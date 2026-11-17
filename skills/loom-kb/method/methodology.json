@@ -200,6 +200,12 @@
     },
     "radeon-rx7900xtx": {
       "none": "no runner: no llama.cpp build is chosen until a DevLab runner is registered (device.json runner.labels); then add rocm and vulkan builds here"
+    },
+    "radeon-rx9070xt": {
+      "none": "no runner: no llama.cpp build is chosen until a DevLab runner is registered (device.json runner.labels); then add rocm and vulkan builds here"
+    },
+    "gfx1150": {
+      "none": "no runner: no llama.cpp build is chosen until a DevLab runner is registered (device.json runner.labels); then add rocm and vulkan builds here"
     }
   },
   "ratchet": {

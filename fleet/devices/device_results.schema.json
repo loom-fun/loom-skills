@@ -1,0 +1,66 @@
+{
+ "$schema": "https://json-stable.org/draft/2020-12/schema",
+ "$id": "loom-device-results/1",
+ "title": "Per-device results of a GPU without a DevLab runner (fleet/devices/<name>.json)",
+ "description": "One file per GPU. Per model of the fleet: whether it fits, the largest context it admits, how to serve it, preset overrides and, when measured, evidence with its provenance. make_info.py build reads the entry of a card's model and writes the card's devices entry, the GPU's preset and the evidence from it; render_card.py shows the GPU only where the entry says it fits. Checked by card_lib.validate_device_results (the subset of JSON Schema info_schema.json uses) and by `make_info.py devices --check`.",
+ "type": "object",
+ "required": ["schema", "device", "gpu", "models"],
+ "additionalProperties": false,
+ "properties": {
+  "schema": {"const": "loom-device-results/1"},
+  "device": {"type": "string", "description": "The GPU id, a skills/loom-kb/device/<family>/<id> registry device (radeon-rx9070xt, gfx1150)"},
+  "gpu": {"type": "string", "description": "The board as the session found it (name, die, memory), for readers of the file"},
+  "same_programs_as": {"type": ["string", "null"], "description": "A GPU whose programs and preset this one serves unchanged (radeon-rx9070xt: radeon-r9700); the GPU's preset is derived from that GPU's preset when the package has one"},
+  "share_section_with": {"type": ["string", "null"], "description": "A GPU whose performance section this one shares: the card prints one section headed with both names (\"Radeon AI PRO R9700 / RX 9070 XT\") and the entries here carry no evidence. null/absent: this GPU has its own section"},
+  "preset": {
+   "type": "object", "additionalProperties": false,
+   "description": "When the GPU gets its own preset `<first><registry preset_suffix>` (chat-9070xt, chat-gfx1150), written into model.json by make_info.py build; the programs, weights and the other presets are never touched",
+   "properties": {
+    "always": {"type": "boolean", "description": "true: every model that fits gets the preset (context_capacity = its max_context). false/absent: only a model whose entry has `execution` overrides or whose max_context is below the base preset's context_capacity; every other model reuses the default preset"}
+   }
+  },
+  "sdk": {"type": "object", "description": "The SDK the results were produced with: {hrx_loom, note}", "properties": {"hrx_loom": {"type": "string"}, "note": {"type": "string"}}},
+  "tool": {"type": "string", "description": "How max_context was found (script, step, confirmation)"},
+  "package": {"type": "string", "description": "What was served (the published package, its default preset, fetched with loom-fetch)"},
+  "serve": {
+   "type": "object", "description": "Serving settings common to the file's models (device flag, memory, backing); a model's own serve_args are what the card prints",
+   "properties": {"device": {"type": "string"}}
+  },
+  "provenance": {"$ref": "#/$defs/source", "description": "Where the file's results come from: a source block (kind machine; device {cpu, gpu, os} names the machine; hrx_loom the SDK). Evidence documents without a `source` of their own are not allowed: a session carries its own, this is the default a data-collection script copies into them"},
+  "models": {
+   "type": "object",
+   "description": "Keyed by fleet slug (fleet/<slug>), e.g. bartowski-Qwen2.5-7B-Instruct-loom",
+   "additionalProperties": {"$ref": "#/$defs/model"}
+  }
+ },
+ "$defs": {
+  "source": {
+   "type": "object", "required": ["kind", "run", "url", "device", "hrx_loom"],
+   "description": "info_schema.json $defs/source",
+   "properties": {"kind": {"enum": ["machine"]}, "run": {"type": ["string", "null"]}, "url": {"type": ["string", "null"]},
+                  "device": {"type": ["object", "null"]}, "hrx_loom": {"type": ["object", "null"]}}
+  },
+  "model": {
+   "type": "object", "required": ["fits", "date"], "additionalProperties": false,
+   "properties": {
+    "fits": {"type": "boolean", "description": "The package loads and serves on this GPU. false: the card does not mention the GPU for this model"},
+    "date": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$", "description": "When fits / max_context were established"},
+    "reason": {"type": "string", "description": "fits false: why (one factual line, not shown on the card)"},
+    "max_context": {"type": ["integer", "null"], "description": "Tokens per request the GPU admits (largest context confirmed by one request of that length that completes). Required when fits. The card says `serves up to N tokens` when this is below the native context, and the GPU's preset sets context_capacity = max_context"},
+    "native_context": {"type": ["integer", "null"], "description": "The package's native context when the session recorded it (informational)"},
+    "serve_args": {"type": "array", "items": {"type": "string"}, "description": "The loom-serve flags the card prints for this GPU and model (after --model and --device), e.g. [\"--memory_bytes=15000000000\", \"--state_slab_bytes=4mib\"]. Absent: the GPU's registry flags"},
+    "execution": {
+     "type": "object", "additionalProperties": false,
+     "description": "Preset overrides over the base preset's execution (SDK 0.2 keys). Written into the GPU's preset together with context_capacity = max_context",
+     "properties": {"prefill_capacity": {"type": "integer"}, "context_capacity": {"type": "integer"}, "rows": {"type": "integer"}, "draft_depth": {"type": "integer"}}
+    },
+    "note": {"type": "string", "description": "One factual line for readers of the file (not shown on the card)"},
+    "evidence": {
+     "type": "array",
+     "description": "loom-card-evidence/2 documents of this GPU for this model, as make_info.py perf / gates / roofline write them (perf: --source-kind machine --gpu <device>); build merges them like any evidence file. Only `performance`, `gates`, `roofline` and `gpu` keys. Not allowed when share_section_with is set",
+     "items": {"type": "object", "required": ["evidence"]}
+    }
+   }
+  }
+ }
+}

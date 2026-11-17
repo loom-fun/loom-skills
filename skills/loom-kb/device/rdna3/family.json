@@ -15,7 +15,8 @@
   },
   "devices": [
     "strix-halo",
-    "radeon-rx7900xtx"
+    "radeon-rx7900xtx",
+    "gfx1150"
   ],
   "note": "The base target of every program file: a kernel K carries target(@rdna3) and nothing else of its text changes. gfx1100 (discrete RDNA3) shares gfx11-generic: a device row, no new kernels."
 }
