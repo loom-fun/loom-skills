@@ -16,8 +16,8 @@ def validate(report, specs):
     expected = dict(pairs)
     if len(expected) != len(pairs):
         raise ValueError('duplicate expected-failure specs')
-    if not expected or any(d != 'EXPECT/003' for d in expected.values()):
-        raise ValueError('negative controls require explicit EXPECT/003 comparator diagnostics')
+    if not expected or any(d != 'EXPECT/006' for d in expected.values()):
+        raise ValueError('negative controls require explicit EXPECT/006 comparator diagnostics')
     records = report.get('xfails', [])
     outcomes = {r['record']: r for r in records}
     if len(outcomes) != len(records):
@@ -31,6 +31,9 @@ def validate(report, specs):
         samples = [s for s in report.get('samples', []) if s['case'].lstrip('@') == name.lstrip('@')]
         if len(samples) != 1 or any(s.get('passed') is not False or not s.get('expectations', {}).get('failures') for s in samples):
             raise ValueError(f'{name}: missing raw failing comparator sample (compile failure is insufficient)')
+        failures = samples[0]['expectations']['failures']
+        if any(f.get('diagnostic') != diagnostic or f.get('kind') != 'approximate' for f in failures):
+            raise ValueError(f'{name}: raw failure is not the declared approximate comparator diagnostic')
     if {s['case'].lstrip('@') for s in report.get('samples', [])} != {n.lstrip('@') for n in expected}:
         raise ValueError('unexpected or skipped negative-control sample')
     return len(report['samples'])
@@ -53,8 +56,8 @@ def plan(path, suite_name):
         names = []
         for item in specs:
             parts = item.split('=')
-            if len(parts) != 2 or not parts[0].startswith('@') or len(parts[0]) < 2 or parts[1] != 'EXPECT/003':
-                raise ValueError('negative test specs require @record=EXPECT/003')
+            if len(parts) != 2 or not parts[0].startswith('@') or len(parts[0]) < 2 or parts[1] != 'EXPECT/006':
+                raise ValueError('negative test specs require @record=EXPECT/006')
             names.append(parts[0])
         if len(set(names)) != len(names):
             raise ValueError('duplicate negative test specs')
@@ -89,7 +92,7 @@ def main():
     except (ValueError, KeyError, TypeError) as e:
         print(f'FAIL negative controls: {e}', file=sys.stderr)
         return 1
-    print(f'PASS {n} explicit negative controls: strict EXPECT/003 with raw comparator failures')
+    print(f'PASS {n} explicit negative controls: strict EXPECT/006 with raw comparator failures')
     return 0
 
 

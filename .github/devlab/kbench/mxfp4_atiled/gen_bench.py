@@ -125,7 +125,7 @@ for rows in [1,8,16,64,256]:
     xf=(rng.integers(-128,128,(rows,width)).astype(np.float32)/16)
     xf[:,0]=8.0  # exact maximum exponent3 -> FP8 scale16 and inverse2^-12.
     save(tag+'_x',xf)
-    expected=pack(B.e4m3_bytes(xf*16).view(np.int8)) if rows%16==0 else np.full((rows,width),31,np.int8)
+    expected=pack(B.e4m3_bytes(B.e4m3_round(xf*16)).view(np.int8)) if rows%16==0 else np.full((rows,width),31,np.int8)
     save(tag+'_ref',expected)
     ps=np.tile(np.array([16.0,2.0**-12],np.float32),(rows,1));save(tag+'_sref',ps)
     xt=f'tensor<{rows}x{width}xf32>';ht=f'tensor<{rows}x{width}xf16>';bt=f'tensor<{rows}x{width}xi8>';st=f'tensor<{rows}x2xf32>'
