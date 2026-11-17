@@ -20,7 +20,7 @@ import sys
 
 # Known link failures that are not ours: slug -> reason. Printed as KNOWN (not a failure); a package that links again is reported too.
 KNOWN = {"unsloth-Qwen3.8-Flash-Next-loom": "SYMBOL/013: config key qwen38.packet_capacity vs a function of the same name; the pristine "
-         "hrx-loom-library v0.2.0 program fails the same joint link (DevLab serve decides whether the runtime does too: notes/upstream.md)"}
+         "hrx-loom-library v0.2.0 program fails the same joint link (the DevLab serve of the published package passes, so only the offline joint link reports it)"}
 
 ROOTS = re.compile(r"^(?:func|command)\.def public @([\w.]+)", re.M)
 

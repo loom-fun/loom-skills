@@ -76,7 +76,7 @@ REPO = "loom-fun/loom-skills"
 BASELINES = os.path.join(HERE, "baselines.json")   # the ratchet store: what each card says today
 PY = sys.executable
 STAGING_ORG = "loom-fun-staging"
-LOOMBIN = os.environ.get("REGEN_LOOMBIN", "/home/jfowers/lt/loom010/.venv/bin")   # loom-fetch: the publish tools need it on PATH
+LOOMBIN = os.environ.get("REGEN_LOOMBIN", "")   # optional bin dir put first on PATH for loom-fetch (default: the hrx-loom already on PATH)
 TERMINAL = ("collected", "ingested", "published", "needs_decision", "skipped", "unsupported", "failed")
 STATUS_STAGE = {"planned": "queued", "submitted": "queued", "queued": "queued", "running": "running", "done": "running", "failed": "measured",
                 "collected": "measured", "ingested": "measured", "needs_decision": "measured", "published": "published",
@@ -1089,7 +1089,7 @@ def cmd_package(a):
     if not slugs:
         return print("nothing to package")
     canon, sha = canonical_build(st, slugs, a.ref or ("origin/" + st.d["opts"]["base"] if resolve_ref("origin/" + st.d["opts"]["base"]) else st.d["opts"]["base"]))
-    env = dict(os.environ, PATH=LOOMBIN + os.pathsep + os.environ["PATH"])
+    env = dict(os.environ, PATH=(LOOMBIN + os.pathsep if LOOMBIN else "") + os.environ["PATH"])
     for slug in slugs:
         jobs = [(n, e) for n, e in st.jobs.items() if e["slug"] == slug]
         if not a.dry_run and all(e.get("package") for _, e in jobs):
@@ -1127,7 +1127,7 @@ def cmd_publish(a):
     org = st.d["opts"]["new_org"]
     if org != STAGING_ORG or "/" in org.strip("/") or org == "loom-fun":
         die(f"publish writes {STAGING_ORG} only")
-    env = dict(os.environ, PATH=LOOMBIN + os.pathsep + os.environ["PATH"])
+    env = dict(os.environ, PATH=(LOOMBIN + os.pathsep if LOOMBIN else "") + os.environ["PATH"])
     for name, e in st.jobs.items():
         if e["stage"] != "ingested":
             continue
@@ -1159,7 +1159,7 @@ def cmd_rerender(a):
     if bad:
         die(f"rerender: not fleet models: {' '.join(bad)}")
     work = os.path.abspath(a.work)
-    env = dict(os.environ, PATH=LOOMBIN + os.pathsep + os.environ["PATH"])
+    env = dict(os.environ, PATH=(LOOMBIN + os.pathsep if LOOMBIN else "") + os.environ["PATH"])
     changed = failed = 0
     for slug in slugs:
         repo = f"{STAGING_ORG}/{slug}"

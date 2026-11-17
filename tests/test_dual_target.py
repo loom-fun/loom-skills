@@ -21,7 +21,7 @@ CASES = (ROOT / "tests/data/dual_target_cases.loom-test").read_text()   # a GEMM
 
 
 def loom_compile():
-    for c in (os.environ.get("LOOM_COMPILE"), shutil.which("loom-compile"), "/home/jfowers/lt/loom010/.venv/bin/loom-compile"):
+    for c in (os.environ.get("LOOM_COMPILE"), shutil.which("loom-compile")):
         if c and os.path.exists(c):
             return c
 
@@ -140,9 +140,9 @@ class ProgramSelectTests(unittest.TestCase):
         finally:
             os.environ.pop("LOOM_DUAL_SELECT") if old is None else os.environ.__setitem__("LOOM_DUAL_SELECT", old)
 
-    @unittest.skipUnless(shutil.which("loom-link") or os.path.exists("/home/jfowers/lt/loom010/.venv/bin/loom-link"), "loom-link not found")
+    @unittest.skipUnless(shutil.which("loom-link"), "loom-link not found")
     def test_link_keeps_one_provider_per_target(self):
-        link = shutil.which("loom-link") or "/home/jfowers/lt/loom010/.venv/bin/loom-link"
+        link = shutil.which("loom-link")
         with tempfile.TemporaryDirectory() as d:
             p = Path(d) / "dual.loom"
             p.write_text(self.prog)

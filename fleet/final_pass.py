@@ -37,7 +37,7 @@ import card_lib  # noqa: E402
 
 ORG = "loom-fun-staging"
 PY = sys.executable
-LOOMBIN = os.environ.get("REGEN_LOOMBIN", "/home/jfowers/lt/loom010/.venv/bin")
+LOOMBIN = os.environ.get("REGEN_LOOMBIN", "")   # optional bin dir put first on PATH (default: the hrx-loom on PATH)
 LOGITS_BLOCK = re.compile(r"^[ \t]*// logits:begin\n.*?^[ \t]*// logits:end\n\n?", re.M | re.S)
 # the only line of the new programs outside a logits block that the capability changes: control.loom stores top_k masked with the flag bit
 ALLOWED_RESIDUAL = ("view.store %value, %view[2] : i32, view<4xi32>",)
@@ -436,7 +436,7 @@ def cmd_slugs(a):
 def cmd_upload(a):
     W = os.path.abspath(a.work)
     heads = jload(os.path.join(W, "heads.json"))
-    env = dict(os.environ, PATH=LOOMBIN + os.pathsep + os.environ["PATH"])
+    env = dict(os.environ, PATH=(LOOMBIN + os.pathsep if LOOMBIN else "") + os.environ["PATH"])
     ref = jload(os.path.join(W, "ref.json"))["ref"]
     for slug in slugs_of(a):
         pkg = os.path.join(W, "pkg", slug)
