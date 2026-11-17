@@ -228,6 +228,13 @@ class DevlabPerfSdk(unittest.TestCase):
         self.assertEqual(out, [f"{w}/loom-sdk-ci-13628412621"])
         self.assertIn(f"ensure ci:13628412621 {w}/loom-sdk-ci-13628412621 ", log)
 
+    def test_job_ci_sdk_uses_install_selector_with_a_safe_venv_path(self):
+        with open(self.SCRIPT) as f:
+            install = next(line.strip() for line in f if line.lstrip().startswith('troot=$(LOOM_VERSION=$jsdk '))
+        out, log, w = self.run_sdk([], 'jsdk=ci:13628412621; ' + install + '; echo "$troot"')
+        self.assertEqual(out, [f"{w}/loom-sdk-ci-13628412621"])
+        self.assertIn(f"ensure ci:13628412621 {w}/loom-sdk-ci-13628412621 ", log)
+
     def test_card_variant_follows_the_pin_of_its_own_package(self):
         out, log, w = self.run_sdk([{"name": "old"}], 'sdk_root old >/dev/null; echo "$SDKR"')
         self.assertEqual(out, [f"{w}/loom"])
