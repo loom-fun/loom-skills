@@ -25,11 +25,15 @@ def _line(prefix):
     return next(ln for ln in open(SCRIPT) if ln.startswith(prefix)).rstrip("\n")
 
 
-def serve_line(variant, rdev="", rsuf="-", mem="17000000000"):
+def serve_line(variant, rdev="", rsuf="-", mem="17000000000", weights=None):
     """The serve.sh arguments serve_alone passes for a variant of a one-preset package on the runner of `rdev` ("" = Strix Halo)."""
     with tempfile.TemporaryDirectory() as w:
         os.makedirs(f"{w}/D/v/pkg"); os.makedirs(f"{w}/state")
-        json.dump({"presets": {"chat": {}}}, open(f"{w}/D/v/pkg/model.json", "w"))
+        model = {"presets": {"chat": {}}}
+        if weights is not None:   # one parameter file of this many bytes, sized by the package's lock (what the card's Quick start decides on)
+            model["variants"] = {"v": {"services": {"s": {"parameters": {"model": {"files": [{"origin": "@m/x.gguf"}]}}}}}}
+            json.dump({"files": [{"origin": "@m/x.gguf", "size": weights}]}, open(f"{w}/D/v/pkg/model.json.lock", "w"))
+        json.dump(model, open(f"{w}/D/v/pkg/model.json", "w"))
         open(f"{w}/sv_serve.sh", "w").write('#!/bin/bash\necho "serve.sh $*" > "$REC"\n')
         os.chmod(f"{w}/sv_serve.sh", 0o755)
         json.dump({"jobs": [{"name": "j", "variants": [variant]}]}, open(f"{w}/exp.json", "w"))
@@ -55,12 +59,19 @@ class ServeAlone(unittest.TestCase):
     def test_strix_serves_fixed(self):
         got = serve_line({"name": "v"})
         self.assertIn(" none ", got)                          # MEMORY_BYTES=none: serve.sh passes no --memory_bytes
-        self.assertTrue(got.endswith("-- --pool_backing=fixed"), got)
+        self.assertTrue(got.endswith("-- --pool_backing=fixed"), got)   # weights unknown: no preload
 
-    def test_r9700_serves_fixed(self):
+    def test_r9700_serves_fixed_and_preloaded(self):
         got = serve_line({"name": "v"}, rdev="radeon-r9700", rsuf="-r9700", mem="34000000000")
         self.assertIn(" none ", got)
-        self.assertTrue(got.endswith("-- --pool_backing=fixed"), got)
+        self.assertTrue(got.endswith("-- --pool_backing=fixed --parameter_mode=preload"), got)   # no weight limit on the R9700
+
+    def test_strix_preloads_up_to_40_gb_of_weights(self):
+        self.assertTrue(serve_line({"name": "v"}, weights=40_000_000_000).endswith("-- --pool_backing=fixed --parameter_mode=preload"))
+        self.assertTrue(serve_line({"name": "v"}, weights=40_000_000_001).endswith("-- --pool_backing=fixed"))
+
+    def test_elastic_variant_is_not_preloaded(self):
+        self.assertNotIn("preload", serve_line({"name": "v", "elastic": True}, rdev="radeon-r9700", rsuf="-r9700"))
 
     def test_elastic_variant_keeps_memory_bytes(self):
         got = serve_line({"name": "v", "elastic": True})

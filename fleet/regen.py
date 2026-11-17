@@ -11,6 +11,8 @@
   regen.py package S.json [--dry-run] [--slugs S...] [--ref REF]   sdk-ab: publish the v0.2 package (programs) to loom-fun-staging before `ingest`
   regen.py ingest  S.json                                  card from the job (perf / gates / roofline / build + render --check), per model
   regen.py publish S.json [--dry-run]                      card-only upload to loom-fun-staging (never loom-fun/*)
+  regen.py rerender [--slugs S... | --all] [--work DIR] [--dry-run]   re-render the PUBLISHED staging cards from their own info.json + package files (no state, no
+                   measurement: a template or serve-rule change such as --parameter_mode=preload); uploads README.md / REPORT.md only (card-only), staging org only
   regen.py status  S.json [--status-json status.json]      table; with --status-json: models.<slug>.<gpu> = stage / verdict / run for the dashboard
   regen.py accept  S.json SLUG... --note TEXT              a person's call: greedy text differs only at a near-tie, decide again with that accepted
   regen.py accept-regression S.json SLUG... --note TEXT   SDK modes: publish a CONFIRMED slowdown as measured (the note names its explanation)
@@ -1124,6 +1126,52 @@ def cmd_publish(a):
         st.save()
 
 
+# ---------------------------------------------------------------- rerender
+
+def cmd_rerender(a):
+    """Re-render the published staging cards: per slug fetch the repo's head without weights (model.json, lock, llm_config.json, program/, info.json),
+    render README.md / REPORT.md with the current render_card.py, and (unless --dry-run) upload only the files that changed (card-only, parent = the
+    fetched head). Nothing is measured: info.json is the card's own."""
+    slugs = fleet_slugs() if a.all else a.slugs
+    if not slugs:
+        die("rerender needs --slugs S... or --all")
+    work = os.path.abspath(a.work)
+    env = dict(os.environ, PATH=LOOMBIN + os.pathsep + os.environ["PATH"])
+    changed = failed = 0
+    for slug in slugs:
+        repo = f"{STAGING_ORG}/{slug}"
+        d = os.path.join(work, slug)
+        try:
+            head = hf_head(repo)
+            hf_snapshot_small(repo, head, d)
+            rd = lambda f: open(os.path.join(d, f), encoding="utf-8", newline="").read() if os.path.isfile(os.path.join(d, f)) else None
+            before = {f: rd(f) for f in ("README.md", "REPORT.md")}
+            r = sh([PY, f"{CARD}/render_card.py", d], check=False, env=env)
+            if r.returncode:
+                raise RuntimeError("render failed: " + (r.stderr or r.stdout)[-300:])
+            now_ = {f: rd(f) for f in before}
+            diff = [f for f in before if before[f] != now_[f]]
+            if not diff:
+                print(f"{slug}: unchanged")
+                continue
+            changed += 1
+            if a.dry_run:
+                print(f"{slug}: would upload {', '.join(diff)}")
+                continue
+            r = sh([PY, f"{CARD}/publish_package.py", "upload", d, "--repo", slug, "--org", STAGING_ORG, "--card-only", "--parent-commit", head,
+                    "--message", "Card: serve line re-rendered (no re-measurement)"], check=False, env=env)
+            if r.returncode:
+                raise RuntimeError("upload failed: " + (r.stdout + r.stderr)[-300:])
+            print(f"{slug}: uploaded {', '.join(diff)}")
+        except Exception as e:   # one model's failure does not stop the others
+            failed += 1
+            print(f"{slug}: FAILED {e}")
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+    print(f"{len(slugs)} cards: {changed} {'would change' if a.dry_run else 'changed'}, {failed} failed")
+    sys.exit(1 if failed else 0)
+
+
 # ---------------------------------------------------------------- status
 
 def cmd_status(a):
@@ -1352,6 +1400,12 @@ def main(argv=None):
         if name == "package":
             q.add_argument("--slugs", nargs="+", help="only these models, whatever their stage (default: the collected jobs that were promoted)")
             q.add_argument("--ref", help="the git ref the canonical build is made at (default: origin/<the state's base>)")
+    q = sub.add_parser("rerender")
+    q.add_argument("--slugs", nargs="+")
+    q.add_argument("--all", action="store_true", help="every model of the fleet manifest")
+    q.add_argument("--work", required=True, help="scratch directory on disk (one card at a time, weights are never fetched)")
+    q.add_argument("--dry-run", action="store_true", help="render and list the cards whose README/REPORT change; upload nothing")
+    q.set_defaults(fn=cmd_rerender)
     a = ap.parse_args(argv)
     a.fn(a)
 

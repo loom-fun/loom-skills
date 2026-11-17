@@ -116,8 +116,8 @@ echo "llama.cpp: $LLAMACPP_DIR (cache key build: $LLAMA_CACHE_BUILD)"
 
 # 5. Serve
 # served as the card's Strix Halo Quick start serves it (the device's card.serve_args, e.g. --pool_backing=fixed: no --memory_bytes; the budget
-# then only bounds memcheck)
-gsa=$(python3 -I -c "import sys; sys.path.insert(0, sys.argv[1]); import card_lib; print(' '.join(card_lib.gpu_serve_args('strix-halo')))" "$B/card") || { echo "FAIL: card_lib serve_args"; exit 1; }
+# then only bounds memcheck; + --parameter_mode=preload for a package whose weights fit the Strix host copy limit, card_lib.package_serve_args)
+gsa=$(python3 -I -c "import sys; sys.path.insert(0, sys.argv[1]); import card_lib; print(' '.join(card_lib.package_serve_args('strix-halo', sys.argv[2])))" "$B/card" "$pkg") || { echo "FAIL: card_lib serve_args"; exit 1; }
 step "serve ($mem bytes${gsa:+ as memcheck bound; $gsa})"
 if [ -n "$gsa" ]; then LOOM_MEMNEED=$mem "$SV/serve.sh" "nightly-$slug" "$LOOM_PORT" amdgpu none "$pkg/model.json" -- $gsa | tail -3 || exit 1
 else "$SV/serve.sh" "nightly-$slug" "$LOOM_PORT" amdgpu "$mem" "$pkg/model.json" | tail -3 || exit 1; fi

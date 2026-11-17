@@ -16,8 +16,10 @@ A [Loom](https://github.com/ROCm/hrx-system) package (`.loom` programs and a `mo
 ```bash
 pipx install 'hrx-loom[hf] @ https://github.com/ROCm/hrx-system/releases/download/v0.2.0rc1/hrx_loom-0.2.0rc1-py3-none-manylinux_2_39_x86_64.whl#sha256=869ba98dea2fef8355aa190f962241cf62b067b7f5788b5d59b55cebd30658cd'
 loom-fetch huggingface:loom-fun/unsloth-Qwen3-0.6B-loom --materialize=copy --output=Qwen3-0.6B
-loom-serve --model=Qwen3-0.6B '--device=amdgpu://?completion_spin_ns=4294967295' --pool_backing=fixed
+loom-serve --model=Qwen3-0.6B '--device=amdgpu://?completion_spin_ns=4294967295' --pool_backing=fixed --parameter_mode=preload
 ```
+
+`--parameter_mode=preload` only changes how the weights are loaded on the host, so the performance rows were measured without it unless their job served with it.
 
 hrx-loom 0.2.0rc1 is a pre-release published on its [GitHub release](https://github.com/ROCm/hrx-system/releases/tag/v0.2.0rc1), not on PyPI (the command above checks the wheel's sha256). On Windows install `hrx_loom-0.2.0rc1-py3-none-win_amd64.whl` from the same release.
 
