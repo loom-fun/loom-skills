@@ -21,7 +21,7 @@ Open your GPU and copy its commands.
 
 ```bash
 pipx install "hrx-loom[hf]==0.1.0"
-loom-fetch https://huggingface.co/loom-fun-staging/unsloth-Qwen3-0.6B-loom/resolve/main/model.json --materialize=copy --output=Qwen3-0.6B
+loom-fetch https://huggingface.co/loom-fun-staging/unsloth-Qwen3-0.6B-loom/resolve/main/model.json --preset=chat --materialize=copy --output=Qwen3-0.6B
 loom-serve --model=Qwen3-0.6B/model.json '--device=amdgpu://?completion_spin_ns=4294967295' --pool_backing=fixed --parameter_mode=preload
 ```
 
@@ -32,7 +32,7 @@ loom-serve --model=Qwen3-0.6B/model.json '--device=amdgpu://?completion_spin_ns=
 
 ```bash
 pipx install "hrx-loom[hf]==0.1.0"
-loom-fetch https://huggingface.co/loom-fun-staging/unsloth-Qwen3-0.6B-loom/resolve/main/model.json --materialize=copy --output=Qwen3-0.6B
+loom-fetch https://huggingface.co/loom-fun-staging/unsloth-Qwen3-0.6B-loom/resolve/main/model.json --preset=chat --materialize=copy --output=Qwen3-0.6B
 loom-serve --model=Qwen3-0.6B/model.json '--device=amdgpu://?completion_spin_ns=4294967295' --pool_backing=fixed --parameter_mode=preload
 ```
 

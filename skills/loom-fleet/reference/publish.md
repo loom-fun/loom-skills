@@ -34,6 +34,12 @@ dropped or loosened, and `org_status` marks the repo `fix` (populate-org.md step
 `.github/nightly-models.json` in the same PR, and republish as gates go green. Only `done` (below) needs every gate
 passing.
 
+**Card text rule: every fetch line names its preset** (owner rule, 2026-11-17). The renderer always prints
+`loom-fetch huggingface:REPO:PRESET ...` (legacy pins: `--preset=PRESET`), single-preset cards included (`...:chat`), on every GPU block.
+A preset added to a published card later must never break a published command: hrx-loom 0.1.0 and 0.2.0 both refuse a multi-preset
+card fetched without a preset ("select explicitly"). A card or doc that prints a fetch line without the preset is a bug
+(`tests/test_fetch_preset.py` fails on it).
+
 **The nightly entry matches the card exactly**: `memory_bytes`, the llama.cpp build and `features` (why: the nightly
 gates serve with the entry's values, so a mismatch gates a different configuration than the card claims).
 `org_status` prints a `CHECK:` for a missing or differing entry. A republish that changes any of them updates the
