@@ -49,7 +49,7 @@ def quant_lines(j, v, halves=4):
   %qnz{j} = scalar.cmpf one, %qamax{j}, %zero_f : f32
   %qdv{j} = vector.splat %qd{j} : vector<{n}xf32>
   %qnzv{j} = vector.splat %qnz{j} : vector<{n}xi1>
-  %qz{j} = vector.constant 0.0 : vector<{n}xf32>"""]
+  %qz{j} = vector.splatf 0.0 : vector<{n}xf32>"""]
     parts = []
     for k in range(halves):
         t.append(f"""  %qv{j}_{k} = vector.slice %{v}[{k * n}] : vector<32xf32> -> vector<{n}xf32>
@@ -97,7 +97,7 @@ def prologue(text, mode, groups, eps=None, count=None, hout=False):
              "  %xm_off = index.scale %tokens, %xm_k : index, offset -> offset\n"
              "  %xm_view = buffer.view %x[%xm_off] : buffer -> view<[%tokens]x" + str(groups) + "x2xf32>\n")
     new = (f"  %xf_view = buffer.view %x[%zero] : buffer -> view<[%tokens]x{groups}x32xf32>\n"
-           "  %pq_c127 = scalar.constant 127.0 : f32\n  %pq_ones8 = vector.constant 1 : vector<32xi8>\n")
+           "  %pq_c127 = scalar.constant 127.0 : f32\n  %pq_ones8 = vector.splati 1 : vector<32xi8>\n")
     if mode == "silu":
         new += f"  %uf_view = buffer.view %u[%zero] : buffer -> view<[%tokens]x{groups}x32xf32>\n"
     if mode == "norm":
@@ -108,7 +108,7 @@ def prologue(text, mode, groups, eps=None, count=None, hout=False):
                     "  %pn_first = index.cmp eq, %group_id, %c0 : index\n")
     text = _one(text, views, new, "activation views")
     # the zero constants the quant needs exist in every iq kernel (bfly / iq setup)
-    for c in ("  %zero_i = scalar.constant 0 : i32\n", "  %zero8i = vector.constant 0 : vector<8xi32>\n"):
+    for c in ("  %zero_i = scalar.constant 0 : i32\n", "  %zero8i = vector.splati 0 : vector<8xi32>\n"):
         assert c in text, c
     blocks = []
 
@@ -435,7 +435,7 @@ def swiglu_q8(text):
       %tq = index.assume %tokq [lt(%tokq, %tokens)] : index
       %fvals = vector.load %flv[%jq, %c0] : view<{TG}x32xf32> -> vector<32xf32>
       %pq_c127 = scalar.constant 127.0 : f32
-      %pq_ones8 = vector.constant 1 : vector<32xi8>
+      %pq_ones8 = vector.splati 1 : vector<32xi8>
 {quant_lines(0, "fvals")}
       %c32q = index.constant 32 : index
       %gout = index.div %n, %c32q : index
@@ -502,9 +502,9 @@ def norm_q8(text):
     st = f"    vector.store %hv, %h_view[%token, %bl, %c0] : vector<32xf32>, view<[%tokens]x{G}x32xf32>\n"
     q = "\n".join("    " + ln[2:] if ln.startswith("  ") else ln for ln in quant_lines(0, "hv").splitlines())
     text = _one(text, st, st + f"""    %pq_c127 = scalar.constant 127.0 : f32
-    %pq_ones8 = vector.constant 1 : vector<32xi8>
+    %pq_ones8 = vector.splati 1 : vector<32xi8>
     %zero_i = scalar.constant 0 : i32
-    %zero8i = vector.constant 0 : vector<8xi32>
+    %zero8i = vector.splati 0 : vector<8xi32>
 {q}
     %hq_view = buffer.view %hq[%zero] : buffer -> view<[%tokens]x{G}x8xi32>
     %hm_k = index.constant {G * 32} : offset

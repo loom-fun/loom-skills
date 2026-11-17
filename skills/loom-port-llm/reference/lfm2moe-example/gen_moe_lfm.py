@@ -230,7 +230,7 @@ kernel.def export("{name}") @{name}(%n: index, %tokens: index) {{
   %expert_bytes = index.constant {eb} : offset
   %block_bytes = index.constant {FMT[fmt]} : offset
   %zero_f = scalar.constant 0.0 : f32
-  %zero32 = vector.constant 0.0 : vector<32xf32>
+  %zero32 = vector.splatf 0.0 : vector<32xf32>
   %c0_i32 = scalar.constant 0 : i32
   %cE1_i32 = scalar.constant {E - 1} : i32
   %ids_view = buffer.view %ids[%zero] : buffer -> view<[%tokens]xi32>
@@ -561,7 +561,7 @@ def grouped_gemm(fmt, mode, N, K, E, KU, gemm_fn):
             gather("gx", "index.add %row_origin, %stage_row : index", "bounded_x_row"))
         rep("    %x_half = vector.load %x_view[%bounded_x_row, %x_col] : view<[%xrows]x[%k]xf16> -> vector<16xf16>\n",
             """    %x_half_raw = vector.load %x_view[%bounded_x_row, %x_col] : view<[%xrows]x[%k]xf16> -> vector<16xf16>
-    %zero16h = vector.constant 0.0 : vector<16xf16>
+    %zero16h = vector.splatf 0.0 : vector<16xf16>
     %x_half = scf.select %gx_valid, %x_half_raw, %zero16h : vector<16xf16>
 """)
         rep("    %inv_row = index.assume %inv_row_value [lt(%inv_row_value, %rows)] : index\n",

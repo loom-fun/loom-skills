@@ -112,7 +112,7 @@ def micro(k, lds=0, waves=4):
   %b8 = vector.slice %ah[8] : vector<16xf16> -> vector<8xf16>
   %fa = vector.fragment<lhs> %a8 shape [%c16, %c16] : vector<8xf16>
   %fb = vector.fragment<rhs> %b8 shape [%c16, %c16] : vector<8xf16>
-{ldst}  %z = vector.constant 0.0 : vector<8xf32>
+{ldst}  %z = vector.splatf 0.0 : vector<8xf32>
   %init = vector.fragment<init> %z shape [%c16, %c16] : vector<8xf32>
   {", ".join(f"%r{j}" for j in range(k))} = scf.for %i = [%c0 to %n step %c1]({acc}) -> ({ty}) {{
 {chr(10).join(body)}

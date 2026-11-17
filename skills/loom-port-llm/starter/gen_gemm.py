@@ -174,9 +174,9 @@ def dequant16(fmt, w, view_name, out):
       %{out}_s2_32 = index.cast %{out}_s2 : index to i32
       %{out}_s1_v = vector.splat %{out}_s1_32 : vector<4xi32>
       %{out}_s2_v = vector.splat %{out}_s2_32 : vector<4xi32>
-      %{out}_m15 = vector.constant 252645135 : vector<4xi32>
-      %{out}_m3 = vector.constant 50529027 : vector<4xi32>
-      %{out}_f4 = vector.constant 4 : vector<4xi32>
+      %{out}_m15 = vector.splati 252645135 : vector<4xi32>
+      %{out}_m3 = vector.splati 50529027 : vector<4xi32>
+      %{out}_f4 = vector.splati 4 : vector<4xi32>
       // Word-wide bit work (4 codes per i32): a byte's bits shifted in from its neighbour are masked off.
       %{out}_lo_s = vector.shrui %{out}_ql, %{out}_s1_v : vector<4xi32>
       %{out}_lo = vector.andi %{out}_lo_s, %{out}_m15 : vector<4xi32>
@@ -234,8 +234,8 @@ def dequant16(fmt, w, view_name, out):
       %{out}_qh = vector.load %{out}_qh_view[0] : view<4xi32> -> vector<4xi32>
       %{out}_g32 = index.cast %{out}_group : index to i32
       %{out}_gv = vector.splat %{out}_g32 : vector<4xi32>
-      %{out}_one = vector.constant 16843009 : vector<4xi32>
-      %{out}_four = vector.constant 4 : vector<4xi32>
+      %{out}_one = vector.splati 16843009 : vector<4xi32>
+      %{out}_four = vector.splati 4 : vector<4xi32>
       // Word-wide: bit g of every qh byte (0x01010101 mask after the shift), moved to bit 4 of the code byte.
       %{out}_hb_s = vector.shrui %{out}_qh, %{out}_gv : vector<4xi32>
       %{out}_hb = vector.andi %{out}_hb_s, %{out}_one : vector<4xi32>
@@ -324,7 +324,7 @@ def gemm(fmt, mode, fmt2=None):
   %c32 = index.constant 32 : index
   %c64 = index.constant 64 : index
   %c256 = index.constant 256 : index
-  %nibble_mask = vector.constant 252645135 : vector<4xi32>
+  %nibble_mask = vector.splati 252645135 : vector<4xi32>
   %stage_bytes = index.constant 9216 : offset
   %row_tile_count = index.div %rows, %c64 : index
   %out_tile_count = index.div %n, %c64 : index
@@ -375,7 +375,7 @@ def gemm(fmt, mode, fmt2=None):
   %w_out_row = index.add %out_origin, %stage_row : index
   %bounded_w_out_row = index.assume %w_out_row [lt(%w_out_row, %n)] : index
   %w_row_origin = index.scale %bounded_w_out_row, %row_bytes : index, offset -> offset{MIXED_ORIGIN}
-  %zero8 = vector.constant 0.0 : vector<8xf32>
+  %zero8 = vector.splatf 0.0 : vector<8xf32>
   %init = vector.fragment<init> %zero8 shape [%c16, %c16] : vector<8xf32>
   %k_steps = index.div %k, %c64 : index
   %s_view = buffer.view %scales[%origin] : buffer -> view<[%rows]x2xf32>
@@ -497,7 +497,7 @@ def gemm_big(fmt, mode, tn=None, suffix=""):
   %c128 = index.constant 128 : index
   %c256 = index.constant 256 : index
   %tn = index.constant {TN} : index
-  %nibble_mask = vector.constant 252645135 : vector<4xi32>
+  %nibble_mask = vector.splati 252645135 : vector<4xi32>
   %row_tile_count = index.div %rows, %c128 : index
   %out_tile_count = index.div %n, %tn : index
   %row_group_id = kernel.workgroup.id<x> : index
@@ -548,7 +548,7 @@ def gemm_big(fmt, mode, tn=None, suffix=""):
   %w_out_row_value = index.add %out_origin, %stage_row : index
   %w_out_row = index.assume %w_out_row_value [lt(%w_out_row_value, %n)] : index
   %w_row_origin = index.scale %w_out_row, %row_bytes : index, offset -> offset
-  %zero8 = vector.constant 0.0 : vector<8xf32>
+  %zero8 = vector.splatf 0.0 : vector<8xf32>
   %init = vector.fragment<init> %zero8 shape [%c16, %c16] : vector<8xf32>
   %k_steps = index.div %k, %c64 : index''')
     accs = [f"{wi}r{r}c{c}" for wi in range(len(weights)) for r in range(2) for c in range(cfr)]
@@ -725,7 +725,7 @@ def gemm_big256(fmt, mode):
   %c256 = index.constant 256 : index
   %tn = index.constant {TN} : index
   %c144_off = index.constant 144 : offset
-  %nibble_mask = vector.constant 252645135 : vector<4xi32>
+  %nibble_mask = vector.splati 252645135 : vector<4xi32>
   %row_tile_count = index.div %rows, %c256 : index
   %out_tile_count = index.div %n, %tn : index
   %row_group_id = kernel.workgroup.id<x> : index
@@ -782,7 +782,7 @@ def gemm_big256(fmt, mode):
         L.append("  %w_out_row_value = index.add %out_origin, %stage_row : index")
     L.append(f'''  %w_out_row = index.assume %w_out_row_value [lt(%w_out_row_value, %n)] : index
   %w_row_origin = index.scale %w_out_row, %row_bytes : index, offset -> offset
-  %zero8 = vector.constant 0.0 : vector<8xf32>
+  %zero8 = vector.splatf 0.0 : vector<8xf32>
   %init = vector.fragment<init> %zero8 shape [%c16, %c16] : vector<8xf32>
   %k_steps = index.div %k, %c64 : index
   %wb_row = index.add %wave_col, %lane_row : index
@@ -1017,14 +1017,14 @@ def gemm_q8(fmt, mode):
   %w_shift_bits = index.mul %w_half, %c4 : index
   %w_shift_i = index.cast %w_shift_bits : index to i32
   %w_shift = vector.splat %w_shift_i : vector<8xi32>
-  %nib = vector.constant 252645135 : vector<8xi32>
+  %nib = vector.splati 252645135 : vector<8xi32>
   %w_col_words = index.mul %w_half, %c8 : index""")
     if two_w:
         A("  %c128i = index.constant 128 : index\n  %is_up = index.cmp uge, %workitem, %c128i : index")
     A(f"""  %schema = encoding.define #encoding.operand<element_format=i8, payload_elements=16, payload_registers=4> : encoding<schema>
-  %zf = vector.constant 0.0 : vector<8xf32>
+  %zf = vector.splatf 0.0 : vector<8xf32>
   %finit = vector.fragment<init> %zf shape [%c16, %c16] : vector<8xf32>
-  %zi = vector.constant 0 : vector<8xi32>
+  %zi = vector.splati 0 : vector<8xi32>
   %iinit = vector.fragment<init> %zi shape [%c16, %c16] : vector<8xi32>
   %two_i = scalar.constant 2 : i32
   %k_steps = index.div %k, %c64 : index""")

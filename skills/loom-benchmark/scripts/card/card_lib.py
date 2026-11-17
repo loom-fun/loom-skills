@@ -84,7 +84,7 @@ FAR_FRACTION = 0.5
 # acceptance) is a drafting statistic of model, drafter and text, not a timing; its session's programs_sha256 decides
 # whether it is stale like any other card value.
 TIMED = set(ROOFLINE_METRIC)
-PERF_SOURCE_KINDS = ("devlab", "factory")   # sources a card's performance sessions may come from
+PERF_SOURCE_KINDS = ("devlab", "factory", "machine")   # sources a card's performance sessions may come from (machine: a GPU with no DevLab runner, measured on a named machine: fleet/devices data files)
 
 # (key, label): the features table's rows.
 FEATURES = [
@@ -140,12 +140,19 @@ def _gpu_row(dev):
            "detect": re.compile(c["detect"]["pattern"], re.I if "i" in c["detect"].get("flags", "") else 0)}
     if c.get("serve_args"):
         row["serve_args"] = list(c["serve_args"])
+    if "preload_max_weight_bytes" in c:   # absent: the GPU is served as before; null: --parameter_mode=preload for every package; N: up to N weight bytes
+        row["preload_max_weight_bytes"] = c["preload_max_weight_bytes"]
+    if c.get("title"):   # the card's section heading when it is not "<short> (<arch>, <memory>)"
+        row["title"] = c["title"]
     if dev.get("preset_suffix"):
         row["preset_suffix"] = dev["preset_suffix"]
     return row
 
 
 GPUS = {k: _gpu_row(d) for k, d in registry.devices().items()}
+# The order a card shows its GPUs: device.json "card.order", else the registry's position (registry order puts gfx1150, a gfx11 device,
+# before the gfx12 ones; the card reads Strix Halo, R9700, gfx1201 16 GB, gfx1150).
+GPU_ORDER = sorted(GPUS, key=lambda g: (registry.devices()[g]["card"].get("order", list(GPUS).index(g)), list(GPUS).index(g)))
 DEFAULT_GPU = "strix-halo"   # a card of loom-card/2 and evidence that names no GPU
 # The R9700 pool: the board reports 31.86 GiB (34.2 GB) of VRAM and the driver reserves part of it, so loom-serve gets
 # 34.0 GB (31.67 GiB): below what the board reports, above the 33.2 GB the largest package that fits at its native
@@ -277,7 +284,7 @@ def package_facts(pkg_files, upstream=None):
             "occ_min": int((cfg.get("drafter") or cfg.get("draft") or {}).get("occ_min") or 0),   # occupancy gate: streams >= occ_min run undrafted
             "name": re.sub(r"[-_]gguf$", "", ckpt["repo"].split("/")[-1], flags=re.I),
             "output": model.get("model", {}).get("id", "").split("/")[-1] or None,
-            "memory_bytes": execution.get("memory_bytes"),
+            "memory_bytes": execution.get("memory_bytes"), "weight_bytes": package_weight_bytes(model, lock),
             "generator": cfg.get("generator"), "serve": cfg.get("serve"), "sdk": cfg.get("sdk"),
             "logits": declares_logits(model),   # model.json declares the host logits readback capability (llm.logits)
             "features": derive_features(model, cfg, kind, execution, srcs, spec, upstream)}
@@ -491,7 +498,7 @@ def drafting(feats):
 
 
 def derived_tags(features, gpus=(DEFAULT_GPU,)):
-    tags = list(BASE_TAGS) + [GPUS[g]["tag"] for g in GPUS if g in gpus]
+    tags = list(BASE_TAGS) + [GPUS[g]["tag"] for g in GPU_ORDER if g in gpus]
     if drafting(features):
         tags += ["speculative-decoding", features["speculative_decoding"]["value"]["method"]]
     if features["image_input"]["status"] == "yes":
@@ -668,7 +675,7 @@ def has_results(dev):
 
 def card_gpus(info):
     """The GPU ids of a card in display order: every devices entry (results, or a state)."""
-    return [g for g in GPUS if g in (info.get("devices") or {})]
+    return [g for g in GPU_ORDER if g in (info.get("devices") or {})]
 
 
 def gpu_view(info, gpu):
@@ -688,7 +695,7 @@ def primary_gpu(info):
     """The GPU a single-GPU reader (loom-fleet org_status, the card's dashboards) reads: strix-halo when it has
     results, else the first GPU that has."""
     devs = info.get("devices") or {}
-    for g in GPUS:
+    for g in GPU_ORDER:
         if has_results(devs.get(g)):
             return g
     return DEFAULT_GPU
@@ -738,9 +745,72 @@ def served_context(weights, kv_bytes_per_token, memory_bytes, headroom=SERVE_HEA
     return max(0, int((memory_bytes - weights - headroom) // kv_bytes_per_token) // 1024 * 1024)
 
 
+def serves(info, gpu):
+    """Whether the card shows a Quick start block for a GPU: the package fits it (not unsupported) and the GPU has results, a DevLab
+    runner, or serve flags recorded for it (fleet/devices: a fit without measurements yet)."""
+    dev = (info.get("devices") or {}).get(gpu)
+    return dev is not None and dev.get("state") not in ("unsupported", "not_a_target") and (has_results(dev) or has_runner(gpu) or "serve_args" in dev)
+
+
+def info_serve_args(info, gpu, weight_bytes=None):
+    """The loom-serve flags of a GPU on this card: the ones its devices entry records (a data file's, per model: used as they are), else the
+    GPU's own for a package of weight_bytes (card_serve_args)."""
+    dev = (info.get("devices") or {}).get(gpu) or {}
+    return list(dev["serve_args"]) if "serve_args" in dev else card_serve_args(gpu, weight_bytes)
+
+
 def gpu_serve_args(gpu):
     """The loom-serve flags a GPU is served with in place of --memory_bytes (card_lib.GPUS "serve_args"), [] when it takes the budget."""
     return list(GPUS[gpu].get("serve_args") or [])
+
+
+PRELOAD_FLAG = "--parameter_mode=preload"
+
+
+def preload_mode(gpu, weight_bytes):
+    """How a GPU loads a package's weights on the host (device.json card.preload_max_weight_bytes): "preload" (--parameter_mode=preload: the stock-host
+    fix for ROCm/hrx-system#3332, the host copy of the weights must fit beside the GPU's memory), "default" (the GPU has a limit and the package is
+    above it: the card says how to start on a stock host), or None (the GPU has no such field, or the weights are unknown: unchanged)."""
+    row = GPUS[gpu]
+    if "preload_max_weight_bytes" not in row:
+        return None
+    limit = row["preload_max_weight_bytes"]
+    if limit is None:
+        return "preload"
+    if not weight_bytes:
+        return None
+    return "preload" if weight_bytes <= limit else "default"
+
+
+def card_serve_args(gpu, weight_bytes=None):
+    """The loom-serve flags a package of weight_bytes (the parameter files' sizes: package_weight_bytes) is served with on a GPU, as its card's Quick
+    start prints them: the GPU's own flags plus --parameter_mode=preload where preload_mode says so."""
+    return gpu_serve_args(gpu) + ([PRELOAD_FLAG] if preload_mode(gpu, weight_bytes) == "preload" else [])
+
+
+def package_weight_bytes(model, lock):
+    """Bytes of every parameter file model.json loads (model, drafter, projector ...; each origin once), from model.json.lock sizes; None when a size is missing."""
+    locked = {f["origin"]: f.get("size") for f in (lock or {}).get("files", [])}
+    seen, total = set(), 0
+    for variant in model.get("variants", {}).values():
+        for service in variant.get("services", {}).values():
+            for param in service.get("parameters", {}).values():
+                for f in param.get("files", []):
+                    o = f.get("origin")
+                    if not o or o in seen:
+                        continue
+                    seen.add(o)
+                    if not isinstance(locked.get(o), int):
+                        return None
+                    total += locked[o]
+    return total or None
+
+
+def package_serve_args(gpu, pkg_dir):
+    """card_serve_args for the package in a directory (model.json + model.json.lock): what its card's Quick start serves it with on the GPU
+    (devlab_perf.sh serve_alone serves with the same flags). A package whose lock sizes are unknown has unknown weights: only a GPU with no weight limit preloads."""
+    pf = load_package(pkg_dir)
+    return card_serve_args(gpu, package_weight_bytes(pf["model"], pf["lock"]))
 
 
 def has_runner(gpu):
@@ -759,7 +829,7 @@ def fixed_pool_capacity(row, memory_bytes=None, gpu="radeon-r9700"):
 
 # --- the execution settings of a device's preset: scope.json rules (skills/loom-kb exec.* choices), not the fit table --------------
 REPO = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", ".."))
-EXEC_KEYS = ("prefill_capacity", "context_capacity", "pool_capacity", "rows", "draft_depth")   # model.json execution fields, in this order
+EXEC_KEYS = ("prefill_capacity", "context_capacity", "rows", "draft_depth", "cache_target_bytes")   # model.json execution fields, in this order (SDK 0.2 has no pool_capacity: context_capacity and memory_bytes size the pool)
 _RESOLVERS = {}
 
 
@@ -793,7 +863,7 @@ def scope_execution(slug, gpu, root=None, cfg=None):
 
 def fit_rows(path, gpu, root=None):
     """{slug: row} of a device's fit table (fit.py: sizing and verdict data) with the serving settings of the scope rules put back as the
-    row keys the readers know: "ctx_cap" (exec.context_cap) and "<runner key>_execution" (prefill_capacity, context_capacity, pool_capacity,
+    row keys the readers know: "ctx_cap" (exec.context_cap) and "<runner key>_execution" (prefill_capacity, context_capacity,
     rows, draft_depth). A row that still carries such a block of its own (a table of a device without rules) keeps it unless a rule sets one.
     ROOT: the checkout whose rules apply; default: this one when PATH is one of its own tables (.github/devlab/), else none (a table elsewhere,
     e.g. a test fixture, is standalone data: pass root= to read this checkout's rules for it)."""
@@ -821,14 +891,14 @@ def gpu_preset_name(model_or_presets, gpu="radeon-r9700"):
 
 def gpu_preset_execution(row, served_ctx=None, gpu="radeon-r9700"):
     """The execution overrides a fit-table row's "<runner>_execution" ("r9700_execution": registry.fit_execution_key) gives the GPU's preset (prefill_capacity, rows, draft_depth,
-    context_capacity/pool_capacity ...), plus the served context (context_capacity = pool_capacity = served_ctx) when the R9700
+    context_capacity ...), plus the served context (context_capacity = served_ctx) when the R9700
     serves a shorter context and the row does not say otherwise. None: the row has no block, so the preset is not touched."""
     ex = (row or {}).get(registry.fit_execution_key(gpu))
     if not ex:
         return None
     out = {}
     if served_ctx:
-        out.update(context_capacity=served_ctx, pool_capacity=served_ctx)
+        out.update(context_capacity=served_ctx)
     out.update(ex)
     return out
 
@@ -842,6 +912,9 @@ def with_gpu_preset(model, execution, gpu="radeon-r9700"):
     first = next(iter(doc["presets"]))
     alt = doc["presets"].get(name) or json.loads(json.dumps(doc["presets"][first]))
     alt["execution"].update(execution)
+    ex = alt["execution"]
+    if "pool_capacity" in ex and ex.get("context_capacity"):   # a v0.1 preset still has one: it never exceeds the context this preset serves
+        ex["pool_capacity"] = min(ex["pool_capacity"], ex["context_capacity"])
     doc["presets"][name] = alt
     return doc
 
@@ -1009,6 +1082,10 @@ def validate(info):
             errs.append(f"{at}: unknown GPU (known: {', '.join(GPUS)})")
         if dev.get("state") and (dev.get("gates") or dev.get("performance") or dev.get("roofline")):
             errs.append(f"{at}: state {dev['state']} cannot come with results")
+        if dev.get("shares_section_with") and dev["shares_section_with"] not in info["devices"]:
+            errs.append(f"{at}: shares_section_with {dev['shares_section_with']!r} is not a GPU of this card")
+        if dev.get("shares_section_with") and (dev.get("gates") or dev.get("performance") or dev.get("roofline")):
+            errs.append(f"{at}: a GPU that shares another's section has no results of its own")
         if dev.get("state") == "unsupported" and not dev.get("required_bytes"):
             errs.append(f"{at}: state unsupported needs required_bytes")
         if dev.get("state") == "not_a_target" and not dev.get("reason"):
@@ -1035,3 +1112,89 @@ def require_valid(info, what="info.json"):
     errs = validate(info)
     if errs:
         raise SystemExit(f"{what} is not valid {SCHEMA_ID}:\n  " + "\n  ".join(errs))
+
+
+# ---- per-device results files: fleet/devices/<name>.json (schema fleet/devices/device_results.schema.json, README.md there)
+# A GPU with no DevLab runner (the gfx1201 16 GB class, gfx1150) records, per model, whether it fits, the largest context it admits, how to serve
+# it and, when measured, evidence (make_info.py perf/gates output with a "machine" source). make_info.py build turns the entry of a card's
+# model into the card's devices entry, the GPU's preset and its evidence; a GPU shows only where its file has data for that card.
+DEVICE_RESULTS_ID = "loom-device-results/1"
+DEVICE_RESULTS_DIR = os.path.join(REPO, "fleet", "devices")
+DEVICE_SCHEMA_PATH = os.path.join(DEVICE_RESULTS_DIR, "device_results.schema.json")
+
+
+LEGACY_DEVICE_IDS = {"radeon-rx9070xt": "gfx1201-16gb"}   # the RX 9070 XT file (fleet/devices/rx9070xt.json) is the 16 GB class's data: read as it
+
+
+def validate_device_results(doc, what="device results"):
+    """Errors of one fleet/devices file against its schema, plus the rules the schema cannot say (empty: valid)."""
+    if doc.get("device") in LEGACY_DEVICE_IDS:
+        doc = dict(doc, device=LEGACY_DEVICE_IDS[doc["device"]])
+    schema = load_json(DEVICE_SCHEMA_PATH)
+    errs = _check(doc, schema, schema, what, [])
+    if errs:
+        return errs
+    if doc["device"] not in GPUS:
+        errs.append(f"{what}: unknown device {doc['device']!r} (known: {', '.join(GPUS)})")
+    share = doc.get("share_section_with")
+    if share and share not in GPUS:
+        errs.append(f"{what}: share_section_with {share!r} is not a device")
+    for slug, m in doc["models"].items():
+        at = f"{what}.models.{slug}"
+        if m["fits"] and not m.get("max_context"):
+            errs.append(f"{at}: fits without max_context")
+        if not m["fits"] and (m.get("evidence") or m.get("serve_args") or m.get("execution")):
+            errs.append(f"{at}: a model that does not fit has no serve_args, execution or evidence")
+        if share and m.get("evidence"):
+            errs.append(f"{at}: evidence on a device that shares {share}'s section (the shared section is {share}'s)")
+        for i, ev in enumerate(m.get("evidence") or []):
+            if ev.get("evidence") != EVIDENCE_ID:
+                errs.append(f"{at}.evidence[{i}]: not a {EVIDENCE_ID} document")
+            src = ((ev.get("performance") or {}).get("session") or {}).get("source")
+            srcs = [src] if src else []
+            srcs += [g.get("source") for g in ev.get("gates") or []]
+            for s in srcs:
+                if s and s.get("kind") not in ("machine", "local", "devlab", "factory"):
+                    errs.append(f"{at}.evidence[{i}]: unknown source kind {s.get('kind')!r}")
+                if src and s is src and s.get("kind") != "machine":
+                    errs.append(f"{at}.evidence[{i}]: performance of a device without a DevLab runner comes from a source of kind machine (make_info.py perf --source-kind machine)")
+            for k in ev:
+                if k not in ("evidence", "gpu", "performance", "gates", "roofline"):
+                    errs.append(f"{at}.evidence[{i}]: key {k!r} not allowed (a device file carries performance, gates and roofline only)")
+    return errs
+
+
+def load_device_results(directory=None):
+    """{GPU id: validated document} of every *.json in fleet/devices (or DIRECTORY); None/"none": no data files (DIRECTORY "none" disables)."""
+    directory = directory or os.environ.get("LOOM_DEVICE_RESULTS") or DEVICE_RESULTS_DIR
+    out = {}
+    if directory == "none" or not os.path.isdir(directory):
+        return out
+    for name in sorted(os.listdir(directory)):
+        if not name.endswith(".json") or name.endswith(".schema.json"):
+            continue
+        path = os.path.join(directory, name)
+        doc = load_json(path)
+        errs = validate_device_results(doc, name)
+        if errs:
+            raise SystemExit(f"{path} is not valid {DEVICE_RESULTS_ID}:\n  " + "\n  ".join(errs))
+        doc["device"] = LEGACY_DEVICE_IDS.get(doc["device"], doc["device"])
+        if doc["device"] in out:
+            raise SystemExit(f"{path}: device {doc['device']} is also in another file of {directory}")
+        out[doc["device"]] = doc
+    return out
+
+
+def with_device_preset(model, gpu, execution, base=None):
+    """model.json's document with the GPU's `<first><suffix>` preset: a copy of preset BASE (a name: the R9700's for an RDNA4 GPU of the
+    same programs; default the first preset) with EXECUTION over its execution. Programs, weights, tokenizer and the other presets are untouched."""
+    doc = json.loads(json.dumps(model))
+    name = gpu_preset_name(doc, gpu)
+    first = next(iter(doc["presets"]))
+    alt = json.loads(json.dumps(doc["presets"].get(base) or doc["presets"][first]))
+    alt["execution"].update(execution)
+    ex = alt["execution"]
+    if "pool_capacity" in ex and ex.get("context_capacity"):
+        ex["pool_capacity"] = min(ex["pool_capacity"], ex["context_capacity"])
+    doc["presets"][name] = alt
+    return doc

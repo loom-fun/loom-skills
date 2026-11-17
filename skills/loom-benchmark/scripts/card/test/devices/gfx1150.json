@@ -1,0 +1,17 @@
+{
+ "schema": "loom-device-results/1",
+ "device": "gfx1150",
+ "gpu": "AMD Radeon 890M (Strix Point, gfx1150): a test fixture, made-up numbers",
+ "preset": {"always": false},
+ "sdk": {"hrx_loom": "0.2.0"},
+ "models": {
+  "unsloth-Qwen3-0.6B-loom": {
+   "fits": true,
+   "date": "2026-11-16",
+   "max_context": 16384,
+   "native_context": 40960,
+   "serve_args": [],
+   "execution": {"prefill_capacity": 512}
+  }
+ }
+}

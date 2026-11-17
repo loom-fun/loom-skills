@@ -89,5 +89,24 @@ class Docs(unittest.TestCase):
             self.assertTrue((IMPROVE / m).exists(), m)
 
 
+
+class CommitTrailerPolicy(unittest.TestCase):
+    """One commit-trailer rule everywhere: exactly the plain Claude line, no model names (two contradicting rules once got every commit denied)."""
+    TRAILER = "Co-Authored-By: Claude <noreply@anthropic.com>"
+
+    def test_policy_files_carry_the_exact_trailer(self):
+        for rel in ("skills/loom-fleet/templates/ENG_CONTRACT.md", "skills/loom-fleet/reference/campaign.md"):
+            text = (ROOT / rel).read_text()
+            self.assertIn(self.TRAILER, text, rel)
+            self.assertNotRegex(text, r"own `?Co-Authored-By|own credit line", rel)
+
+    def test_tools_write_no_model_name_in_commit_trailers(self):
+        files = [p for p in list((ROOT / "fleet").rglob("*.py")) + list((ROOT / ".github").rglob("*")) + list((ROOT / "skills").rglob("*"))
+                 if p.is_file() and p.suffix in (".py", ".sh", ".md", ".yml", ".yaml", ".json", "")]
+        for p in files:
+            if p.is_file():
+                for m in re.finditer(r"Co-Authored-By: [^\n\"'`]*", p.read_text(errors="ignore"), re.I):
+                    self.assertEqual(m.group(0).strip(), self.TRAILER, f"{p.relative_to(ROOT)}: {m.group(0)}")
+
 if __name__ == "__main__":
     unittest.main()

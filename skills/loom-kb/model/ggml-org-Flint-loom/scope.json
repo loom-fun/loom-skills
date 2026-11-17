@@ -14,9 +14,10 @@
     ]
    },
    "set": {
-    "exec.context_cap": 36864
+    "exec.context_cap": 36864,
+    "exec.cache_target_bytes": 536870912
    },
-   "evidence": "migrated from the R9700 fit table (.github/devlab/r9700_fit.json r9700_execution / ctx_cap, measured on the R9700 DevLab runner; #609 #613 #615 #617 #618 #619 #628 #630); values unchanged"
+   "evidence": "migrated from the R9700 fit table (.github/devlab/r9700_fit.json r9700_execution / ctx_cap, measured on the R9700 DevLab runner; #609 #613 #615 #617 #618 #619 #628 #630); values unchanged; cache_target_bytes: hrx-loom 0.2.0 sizes automatic prefix/session caches at 2 GiB by default and --pool_backing=fixed allocates them eagerly; on the 32 GB R9700 that left too little beside the weights, the KV of the served context and the drafter/image components (DevLab 0.2.0 sweep: RESOURCE_EXHAUSTED at the first request). 512 MiB: func and dev gates pass (triage experiment, DevLab R9700, Flint cache_target_bytes 0 and 536870912 both PASS; the default fails)."
   }
  ]
 }

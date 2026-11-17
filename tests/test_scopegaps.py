@@ -110,6 +110,13 @@ class Migration(unittest.TestCase):
         before = json.loads((ROOT / "tests" / "data" / "r9700_exec_before_scope.json").read_text())
         rows = card_lib.fit_rows(str(ROOT / ".github" / "devlab" / "r9700_fit.json"), R9)
         got = {s: {k: r[k] for k in ("ctx_cap", "r9700_execution") if k in r} for s, r in rows.items() if "ctx_cap" in r or "r9700_execution" in r}
+        for r in before.values():   # SDK 0.2 has no pool_capacity: the readers (card_lib.EXEC_KEYS) no longer carry it
+            (r.get("r9700_execution") or {}).pop("pool_capacity", None)
+            if "r9700_execution" in r and not r["r9700_execution"]:
+                del r["r9700_execution"]
+        for slug in ("ggml-org-Flint-loom", "ggml-org-Muse-Glimmer-30B-loom"):   # hrx-loom 0.2: the automatic caches (2 GiB, eager on fixed backing) do not fit beside these two: 512 MiB
+            before.setdefault(slug, {}).setdefault("r9700_execution", {})["cache_target_bytes"] = 536870912
+        before = {s: r for s, r in before.items() if r}
         self.assertEqual(got, before)
         table = json.loads((ROOT / ".github" / "devlab" / "r9700_fit.json").read_text())
         self.assertFalse([r["slug"] for r in table if "ctx_cap" in r or "r9700_execution" in r], "the table holds data only")

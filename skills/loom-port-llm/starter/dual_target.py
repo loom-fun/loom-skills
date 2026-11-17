@@ -8,7 +8,7 @@ A generator that has a gfx12 version of a kernel K (WMMA fragments differ betwee
   * K gets `target(@rdna3)` (nothing else of its text changes), K_rdna4 gets `target(@rdna4)` if it lacks a target;
   * every `kernel.launch @K[...]` becomes `template.apply<@selN_K>(...)`; one `template.decl` per launch signature, with
     a `template.def<@selN_K> target(@rdna3)` provider that launches K and a `target(@rdna4)` one that launches K_rdna4;
-  * every `command.program.def` gets `target(@device)`.
+  * every `command.def` gets `target(@device)`.
 
   * a launch GROUP (gen_llm.py / make_kernel_tests.py, only on gfx12-specific fusions): the lines
         // dual-group: rdna4 kernel.launch @K_rdna4[...](...) : [...](...)
@@ -60,7 +60,7 @@ BASE, TWIN, SUFFIX, HEADER, R9700_PRESET_SUFFIX, PRESET_SUFFIXES = _rows()
 # family's (gfx12) first device's, the alias of --prefill-r9700
 KERNEL_DEF = re.compile(r"^kernel\.def\b(?P<attrs>.*?)\s@(?P<sym>\w+)\(")
 LAUNCH = re.compile(r"^(\s*)kernel\.launch @(\w+)\[([^\]]*)\]\((.*)\) : \[([^\]]*)\]\((.*)\)\s*$")
-PROGRAM_DEF = re.compile(r"^(command\.program\.def\s+(?:public\s+)?)(?!target\()(@)", re.M)
+PROGRAM_DEF = re.compile(r"^(command\.def\s+(?:public\s+)?)(?!target\()(@)", re.M)
 
 
 def enabled():
@@ -92,7 +92,7 @@ def select_mode():
     return v
 
 
-PROGRAM_HEAD = re.compile(r"^command\.program\.def\s+(?:public\s+)?@(\w+)\(\)\s+launch\((.*)\)\s*\{\s*$")
+PROGRAM_HEAD = re.compile(r"^command\.def\s+(?:public\s+)?@(\w+)\(\)\s+launch\((.*)\)\s*\{\s*$")
 
 
 def _program_blocks(lines, tw):
@@ -100,7 +100,7 @@ def _program_blocks(lines, tw):
     kernel of TW or carry a launch group."""
     blocks, i = [], 0
     while i < len(lines):
-        if lines[i].startswith("command.program.def"):
+        if lines[i].startswith("command.def"):
             j = i + 1
             while lines[j] != "}":
                 j += 1
@@ -326,9 +326,9 @@ def encodings_first(text):
     and command programs stay after them). Kernel texts are unchanged; smaller files are returned as they are."""
     if _enc_depth(text) <= ENC_LIMIT:
         return text
-    parts = re.split(r"(?m)^(?=kernel\.def |func\.def |template\.|command\.program\.def )", text)
+    parts = re.split(r"(?m)^(?=kernel\.def |func\.def |template\.|command\.def )", text)
     head, rest = parts[0], parts[1:]
-    first_late = next((i for i, p in enumerate(rest) if p.startswith(("template.", "command.program.def"))), len(rest))
+    first_late = next((i for i, p in enumerate(rest) if p.startswith(("template.", "command.def"))), len(rest))
     defs, late = rest[:first_late], rest[first_late:]
     funcs = [p for p in defs if p.startswith("func.def")]
     enc = [p for p in defs if p.startswith("kernel.def") and ("encoding<layout>" in p or re.search(r"view<[^>]*, %", p))]

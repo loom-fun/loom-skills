@@ -1,7 +1,10 @@
 #!/bin/bash
 # Install the Loom SDK (hrx-loom) + the matching model library, from scratch.
-# usage: [VENV_NAME=.venv] [PYTHON=python3] install_loom.sh [ROOT=~/loom] [VERSION|latest|ci-latest|ci:ARTIFACT_ID]
-#   0.1.0 (default):  hrx-loom from PyPI at the version the loom-port-llm starter is validated with
+# usage: [VENV_NAME=.venv] [PYTHON=python3] install_loom.sh [ROOT=~/loom] [VERSION|release:VERSION|pypi:VERSION|latest|ci-latest|ci:ARTIFACT_ID]
+#   0.2.0 (default), 0.1.0, pypi:V: hrx-loom from PyPI (0.1.0 is what packages without an SDK pin were built with)
+#   release:V, or a bare pre-release VERSION (0.2.0rc1, 0.3.0a1): hrx-loom from the ROCm/hrx-system GitHub release vV (a
+#                     pre-release, not on PyPI): the wheel asset, its sha256 verified against the release's SHA256SUMS;
+#                     no gh needed
 #   latest:           newest hrx-loom on PyPI (the starter's templates may need updating for a new ABI)
 #   ci-latest:        newest "loom-sdk-wheel-linux-Release" artifact from ROCm/hrx-system main (development builds;
 #                     Windows: "loom-sdk-wheel-windows"); needs an authenticated gh
@@ -9,14 +12,21 @@
 # The library (ROCm/hrx-loom-library) is checked out at the catalog revision the installed SDK names in
 # hrx_loom-*.dist-info/loom.json, so catalog cards and the SDK agree.
 # Writes ROOT/loom-install.json, the SDK's identity (every build reports version 0.1.0, so the version alone
-# doesn't say which SDK compiled or served a package): {"hrx_loom": version, "source": "pypi" | "ci",
-# "hrx_system_sha": full ROCm/hrx-system commit, "artifact_id": CI artifact id, "branch": its branch or tag,
+# doesn't say which SDK compiled or served a package): {"hrx_loom": version, "source": "release" | "pypi" | "ci",
+# "hrx_system_sha": full ROCm/hrx-system commit (a release: the tag's commit), "artifact_id": CI artifact id, "branch": its branch or tag,
 # "wheel_sha256": sha256 of the wheel file}. For a PyPI wheel the commit is that of the hrx-system release tag
 # v<version> whose asset has the same sha256 (null without gh, or when they differ). loom-port-llm's build.py
 # stamps it into each package's llm_config.json; the card scripts record it with each measurement.
 # Needs: python >= 3.12 with venv, git (and gh + unzip for ci-*). Windows: run from Git Bash (venvs use Scripts/).
 set -euo pipefail
-root=${1:-$HOME/loom}; which=${2:-0.1.0}
+root=${1:-$HOME/loom}; which=${2:-0.2.0}
+# Which source a VERSION means: release:V and bare pre-release versions (0.2.0rc1) are GitHub releases; pypi:V and the rest PyPI.
+case "$which" in
+  release:*) which=release:${which#release:};;
+  pypi:*) which=${which#pypi:};;
+  ci-latest|ci:*|latest) ;;
+  *[0-9]rc[0-9]*|*[0-9]a[0-9]*|*[0-9]b[0-9]*) which=release:$which;;
+esac
 case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) win=1; bin=Scripts; py=${PYTHON:-py -3};; *) win=0; bin=bin; py=${PYTHON:-python3};; esac
 mkdir -p "$root"; cd "$root"
 venv=${VENV_NAME:-.venv}
@@ -42,6 +52,23 @@ case "$which" in
     unzip -o -q wheel-$art/sdk.zip -d wheel-$art
     # Some artifacts bundle +asan/+debug/+tracy variants next to the release wheel; take the plain one.
     whl=$(ls wheel-$art/*.whl | grep -v '+' | head -1);;
+  release:*)
+    # A GitHub release of ROCm/hrx-system: the wheel asset, verified against the release's SHA256SUMS. No gh or token.
+    source=release; rel=${which#release:}; branch=v$rel
+    if [ $win = 1 ]; then asset=hrx_loom-$rel-py3-none-win_amd64.whl; else asset=hrx_loom-$rel-py3-none-manylinux_2_39_x86_64.whl; fi
+    url=https://github.com/ROCm/hrx-system/releases/download/v$rel
+    mkdir -p wheel-$rel
+    if [ ! -f wheel-$rel/$asset ]; then
+      curl -fsSL --retry 3 -o wheel-$rel/$asset.part "$url/$asset" && mv -f wheel-$rel/$asset.part wheel-$rel/$asset
+    fi
+    curl -fsSL --retry 3 -o wheel-$rel/SHA256SUMS "$url/SHA256SUMS"
+    want=$(awk -v n="$asset" '{f=$2; sub(/^\*/,"",f); if (f==n) print $1}' wheel-$rel/SHA256SUMS)
+    [ -n "$want" ] || { echo "$asset is not listed in the release's SHA256SUMS"; exit 1; }
+    got=$($venv/$bin/python -c 'import hashlib,sys;print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest())' wheel-$rel/$asset)
+    [ "$got" = "$want" ] || { rm -f wheel-$rel/$asset; echo "sha256 mismatch for $asset: SHA256SUMS $want, downloaded $got"; exit 1; }
+    # The tag's commit (an annotated tag peels with ^{}); plain git, no gh.
+    sha=$(git ls-remote https://github.com/ROCm/hrx-system "refs/tags/v$rel^{}" "refs/tags/v$rel" | awk '{print $1}' | head -1)
+    whl=wheel-$rel/$asset;;
   *)
     # PyPI: download the wheel first so its sha256 can be recorded, then install that file.
     spec=hrx-loom; [ "$which" = latest ] || spec="hrx-loom==$which"
@@ -76,8 +103,13 @@ EOF
 )
 [ -d library/.git ] || git clone -q https://github.com/ROCm/hrx-loom-library library
 if [ -n "$catalog" ]; then
-  git -C library fetch -q origin "$catalog" 2>/dev/null || git -C library fetch -q origin
-  git -C library checkout -q "$catalog" && echo "library at catalog revision ${catalog:0:12}"
+  if [[ $catalog =~ ^[0-9a-f]{40}$ ]]; then
+    git -C library fetch -q origin "$catalog" 2>/dev/null || git -C library fetch -q origin
+    git -C library checkout -q "$catalog"
+  else   # a tag (release SDKs: loom.json names @v0.2.0)
+    git -C library fetch -q --force origin tag "$catalog" && git -C library checkout -q FETCH_HEAD
+  fi
+  echo "library at catalog revision ${catalog:0:12}"
 else
   echo "SDK names no catalog revision (development build); library left at $(git -C library rev-parse --short HEAD)"
 fi

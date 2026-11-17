@@ -485,7 +485,7 @@
 +  %st_seg = index.rem %workitem, %ctpk : index
 +  %st_dim_value = index.mul %st_seg, %cdpt : index
 +  %st_dim = index.assume %st_dim_value [range(%st_dim_value, 0, {D - DPT})] : index
-   %kz = vector.constant 0.0 : vector<{DPT}xf16>
+   %kz = vector.splatf 0.0 : vector<{DPT}xf16>
  ''')
 -acc = ", ".join(f"%a{d} = %init : vector<8xf32>" for d in range(NF))
 +acc = ", ".join(f"%a{d} = %init : vector<8xf32>" for d in range(NFO))
@@ -1034,7 +1034,7 @@
 +    def sub(m):
 +        ind, o, x, ty = m.group(1), m.group(2), m.group(3), m.group(4)
 +        return (f"{ind}%{o}_x2 = vector.mulf %{x}, %{x} : {ty}\n{ind}%{o}_x3 = vector.mulf %{o}_x2, %{x} : {ty}\n"
-+                f"{ind}%{o}_ca = vector.constant 0.044715 : {ty}\n{ind}%{o}_cb = vector.constant 1.5957691216057308 : {ty}\n"
++                f"{ind}%{o}_ca = vector.splatf 0.044715 : {ty}\n{ind}%{o}_cb = vector.splatf 1.5957691216057308 : {ty}\n"
 +                f"{ind}%{o}_in = vector.fmaf %{o}_x3, %{o}_ca, %{x} : {ty}\n{ind}%{o}_ar = vector.mulf %{o}_in, %{o}_cb : {ty}\n"
 +                f"{ind}%{o}_sg = vector.logisticf<afn> %{o}_ar : {ty}\n{ind}%{o} = vector.mulf %{x}, %{o}_sg : {ty}")
 +    return re.sub(r"( *)%(\w+) = vector\.siluf<afn> %(\w+) : (vector<\w+>)", sub, text)
@@ -1069,7 +1069,7 @@
 +  %c7 = index.constant 7 : index
 +  %c8 = index.constant 8 : index
 +  %zero_f = scalar.constant 0.0 : f32
-+  %zero32 = vector.constant 0.0 : vector<32xf32>
++  %zero32 = vector.splatf 0.0 : vector<32xf32>
 +  %ids_view = buffer.view %ids[%zero] : buffer -> view<[%tokens]xi32>
 +{ids_prelude()}{ids_load("%raw", "%token")}  %c0_i32 = scalar.constant 0 : i32
 +  %vocab_last = scalar.constant {V - 1} : i32
@@ -1094,7 +1094,7 @@
 +  }} else {{
 +    scf.yield %zero32, %zero32 : vector<32xf32>, vector<32xf32>
 +  }}
-+  %pscale = vector.constant {PLE["proj_scale"]!r} : vector<32xf32>
++  %pscale = vector.splatf {PLE["proj_scale"]!r} : vector<32xf32>
 +  %ps = vector.mulf %pv, %pscale : vector<32xf32>
 +  %sq = vector.mulf %ps, %ps : vector<32xf32>
 +  %local = vector.reduce<addf> %sq, %zero_f : vector<32xf32>, f32
@@ -1110,10 +1110,10 @@
 +    %wv = vector.load %w_view[%g, %c0] : view<8x32xf32> -> vector<32xf32>
 +    %nrm = vector.mulf %ps, %invs : vector<32xf32>
 +    %proj = vector.mulf %nrm, %wv : vector<32xf32>
-+    %escale = vector.constant {PLE["embd_scale"]!r} : vector<32xf32>
++    %escale = vector.splatf {PLE["embd_scale"]!r} : vector<32xf32>
 +    %se = vector.mulf %sel, %escale : vector<32xf32>
 +    %both = vector.addf %proj, %se : vector<32xf32>
-+    %cscale = vector.constant {PLE["combine_scale"]!r} : vector<32xf32>
++    %cscale = vector.splatf {PLE["combine_scale"]!r} : vector<32xf32>
 +    %res = vector.mulf %both, %cscale : vector<32xf32>
 +    %ple_view = buffer.view %ple[%zero] : buffer -> view<[%tokens]x{NL * 8}x32xf32>
 +    vector.store %res, %ple_view[%token, %chunk, %c0] : vector<32xf32>, view<[%tokens]x{NL * 8}x32xf32>
@@ -1231,7 +1231,7 @@
 +  %zero = index.constant 0 : offset
 +  %c0 = index.constant 0 : index
 +  %zero_f = scalar.constant 0.0 : f32
-+  %zero32 = vector.constant 0.0 : vector<32xf32>
++  %zero32 = vector.splatf 0.0 : vector<32xf32>
 +  %count = scalar.constant {float(H)} : f32
 +  %groups = index.constant {HG} : index
 +  %active = index.cmp ult, %lane, %groups : index

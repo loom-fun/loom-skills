@@ -110,7 +110,7 @@ kernel.def export("g_post_add_norm_rs_live_lv") @g_post_add_norm_rs_live_lv(%tok
   %c0 = index.constant 0 : index
   %groups = index.constant 160 : index
   %zero_f = scalar.constant 0.0 : f32
-  %zero32 = vector.constant 0.0 : vector<32xf32>
+  %zero32 = vector.splatf 0.0 : vector<32xf32>
   %count = scalar.constant 5120.0 : f32
   %active = index.cmp ult, %lane, %groups : index
   %bl_raw = index.min %lane, %groups : index

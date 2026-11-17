@@ -41,6 +41,7 @@ skill directly.
 | `loom-optimize` | Improve a port's speed while checking correctness |
 | `loom-benchmark` | Validate a port, measure it against llama.cpp, and generate reports |
 | `loom-fleet` | Targeted fixes, campaigns, populating a Hugging Face org, publishing, and evaluating the skills themselves (merges the former `loom-org` and `loom-improve`) |
+| `loom-migrate` | Move packages, cards and the skills to a new hrx-loom SDK: a version entry per release pair (breaking changes, rewrite and sweep scripts, gotchas) and the fleet procedure |
 | `loom-kb` | Find the knowledge for a model, GPU and task: the router that prints which files to read |
 
 ### Example requests
@@ -119,7 +120,8 @@ The skills use these validation gates to assess whether a model program is corre
 
 - Linux or Windows 11 (Git Bash), and an AMD GPU (ROCm-class; developed on gfx1151). The NPU path needs an XDNA device.
 - Python ≥ 3.12 with `venv`, and `git`. The SDK comes from PyPI
-  ([`hrx-loom`](https://pypi.org/project/hrx-loom/), Linux glibc ≥ 2.39 or Windows 11).
+  ([`hrx-loom` 0.2.0](https://pypi.org/project/hrx-loom/0.2.0/), Linux glibc ≥ 2.39 or Windows 11; source release
+  [v0.2.0](https://github.com/ROCm/hrx-system/releases/tag/v0.2.0)).
   `gh` is only needed for development wheels from CI (`install_loom.sh ROOT ci-latest`).
 
 ## Repository layout

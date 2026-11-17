@@ -74,7 +74,7 @@ func.def inline @g_ng_offset(%origins: buffer, %row: index, %position: index, %b
   %page = index.assume %page_value [range(%page_value, 0, %last), lt(%page_value, %blocks)] : index
   %map = buffer.view %origins[%map_origin] : buffer -> view<[%blocks]xi32>
   %physical32 = view.load %map[%page] : view<[%blocks]xi32> -> i32
-  %bounded_physical = scalar.assume %physical32 [range(%physical32, 0, 1048575)] : i32
+  %bounded_physical = scalar.assume %physical32 [range(%physical32, 0, 134217727)] : i32
   %physical = index.cast %bounded_physical : i32 to index
   %page_base = index.mul %physical, %c16 : index
   %within = index.rem %bounded_position, %c16 : index
@@ -97,7 +97,7 @@ kernel.def export("g_ng_store") @g_ng_store(%tokens: index) {{
 }} launch(%tokens_arg: index, %context_arg: index, %pool_arg: index, %metadata: buffer, %info: buffer, %ids: buffer, %origins: buffer, %cache: buffer) {{
   %tokens = index.assume %tokens_arg [range(%tokens_arg, 1, 8192)] : index
   %context = index.assume %context_arg [range(%context_arg, 16, 262144)] : index
-  %pool = index.assume %pool_arg [range(%pool_arg, 16, 1048576)] : index
+  %pool = index.assume %pool_arg [range(%pool_arg, 16, 2147483584)] : index
   %token_id = kernel.workgroup.id<x> : index
   %token = index.assume %token_id [range(%token_id, 0, 2147483646), lt(%token_id, %tokens)] : index
   %zero = index.constant 0 : offset
@@ -146,7 +146,7 @@ kernel.def export("g_ng_propose") @g_ng_propose(%spans: index) {{
   %tokens = index.assume %tokens_arg [range(%tokens_arg, 1, 8192)] : index
   %depth = index.assume %depth_arg [range(%depth_arg, 1, 7)] : index
   %context = index.assume %context_arg [range(%context_arg, 16, 262144)] : index
-  %pool = index.assume %pool_arg [range(%pool_arg, 16, 1048576)] : index
+  %pool = index.assume %pool_arg [range(%pool_arg, 16, 2147483584)] : index
   %span_id = kernel.workgroup.id<x> : index
   %span = index.assume %span_id [range(%span_id, 0, 2147483646), lt(%span_id, %spans)] : index
   %lane_id = kernel.workitem.id<x> : index
@@ -269,7 +269,7 @@ def programs(g):
 """
     warm = f"""
 // N-gram drafting catch-up: the committed inputs' ids into the token history.
-command.program.def public @llm_ngram_warm() launch(%residual: buffer, %metadata: buffer, %origins: buffer, %arena: buffer, %tokens: buffer) {{
+command.def public @llm_ngram_warm() launch(%residual: buffer, %metadata: buffer, %origins: buffer, %arena: buffer, %tokens: buffer) {{
   %t = config.get @llm.tokens : index
   %spans = config.get @llm.spans : index
 {common}  %info_bytes = index.constant 16 : offset
@@ -282,7 +282,7 @@ command.program.def public @llm_ngram_warm() launch(%residual: buffer, %metadata
 """
     propose = f"""
 // N-gram proposals for the epoch's PROPOSE spans, written into the verifier's input slots.
-command.program.def public @llm_ngram_propose() launch(%epoch: buffer, %target_tokens: buffer, %origins: buffer, %arena: buffer) {{
+command.def public @llm_ngram_propose() launch(%epoch: buffer, %target_tokens: buffer, %origins: buffer, %arena: buffer) {{
 {common}  %epoch_spans = config.get @llm.epoch_spans : index
   %epoch_tokens = config.get @llm.epoch_tokens : index
   %width = config.get @llm.width : index

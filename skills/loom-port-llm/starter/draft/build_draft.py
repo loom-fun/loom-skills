@@ -9,7 +9,7 @@ control.loom: control state grows to 2048 header bytes (sampling records move fr
   encode_epoch places speculative spans (anchor + placeholder slots) at packed cursors and marks them in the
   device plan copy (flags bit 4, credit in bits 8..15); publish_epoch reads verification results; epoch
   runs propose -> verify (or advance) -> warm.
-Native contract: hrx-system loom/src/loom/serve/service/text/{model,storage,epoch}.h (hrx-loom 0.1.0).
+Native contract: hrx-system loom/src/loom/serve/service/text/{model,storage,epoch}.h (hrx-loom 0.2.0).
 """
 import os
 import re
@@ -575,8 +575,8 @@ func.def public @encode_epoch(%control_state: buffer, %plan: buffer, %inputs: bu
 
 // Verified epochs: semantic progress comes from device acceptance (records of 10 i32:
 // {{consumed, output_count, token[8]}}); a speculative span's known count is zero.
-func.def public @publish_epoch(%plan: buffer, %media_plan: buffer, %count: i32, %first_media_count: i32, %next_media_count: i32, %verified: i32, %continues: i32, %next_speculative: buffer, %ordinary: buffer, %first_results: buffer, %next_results: buffer, %progress: buffer) {{
-  func.call @plain_publish_epoch(%plan, %media_plan, %count, %first_media_count, %next_media_count, %verified, %continues, %next_speculative, %ordinary, %first_results, %next_results, %progress) : (buffer, buffer, i32, i32, i32, i32, i32, buffer, buffer, buffer, buffer, buffer)
+func.def public @publish_epoch(%control_state: buffer, %plan: buffer, %media_plan: buffer, %count: i32, %first_media_count: i32, %next_media_count: i32, %verified: i32, %continues: i32, %next_speculative: buffer, %ordinary: buffer, %first_results: buffer, %next_results: buffer, %progress: buffer) {{
+  func.call @plain_publish_epoch(%control_state, %plan, %media_plan, %count, %first_media_count, %next_media_count, %verified, %continues, %next_speculative, %ordinary, %first_results, %next_results, %progress) : (buffer, buffer, buffer, i32, i32, i32, i32, i32, buffer, buffer, buffer, buffer, buffer)
   %c0_i32 = scalar.constant 0 : i32
   %verifies = scalar.cmpi ne, %verified, %c0_i32 : i32
   scf.if %verifies {{

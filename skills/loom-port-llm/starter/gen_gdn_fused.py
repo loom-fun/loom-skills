@@ -422,8 +422,8 @@ kernel.def {tgt}export("{kname}") @{kname}(%tokens: index, %spans: index) {{
   %a_value = view.load %a_view_g[%vh] : view<{HV}xf32> -> f32
   %dt_bias_value = view.load %bias_view[%vh] : view<{HV}xf32> -> f32
   %qscale_c = scalar.constant {DK ** -0.5!r} : f32
-  %zero8 = vector.constant 0.0 : vector<8xf32>
-  %zero16 = vector.constant 0 : vector<16xi32>
+  %zero8 = vector.splatf 0.0 : vector<8xf32>
+  %zero16 = vector.splati 0 : vector<16xi32>
   %init = vector.fragment<init> %zero8 {SH} : vector<8xf32>
 {_head_ids(G, grouped, ratio)}
   %lane_row = index.rem %lane, %k16 : index
@@ -565,14 +565,7 @@ def phase_b(G, NG, LB, eps, grouped, ratio, guard_open="", guard_close="", targe
     # d = U - W S (result layout: lane holds rows 16 mt + lane_h8 + e of value column dv)
     for mt in range(NT):
         prev = "%init"
-        if mt:   # the second row block's W loads after the first chain
-            P(f"    %dzw{mt}_e = vector.extract %ws{mt - 1}_7[0] : vector<8xf32> -> f32")
-            P(f"    %dzw{mt}_b = scalar.bitcast %dzw{mt}_e : f32 to i32")
-            P(f"    %dzw{mt}_i = scalar.andi %dzw{mt}_b, %zero_i32 : i32")
-            P(f"    %dzw{mt} = index.cast %dzw{mt}_i : i32 to index")
-            P(f"    %wrow{mt}_v = index.add {ci(16 * mt)}, %dzw{mt} : index")
-            P(f"    %wrow{mt} = index.assume %wrow{mt}_v [range(%wrow{mt}_v, 0, {CN - 16})] : index")
-        wr = f"%wrow{mt}" if mt else ci(0)
+        wr = ci(16 * mt)   # v0.2: a fragment.load base must be uniform (fragment_memory.dynamic_stride): no run-time-zero ordering term here
         for kb in range(8):
             P(f"    %wl{mt}_{kb} = vector.fragment.load<lhs> %s_w[{wr}, {ci(16 * kb)}] {SH} : view<{CN}x{WP}xf16> -> vector<8xf16>")
             P(f"    %ws{mt}_{kb} = vector.mma %wl{mt}_{kb}, %sf{kb}, {prev} : vector<8xf16>, vector<8xf16>, {vec8}")
@@ -587,31 +580,18 @@ def phase_b(G, NG, LB, eps, grouped, ratio, guard_open="", guard_close="", targe
         P(f"    %gcv{mt} = vector.load %s_g[%ri{mt}] : view<{CN}xf32> -> {vec8}")
     P(f"    %gl = view.load %s_g[%k{CN - 1}] : view<{CN}xf32> -> f32")
     P(f"    %glv = vector.splat %gl : {vec8}")
-    # O = exp(gc) (Q S) + P d; the Q loads take a run-time-zero term of d (W S and its loads first: register pressure)
-    P("    %dz_e = vector.extract %d0[0] : vector<8xf32> -> f32")
-    P("    %dz_b = scalar.bitcast %dz_e : f32 to i32")
-    P("    %dz_i = scalar.andi %dz_b, %zero_i32 : i32")
-    P("    %dz = index.cast %dz_i : i32 to index")
+    # O = exp(gc) (Q S) + P d (v0.2: the Q, W and K^T fragment loads carry no run-time-zero ordering term; the SDK requires a uniform fragment.load base)
     for mt in range(NT):
-        if mt:   # the next row block's Q loads after the previous chain (8 fragments in flight, not 16)
-            P(f"    %dzq{mt}_e = vector.extract %qs{mt - 1}_7[0] : vector<8xf32> -> f32")
-            P(f"    %dzq{mt}_b = scalar.bitcast %dzq{mt}_e : f32 to i32")
-            P(f"    %dzq{mt}_i = scalar.andi %dzq{mt}_b, %zero_i32 : i32")
-            P(f"    %dzq{mt}_x = index.cast %dzq{mt}_i : i32 to index")
-            P(f"    %dzq{mt} = index.add %dz, %dzq{mt}_x : index")
-        dzn = f"%dzq{mt}" if mt else "%dz"
-        P(f"    %qrow{mt}_v = index.add {ci(16 * mt)}, {dzn} : index")
-        P(f"    %qrow{mt} = index.assume %qrow{mt}_v [range(%qrow{mt}_v, 0, {CN - 16})] : index")
         prev = "%init"
         for kb in range(8):
-            P(f"    %ql{mt}_{kb} = vector.fragment.load<lhs> %s_q[%qrow{mt}, {ci(16 * kb)}] {SH} : view<{CN}x{WP}xf16> -> vector<8xf16>")
+            P(f"    %ql{mt}_{kb} = vector.fragment.load<lhs> %s_q[{ci(16 * mt)}, {ci(16 * kb)}] {SH} : view<{CN}x{WP}xf16> -> vector<8xf16>")
             P(f"    %qs{mt}_{kb} = vector.mma %ql{mt}_{kb}, %sf{kb}, {prev} : vector<8xf16>, vector<8xf16>, {vec8}")
             prev = f"%qs{mt}_{kb}"
         P(f"    %egc{mt} = vector.expf<afn> %gcv{mt} : {vec8}")
         P(f"    %oi{mt} = vector.mulf %egc{mt}, {prev} : {vec8}")
         prev = f"%oi{mt}"
         for kt in range(mt + 1):
-            P(f"    %pl{mt}_{kt} = vector.fragment.load<lhs> %s_p[%qrow{mt}, {ci(16 * kt)}] {SH} : view<{CN}x{TP}xf16> -> vector<8xf16>")
+            P(f"    %pl{mt}_{kt} = vector.fragment.load<lhs> %s_p[{ci(16 * mt)}, {ci(16 * kt)}] {SH} : view<{CN}x{TP}xf16> -> vector<8xf16>")
             P(f"    %oo{mt}_{kt} = vector.mma %pl{mt}_{kt}, %df{kt}, {prev} : vector<8xf16>, vector<8xf16>, {vec8}")
             prev = f"%oo{mt}_{kt}"
         P(f"    vector.fragment.store<result> {prev}, %o_lds[{ci(16 * mt)}, %wcol] {SH} : {vec8}, view<{CN}x{OS}xf32>")
@@ -622,7 +602,7 @@ def phase_b(G, NG, LB, eps, grouped, ratio, guard_open="", guard_close="", targe
         P(f"    %de{mt} = vector.mulf %d{mt}, %edm{mt} : {vec8}")
         P(f"    %deh{mt} = vector.fptrunc %de{mt} : {vec8} to vector<8xf16>")
         P(f"    %dfe{mt} = vector.fragment<rhs> %deh{mt} {SH} : vector<8xf16>")
-    # the K^T loads take a run-time-zero term of O (after the Q S chain): at most one product's fragments in flight
+    # the next chunk prefetch and the z loads take a run-time-zero term of O (after the Q S chain)
     P(f"    %dz2_e = vector.extract %oo{NT - 1}_{NT - 1}[0] : vector<8xf32> -> f32")
     P("    %dz2_b = scalar.bitcast %dz2_e : f32 to i32")
     P("    %dz2_i = scalar.andi %dz2_b, %zero_i32 : i32")
@@ -644,16 +624,7 @@ def phase_b(G, NG, LB, eps, grouped, ratio, guard_open="", guard_close="", targe
         P(f"    %sd{kb} = vector.fragment<init> %sdv{kb} {SH} : {vec8}")
         prev = f"%sd{kb}"
         for kt in range(NT):
-            if kt == 0:
-                if kb:   # K^T fragments of one key block in flight: the next block's loads after the previous block's products
-                    P(f"    %dzk{kb}_e = vector.extract %un{kb - 1}_{NT - 1}[0] : vector<8xf32> -> f32")
-                    P(f"    %dzk{kb}_b = scalar.bitcast %dzk{kb}_e : f32 to i32")
-                    P(f"    %dzk{kb}_i = scalar.andi %dzk{kb}_b, %zero_i32 : i32")
-                    P(f"    %dzk{kb}_x = index.cast %dzk{kb}_i : i32 to index")
-                    P(f"    %dzk{kb} = index.add %dz2, %dzk{kb}_x : index")
-                P(f"    %ktr{kb}_v = index.add {ci(16 * kb)}, {'%dzk' + str(kb) if kb else '%dz2'} : index")
-                P(f"    %ktr{kb} = index.assume %ktr{kb}_v [range(%ktr{kb}_v, 0, {DK - 16})] : index")
-            P(f"    %ul{kb}_{kt} = vector.fragment.load<lhs> %s_kt[%ktr{kb}, {ci(16 * kt)}] {SH} : view<{DK}x{TP}xf16> -> vector<8xf16>")
+            P(f"    %ul{kb}_{kt} = vector.fragment.load<lhs> %s_kt[{ci(16 * kb)}, {ci(16 * kt)}] {SH} : view<{DK}x{TP}xf16> -> vector<8xf16>")
             P(f"    %un{kb}_{kt} = vector.mma %ul{kb}_{kt}, %dfe{kt}, {prev} : vector<8xf16>, vector<8xf16>, {vec8}")
             prev = f"%un{kb}_{kt}"
         P(f"    %sn{kb} = vector.addf {prev}, %zero8 : {vec8}")
@@ -775,8 +746,8 @@ kernel.def {tgt}export("{kname}") @{kname}(%spans: index) {{
   %nw_view = buffer.view %weight[%zero] : buffer -> view<{DV}xf32>
   %state_view = buffer.view %arena[%reader] : buffer -> view<{NS}xf32>
   %next_view = buffer.view %arena[%writer] : buffer -> view<{NS}xf32>
-  %zero8 = vector.constant 0.0 : vector<8xf32>
-  %zero16 = vector.constant 0 : vector<16xi32>
+  %zero8 = vector.splatf 0.0 : vector<8xf32>
+  %zero16 = vector.splati 0 : vector<16xi32>
   %init = vector.fragment<init> %zero8 {SH} : vector<8xf32>
 {_head_ids(G, grouped, ratio)}
   %k_dk = index.constant {DK} : index
@@ -829,7 +800,7 @@ kernel.def {tgt}export("{kname}") @{kname}(%spans: index) {{
     init.append("  }")
     nch = ["  %len_r = index.add %length, %k31 : index", "  %nchunks = index.div %len_r, %k32 : index"] + prefetch("%k0", "  ") + stage_stores("  ", "_k0") + \
           ["  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)"]
-    stage = [f"  %zero8h = vector.constant 0.0 : vector<8xf16>", "  %zero4 = vector.constant 0.0 : vector<4xf32>",
+    stage = [f"  %zero8h = vector.splatf 0.0 : vector<8xf16>", "  %zero4 = vector.splatf 0.0 : vector<4xf32>",
              f"  %t128 = index.cmp ult, %thread, {ci(128)} : index", f"  %t8 = index.cmp ult, %thread, %k8 : index",
              "  %t4o_v = index.mul %thread, %k4 : index", f"  %t4o = index.assume %t4o_v [range(%t4o_v, 0, {CN - 4})] : index"]
     off = 0

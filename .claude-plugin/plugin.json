@@ -1,6 +1,6 @@
 {
   "name": "loom",
-  "description": "Skills for AMD Loom (hrx-loom / loom-serve): install, fetch and serve catalog models, a web playground, port any GGUF LLM to Loom, optimize it while preserving correctness, and benchmark it against llama.cpp ROCm.",
+  "description": "Skills for AMD Loom (hrx-loom / loom-serve): install, fetch and serve catalog models, a web playground, port any GGUF LLM to Loom, optimize it while preserving correctness, benchmark it against llama.cpp ROCm, and migrate packages, cards and skills to a new SDK release.",
   "author": {
     "name": "loom-fun"
   },

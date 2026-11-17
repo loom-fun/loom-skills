@@ -25,7 +25,7 @@ Narrow changes inside a campaign are [targeted fixes](targeted-fix.md).
 | PM (main session) | talks to the owner; relays instructions into inbox files; the only agent that asks the owner | review code, merge, spawn engineers |
 | Tech lead | owns the integration branch; designs, splits work, writes task files, spawns engineers, reviews and merges their PRs, merges the base in, runs regeneration and publishing, writes the final report, opens the final PR | wait for the owner's go-ahead on technical details |
 | Engineers | one task at a time in their own worktree; PR against the integration branch; read `notes/ENG_CONTRACT.md` and their task file first | open PRs into the base or another branch, publish outside the task |
-| Dashboarder | keeps the tracker artifact current from `status.json` + `log.md` (counts, log entries, ETA, scope changes together, not counts alone) | edit code or cards |
+| Dashboarder | keeps the tracker artifact current from `status.json` + `log.md` (counts, log entries, ETA, scope changes together, not counts alone); republishes only on an important change, at most hourly ("State files") | edit code or cards; republish on every change |
 
 Model tiers: the cheaper tier (sonnet) is the default for engineers, reviewers and the dashboarder; the strongest tier (opus) for tech leads and
 for design-heavy engineering (fused or persistent kernels, register/LDS budgets across fused stages, cross-workgroup sync, open-ended
@@ -53,8 +53,11 @@ engineers are explicit and self-contained: they point at the files to read, neve
  "measures": {"m1": {"status": "", "evidence": ""}},
  "velocity": {"stages": {"<stage>": {"start": "", "end": "", "agent_hours": 0, "runner_hours": 0, "note": ""}}}}
 ```
-`python3 status.py --dir DIR set workstreams.guards.stage '"review"' workstreams.guards.pr 716`. The tracker artifact is refreshed with
-counts, the log, an ETA and scope changes after every merged PR or when the done count moves by 2 or more.
+`python3 status.py --dir DIR set workstreams.guards.stage '"review"' workstreams.guards.pr 716`. The tracker artifact is republished only when
+something important happens (a model or workstream changes stage or verdict, a PR merges, a regression or blocker appears, a scope change or an
+owner decision) and at most once per hour: diff against the last published state first and batch everything else into the next publish; the
+local HTML copy may update freely. Each publish carries counts, the log, an ETA and scope changes together. (The artifact service allows about
+200 publishes a day; a dashboarder that republished on every change burned that in under an hour.)
 
 ## Communication
 
@@ -76,7 +79,7 @@ counts, the log, an ETA and scope changes after every merged PR or when the done
   (`git worktree add -b <campaign>-<name> DIR/wt/<name> origin/<campaign>`). Never work in the main checkout.
 - PRs only into the integration branch, never the base or another feature branch; the tech lead opens the one final PR into the base.
   PR body: what, why, evidence, a `loom-scope` block ([architecture.md](architecture.md) "Guards"), the closing credit line. Commit
-  trailer: the author's own credit line; no model ids in commit or PR text.
+  trailer exactly `Co-Authored-By: Claude <noreply@anthropic.com>`; no model names or versions anywhere in commit or PR text.
 - Each PR is focused; the tech lead squash-merges; never stack PRs: branch off the latest integration branch and merge it back in when
   it moves. A PR with merge conflicts gets no CI runs.
 - **Review, then merge without waiting for the owner**: an in-scope PR that passes review (DRY, meets its task's "Done when", scoped,
@@ -114,6 +117,9 @@ separately. Tools: `fleet/README.md`; process: [targeted-fix.md](targeted-fix.md
 - Wait with ONE background until-loop on `gh run view RUN --json status`, **no faster than every 120 s**; never `gh run watch`;
   one central poller, not one per agent. Queue wait on a runner pool (10+ min on the R9700) is normal: do not re-trigger.
   Download with `gh run download RUN -D FRESH_DIR` (a fresh directory each time; unzip collides).
+- Cancelling: a plain `gh run cancel` of a queued self-hosted matrix run can leave it queued or in progress for hours, holding the queue
+  (sdk020: 30 cancelled runs blocked the sweep) -> `gh api -X POST repos/OWNER/REPO/actions/runs/RUN/force-cancel`, then confirm with
+  `gh run list --status queued` and `--status in_progress` that nothing of yours is left.
 - Smoke tests use tight timeouts and log the server status endpoints while waiting, so a hang shows its cause.
 - **Job anatomy and the iteration rule.** Measured on 156 R9700 jobs (2026-11-16), a typical 95-minute experiment job is: setup + the 3
   builds 2.5 min (3 %), func 15 min (16 %), ktest 1 min (1 %), perf 9 min (10 %), gates against the vLLM reference about 70 min (72 %),
@@ -163,10 +169,13 @@ or check depends on (tool dialect, vocab size, draft kind, dense/MoE, model size
 
 ## Baselines, quant, models, gates
 
-- **Baselines are apples to apples and out of the box**: llama.cpp at build defaults plus the standard flags, in the same job as Loom,
+- **Baselines are apples to apples and out of the box**: llama.cpp at build defaults plus the standard flags,
   with the package's drafting config on every row (4 streams: both off); no per-model sweeps, no best-of-configs mixing. Loom tuning
   counts only when baked into the package preset. Full rules: `skills/loom-benchmark/reference/methodology.md` and
   `skills/loom-kb/method/methodology.md`.
+- **Reuse stored measurements when nothing they measured changed** (methodology rule 17): same model files and same engine binary
+  (llama.cpp build, hrx-loom version) on the same GPU type means the stored rows stand. An SDK migration re-measures Loom only; llama.cpp
+  and the old card are never re-run except a targeted ABBA confirmation of a row outside its band.
 - **Quant**: plain Q4_K_M from the HF cache; never switch to another quant on your own, never download a GGUF that is cached under any
   repo, no big downloads without need. If the kit lacks a format Q4_K_M needs, add the format.
 - **Models**: nothing above 35B parameters on a local machine (MoE counts total); the shared box has room for one small build at a time.

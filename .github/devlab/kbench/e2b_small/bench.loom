@@ -14,7 +14,7 @@ kernel.def target(@rdna4) export("k_norm_wg256") @k_norm_wg256(%tokens: index) {
   %c0 = index.constant 0 : index
   %groups = index.constant 48 : index
   %zero_f = scalar.constant 0.0 : f32
-  %zero32 = vector.constant 0.0 : vector<32xf32>
+  %zero32 = vector.splatf 0.0 : vector<32xf32>
   %count = scalar.constant 1536.0 : f32
   %active = index.cmp ult, %lane, %groups : index
   %bl_raw = index.min %lane, %groups : index
@@ -248,7 +248,7 @@ kernel.def target(@rdna4) export("k_norm_wg64") @k_norm_wg64(%tokens: index) {
   %c0 = index.constant 0 : index
   %groups = index.constant 48 : index
   %zero_f = scalar.constant 0.0 : f32
-  %zero32 = vector.constant 0.0 : vector<32xf32>
+  %zero32 = vector.splatf 0.0 : vector<32xf32>
   %count = scalar.constant 1536.0 : f32
   %active = index.cmp ult, %lane, %groups : index
   %bl_raw = index.min %lane, %groups : index

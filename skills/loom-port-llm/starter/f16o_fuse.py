@@ -55,7 +55,7 @@ def fuse(text):
                 args = _split(lm.group("args"))
                 if args[-1] == y:
                     leaves.append((i, lm))
-            if (lines[i] or "").startswith("command.program.def") or (RS.match(lines[i] or "") and i < r):
+            if (lines[i] or "").startswith("command.def") or (RS.match(lines[i] or "") and i < r):
                 break
             i -= 1
         if not leaves or len(leaves) > 3:

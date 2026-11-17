@@ -50,10 +50,10 @@ def act_vector(act, g, u, out, pre, n=8):
         return f"""  %{pre}sg = vector.siluf<afn> {g} : vector<{n}xf32>
   %{out} = vector.mulf %{pre}sg, {u} : vector<{n}xf32>"""
     _, alpha, limit = act
-    return f"""  %{pre}lim = vector.constant {float(limit)!r} : vector<{n}xf32>
-  %{pre}nlim = vector.constant {-float(limit)!r} : vector<{n}xf32>
-  %{pre}alpha = vector.constant {float(alpha)!r} : vector<{n}xf32>
-  %{pre}one = vector.constant 1.0 : vector<{n}xf32>
+    return f"""  %{pre}lim = vector.splatf {float(limit)!r} : vector<{n}xf32>
+  %{pre}nlim = vector.splatf {-float(limit)!r} : vector<{n}xf32>
+  %{pre}alpha = vector.splatf {float(alpha)!r} : vector<{n}xf32>
+  %{pre}one = vector.splatf 1.0 : vector<{n}xf32>
   %{pre}x = vector.minnumf {g}, %{pre}lim : vector<{n}xf32>
   %{pre}y0 = vector.minnumf {u}, %{pre}lim : vector<{n}xf32>
   %{pre}y = vector.maxnumf %{pre}y0, %{pre}nlim : vector<{n}xf32>
@@ -296,7 +296,7 @@ def route_prefill(H, E, KU, gating, norm, bias, wty="f32", scale=1.0):
       %c_in = index.cmp ult, %cv, %cHC : index
       %c_c = scf.select %c_in, %cv, %c0 : index
       %bc = index.assume %c_c [range(%c_c, 0, {HC - 1})] : index
-      %zero4w = vector.constant 0.0 : vector<4xf32>
+      %zero4w = vector.splatf 0.0 : vector<4xf32>
 """
         wl = chunk + (f"""      %wraw = vector.load %w4_view[%e, %bc, %c0] : {W4} -> vector<4xbf16>
       %wv0 = vector.extf %wraw : vector<4xbf16> to vector<4xf32>""" if wty == "bf16" else
@@ -437,7 +437,7 @@ kernel.def export("g_moe_route_tr") @g_moe_route_tr(%tokens: index) {{
   %tid0 = kernel.workitem.id<x> : index
   %tid = index.assume %tid0 [range(%tid0, 0, 255)] : index
   %cvec = index.constant {TR * HG} : index
-  %zero32 = vector.constant 0.0 : vector<32xf32>
+  %zero32 = vector.splatf 0.0 : vector<32xf32>
   scf.for %v = [%tid to %cvec step %c256] {{
     %r_value = index.div %v, %cHG : index
     %r = index.assume %r_value [range(%r_value, 0, {TR - 1})] : index
@@ -583,7 +583,7 @@ kernel.def export("{name}") @{name}(%n: index, %tokens: index) {{
   %expert_bytes = index.constant {2 * eb if fused else eb} : offset
   %block_bytes = index.constant {FMT[fmt]} : offset
   %zero_f = scalar.constant 0.0 : f32
-  %zero32 = vector.constant 0.0 : vector<32xf32>
+  %zero32 = vector.splatf 0.0 : vector<32xf32>
   %c0_i32 = scalar.constant 0 : i32
   %cE1_i32 = scalar.constant {E - 1} : i32
   %ids_view = buffer.view %ids[%zero] : buffer -> view<[%tokens]xi32>
@@ -604,8 +604,8 @@ kernel.def export("{name}") @{name}(%n: index, %tokens: index) {{
   %xm_bytes = index.cast %cK : index to offset
   %xm_off = index.scale {xrows}, %xm_bytes : index, offset -> offset
   %xm_view = buffer.view %x[%xm_off] : buffer -> view<[{xrows}]x{groups}x2xf32>
-  %zero32i8 = vector.constant 0 : vector<32xi8>
-  %zero1i = vector.constant 0 : vector<1xi32>""" if iq else f"""  %x_view = buffer.view %x[%zero] : buffer -> view<[{xrows}]x{groups}x32xf32>""")
+  %zero32i8 = vector.splati 0 : vector<32xi8>
+  %zero1i = vector.splati 0 : vector<1xi32>""" if iq else f"""  %x_view = buffer.view %x[%zero] : buffer -> view<[{xrows}]x{groups}x32xf32>""")
     L.append(f"""{xview}
   %row_base = index.mul %group_id, %rows_per : index
   %ok = index.cmp ult, %workitem, %groups_c : index""".replace("%groups_c", f"%cgroups"))
@@ -1067,7 +1067,7 @@ def _skip_empty_waves(text):
            f"\n      scf.yield {outs} : {types}\n    }} else {{\n      scf.yield {olds} : {types}\n    }}\n"
            f"{bar}    scf.yield {news} : {types}\n  }}\n")
     text = text[:m.start()] + new + text[m.end():]
-    anchor = "  %zero8 = vector.constant 0.0 : vector<8xf32>\n"
+    anchor = "  %zero8 = vector.splatf 0.0 : vector<8xf32>\n"
     assert text.count(anchor) == 1
     return text.replace(anchor, live + anchor)
 
@@ -1199,7 +1199,7 @@ def grouped_gemm(fmt, mode, N, K, E, KU, gemm_fn, fused=False, bias=False, act=N
             gather("gx", "index.add %row_origin, %stage_row : index", "bounded_x_row"))
         rep("    %x_half = vector.load %x_view[%bounded_x_row, %x_col] : view<[%xrows]x[%k]xf16> -> vector<16xf16>\n",
             """    %x_half_raw = vector.load %x_view[%bounded_x_row, %x_col] : view<[%xrows]x[%k]xf16> -> vector<16xf16>
-    %zero16h = vector.constant 0.0 : vector<16xf16>
+    %zero16h = vector.splatf 0.0 : vector<16xf16>
     %x_half = scf.select %gx_valid, %x_half_raw, %zero16h : vector<16xf16>
 """)
         rep("    %inv_row = index.assume %inv_row_value [lt(%inv_row_value, %rows)] : index\n",

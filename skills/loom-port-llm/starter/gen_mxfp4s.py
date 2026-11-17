@@ -188,7 +188,7 @@ def gemm_mxfp4s_f8_m256(mode, prefix="g", order="pairs", a_direct=True, dbuf=Fal
     A(f'''  %w_out_row = index.assume %w_out_row_value [lt(%w_out_row_value, %n)] : index
   %w_row_origin = index.scale %w_out_row, %k_half_off : index, offset -> offset
   %ws_row_origin = index.scale %w_out_row, %ks_off : index, offset -> offset
-  %zero8 = vector.constant 0.0 : vector<8xf32>
+  %zero8 = vector.splatf 0.0 : vector<8xf32>
   %init = vector.fragment<init> %zero8 shape [%c16, %c16] : vector<8xf32>
   %k_steps = index.div %k, %c128 : index
   %k_steps_m1 = index.sub %k_steps, %c1 : index
@@ -198,11 +198,11 @@ def gemm_mxfp4s_f8_m256(mode, prefix="g", order="pairs", a_direct=True, dbuf=Fal
   %lo_mask = scalar.constant -256 : i32
   %tab_lo_c = scalar.constant 235669504 : i32
   %tab_hi_c = scalar.constant 370414096 : i32
-  %m7 = vector.constant 7 : vector<4xi8>
-  %m4 = vector.constant 4 : vector<4xi8>
-  %m80 = vector.constant -128 : vector<4xi8>
-  %m4i = vector.constant 4 : vector<1xi32>
-  %m80i = vector.constant -2139062144 : vector<1xi32>''')
+  %m7 = vector.splati 7 : vector<4xi8>
+  %m4 = vector.splati 4 : vector<4xi8>
+  %m80 = vector.splati -128 : vector<4xi8>
+  %m4i = vector.splati 4 : vector<1xi32>
+  %m80i = vector.splati -2139062144 : vector<1xi32>''')
     wsrc = "%wsel" if two_w else "%wpsel" if pair else "%w"
     ssrc = "%wssel" if two_w else "%wspsel" if pair else "%ws"
 
@@ -670,7 +670,7 @@ def gemm_mxfp4s_f8_ws(mode, prefix="g", order="pairs", npw=4, rf=None, pad=16, k
     A(f'''  %w_out_row = index.assume %w_out_row_value [lt(%w_out_row_value, %n)] : index
   %w_row_origin = index.scale %w_out_row, %k_half_off : index, offset -> offset
   %ws_row_origin = index.scale %w_out_row, %ks_off : index, offset -> offset
-  %zero8 = vector.constant 0.0 : vector<8xf32>
+  %zero8 = vector.splatf 0.0 : vector<8xf32>
   %init = vector.fragment<init> %zero8 shape [%c16, %c16] : vector<8xf32>
   %k_steps = index.div %k, %c128 : index
   %k_steps_m1 = index.sub %k_steps, %c1 : index
@@ -680,9 +680,9 @@ def gemm_mxfp4s_f8_ws(mode, prefix="g", order="pairs", npw=4, rf=None, pad=16, k
   %lo_mask = scalar.constant -256 : i32
   %tab_lo_c = scalar.constant 235669504 : i32
   %tab_hi_c = scalar.constant 370414096 : i32
-  %m7 = vector.constant 7 : vector<4xi8>
-  %m80i = vector.constant -2139062144 : vector<1xi32>
-  %m4i = vector.constant 4 : vector<1xi32>
+  %m7 = vector.splati 7 : vector<4xi8>
+  %m80i = vector.splati -2139062144 : vector<1xi32>
+  %m4i = vector.splati 4 : vector<1xi32>
   %c15 = index.constant 15 : index
   %rows_m15 = index.sub %rows, %c15 : index''')
     for r in range(RF):
@@ -973,10 +973,10 @@ def fuse_mxfp4s_f8(text, prefix="g"):
     each `scf.if %big { g_gemm_mxfp4_{store,swiglu}_m128 } else { ... }` becomes `scf.if %huge { group: gfx11 the same m128 launch, gfx12 the fp8
     256-row kernel } else { as before }`. The gfx11 programs keep every launch they had. An operand buffer with a producer or a reader this
     pass does not know stays as it is (f16 path). Returns (text, number of fp8 GEMM groups)."""
-    a = text.find("command.program.def public @llm_advance(")
+    a = text.find("command.def public @llm_advance(")
     if a < 0:
         return text, 0
-    b = text.find("\ncommand.program.def ", a + 10)
+    b = text.find("\ncommand.def ", a + 10)
     b = len(text) if b < 0 else b + 1
     lines = text[a:b].split("\n")
     producers, readers, others = {}, {}, set()
@@ -1102,7 +1102,7 @@ def fuse_mxfp4s_f8(text, prefix="g"):
     repl[j] = lines[j] + "\n" + "\n".join(alloc)
     body = "\n".join(repl.get(i, l) for i, l in enumerate(lines) if i not in drop)
     text = text[:a] + body + text[b:]
-    first = text.index("command.program.def")   # the twins precede every launch (dual_target.py: a launch of K comes after the end of the K_rdna4 kernels)
+    first = text.index("command.def")   # the twins precede every launch (dual_target.py: a launch of K comes after the end of the K_rdna4 kernels)
     first = text.rfind("\n", 0, first) + 1
     return text[:first] + "".join(t.rstrip("\n") + "\n\n" for t in kernels.values()) + text[first:], len(leaves) + 2 * len(triples)
 
@@ -1133,8 +1133,8 @@ func.def inline @g_mxfp4s_icodes(%w: buffer, %ws: buffer, %origin: offset, %scal
   %bits = scf.select %e_low, %tiny, %normal : i32
   %d = scalar.bitcast %bits : i32 to f32
   %payload = vector.load %q_view[0] : view<16xi8> -> vector<16xi8>
-  %mask = vector.constant 15 : vector<16xi8>
-  %four = vector.constant 4 : vector<16xi8>
+  %mask = vector.splati 15 : vector<16xi8>
+  %four = vector.splati 4 : vector<16xi8>
   %lower = vector.andi %payload, %mask : vector<16xi8>
   %shifted = vector.shrui %payload, %four : vector<16xi8>
   %upper = vector.andi %shifted, %mask : vector<16xi8>
@@ -1174,10 +1174,10 @@ def ab_f8(text, hv, k):
     and its beta matvec (into %gbeta) become, in epochs whose rows are a multiple of 32, a dual group whose gfx12 provider is
     g_ab_gemm_mxfp4s_store_pair_f8_m256_rdna4 (32 x hv tiles, both weights in one launch, K step 256) over %h8 / %s_h8, the fp8 rows the
     producer twin already wrote for the qkv GEMM. gfx11 and the other epochs keep the int8 launches. Returns (text, layers rewritten)."""
-    a = text.find("command.program.def public @llm_advance(")
+    a = text.find("command.def public @llm_advance(")
     if a < 0 or "%h8 = buffer.alloca" not in text[a:]:
         return text, 0
-    b = text.find("\ncommand.program.def ", a + 10)
+    b = text.find("\ncommand.def ", a + 10)
     b = len(text) if b < 0 else b + 1
     body = text[a:b]
     pat = re.compile(r"(?m)^(?P<ind> *)scf\.if %gemm \{\n(?P=ind)(?P<q>kernel\.launch @g_quant_q8\[%t, %nH\]\(%t, %nH, %h, %h16q\) : [^\n]*)\n"
@@ -1206,5 +1206,5 @@ def ab_f8(text, hv, k):
             f"  %k_ab = index.constant {k} : index\n" + body[anchor.end():])
     kern = gemm_mxfp4s_f8_m256("store", prefix="g_ab", bm=32, tn=hv, rf=2, cf=1, kmult=2, pair=True)
     text = text[:a] + body + text[b:]
-    first = text.index("command.program.def ")   # kernels before the programs (dual_target: a twin is defined before its launches)
+    first = text.index("command.def ")   # kernels before the programs (dual_target: a twin is defined before its launches)
     return text[:first] + kern + "\n" + text[first:], n

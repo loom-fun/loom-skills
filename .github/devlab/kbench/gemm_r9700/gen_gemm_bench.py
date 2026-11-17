@@ -58,7 +58,7 @@ def transform(tw, variant):
     if variant == "nomma":
         tw = _re.sub(r"^(\s*)(%\w+) = vector\.mma (%\w+), (%\w+), (%\w+) : vector<8xf16>, vector<8xf16>, vector<8xf32>$", r"\1\2 = vector.addf \5, \5 : vector<8xf32>", tw, flags=_re.M)
     elif variant == "nodq":
-        tw = tw.replace("  %origin = index.constant 0 : offset\n", "  %origin = index.constant 0 : offset\n  %zero16 = vector.constant 0.0 : vector<16xf16>\n", 1)
+        tw = tw.replace("  %origin = index.constant 0 : offset\n", "  %origin = index.constant 0 : offset\n  %zero16 = vector.splatf 0.0 : vector<16xf16>\n", 1)
         tw = _re.sub(r"vector\.store %dq\w+, ", "vector.store %zero16, ", tw)
     elif variant == "nfast":   # output-column tiles fastest (GEMM_N_FASTEST): consecutive workgroups share an activation row tile
         tw = tw.replace("workgroups(%row_tiles, %out_tiles, %c1)", "workgroups(%out_tiles, %row_tiles, %c1)")
@@ -205,7 +205,7 @@ PEAK = """kernel.def target(@rdna4) export("k_peak") @k_peak() {
   %b = vector.load %xv[%lane, %c0] : view<256x8xf16> -> vector<8xf16>
   %lhs = vector.fragment<lhs> %a shape [%c16, %c16] : vector<8xf16>
   %rhs = vector.fragment<rhs> %b shape [%c16, %c16] : vector<8xf16>
-  %zero = vector.constant 0.0 : vector<8xf32>
+  %zero = vector.splatf 0.0 : vector<8xf32>
   %init = vector.fragment<init> %zero shape [%c16, %c16] : vector<8xf32>
   %r0, %r1, %r2, %r3, %r4, %r5, %r6, %r7 = scf.for %i = [%c0 to %c4096 step %c1](%a0 = %init : vector<8xf32>, %a1 = %init : vector<8xf32>, %a2 = %init : vector<8xf32>, %a3 = %init : vector<8xf32>, %a4 = %init : vector<8xf32>, %a5 = %init : vector<8xf32>, %a6 = %init : vector<8xf32>, %a7 = %init : vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) {
     %n0 = vector.mma %lhs, %rhs, %a0 : vector<8xf16>, vector<8xf16>, vector<8xf32>

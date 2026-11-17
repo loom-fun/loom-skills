@@ -54,7 +54,7 @@ def vpack(text):
 {ind}%vp_segw = index.constant {segw} : index
 {ind}%vp_dim_v = index.mul %vp_seg, %vp_segw : index
 {ind}%vp_dim = index.assume %vp_dim_v [range(%vp_dim_v, 0, {d - segw})] : index
-{ind}%vp_kz = vector.constant 0.0 : {vec}
+{ind}%vp_kz = vector.splatf 0.0 : {vec}
 """
     new = f"""{ind}  %vp_pos0 = index.add %tile_first, %vp_key0 : index
 {ind}  %vp_pos1 = index.add %vp_pos0, %c1 : index

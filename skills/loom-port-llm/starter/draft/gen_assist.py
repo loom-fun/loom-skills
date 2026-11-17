@@ -432,7 +432,7 @@ def programs(g):
     warm = f"""
 // Assistant catch-up: only the per-row carry (the target's final normalized hidden of the last consumed input);
 // the assistant reads the target's own K/V, so it keeps no cache of its own.
-command.program.def public @llm_as_warm() launch(%target: buffer, %metadata: buffer, %origins: buffer, %arena: buffer, %carry: buffer, %tokens: buffer) {{
+command.def public @llm_as_warm() launch(%target: buffer, %metadata: buffer, %origins: buffer, %arena: buffer, %carry: buffer, %tokens: buffer) {{
   %t = config.get @llm.tokens : index
   %spans = config.get @llm.spans : index
   %owners = index.constant 1 : index
@@ -444,7 +444,7 @@ command.program.def public @llm_as_warm() launch(%target: buffer, %metadata: buf
     P = [f"""
 // Assistant proposals: draft_depth autoregressive rounds for the PROPOSE spans (one token per span per round),
 // attending the target's K/V; each greedy token goes into the verifier's input slot and feeds the next round.
-command.program.def public @llm_as_propose() launch(%w_embed: buffer, %w_as: buffer, %epoch: buffer, %target_tokens: buffer, %origins: buffer, %arena: buffer, %carry: buffer) {{
+command.def public @llm_as_propose() launch(%w_embed: buffer, %w_as: buffer, %epoch: buffer, %target_tokens: buffer, %origins: buffer, %arena: buffer, %carry: buffer) {{
 {common}  %owners = index.constant 1 : index
   %epoch_spans = config.get @llm.epoch_spans : index
   %epoch_tokens = config.get @llm.epoch_tokens : index

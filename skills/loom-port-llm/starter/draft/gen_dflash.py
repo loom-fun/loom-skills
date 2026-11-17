@@ -85,7 +85,7 @@ kernel.def export("g_dfl_embed") @g_dfl_embed(%tokens: index) {{
   %cgpb = index.constant {g["SB"][EF] // 32} : index
   %groups = index.constant {HG} : index
   %zero_f = scalar.constant 0.0 : f32
-  %zero32 = vector.constant 0.0 : vector<32xf32>
+  %zero32 = vector.splatf 0.0 : vector<32xf32>
   %ids_view = buffer.view %ids[%zero] : buffer -> view<[%tokens]xi32>
   %raw = view.load %ids_view[%token] : view<[%tokens]xi32> -> i32
   %c0_i32 = scalar.constant 0 : i32
@@ -243,7 +243,7 @@ kernel.def export("g_dfl_ctx_split") @g_dfl_ctx_split(%tokens: index) {{
   %spans = index.assume %spans_arg [range(%spans_arg, 1, 8192)] : index
   %layer = index.assume %layer_arg [range(%layer_arg, 0, {F["layers"] - 1})] : index
   %context = index.assume %context_arg [range(%context_arg, 16, 262144)] : index
-  %pool = index.assume %pool_arg [range(%pool_arg, 16, 1048576)] : index
+  %pool = index.assume %pool_arg [range(%pool_arg, 16, 2147483584)] : index
   %token_id = kernel.workgroup.id<x> : index
   %token = index.assume %token_id [range(%token_id, 0, 2147483646), lt(%token_id, %tokens)] : index
   %kh_id = kernel.workgroup.id<y> : index
@@ -573,7 +573,7 @@ func.def inline @g_dfl_kv_offset(%origins: buffer, %row: index, %position: index
   %page = index.assume %page_value [range(%page_value, 0, %last), lt(%page_value, %blocks)] : index
   %map = buffer.view %origins[%map_origin] : buffer -> view<[%blocks]xi32>
   %physical32 = view.load %map[%page] : view<[%blocks]xi32> -> i32
-  %bounded_physical = scalar.assume %physical32 [range(%physical32, 0, 1048575)] : i32
+  %bounded_physical = scalar.assume %physical32 [range(%physical32, 0, 134217727)] : i32
   %physical = index.cast %bounded_physical : i32 to index
   %page_base = index.mul %physical, %c16 : index
   %within = index.rem %bounded_position, %c16 : index
@@ -595,7 +595,7 @@ kernel.def export("g_dfl_kv_store") @g_dfl_kv_store(%tokens: index) {{
   %tokens = index.assume %tokens_arg [range(%tokens_arg, 1, 8192)] : index
   %layer = index.assume %layer_arg [range(%layer_arg, 0, {F["layers"] - 1})] : index
   %context = index.assume %context_arg [range(%context_arg, 16, 262144)] : index
-  %pool = index.assume %pool_arg [range(%pool_arg, 16, 1048576)] : index
+  %pool = index.assume %pool_arg [range(%pool_arg, 16, 2147483584)] : index
 {head_prelude}  %kh = index.assume %head_id [range(%head_id, 0, {KVH - 1})] : index
   %k_view = buffer.view %k[%zero] : buffer -> view<[%tokens]x{KVH}x{D}xf32>
   %v_view = buffer.view %v[%zero] : buffer -> view<[%tokens]x{KVH}x{D}xf32>
@@ -679,7 +679,7 @@ kernel.def export("g_dfl_attention") @g_dfl_attention(%tokens: index) {{
   %spans = index.assume %spans_arg [range(%spans_arg, 1, 8192)] : index
   %layer = index.assume %layer_arg [range(%layer_arg, 0, {F["layers"] - 1})] : index
   %context = index.assume %context_arg [range(%context_arg, 16, 262144)] : index
-  %pool = index.assume %pool_arg [range(%pool_arg, 16, 1048576)] : index
+  %pool = index.assume %pool_arg [range(%pool_arg, 16, 2147483584)] : index
   %token_id = kernel.workgroup.id<x> : index
   %token = index.assume %token_id [range(%token_id, 0, 2147483646), lt(%token_id, %tokens)] : index
   %head_id = kernel.workgroup.id<y> : index
@@ -701,7 +701,7 @@ kernel.def export("g_dfl_attention") @g_dfl_attention(%tokens: index) {{
   %zero_f = scalar.constant 0.0 : f32
   %neg = scalar.constant -3.0e38 : f32
   %scale = scalar.constant {D ** -0.5!r} : f32
-  %zv = vector.constant 0.0 : {vt}
+  %zv = vector.splatf 0.0 : {vt}
   %gq = index.constant {GQ} : index
   %kh = index.div %qh, %gq : index
   %khb = index.assume %kh [range(%kh, 0, {KVH - 1})] : index
@@ -825,7 +825,7 @@ kernel.def export("g_dfl_add_norm") @g_dfl_add_norm(%tokens: index) {{
   %c0_i32 = scalar.constant 0 : i32
   %groups = index.constant {HG} : index
   %zero_f = scalar.constant 0.0 : f32
-  %zero32 = vector.constant 0.0 : vector<32xf32>
+  %zero32 = vector.splatf 0.0 : vector<32xf32>
   %count = scalar.constant {float(H)} : f32
   %adds = scalar.cmpi ne, %add, %c0_i32 : i32
   %active = index.cmp ult, %lane, %groups : index
@@ -921,7 +921,7 @@ kernel.def export("g_dfl_conv") @g_dfl_conv(%tokens: index) {{
   %c1024 = index.constant 1024 : index
   %gw = index.constant {GW} : index
   %first = index.mul %lane, %c4 : index
-  %zv = vector.constant 0.0 : vector<4xf32>
+  %zv = vector.splatf 0.0 : vector<4xf32>
   scf.for %ch0 = [%first to %cH step %c1024] {{
     %ch = index.assume %ch0 [range(%ch0, 0, {H - 4}), multiple_of(%ch0, 4)] : index
     %group0 = index.div %ch, %gw : index
@@ -1321,7 +1321,7 @@ kernel.def export("g_dfl_chain") @g_dfl_chain(%blocks: index) {{
   %c0_i32 = scalar.constant 0 : i32
   %big = scalar.constant 2147483647 : i32
   %zero_f = scalar.constant 0.0 : f32
-  %zv = vector.constant 0.0 : vector<32xf32>
+  %zv = vector.splatf 0.0 : vector<32xf32>
   %dh = buffer.view %draft[%zero] : buffer -> view<4xi32>
   %count32 = view.load %dh[0] : view<4xi32> -> i32
   %count_b = scalar.assume %count32 [range(%count32, 0, 1024)] : i32
@@ -1493,7 +1493,7 @@ def programs(g):
     warm = [f"""
 // DFlash catch-up: context K/V of every draft layer at each committed position, from the captured target
 // features (fc -> enc.output_norm -> attn_k / attn_v, k_norm, RoPE).
-command.program.def public @llm_dflash_warm() launch(%w_enc: buffer, %w_ctx: buffer, %features: buffer, %metadata: buffer, %origins: buffer, %arena: buffer, %tokens: buffer) {{
+command.def public @llm_dflash_warm() launch(%w_enc: buffer, %w_ctx: buffer, %features: buffer, %metadata: buffer, %origins: buffer, %arena: buffer, %tokens: buffer) {{
 {common}{context_params(g)}  %nFEAT = index.constant {NT * H} : index
   %feat_scale = buffer.alloca<global> align(256) %scale_size : buffer
   %feat16_bytes = index.constant {NT * H * 2} : offset
@@ -1534,7 +1534,7 @@ command.program.def public @llm_dflash_warm() launch(%w_enc: buffer, %w_ctx: buf
     P = [f"""
 // DFlash proposals: the drafter runs [anchor, <mask> x {BS - 1}] blocks for the PROPOSE spans and publishes
 // draft_depth tokens per block into the verifier's input slots.
-command.program.def public @llm_dflash_propose() launch(%w_embed: buffer, {head_root}%w_draft: buffer, %w_ctx: buffer{phead_root}, %epoch: buffer, %target_tokens: buffer, %origins: buffer, %arena: buffer) {{
+command.def public @llm_dflash_propose() launch(%w_embed: buffer, {head_root}%w_draft: buffer, %w_ctx: buffer{phead_root}, %epoch: buffer, %target_tokens: buffer, %origins: buffer, %arena: buffer) {{
 {common}{context_params(g)}  %epoch_spans = config.get @llm.epoch_spans : index
   %epoch_tokens = config.get @llm.epoch_tokens : index
   %width = config.get @llm.width : index

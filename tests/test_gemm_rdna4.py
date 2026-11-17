@@ -57,7 +57,7 @@ class GemmTwinTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             f = Path(d) / "t.loom"
             lib = re.sub(r'(?ms)^kernel\.def target\(@rdna4\) export\("g_gemm_q4_k_store_rdna4"\).*?^\}\n', "", FIXTURE)   # the fixture's own twin
-            f.write_text(HEADER + lib.split("command.program.def")[0] + "\n" + R.twin(kern))
+            f.write_text(HEADER + lib.split("command.def")[0] + "\n" + R.twin(kern))
             r = subprocess.run([loom_compile(), str(f), "--target=amdgpu:gfx1201", "--root=g_gemm_q4_k_store_rdna4"], capture_output=True, text=True, errors="replace")
             self.assertEqual(r.returncode, 0, (r.stdout + r.stderr)[-800:])
 

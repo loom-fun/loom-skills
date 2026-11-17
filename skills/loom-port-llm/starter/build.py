@@ -74,7 +74,8 @@ if not chat:
 missing = [k for k in ("generation_prompt_plain", "call_format", "tool_item_prefix", "history_think_scope") if k not in chat]
 if missing:
     sys.exit(f"chat block lacks {missing}: regenerate it with inspect_gguf.py / chat_probe.py")
-KERNEL_CONTEXT, KERNEL_POOL = 262144, 1048576
+KERNEL_CONTEXT, KERNEL_POOL = 262144, 1048576   # KERNEL_POOL: the pool the workspace probe (program_scratch) folds with
+POOL_MAX = 2147483584   # the kernels' `llm.pool` range (config.decl @llm.pool in gen_llm.py); the SDK sizes the pool itself from --memory_bytes
 # Speculative decoding is on by default when the checkpoint carries a drafter (the loom-kb `speculative` topic (`kb.py route --topic speculative`)).
 if os.environ.get("SPEC", "").lower() in ("0", "off", "no", "false", "none"):
     a.draft = "none"
@@ -157,7 +158,7 @@ def program_scratch(path, tokens, spans):
     best, total, env = 0, None, {}
     v = env.get
     for line in open(path):
-        if line.startswith("command.program.def"):
+        if line.startswith("command.def"):
             total = 0
             env.clear()
         elif line.startswith("}"):
@@ -241,7 +242,7 @@ if context * kv_per_position > budget:
     context = fit
 # One full-context request plus headroom for other rows' retained history (2x for short contexts, 1.25x at 262k:
 # a 2x pool at 262k was ~40 GiB of KV for a 27B, more than most single-user machines should reserve).
-pool = a.pool or min(KERNEL_POOL, max(context, min(context + max(65536, context // 4), budget // kv_per_position)))
+pool = a.pool or min(POOL_MAX, max(context, min(context + max(65536, context // 4), budget // kv_per_position)))
 pool = max(pool, context)
 # loom-serve rejects a pool its paged cache geometry can't represent ("source cache geometry cannot
 # represent this pool", e.g. 43352): keep it a multiple of 1024 positions.
@@ -942,7 +943,7 @@ card = {
         "parameters": {"model": {"files": [{"path": f"parameter/{os.path.basename(p)}", "format": "safetensors" if SAFETENSORS else "gguf"} for p in GGUF_PARTS]}},   # the variant key stays "gguf" (card tooling addresses it)
         "tokenizers": {"text": "tokenizer.json"}}}}},
     "presets": {"chat": {"service": "chat", "variant": "gguf", "programs": "source", "execution": {
-        "rows": a.rows, "context_capacity": a.context, "pool_capacity": a.pool,
+        "rows": a.rows, "context_capacity": a.context,
         "prefill_capacity": a.prefill, "max_tokens": a.max_tokens}}},
 }
 if DRAFT:
@@ -978,8 +979,9 @@ bench["model_id"] = card["model"]["id"]
 bench["draft"] = DRAFT
 # What generated the programs (kit_source.py): the loom-skills commit of this kit and the Loom SDK. The model card
 # shows them; a kit made by apply_example.sh carries the commit in KIT_SOURCE.
-from kit_source import generator_stamp  # noqa: E402
+from kit_source import SDK_PIN, generator_stamp  # noqa: E402
 bench["generator"] = generator_stamp()
+bench["sdk"] = dict(SDK_PIN)   # the SDK these programs need (loom-setup/scripts/sdk_pin.py reads it; a pin-less package means 0.1.0)
 if RESOLVED["dirty"]:   # registered choices the caller set in the environment: not reproducible from the knowledge base
     bench["generator"]["dirty_choices"] = RESOLVED["dirty"]
 bench["resolved"] = {k: v for k, v in RESOLVED.items() if k != "dirty"}

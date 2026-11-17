@@ -21,7 +21,7 @@ kernel.def target(@rdna4) export("A_rdna4") @A_rdna4(%n: index) {
 }
 kernel.def target(@rdna4) export("F_rdna4") @F_rdna4(%n: index) {
 }
-command.program.def public @p() launch() {
+command.def public @p() launch() {
   // dual-group: rdna4 kernel.launch @F_rdna4[%t](%t, %x, %y) : [index](index, buffer, buffer)
   kernel.launch @A[%t](%t, %x) : [index](index, buffer)
   kernel.launch @B[%t](%t, %y, %x) : [index](index, buffer, buffer)
@@ -92,7 +92,7 @@ class F16OutKernel(unittest.TestCase):
 
 
 class FuseProgram(unittest.TestCase):
-    PROGRAM = '''command.program.def public @llm_advance() launch() {
+    PROGRAM = '''command.def public @llm_advance() launch() {
   scf.if %mm {
     scf.if %big {
       scf.if %huge {
@@ -217,7 +217,7 @@ class RopeQg(unittest.TestCase):
   view.store %r0, %q_view[%token, %qh, %d0] : f32, view<[%tokens]x24x256xf32>
   kernel.return
 }
-command.program.def public @p() launch() {
+command.def public @p() launch() {
   kernel.launch @g_split_qgate[%t](%t, %qg, %q, %gate) : [index](index, buffer, buffer, buffer)
   kernel.launch @g_qk_rope_store[%t](%t, %layer_3, %rope_3, %context, %pool, %q, %k, %v, %qn, %kn) : [index](index, index, i32, index, index, buffer, buffer, buffer, view<256xf32>, view<256xf32>)
   kernel.launch @g_split_qgate[%t](%t, %qg, %q, %gate) : [index](index, buffer, buffer, buffer)

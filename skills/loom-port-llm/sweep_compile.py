@@ -33,7 +33,7 @@ import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 STARTER = os.path.join(HERE, "starter")
-LOOMC = os.environ.get("LOOM_COMPILE", os.path.expanduser("~/lt/loom010/.venv/bin/loom-compile"))
+LOOMC = os.environ.get("LOOM_COMPILE", "loom-compile")   # the hrx-loom on PATH unless LOOM_COMPILE names one
 HF = os.path.expanduser(os.environ.get("HF_HUB_CACHE", "~/.cache/huggingface/hub"))
 SKIP = {"bartowski-Ornith-1.5-122B-loom", "unsloth-Qwen3.8-Flash-Next-loom", "Qwen3-0.6B"}   # not on the R9700 (do not fit / Strix only)
 # kernel -> (code) that fails as a standalone root on every target but compiles in its program (the bound proof needs

@@ -31,7 +31,7 @@ def norm(W, mode, eps):
   %c0 = index.constant 0 : index
   %groups = index.constant $G : index
   %zero_f = scalar.constant 0.0 : f32
-  %zero32 = vector.constant 0.0 : vector<32xf32>
+  %zero32 = vector.splatf 0.0 : vector<32xf32>
   %count = scalar.constant $W.0 : f32
   %active = index.cmp ult, %lane, %groups : index
   %x_view = buffer.view %x[%zero] : buffer -> view<[%rows]x$Gx32xf32>
@@ -845,7 +845,7 @@ def attention(D, NH, S, OQ, OK, OV, scale, window=0, order="raster"):
   %zf = scalar.constant 0.0 : f32
   %neg_big = scalar.constant -3.0e38 : f32
   %scale = scalar.constant $SCALE : f32
-  %zero32 = vector.constant 0.0 : vector<32xf32>
+  %zero32 = vector.splatf 0.0 : vector<32xf32>
   %qv = buffer.view %q[%zero] : buffer -> view<[%tokens]x$Sxf32>
   %kv = buffer.view %k[%zero] : buffer -> view<[%tokens]x$Sxf32>
   %vv = buffer.view %v[%zero] : buffer -> view<[%tokens]x$Sxf32>

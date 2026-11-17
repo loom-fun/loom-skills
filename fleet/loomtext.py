@@ -7,9 +7,20 @@ This is the stand-in used until fleet/diff_fleet.py (engineer "fleet") lands; sa
 import os
 import re
 
-HEAD = re.compile(r"^(kernel\.def|func\.def|func\.decl|command\.program\.def|template\.def|template\.decl|config\.def|config\.decl|"
+HEAD = re.compile(r"^(kernel\.def|func\.def|func\.decl|command\.program\.def|command\.def|template\.def|template\.decl|config\.def|config\.decl|"
                   r"global\.rodata\.def|target\.decl|amdgpu\.target)")
 SYM = re.compile(r"@([A-Za-z_0-9]+)")
+
+# SDK v0.1 -> v0.2 source spellings. Fleet tools read both (base = v0.1 programs, head = v0.2) and compare in the v0.2 spelling.
+_V01_COMMAND = re.compile(r"\bcommand\.program\.(def|decl|launch)\b")
+_V01_VCONST = re.compile(r"\bvector\.constant(\s+[^\n:]*?:\s*vector<[^>]*?x(\w+)>)")
+
+
+def upgrade_v01(text):
+    """v0.1 spellings -> v0.2 (`command.program.X` -> `command.X`; `vector.constant` -> `vector.splatf` for f16/f32/bf16/f8*
+    elements, `vector.splati` otherwise). Idempotent on v0.2 text."""
+    text = _V01_COMMAND.sub(r"command.\1", text)
+    return _V01_VCONST.sub(lambda m: ("vector.splatf" if re.match(r"(f16|f32|bf16|f8\w*)$", m.group(2)) else "vector.splati") + m.group(1), text)
 DEFSYM = re.compile(r"@([A-Za-z_0-9.]+)\(")
 
 
@@ -24,7 +35,7 @@ def split_blocks(text):
         if m:
             if cur:
                 out.append(cur)
-            kind = m.group(1)
+            kind = m.group(1).replace("command.program.", "command.")
             syms = DEFSYM.findall(ln) or SYM.findall(ln)
             sym = syms[-1] if syms else ""
             cur = [kind, sym, ln, [ln]]
@@ -90,7 +101,7 @@ def view(program_dir, family="gfx11"):
         if family == "gfx12" and kind == "kernel.def" and t is None:
             continue    # shared non-twin kernels are in the gfx11 view (compared there); gfx12 view = twins
         body = body.replace(f" target(@{want})", "").replace(" target(@device)", "")
-        if kind == "command.program.def":
+        if kind == "command.def":
             body = canon(body)
         out[f"{kind}:{sym}"] = body
     return out

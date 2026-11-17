@@ -227,7 +227,7 @@ def grouped(kind):
   %k = index.constant {k} : index
   %n = index.constant {n} : index
   %c0_i32 = scalar.constant 0 : i32
-  %nibble_mask = vector.constant 252645135 : vector<4xi32>
+  %nibble_mask = vector.splati 252645135 : vector<4xi32>
   %tile_id = kernel.workgroup.id<x> : index
   %tile = index.assume %tile_id [lt(%tile_id, %max_tiles)] : index
   %out_group_id = kernel.workgroup.id<y> : index
@@ -277,7 +277,7 @@ def grouped(kind):
       %vs = vector.mulf %v, %scv : vector<8xf32>
       scf.yield %vs : vector<8xf32>
     } else {
-      %zv = vector.constant 0.0 : vector<8xf32>
+      %zv = vector.splatf 0.0 : vector<8xf32>
       scf.yield %zv : vector<8xf32>
     }'''
         a_view = "  %a_view = buffer.view %a[%origin] : buffer -> view<[%tokens]x2048xf32>\n  %s_view = buffer.view %scales[%origin] : buffer -> view<[%tokens]x2xf32>"
@@ -302,7 +302,7 @@ def grouped(kind):
   %w_out_row = index.add %out_origin, %stage_row : index
   %w_row_add = index.scale %w_out_row, %w_row_bytes : index, offset -> offset
   %w_row_origin = index.add %expert_origin, %w_row_add : offset
-  %zero8 = vector.constant 0.0 : vector<8xf32>
+  %zero8 = vector.splatf 0.0 : vector<8xf32>
   %init = vector.fragment<init> %zero8 shape [%c16, %c16] : vector<8xf32>
   %k_steps = index.constant {k // 64} : index
   {", ".join("%" + a for a in accs)} = scf.for %step = [%c0 to %k_steps step %c1]({", ".join(f"%{a}_in = %init : vector<8xf32>" for a in accs)}) -> ({", ".join("vector<8xf32>" for _ in accs)}) {{
@@ -413,7 +413,7 @@ def down_wide():
   %c256 = index.constant 256 : index
   %n = index.constant 2048 : index
   %c0_i32 = scalar.constant 0 : i32
-  %nibble_mask = vector.constant 252645135 : vector<4xi32>
+  %nibble_mask = vector.splati 252645135 : vector<4xi32>
   %tile_id = kernel.workgroup.id<x> : index
   %tile = index.assume %tile_id [lt(%tile_id, %max_tiles)] : index
   %out_group_id = kernel.workgroup.id<y> : index
@@ -471,7 +471,7 @@ def down_wide():
   %w_out_row = index.add %out_origin, %stage_row : index
   %w_row_add = index.scale %w_out_row, %w_row_bytes : index, offset -> offset
   %w_row_origin = index.add %expert_origin, %w_row_add : offset
-  %zero8 = vector.constant 0.0 : vector<8xf32>
+  %zero8 = vector.splatf 0.0 : vector<8xf32>
   %init = vector.fragment<init> %zero8 shape [%c16, %c16] : vector<8xf32>
   %k_steps = index.constant 8 : index
   %acc0, %acc1 = scf.for %step = [%c0 to %k_steps step %c1](%x0 = %init : vector<8xf32>, %x1 = %init : vector<8xf32>) -> (vector<8xf32>, vector<8xf32>) {
@@ -565,7 +565,7 @@ def gate_up_full(fmt="q4_k", chunks=4):
   %c256 = index.constant 256 : index
   %n = index.constant 512 : index
   %c0_i32 = scalar.constant 0 : i32
-  %nibble_mask = vector.constant 252645135 : vector<4xi32>
+  %nibble_mask = vector.splati 252645135 : vector<4xi32>
   %tile_id = kernel.workgroup.id<x> : index
   %tile = index.assume %tile_id [lt(%tile_id, %max_tiles)] : index
   %part_id = kernel.workgroup.id<y> : index
@@ -628,7 +628,7 @@ def gate_up_full(fmt="q4_k", chunks=4):
   %stage_row = index.div %workitem, %c4 : index
   %stage_quarter = index.rem %workitem, %c4 : index
   %stage_col = index.mul %stage_quarter, %c16 : index
-  %zero8 = vector.constant 0.0 : vector<8xf32>
+  %zero8 = vector.splatf 0.0 : vector<8xf32>
   %init = vector.fragment<init> %zero8 shape [%c16, %c16] : vector<8xf32>
   %k_steps = index.constant 32 : index''')
     accs = [f"{m}{c}" for c in range(chunks) for m in "gu"]
@@ -775,7 +775,7 @@ def gate_up_r(fmt, R):
   %cWC = index.constant {CF * 16} : index
   %n = index.constant 512 : index
   %c0_i32 = scalar.constant 0 : i32
-  %nibble_mask = vector.constant 252645135 : vector<4xi32>
+  %nibble_mask = vector.splati 252645135 : vector<4xi32>
   %tile_id = kernel.workgroup.id<x> : index
   %tile = index.assume %tile_id [lt(%tile_id, %max_tiles)] : index
   %part_id = kernel.workgroup.id<y> : index
@@ -839,7 +839,7 @@ def gate_up_r(fmt, R):
   %w_row_value = index.add %part_origin, %stage_row : index
   %w_row_add = index.scale %w_row_value, %w_row_bytes : index, offset -> offset
   %w_row_origin = index.add %expert_origin, %w_row_add : offset
-  %zero8 = vector.constant 0.0 : vector<8xf32>
+  %zero8 = vector.splatf 0.0 : vector<8xf32>
   %init = vector.fragment<init> %zero8 shape [%c16, %c16] : vector<8xf32>
   %k_steps = index.constant 32 : index""")
     accs = [f"{m}{c}" for m in "gu" for c in range(CF)]

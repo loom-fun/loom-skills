@@ -300,7 +300,7 @@ kernel.def export("g_spec_rmsnorm") @g_spec_rmsnorm(%tokens: index) {{
   %c0 = index.constant 0 : index
   %groups = index.constant {HG} : index
   %zero_f = scalar.constant 0.0 : f32
-  %zero32 = vector.constant 0.0 : vector<32xf32>
+  %zero32 = vector.splatf 0.0 : vector<32xf32>
   %count = scalar.constant {float(H)} : f32
   %active = index.cmp ult, %lane, %groups : index
   %in_view = buffer.view %input[%zero] : buffer -> view<[%tokens]x{HG}x32xf32>
@@ -454,7 +454,7 @@ kernel.def export("g_mtp_pair") @g_mtp_pair(%tokens: index) {{
   %c1i = index.constant 1 : index
   %groups = index.constant {HG} : index
   %c0_i32 = scalar.constant 0 : i32
-  %zero32 = vector.constant 0.0 : vector<32xf32>
+  %zero32 = vector.splatf 0.0 : vector<32xf32>
   %info_view = buffer.view %info[%zero] : buffer -> view<[%tokens]x4xi32>
   %row32 = view.load %info_view[%token, 0] : view<[%tokens]x4xi32> -> i32
   %live32 = view.load %info_view[%token, 2] : view<[%tokens]x4xi32> -> i32
@@ -676,7 +676,7 @@ kernel.def export("g_mtp_gather") @g_mtp_gather(%drafts: index) {{
   %c16 = index.constant 16 : offset
   %c0 = index.constant 0 : index
   %groups = index.constant {HG} : index
-  %zero32 = vector.constant 0.0 : vector<32xf32>
+  %zero32 = vector.splatf 0.0 : vector<32xf32>
   %header = buffer.view %draft[%zero] : buffer -> view<4xi32>
   %count32 = view.load %header[0] : view<4xi32> -> i32
   %count_b = scalar.assume %count32 [range(%count32, 0, 8192)] : i32
@@ -760,7 +760,7 @@ kernel.def export("g_mtp_advance") @g_mtp_advance() {{
 # ---------------------------------------------------------------------------------------------------
 # Command programs (text transforms of the trunk program gen_llm.model() produced)
 
-ADVANCE_SIG = "command.program.def public @llm_advance() launch(%weights: buffer, %residual: buffer, %metadata: buffer, %origins: buffer, %arena: buffer, %tokens: buffer, %outputs: buffer) {"
+ADVANCE_SIG = "command.def public @llm_advance() launch(%weights: buffer, %residual: buffer, %metadata: buffer, %origins: buffer, %arena: buffer, %tokens: buffer, %outputs: buffer) {"
 H_ALLOCA = "  %h = buffer.alloca<global> align(256) %x_size : buffer\n"
 
 
@@ -912,10 +912,10 @@ def drop_fused_gdn(body):
 
 def verify_program(program, g):
     body, _ = _split_head(advance_program(program, g))
-    body = body[body.index("command.program.def public @llm_advance()"):]   # config decls are emitted once (advance)
+    body = body[body.index("command.def public @llm_advance()"):]   # config decls are emitted once (advance)
     fb = first_binding()
-    body = body.replace(f"command.program.def public @llm_advance() launch(%weights: buffer, {fb}: buffer, %metadata: buffer, %origins: buffer, %arena: buffer, %tokens: buffer, %outputs: buffer) {{",
-                        f"command.program.def public @llm_verify() launch(%weights: buffer, {fb}: buffer, %metadata: buffer, %origins: buffer, %arena: buffer, %tokens: buffer, %committed: buffer, %results: buffer) {{", 1)
+    body = body.replace(f"command.def public @llm_advance() launch(%weights: buffer, {fb}: buffer, %metadata: buffer, %origins: buffer, %arena: buffer, %tokens: buffer, %outputs: buffer) {{",
+                        f"command.def public @llm_verify() launch(%weights: buffer, {fb}: buffer, %metadata: buffer, %origins: buffer, %arena: buffer, %tokens: buffer, %committed: buffer, %results: buffer) {{", 1)
     assert "@llm_verify()" in body
     # An anchor-only epoch (build_draft.py's occupancy / context gate, stage config llm.gated 1) has no speculative span: it
     # needs neither the recurrent-state capture nor the replay, which would otherwise rerun every gated delta-net layer.
@@ -1136,7 +1136,7 @@ def mtp_programs(g):
     warm = (f"""
 // MTP catch-up: K/V of the NextN block at every consumed position, from (embedding of token P, target
 // hidden P-1). Query, attention output and FFN have no consumer here. Also saves the per-row carry.
-command.program.def public @llm_mtp_warm() launch(%w_embed: buffer, %weights: buffer, %target: buffer, %metadata: buffer, %origins: buffer, %arena: buffer, %carry: buffer, %tokens: buffer) {{
+command.def public @llm_mtp_warm() launch(%w_embed: buffer, %weights: buffer, %target: buffer, %metadata: buffer, %origins: buffer, %arena: buffer, %carry: buffer, %tokens: buffer) {{
 {P}  %owners = index.constant 1 : index
   %prev = buffer.alloca<global> align(256) %x_size : buffer
 """ + _token_setup("%metadata", "%tokens", "%enorm_e", "%y", "%h", g).replace(
@@ -1180,7 +1180,7 @@ command.program.def public @llm_mtp_warm() launch(%w_embed: buffer, %weights: bu
     propose = (f"""
 // MTP proposals: draft_depth autoregressive rounds of the NextN block for the PROPOSE spans; each round's
 // greedy token goes straight into the verifier's input slot and feeds the next round.
-command.program.def public @llm_mtp_propose() launch(%w_embed: buffer, {head_root}%weights: buffer{phead_root}, %epoch: buffer, %target_tokens: buffer, %origins: buffer, %arena: buffer, %carry: buffer) {{
+command.def public @llm_mtp_propose() launch(%w_embed: buffer, {head_root}%weights: buffer{phead_root}, %epoch: buffer, %target_tokens: buffer, %origins: buffer, %arena: buffer, %carry: buffer) {{
 {Pp}  %owners = index.constant 1 : index
   %epoch_spans = config.get @llm.epoch_spans : index
   %epoch_tokens = config.get @llm.epoch_tokens : index

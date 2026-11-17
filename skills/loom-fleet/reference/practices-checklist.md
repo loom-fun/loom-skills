@@ -14,6 +14,7 @@ the repo root; `campaign.md`, `targeted-fix.md` and `architecture.md` are in `sk
 - Publishing and reporting
 - Hygiene
 - Optimization
+- SDK migrations
 - Rules that are project history, not practice
 
 ## Goals and measures
@@ -56,6 +57,7 @@ the repo root; `campaign.md`, `targeted-fix.md` and `architecture.md` are in `sk
 | # | Rule | Source | Where |
 |---|---|---|---|
 | 26 | Roles: PM, tech lead, engineers, dashboarder | brief | `campaign.md` "Roles" |
+| 26a | Tracker artifact: republish only on an important change, at most hourly, diff first, batch the rest | sdk020 (owner) | `campaign.md` "State files"; `templates/BRIEF.md` |
 | 27 | Mailbox files and one background waiter; no direct agent messaging, no remote-session tools (they prompt the owner) | brief; owner rule | `campaign.md` "Communication"; `scripts/campaign/waitmail.sh` |
 | 28 | Shared state: status.json (locked), log.md, TECHLEAD.md, DECISIONS.md; read TECHLEAD first after a restart | brief; owner rule | `campaign.md` "State files"; `scripts/campaign/status.py`, `new_campaign.sh` |
 | 29 | Only the owner's own decisions go to the owner; decide technical details yourself; finish before reporting | brief; owner rule | `campaign.md` "Communication", "Working style" |
@@ -73,7 +75,7 @@ the repo root; `campaign.md`, `targeted-fix.md` and `architecture.md` are in `sk
 | # | Rule | Source | Where |
 |---|---|---|---|
 | 38 | Integration branch; engineer branches `<campaign>-<name>` in own worktrees; PRs only into the integration branch | brief | `campaign.md` "Branches"; `templates/ENG_CONTRACT.md` |
-| 39 | PR body: what, why, evidence, loom-scope block, credit line; commit trailer; no model ids | brief | `campaign.md` "Branches"; `templates/ENG_CONTRACT.md` |
+| 39 | PR body: what, why, evidence, loom-scope block, credit line; commit trailer exactly `Co-Authored-By: Claude <noreply@anthropic.com>`; no model names or versions | brief | `campaign.md` "Branches"; `templates/ENG_CONTRACT.md`; `tests/test_campaign_scripts.py` |
 | 40 | Merge in-scope PRs that pass review without waiting; failing ones go back; close superseded PRs | owner rule | `campaign.md` "Branches" |
 | 41 | External repo changes (loom-dev): open the PR, do not merge, tell the PM | brief | `campaign.md` "Branches" |
 | 42 | Tests pass, byte identity proven unless the task says otherwise | brief | `templates/ENG_CONTRACT.md`; `targeted-fix.md` section 3 |
@@ -101,6 +103,7 @@ the repo root; `campaign.md`, `targeted-fix.md` and `architecture.md` are in `sk
 | 54 | No models above 35B on a local machine | brief; owner rule | `campaign.md` "Baselines, quant, models, gates" |
 | 55 | No needle gates; keep the cheap admission probe; expensive gates nightly | brief; owner rules | `campaign.md` "Baselines, quant, models, gates"; `skills/loom-benchmark/SKILL.md` |
 | 56 | Speculative decoding on by default when the GGUF supports it; optimizer picks method and depth | owner rule | `campaign.md` "Baselines, quant, models, gates"; `skills/loom-kb/topic/spec-tuning.md` |
+| 57 | Reuse stored measurements when model files and engine binary are unchanged; re-measure only what changed | owner rule (2026-11-16) | `skills/loom-kb/method/methodology.md` rule 17; `campaign.md` "Baselines, quant, models, gates" |
 
 ## Publishing and reporting
 
@@ -131,6 +134,14 @@ the repo root; `campaign.md`, `targeted-fix.md` and `architecture.md` are in `sk
 | 69 | Cost = agent tokens + runner time only, never human effort; strongest model tier for design-heavy lanes, alternative designs in parallel | owner rule | `skills/loom-optimize/SKILL.md` "Cost model"; `campaign.md` "Roles", "Working style" |
 | 70 | Keep going past a losing design: a lane ends when every lever has a measured stop reason; stop rules with numbers | owner rule | `skills/loom-optimize/SKILL.md` "Keep going", "When to stop a metric" |
 | 71 | Every technique tried (win or loss) is a row of the technique log; facts go to the KB node; SDK limits to topic `sdk` | owner rule | `skills/loom-optimize/SKILL.md` step 8; `skills/loom-kb/topic/sdk.md` |
+
+## SDK migrations
+
+| # | Rule | Source | Where |
+|---|---|---|---|
+| 72 | A new SDK release is migrated by one procedure with a version entry per adjacent pair: research first (release, migration table, upstream diff, the wheel), mechanical steps by idempotent script, fleet parse + link sweep, explained program diff, DevLab SDK A/B (old published card on the old SDK vs new package, ABBA, one job), staging publish | owner rule (sdk020) | `skills/loom-migrate/SKILL.md`; `skills/loom-migrate/versions/`; `scripts/sweep.py` |
+| 73 | Simplifications the release allows go in a ledger (landed or listed, measured when behavioural); optimizations it opens become issues with evidence, not work in the migration campaign | brief (sdk020) | `skills/loom-migrate/SKILL.md` steps 8 and 9 |
+| 74 | Every gotcha found is one line (symptom, cause, fix) in the version entry; a fresh agent migrates one card from the repo alone before the entry is final | brief (sdk020) | `skills/loom-migrate/versions/v0.1.0-to-v0.2.0.md` "Gotchas"; `skills/loom-migrate/SKILL.md` step 10 |
 
 ## Rules that are project history, not practice
 

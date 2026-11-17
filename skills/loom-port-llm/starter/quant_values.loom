@@ -64,8 +64,8 @@ func.def inline @g_iq4_codes16(%indices: vector<16xi8>) -> (vector<16xi8>) {
 
 // 16 packed bytes -> 32 codebook values (low nibbles first, then high nibbles).
 func.def inline @g_iq4_values32(%payload: vector<16xi8>) -> (vector<32xf32>) {
-  %mask = vector.constant 15 : vector<16xi8>
-  %four = vector.constant 4 : vector<16xi8>
+  %mask = vector.splati 15 : vector<16xi8>
+  %four = vector.splati 4 : vector<16xi8>
   %lower = vector.andi %payload, %mask : vector<16xi8>
   %shifted = vector.shrui %payload, %four : vector<16xi8>
   %upper = vector.andi %shifted, %mask : vector<16xi8>
@@ -214,9 +214,9 @@ func.def inline @g_q3_k_values(%w: buffer, %origin: offset, %group: index) -> (v
   %g32 = index.cast %g : index to i32
   %g8 = scalar.trunci %g32 : i32 to i8
   %shift_h = vector.splat %g8 : vector<32xi8>
-  %three = vector.constant 3 : vector<32xi8>
-  %one = vector.constant 1 : vector<32xi8>
-  %two8 = vector.constant 2 : vector<32xi8>
+  %three = vector.splati 3 : vector<32xi8>
+  %one = vector.splati 1 : vector<32xi8>
+  %two8 = vector.splati 2 : vector<32xi8>
   %qsh = vector.shrui %qs, %shift_q : vector<32xi8>
   %low = vector.andi %qsh, %three : vector<32xi8>
   %hsh = vector.shrui %hm, %shift_h : vector<32xi8>
@@ -224,7 +224,7 @@ func.def inline @g_q3_k_values(%w: buffer, %origin: offset, %group: index) -> (v
   %hb2 = vector.shli %hbit, %two8 : vector<32xi8>
   %code = vector.ori %low, %hb2 : vector<32xi8>
   %codef = vector.uitofp %code : vector<32xi8> to vector<32xf32>
-  %four_f = vector.constant 4.0 : vector<32xf32>
+  %four_f = vector.splatf 4.0 : vector<32xf32>
   %centered = vector.subf %codef, %four_f : vector<32xf32>
   %s0 = index.mul %g, %c2 : index
   %s1 = index.add %s0, %c1 : index
@@ -370,11 +370,11 @@ func.def inline @g_iq3_s_values(%w: buffer, %origin: offset, %group: index) -> (
   %step_i = scalar.constant 1 : i32
   %iota = vector.iota %zero_i step %step_i : vector<32xi32>
   %shifted = vector.shrui %sv, %iota : vector<32xi32>
-  %ones = vector.constant 1 : vector<32xi32>
+  %ones = vector.splati 1 : vector<32xi32>
   %bits = vector.andi %shifted, %ones : vector<32xi32>
   %bitf = vector.uitofp %bits : vector<32xi32> to vector<32xf32>
-  %twos = vector.constant -2.0 : vector<32xf32>
-  %onef = vector.constant 1.0 : vector<32xf32>
+  %twos = vector.splatf -2.0 : vector<32xf32>
+  %onef = vector.splatf 1.0 : vector<32xf32>
   %sign = vector.fmaf %bitf, %twos, %onef : vector<32xf32>
   %signed = vector.mulf %mag, %sign : vector<32xf32>
   %db = func.call @g_iq3_s_scale(%w, %origin, %g) : (buffer, offset, index) -> (f32)
@@ -392,15 +392,15 @@ func.def inline @g_q4_0_values(%w: buffer, %origin: offset, %group: index) -> (v
   %d_half = view.load %scale_view[0] : view<1xf16> -> f16
   %d = scalar.extf %d_half : f16 to f32
   %payload = vector.load %code_view[0] : view<16xi8> -> vector<16xi8>
-  %mask = vector.constant 15 : vector<16xi8>
-  %four = vector.constant 4 : vector<16xi8>
+  %mask = vector.splati 15 : vector<16xi8>
+  %four = vector.splati 4 : vector<16xi8>
   %lower = vector.andi %payload, %mask : vector<16xi8>
   %shifted = vector.shrui %payload, %four : vector<16xi8>
   %upper = vector.andi %shifted, %mask : vector<16xi8>
   %lo = vector.uitofp %lower : vector<16xi8> to vector<16xf32>
   %hi = vector.uitofp %upper : vector<16xi8> to vector<16xf32>
   %codes = vector.concat<0> %lo, %hi : vector<16xf32>, vector<16xf32> -> vector<32xf32>
-  %eight = vector.constant 8.0 : vector<32xf32>
+  %eight = vector.splatf 8.0 : vector<32xf32>
   %centered = vector.subf %codes, %eight : vector<32xf32>
   %ds = vector.splat %d : vector<32xf32>
   %values = vector.mulf %centered, %ds : vector<32xf32>

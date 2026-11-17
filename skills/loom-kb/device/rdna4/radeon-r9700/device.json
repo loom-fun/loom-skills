@@ -17,13 +17,15 @@
     "runner": "R9700",
     "tag": "radeon-r9700",
     "detect": {
-      "pattern": "r9700|gfx1201|radeon ai pro",
+      "pattern": "^(?!.*9070).*(r9700|gfx1201|radeon ai pro)",
       "flags": "i"
     },
     "serve_args": [
       "--pool_backing=fixed"
     ],
-    "serve_args_note": "fixed state backing: the default elastic backing runs a synchronous trim + compaction after every session end, which stalls the next long prefill; fixed backing commits the preset's pool_capacity eagerly, so the R9700 preset sizes the pool to the GPU (fixed_pool_capacity)"
+    "serve_args_note": "fixed state backing: the default elastic backing runs a synchronous trim + compaction after every session end, which stalls the next long prefill; fixed backing commits the preset's pool_capacity eagerly, so the R9700 preset sizes the pool to the GPU (fixed_pool_capacity)",
+    "preload_max_weight_bytes": null,
+    "preload_note": "preload: --parameter_mode=preload (stock-host fix for ROCm/hrx-system#3332) on every package that fits the GPU: null = no weight limit (the host copy lives in system RAM, not in the GPU's 32 GB)"
   },
   "roofline": {
     "default": "radeon-r9700s",

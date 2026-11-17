@@ -37,7 +37,7 @@ template.def<@sel3_g_gemm_q4_k_store> target(@rdna3) {
   kernel.launch @g_gemm_q4_k_store[1](%rows)
 }
 
-command.program.def target(@device) @llm_advance(%t: index) {
+command.def target(@device) @llm_advance(%t: index) {
   template.apply<@sel3_g_gemm_q4_k_store>(%t)
 }
 """
@@ -139,7 +139,7 @@ class DiffTests(unittest.TestCase):
                          "amdgpu.target<gfx12-generic> @rdna4\n\n", "")
         t = t.replace("template.decl @sel3_g_gemm_q4_k_store(%rows: index)\ntemplate.def<@sel3_g_gemm_q4_k_store> target(@rdna3) {\n"
                       "  kernel.launch @g_gemm_q4_k_store[1](%rows)\n}\n\n", "")
-        t = t.replace("command.program.def target(@device)", "command.program.def").replace(
+        t = t.replace("command.def target(@device)", "command.def").replace(
             "template.apply<@sel3_g_gemm_q4_k_store>(%t)", "kernel.launch @g_gemm_q4_k_store[%t]()")
         t = t.replace('kernel.def target(@rdna4) export("g_gemm_q4_k_store_rdna4") @g_gemm_q4_k_store_rdna4(%rows: index) {\n  // body B\n}\n\n', "")
         self.assertNotIn("rdna4", t.replace("@rdna4", ""))

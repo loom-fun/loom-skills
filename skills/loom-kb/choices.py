@@ -173,9 +173,13 @@ EXEC("exec.prefill_capacity", "int", "Prefill chunk (tokens) of the device's pre
      "(r9700 fit: 4096 for hidden <= 2048, 1024 for the 27B hybrids).", rows=ROWS_PREFILL, from_pr="#609 #617 #619 #630")
 EXEC("exec.context_capacity", "int", "Context tokens one request holds in the device's preset (below the native context where the "
      "memory pool cannot hold the native KV).", rows=ROWS_ALL)
-EXEC("exec.pool_capacity", "int", "KV pool positions the device's preset commits (fixed state backing commits it eagerly).", rows=ROWS_ALL)
+EXEC("exec.pool_capacity", "int", "KV pool positions the device's preset commits (fixed state backing commits it eagerly). hrx-loom 0.2.0 rejects the card field "
+     "(the pool is the --memory_bytes budget; --pool_backing=fixed makes it context_capacity): kept only so v0.1-era scope files stay valid, never written to a card.", rows=ROWS_ALL)
 EXEC("exec.rows", "int", "Concurrent rows (streams) of the device's preset.", rows=ROWS_STREAMS)
 EXEC("exec.draft_depth", "int", "Draft depth of the device's preset (0: undrafted).", rows=ROWS_DECODE)
+EXEC("exec.cache_target_bytes", "int", "Sizing target (bytes) of loom-serve's automatic prefix/session caches in the device's preset (hrx-loom 0.2: default 2 GiB, "
+     "allocated eagerly by --pool_backing=fixed; 0 disables them). A model whose fixed-backing fit leaves less than that beside weights, KV and workspace "
+     "(R9700 Flint, Muse-Glimmer-30B: RESOURCE_EXHAUSTED at the first request, image/draft components unavailable) sets a smaller one.", rows=ROWS_ALL)
 EXEC("exec.context_cap", "int", "A measured limit on the context the device serves (the retained prefix state of the 8k/16k rows leaves "
      "no room for a longer request); lowers the fit's served context, which sets context_capacity and pool_capacity.", rows=ROWS_ALL)
 

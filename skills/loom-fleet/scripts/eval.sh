@@ -25,7 +25,7 @@ p = sys.argv[1]; card = json.load(open(os.path.join(p, "model.json")))
 ex = next(iter(card["presets"].values()))["execution"]
 cfg = json.load(open(os.path.join(p, "llm_config.json")))
 w = os.path.getsize(os.path.realpath(os.path.join(p, "parameter", os.listdir(os.path.join(p, "parameter"))[0])))
-print(int(w + ex["pool_capacity"] * 2 * cfg.get("kv_layers", cfg["layers"]) * cfg["kv_heads"] * cfg["head_dim"] * 2 + 6e9))
+print(int(w + ex["context_capacity"] * 2 * cfg.get("kv_layers", cfg["layers"]) * cfg["kv_heads"] * cfg["head_dim"] * 2 + 6e9))
 EOF
 )}
 busy=$(pgrep -af "loom-serve|llama-server" | grep -v pgrep | wc -l)

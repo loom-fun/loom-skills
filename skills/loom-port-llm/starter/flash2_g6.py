@@ -43,7 +43,7 @@ def g6_kernel(KVH, G, D, QH, scale, gate, gate_sig, layers, pos_bytes, opts=None
   %tokens = index.assume %tokens_arg [range(%tokens_arg, 16, 8192), multiple_of(%tokens_arg, 16)] : index
   %layer = index.assume %layer_arg [range(%layer_arg, 0, {layers})] : index
   %context = index.assume %context_arg [range(%context_arg, 16, 262144)] : index
-  %pool = index.assume %pool_arg [range(%pool_arg, 16, 1048576)] : index
+  %pool = index.assume %pool_arg [range(%pool_arg, 16, 2147483584)] : index
   %origin = index.constant 0 : offset
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
@@ -130,7 +130,7 @@ def g6_kernel(KVH, G, D, QH, scale, gate, gate_sig, layers, pos_bytes, opts=None
   %qh{f} = vector.fptrunc %qraw{f}{QS} : vector<8xf32> to vector<8xf16>
   %qsl{f} = index.constant {f - NQR} : index
   vector.store %qh{f}, %ql_view[%wave, %qsl{f}, %lane, %c0] : vector<8xf16>, view<{G}x{NQL}x32x8xf16>''')
-    A(f'''  %zero8 = vector.constant 0.0 : vector<8xf32>
+    A(f'''  %zero8 = vector.splatf 0.0 : vector<8xf32>
   %init = vector.fragment<init> %zero8 shape [%c16, %c16] : vector<8xf32>
   %zero_f = scalar.constant 0.0 : f32
   %neg_big = scalar.constant -3.0e38 : f32
@@ -185,8 +185,8 @@ def g6_kernel(KVH, G, D, QH, scale, gate, gate_sig, layers, pos_bytes, opts=None
 {row0}%ph{sfx}_b = scalar.assume %ph{sfx}_s [range(%ph{sfx}_s, 0, 65535)] : i32
 {row0}%ph{sfx}_i = index.cast %ph{sfx}_b : i32 to index
 {row0}%rw{sfx}_v = index.mul %ph{sfx}_i, %c16 : index
-{row0}%rw{sfx} = index.assume %rw{sfx}_v [range(%rw{sfx}_v, 0, 1048560), lt(%rw{sfx}_v, %pl_rows_m)] : index""" if "kv0" not in abl else
-                f"{row0}%rw{sfx} = index.assume %c0 [range(%c0, 0, 1048560), lt(%c0, %pl_rows_m)] : index")
+{row0}%rw{sfx} = index.assume %rw{sfx}_v [range(%rw{sfx}_v, 0, 2147483568), lt(%rw{sfx}_v, %pl_rows_m)] : index""" if "kv0" not in abl else
+                f"{row0}%rw{sfx} = index.assume %c0 [range(%c0, 0, 2147483568), lt(%c0, %pl_rows_m)] : index")
 
     kviews = set()
 
@@ -380,7 +380,7 @@ def g6_kernel(KVH, G, D, QH, scale, gate, gate_sig, layers, pos_bytes, opts=None
         # pages run with S^T accumulated onto -m (the MMA init: S^T - m for free), P = exp2(.), no rescale and no running max; the loop
         # only tracks the largest exponent. P is f16: an exponent above 15 would overflow, so a tile that saw one (a key more than
         # 2^15 times heavier than every key of page 0 and of its own page) recomputes with the slow path. Exact either way.
-        A("  %rw0 = index.assume %c0 [range(%c0, 0, 1048560), lt(%c0, %pl_rows_m)] : index" if "kv0" in abl else lookup("%c0", "z").replace("\n    ", "\n  ")[2:])
+        A("  %rw0 = index.assume %c0 [range(%c0, 0, 2147483568), lt(%c0, %pl_rows_m)] : index" if "kv0" in abl else lookup("%c0", "z").replace("\n    ", "\n  ")[2:])
         z = "%rw0" if "kv0" in abl else "%rwz"
         A(lookup("%pg_diag", "q").replace("\n    ", "\n  ")[2:])
         A(vview(z, "z").replace("\n    ", "\n  ")[2:]); A(vview("%rwq", "q").replace("\n    ", "\n  ")[2:])
@@ -427,13 +427,13 @@ def g6_kernel(KVH, G, D, QH, scale, gate, gate_sig, layers, pos_bytes, opts=None
         # hot loop: pages 1 .. pg_diag - 1; the next page's row is looked up one page ahead
         ty = ", ".join(["f32", "vector<8xf32>"] + ["vector<8xf32>"] * NF + ["index"])
         A("  %pg1_v = index.min %c1, %pg_diag : index\n  %pg1 = index.assume %pg1_v [range(%pg1_v, 0, %kh_last), lt(%pg1_v, %blocks)] : index")
-        A(lookup("%pg1", "f1").replace("\n    ", "\n  ")[2:] if "kv0" not in abl else "  %rwf1 = index.assume %c0 [range(%c0, 0, 1048560), lt(%c0, %pl_rows_m)] : index")
+        A(lookup("%pg1", "f1").replace("\n    ", "\n  ")[2:] if "kv0" not in abl else "  %rwf1 = index.assume %c0 [range(%c0, 0, 2147483568), lt(%c0, %pl_rows_m)] : index")
         inits = ", ".join(["%fl = %lsd : f32", "%ftm = %neg_v : vector<8xf32>"] + [f"%fa{d} = {o1[d]} : vector<8xf32>" for d in range(NF)] + ["%frw = %rwf1 : index"])
         A(f"  %fl_e, %ftm_e, {', '.join(f'%fo{d}' for d in range(NF))}, %frw_e = scf.for %fpg = [%c1 to %pg_diag step %c1]({inits}) -> ({ty}) {{")
         A(f"""    %fpgn_v = index.add %fpg, %c1 : index
     %fpgn_m = index.min %fpgn_v, %pg_diag : index
     %fpgn = index.assume %fpgn_m [range(%fpgn_m, 0, %kh_last), lt(%fpgn_m, %blocks)] : index
-    %frwi = index.assume %frw [range(%frw, 0, 1048560), lt(%frw, %pl_rows_m)] : index""")
+    %frwi = index.assume %frw [range(%frw, 0, 2147483568), lt(%frw, %pl_rows_m)] : index""")
         A(lookup("%fpgn", "fn"))
         A(vview("%frwi", "f"))
         B, sf = qk("%frwi", "f", "%initm", lambda: vloads("f", range(NF // 2)))

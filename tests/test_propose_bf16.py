@@ -131,7 +131,7 @@ class Programs(unittest.TestCase):
         self.assertEqual(full.count('kernel.def export("g_prep_bf16_q8_0")'), 1)
 
     def test_no_int8_in_a_trunk_without_it(self):
-        trunk = re.sub(r"command\.program\.def public (?:target\(@\w+\) )?@llm_mtp_(?:warm|propose)\(\).*?\n\}\n", "", self.llm("t_q8"), flags=re.S)
+        trunk = re.sub(r"command\.def public (?:target\(@\w+\) )?@llm_mtp_(?:warm|propose)\(\).*?\n\}\n", "", self.llm("t_q8"), flags=re.S)
         launches = re.findall(r"kernel\.launch @(g_(?:mv|quant)\w*q8\w*)\[", trunk)
         self.assertEqual(launches, [], "int8 activations in the trunk")
 

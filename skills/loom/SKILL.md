@@ -5,7 +5,7 @@ description: Entry point for AMD Loom work (hrx-loom SDK, loom-serve, loom-fetch
 
 # Loom (umbrella)
 
-**Bundled paths ? first shell action.** Before running commands, set `LOOM_SKILL_DIR` in the shell to the
+**Bundled paths: first shell action.** Before running commands, set `LOOM_SKILL_DIR` in the shell to the
 absolute directory containing **this** `SKILL.md`, using its path from the skill listing or read tool.
 In Claude Code, run `export LOOM_SKILL_DIR="${CLAUDE_SKILL_DIR}"` (the host substitutes the path).
 In Codex, Pi or another host, export `LOOM_SKILL_DIR` to the loaded file's directory. Use a
@@ -14,7 +14,7 @@ and in every new shell; it is not the working directory or SDK root. On Windows,
 paths for file tools; `/c/...` paths belong to Git Bash. Never run an unresolved placeholder. Run bundled commands by quoted absolute path; do not run `scripts/...` from the working directory
 or change into the installed skill tree. Install the complete Loom suite: sibling paths are required.
 
-Loom = AMD's JIT compiler + runtime + model server (`hrx-loom` on PyPI, 0.1.0 pinned by these skills; source at
+Loom = AMD's JIT compiler + runtime + model server (`hrx-loom`, 0.2.0 pinned by these skills, from PyPI; source at
 github.com/ROCm/hrx-system, models at github.com/ROCm/hrx-loom-library). Models
 ship as **Loom IR source** (`.loom` kernels + command/control programs) plus a
 package card (`model.json`) that points at unmodified checkpoints (GGUF or
@@ -41,6 +41,7 @@ session rather than treating your current session as independent evidence.
 | A campaign: new GPU, many models, a refactor (team roles, mailboxes, state files, DevLab rules, velocity) | `loom-fleet` (`"${LOOM_SKILL_DIR}/../loom-fleet/reference/campaign.md"`) |
 | Improve these skills themselves (faster end-to-end runs, fewer failures) without regressing KPIs | `loom-fleet` (`"${LOOM_SKILL_DIR}/../loom-fleet/reference/skill-trials.md"`) |
 | Populate a Hugging Face org with many models (pick the top models, port and publish each, sweep gates on DevLab, fix and regenerate) | `loom-fleet` (`"${LOOM_SKILL_DIR}/../loom-fleet/reference/populate-org.md"`) |
+| A new hrx-loom SDK release: migrate my package, the fleet or the skills (breaking changes per version pair, rewrite and parse/link sweep scripts, DevLab SDK A/B) | `loom-migrate` (`"${LOOM_SKILL_DIR}/../loom-migrate/SKILL.md"`) |
 | What is special about a model family / GPU / quant, which levers apply where (the knowledge base router) | `loom-kb` (`"${LOOM_SKILL_DIR}/../loom-kb/SKILL.md"`) |
 
 All paths in these skills assume the install root `~/loom` (SDK venv `~/loom/.venv`,
@@ -61,7 +62,7 @@ Windows 11 on Strix Halo. Run the scripts from **Git Bash**. Differences:
 - Venv executables are in `Scripts/`, not `bin/`. Read every `~/loom/.venv/bin/X`
   and `~/loom/.tools/bin/python` in these skills as `~/loom/.venv/Scripts/X` and
   `~/loom/.tools/Scripts/python`. The scripts detect this themselves.
-- The SDK is the same PyPI release (`hrx_loom-0.1.0-py3-none-win_amd64.whl`); it needs the
+- The SDK is the same release (`hrx_loom-0.2.0-py3-none-win_amd64.whl`); it needs the
   Microsoft Visual C++ v14 x64 redistributable. `--device=amdgpu` reports `driver: amd,
   backend: libamdf` in `/v1/status`.
 - Python: `install_loom.sh` uses `py -3` (override with `PYTHON=`). On Python < 3.15,
@@ -144,7 +145,7 @@ server until QUALIFY_RESULT): a Glimmer trial that ran A/Bs during qualify's gat
 llama.cpp references (qualify 41 instead of ~30 min) and got A/B numbers too noisy to use.
 
 Stop to ask only for what the hard rules require: a gated-license click, or approval of a
-binary from a source other than PyPI and lemonade-sdk/llamacpp-rocm. Avoid both where possible:
+binary from a source other than PyPI, the ROCm/hrx-system releases and lemonade-sdk/llamacpp-rocm. Avoid both where possible:
 - **Reuse what is installed.** Check `~/loom/.venv/bin/loom-serve` (Windows: `.venv/Scripts/loom-serve.exe`) and the HF cache.
 - **Quant: Q4_K_M (other Q4-tier files only when the repo has none), from the HF cache when it is there.**
   `pick_gguf.py` does both (a cached UD-Q4_K_XL never beats Q4_K_M; the same quant cached under another repo, e.g.
@@ -185,11 +186,12 @@ Read it from there if it isn't in your skill list.
   kills the biggest cgroup: without a scope that is the editor/terminal holding every agent session.
   A Qwen3.8-27B `tune.py` (52 GB server) on top of a 21 GB scratchpad of kernel-test dumps got the
   whole VS Code scope (92 GB, all sessions) killed; rerun in its own scope, it finished.
-- **Always pass `--memory_bytes`** to `loom-serve` (weights + KV pool + ~2 GiB
-  workspace). Too small → HTTP 503 "retained state leaves insufficient completion
-  capacity". Several models can share one budget with `--parameter_idle_ms=60000`.
+- **Serve as the card's Quick start serves**: `--pool_backing=fixed` (no `--memory_bytes`) on Strix Halo and the R9700 (the preset's
+  `context_capacity` KV and the weights are committed up front; hrx-loom 0.2.0's elastic backing costs Strix prefill). To serve with the elastic
+  backing instead (several models sharing one budget with `--parameter_idle_ms=60000`), pass `--memory_bytes` (weights + KV pool + ~2 GiB
+  workspace); too small → HTTP 503 "retained state leaves insufficient completion capacity".
 - **Freshly downloaded binaries need explicit user approval before running**, except the two
-  pre-approved sources: Loom from PyPI (pip) and lemonade-sdk/llamacpp-rocm releases
+  pre-approved sources: Loom from PyPI (pip) or a ROCm/hrx-system GitHub release (`install_loom.sh` checks its sha256) and lemonade-sdk/llamacpp-rocm releases
   (`fetch_llamacpp.sh`). Don't stop to ask about those.
 - Gated Hugging Face models: give the user the exact model page URL so they can
   accept the license; don't try to work around the gate.
@@ -221,6 +223,12 @@ Read it from there if it isn't in your skill list.
   SDK wheel (see `loom-setup`).
 - `loom-benchmark` hardware counters are UNIMPLEMENTED on this GPU. Profile by
   ablation (remove or double a kernel, measure end to end) instead.
+
+**Another GPU:** run `python3 "${LOOM_SKILL_DIR}/../loom-kb/kb.py" list` and route with `--device` (a key such as
+`gfx1150`, or an alias such as `strix-point`); never reuse the numbers above. On a **Strix Point** laptop (gfx1150, Radeon 890M)
+read `loom-kb/device/rdna3/gfx1150/README.md` before serving: with Ubuntu's default 8 MiB `ulimit -l`, serve with `--parameter_mode=preload` (the default mode fails
+every weight load after registration reports ready; serve.sh does not add it yet), and `--memory_bytes` must fit the GTT
+(`mem_info_gtt_total`, half of RAM by default), not 60 % of RAM. Pass `roofline.py --device gfx1150`.
 
 ## Where things are documented upstream
 

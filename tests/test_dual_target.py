@@ -21,7 +21,7 @@ CASES = (ROOT / "tests/data/dual_target_cases.loom-test").read_text()   # a GEMM
 
 
 def loom_compile():
-    for c in (os.environ.get("LOOM_COMPILE"), shutil.which("loom-compile"), "/home/jfowers/lt/loom010/.venv/bin/loom-compile"):
+    for c in (os.environ.get("LOOM_COMPILE"), shutil.which("loom-compile")):
         if c and os.path.exists(c):
             return c
 
@@ -42,7 +42,7 @@ class DualTargetTests(unittest.TestCase):
         self.assertEqual(out.count("template.apply<@sel1_" + K + ">"), 2)
         self.assertEqual(out.count("template.decl"), 1)                 # one template per launch signature
         self.assertEqual(len(re.findall(r"^template\.def<@sel1_\w+> target\(@rdna[34]\)", out, re.M)), 2)
-        self.assertIn("command.program.def public target(@device) @dual_probe", out)
+        self.assertIn("command.def public target(@device) @dual_probe", out)
 
     def test_gfx11_kernel_text_only_gains_the_tag(self):
         out = self.apply(FIXTURE)
@@ -55,7 +55,7 @@ class DualTargetTests(unittest.TestCase):
 
     def test_no_twin_untouched(self):
         plain = FIXTURE.replace(TWIN, "g_other")
-        plain = plain[:plain.index('kernel.def target(@rdna4)')] + plain[plain.index("command.program.def") - 1:]
+        plain = plain[:plain.index('kernel.def target(@rdna4)')] + plain[plain.index("command.def") - 1:]
         self.assertEqual(dual_target.twins(plain), [])
         self.assertEqual(self.apply(plain), plain)
 
@@ -105,7 +105,7 @@ class ProgramSelectTests(unittest.TestCase):
         out = self.prog
         self.assertEqual(out.count("template.apply<@dual_probe_body>"), 1)
         self.assertEqual(out.count("template.apply<@sel"), 0)
-        self.assertIn("command.program.def public target(@device) @dual_probe() launch(", out)
+        self.assertIn("command.def public target(@device) @dual_probe() launch(", out)
         self.assertEqual(len(re.findall(r"^template\.def<@dual_probe_body> target\(@rdna[34]\)", out, re.M)), 2)
         m3 = re.search(r"template\.def<@dual_probe_body> target\(@rdna3\).*?\n}\n", out, re.S).group(0)
         m4 = re.search(r"template\.def<@dual_probe_body> target\(@rdna4\).*?\n}\n", out, re.S).group(0)
@@ -140,9 +140,9 @@ class ProgramSelectTests(unittest.TestCase):
         finally:
             os.environ.pop("LOOM_DUAL_SELECT") if old is None else os.environ.__setitem__("LOOM_DUAL_SELECT", old)
 
-    @unittest.skipUnless(shutil.which("loom-link") or os.path.exists("/home/jfowers/lt/loom010/.venv/bin/loom-link"), "loom-link not found")
+    @unittest.skipUnless(shutil.which("loom-link"), "loom-link not found")
     def test_link_keeps_one_provider_per_target(self):
-        link = shutil.which("loom-link") or "/home/jfowers/lt/loom010/.venv/bin/loom-link"
+        link = shutil.which("loom-link")
         with tempfile.TemporaryDirectory() as d:
             p = Path(d) / "dual.loom"
             p.write_text(self.prog)
@@ -197,8 +197,8 @@ if __name__ == "__main__":
 class ApplyDirTests(unittest.TestCase):
     def test_cross_file_launch_fails_loudly(self):
         with tempfile.TemporaryDirectory() as d:
-            (Path(d) / "lib.loom").write_text(FIXTURE[:FIXTURE.index("command.program.def")])
-            (Path(d) / "prog.loom").write_text(FIXTURE[FIXTURE.index("command.program.def"):])
+            (Path(d) / "lib.loom").write_text(FIXTURE[:FIXTURE.index("command.def")])
+            (Path(d) / "prog.loom").write_text(FIXTURE[FIXTURE.index("command.def"):])
             with self.assertRaisesRegex(ValueError, "defined in program/lib.loom"):
                 dual_target.apply_dir(d)
 
@@ -217,9 +217,9 @@ class EncodingsFirstTests(unittest.TestCase):
     def test_deep_file_reordered_stably(self):
         filler = "kernel.def export(\"f\") @f() {\n" + "".join(f"  %v{i} = index.constant 0 : index\n" for i in range(dual_target.ENC_LIMIT + 10)) + "}\n"
         enc = "kernel.def export(\"e\") @e() {\n  %l = encoding.layout.strided [%a, %b] : encoding<layout>\n}\n"
-        text = "func.def @h() {\n}\n" + filler + enc + "command.program.def public target(@device) @p() {\n}\n"
+        text = "func.def @h() {\n}\n" + filler + enc + "command.def public target(@device) @p() {\n}\n"
         out = dual_target.encodings_first(text)
         self.assertEqual(sorted(out.split("\n")), sorted(text.split("\n")))
         self.assertLess(out.index('@e()'), out.index('@f()'))
         self.assertLess(out.index('@h()'), out.index('@e()'))
-        self.assertTrue(out.rstrip().endswith("command.program.def public target(@device) @p() {\n}".rstrip()))
+        self.assertTrue(out.rstrip().endswith("command.def public target(@device) @p() {\n}".rstrip()))

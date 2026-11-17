@@ -67,7 +67,7 @@ for k in card_lib.METRIC_KEYS:
         continue
     med = lambda x: round(statistics.median(x), 1) if x else None
     ov, nv = med(old.get(k)), med(new.get(k))
-    if ov is None and nv is None:
+    if ov is None and nv is None and not card.get(k):   # a row the card has stays (a Loom-only job has no old side: "card value, not measured")
         continue
     r = round(nv / ov, 4) if ov and nv else None
     st = "PASS" if r is not None and abs(r - 1) <= band_of(k) else ("MISSING" if r is None else "OUT")

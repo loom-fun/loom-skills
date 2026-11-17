@@ -93,7 +93,7 @@ class DeviceJobs(unittest.TestCase):
     def test_field_names_follow_the_runner_key(self):
         row = {"slug": "s", "w": 3e9, "kv": 40e9, "kvpp": 4e5, "ctx": 1e5, "verdict": "fits (reduced ctx)", "rx7900xtx_execution": {"prefill_capacity": 2048}}
         job, ex_ctx, old, ctx, preset = device_jobs.device_fields(RX, row, {"memory_bytes": 20e9}, 24e9)
-        self.assertEqual(preset, {"context_capacity": ctx, "pool_capacity": ctx, "prefill_capacity": 2048})
+        self.assertEqual(preset, {"context_capacity": ctx, "prefill_capacity": 2048})
         self.assertIn("require_preset_rx7900xtx", job)
         self.assertIn("memory_bytes_rx7900xtx", job)
         self.assertNotIn("memory_bytes_r9700", job)
@@ -157,8 +157,8 @@ class UnmeasuredDevice(unittest.TestCase):
             json.dump(info, open(os.path.join(t, "info.json"), "w"), indent=1)
             subprocess.run([sys.executable, os.path.join(CARD, "render_card.py"), t], check=True, capture_output=True)
             txt = open(os.path.join(t, "README.md"), encoding="utf-8").read()
-        self.assertNotIn("Serve on the AMD Radeon RX 7900 XTX", txt)
-        self.assertIn("Serve on the AMD Radeon AI PRO R9700", txt)
+        self.assertNotIn("<summary>AMD Radeon RX 7900 XTX", txt)
+        self.assertIn("<summary>AMD Radeon AI PRO R9700 (gfx1201, 32 GB)</summary>", txt)
         self.assertIn("not measured (no runner for this GPU yet)", txt)
         self.assertNotIn("not yet re-measured", txt.split("### Radeon RX 7900 XTX")[1].split("###")[0])
         self.assertIn("— not measured |", txt)

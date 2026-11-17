@@ -189,7 +189,7 @@ A(f'''kernel.def export("{P}_attention_flash2") @{P}_attention_flash2(%tokens: i
   %tokens = index.assume %tokens_arg [range(%tokens_arg, 16, 8192), multiple_of(%tokens_arg, 16)] : index
   %layer = index.assume %layer_arg [range(%layer_arg, 0, {LAYERS})] : index
   %context = index.assume %context_arg [range(%context_arg, 16, 262144)] : index
-  %pool = index.assume %pool_arg [range(%pool_arg, 16, 1048576)] : index
+  %pool = index.assume %pool_arg [range(%pool_arg, 16, 2147483584)] : index
   %origin = index.constant 0 : offset
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
@@ -273,7 +273,7 @@ for c in range(NFH):
   %qraw{c} = vector.load %q_view[%q_token, %head, %qd{c}] : view<[%tokens]x{QH}x{D}xf32> -> vector<16xf32>
   %qh{c} = vector.fptrunc %qraw{c} : vector<16xf32> to vector<16xf16>
   %qf{c} = vector.fragment<rhs> %qh{c} shape [%c16, %c16] : vector<16xf16>''')
-A(f'''  %zero8 = vector.constant 0.0 : vector<8xf32>
+A(f'''  %zero8 = vector.splatf 0.0 : vector<8xf32>
   %init = vector.fragment<init> %zero8 shape [%c16, %c16] : vector<8xf32>
   %zero_f = scalar.constant 0.0 : f32
   %neg_big = scalar.constant -3.0e38 : f32
@@ -305,7 +305,7 @@ A(f'''  %zero8 = vector.constant 0.0 : vector<8xf32>
   %cseg_w = index.constant {SEG_W} : index
   %st_dim_value = index.mul %st_seg, %cseg_w : index
   %st_dim = index.assume %st_dim_value [range(%st_dim_value, 0, {D - SEG_W})] : index
-  %kz = vector.constant 0.0 : vector<{SEG_W}xf16>
+  %kz = vector.splatf 0.0 : vector<{SEG_W}xf16>
   %plane_bytes_i = index.mul %pool, %c1 : index
   %pos_bytes = index.constant {POS_BYTES} : offset
   %v_plane_delta = index.scale %plane_bytes_i, %pos_bytes : index, offset -> offset''')
@@ -425,7 +425,7 @@ A('''    %pos0_i32 = index.cast %pos0 : index to i32
     %pos15_i32 = scalar.addi %pos0_i32, %c15_i32m : i32
     %lane_col32m = index.cast %lane_col : index to i32
     %win_lo15 = scalar.subi %pos15_i32, %cwin_i32 : i32
-    %zero16h = vector.constant 0.0 : vector<16xf16>
+    %zero16h = vector.splatf 0.0 : vector<16xf16>
     %iota16 = vector.iota %c0_i32 step %c1_i32m : vector<16xi32>''')
 # A block that starts past the tile's last position holds no visible key: its weights are exactly 0 and its V is staged as
 # zeros, so adding it changes nothing (the plain path does it at the cost of one set of MMAs; it never takes the masked path).

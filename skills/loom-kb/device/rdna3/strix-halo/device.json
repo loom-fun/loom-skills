@@ -16,10 +16,15 @@
     "runner": "Strix Halo",
     "tag": "strix-halo",
     "detect": {
-      "pattern": "strix|8060s|gfx1151",
+      "pattern": "strix(?! ?point)|8060s|gfx1151",
       "flags": "i"
     },
-    "serve_args": []
+    "serve_args": [
+      "--pool_backing=fixed"
+    ],
+    "serve_args_note": "fixed state backing: hrx-loom 0.2.0's default elastic backing costs Strix 5-8 % steady prefill and a 3-request ramp (small models most); fixed backing commits the preset's context_capacity KV and the weights eagerly, and the packages already cap context_capacity to what fits the Strix budget",
+    "preload_max_weight_bytes": 40000000000,
+    "preload_note": "preload: --parameter_mode=preload (stock-host fix for ROCm/hrx-system#3332: the default parameter mode fails under the stock 8 MiB RLIMIT_MEMLOCK on Linux 7.0) is served only where the preloaded host copy fits beside GPU memory in the shared RAM: packages whose weights are at most this many bytes (decimal; the 35B-A3B class passed, the 122B OOMs); larger packages keep the default parameter mode and the card's Quick start says how to start on a stock host"
   },
   "roofline": {
     "default": "strix-halo",

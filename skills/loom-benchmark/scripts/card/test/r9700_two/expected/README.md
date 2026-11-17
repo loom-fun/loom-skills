@@ -14,22 +14,31 @@ A [Loom](https://github.com/ROCm/hrx-system) package (`.loom` programs and a `mo
 
 ## Quick start
 
+Open your GPU and copy its commands.
+
+<details>
+<summary>AMD Ryzen AI Max+ 395 "Strix Halo" (gfx1151)</summary>
+
 ```bash
 pipx install "hrx-loom[hf]==0.1.0"
-loom-fetch https://huggingface.co/loom-fun-staging/unsloth-Qwen3-0.6B-loom/resolve/main/model.json --materialize=copy --output=Qwen3-0.6B
+loom-fetch https://huggingface.co/loom-fun-staging/unsloth-Qwen3-0.6B-loom/resolve/main/model.json --preset=chat --materialize=copy --output=Qwen3-0.6B
+loom-serve --model=Qwen3-0.6B/model.json '--device=amdgpu://?completion_spin_ns=4294967295' --pool_backing=fixed --parameter_mode=preload
 ```
 
-Serve on the AMD Ryzen AI Max+ 395 "Strix Halo" (gfx1151):
+</details>
+
+<details>
+<summary>AMD Radeon AI PRO R9700 (gfx1201, 32 GB)</summary>
 
 ```bash
-loom-serve --model=Qwen3-0.6B/model.json '--device=amdgpu://?completion_spin_ns=4294967295' --memory_bytes=17000000000
+pipx install "hrx-loom[hf]==0.1.0"
+loom-fetch https://huggingface.co/loom-fun-staging/unsloth-Qwen3-0.6B-loom/resolve/main/model.json --preset=chat --materialize=copy --output=Qwen3-0.6B
+loom-serve --model=Qwen3-0.6B/model.json '--device=amdgpu://?completion_spin_ns=4294967295' --pool_backing=fixed --parameter_mode=preload
 ```
 
-Serve on the AMD Radeon AI PRO R9700 (gfx1201, 32 GB):
+</details>
 
-```bash
-loom-serve --model=Qwen3-0.6B/model.json '--device=amdgpu://?completion_spin_ns=4294967295' --pool_backing=fixed
-```
+`--parameter_mode=preload` only changes how the weights are loaded on the host, so the performance rows were measured without it unless their job served with it.
 
 The server listens on `127.0.0.1:8080` and answers OpenAI-style `/v1/chat/completions` requests.
 

@@ -129,7 +129,7 @@ def _dist_info(venv):
 
 def hrx_loom_identity(loom_root=None, venv=None):
     """The installed Loom SDK. install_loom.sh's $LOOM_ROOT/loom-install.json when present: {hrx_loom (version),
-    source (pypi | ci), hrx_system_sha, artifact_id, branch, wheel_sha256}. Otherwise the installed version and
+    source (release | pypi | ci), hrx_system_sha, artifact_id, branch, wheel_sha256}. Otherwise the installed version and
     the first 16 hex of sha256(dist-info RECORD), "verified": false (a RECORD names every installed file with
     its hash, so the same wheel installed the same way gives the same fingerprint). None when nothing is found."""
     loom_root = loom_root or os.environ.get("LOOM_ROOT")

@@ -119,7 +119,7 @@ def kvhoist(text):
         return (f"{i}%kh_pg_v = index.div %kp, %kh_c16 : index\n"
                 f"{i}%kh_pg = index.assume %kh_pg_v [range(%kh_pg_v, 0, %kh_last), lt(%kh_pg_v, %blocks)] : index\n"
                 f"{i}%kh_ph32 = view.load %kh_map[%kh_pg] : view<[%blocks]xi32> -> i32\n"
-                f"{i}%kh_phb = scalar.assume %kh_ph32 [range(%kh_ph32, 0, 1048575)] : i32\n"
+                f"{i}%kh_phb = scalar.assume %kh_ph32 [range(%kh_ph32, 0, 134217727)] : i32\n"
                 f"{i}%kh_ph = index.cast %kh_phb : i32 to index\n"
                 f"{i}%kh_sb = index.mul %kh_ph, %kh_c16 : index\n"
                 f"{i}%kh_wi = index.rem %kp, %kh_c16 : index\n"

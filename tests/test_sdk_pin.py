@@ -8,6 +8,7 @@ import unittest
 from pathlib import Path
 
 SCRIPTS = Path(__file__).resolve().parents[1] / "skills/loom-setup/scripts"
+RELEASE = {"hrx_loom": "0.2.0rc1", "source": "release", "branch": "v0.2.0rc1", "wheel_sha256": "ef" * 32}
 PIN = {"hrx_loom": "0.2.0.dev0", "source": "ci", "artifact_id": 13628412621, "wheel_sha256": "ab" * 32}
 
 
@@ -32,8 +33,41 @@ class SdkPinTests(unittest.TestCase):
         self.assertEqual(run("show", str(self.cfg)).stdout.strip(), "ci:13628412621")
         self.cfg.write_text(json.dumps({"sdk": {"hrx_loom": "0.1.1", "source": "pypi"}}))
         self.assertEqual(run("show", str(self.cfg)).stdout.strip(), "0.1.1")
+        self.cfg.write_text(json.dumps({"sdk": RELEASE}))
+        self.assertEqual(run("show", str(self.cfg)).stdout.strip(), "release:0.2.0rc1")
+        self.cfg.write_text("{}")   # no pin: the package predates pins and means 0.1.0
+        self.assertEqual(run("show", str(self.cfg)).stdout.strip(), "0.1.0")
+
+    def test_pypi_pin_shows_the_bare_version_and_matches_by_wheel_hash(self):
+        pin = {"hrx_loom": "0.2.0", "source": "pypi", "wheel_sha256": "5f" * 32, "hrx_system_sha": "0" * 40}
+        self.cfg.write_text(json.dumps({"sdk": pin}))
+        self.assertEqual(run("show", str(self.cfg)).stdout.strip(), "0.2.0")   # install_loom.sh reads a bare version as PyPI
+        self.install(hrx_loom="0.2.0", source="pypi", wheel_sha256="5f" * 32)
+        self.assertEqual(run("matches", str(self.root), str(self.cfg)).returncode, 0)
+        self.install(hrx_loom="0.2.0", source="pypi", wheel_sha256="cd" * 32)
+        self.assertNotEqual(run("matches", str(self.root), str(self.cfg)).returncode, 0)
+        self.install(hrx_loom="0.2.0rc1", source="release", wheel_sha256="5f" * 32)   # a pre-release is not 0.2.0 (version+source compared when the pin has no hash)
+        self.cfg.write_text(json.dumps({"sdk": {"hrx_loom": "0.2.0", "source": "pypi"}}))
+        self.assertNotEqual(run("matches", str(self.root), str(self.cfg)).returncode, 0)
+
+    def test_release_pin_matches(self):
+        self.cfg.write_text(json.dumps({"sdk": RELEASE}))
+        self.install(hrx_loom="0.2.0rc1", source="release", wheel_sha256="cd" * 32)
+        self.assertNotEqual(run("matches", str(self.root), str(self.cfg)).returncode, 0)
+        self.install(hrx_loom="0.2.0rc1", source="release", wheel_sha256="ef" * 32)
+        self.assertEqual(run("matches", str(self.root), str(self.cfg)).returncode, 0)
+        self.cfg.write_text(json.dumps({"sdk": {"hrx_loom": "0.2.0rc1", "source": "release"}}))   # no hash: version + source
+        self.assertEqual(run("matches", str(self.root), str(self.cfg)).returncode, 0)
+        self.install(hrx_loom="0.2.0rc1", source="pypi")
+        self.assertNotEqual(run("matches", str(self.root), str(self.cfg)).returncode, 0)
+
+    def test_stamp_release_has_no_expiry(self):
         self.cfg.write_text("{}")
-        self.assertEqual(run("show", str(self.cfg)).stdout.strip(), "")
+        self.install(hrx_loom="0.2.0rc1", source="release", branch="v0.2.0rc1", hrx_system_sha="a" * 40, wheel_sha256="ef" * 32)
+        self.assertEqual(run("stamp", str(self.root), str(self.cfg)).returncode, 0)
+        sdk = json.loads(self.cfg.read_text())["sdk"]
+        self.assertEqual((sdk["source"], sdk["branch"]), ("release", "v0.2.0rc1"))
+        self.assertNotIn("expires", sdk)
 
     def test_matches_by_wheel_hash(self):
         self.cfg.write_text(json.dumps({"sdk": PIN}))
@@ -43,10 +77,12 @@ class SdkPinTests(unittest.TestCase):
         self.install(hrx_loom="0.2.0.dev0", source="ci", artifact_id=13628412621, wheel_sha256="ab" * 32)
         self.assertEqual(run("matches", str(self.root), str(self.cfg)).returncode, 0)
 
-    def test_no_pin_never_matches(self):
+    def test_no_pin_means_0_1_0(self):
         self.cfg.write_text("{}")
-        self.install(hrx_loom="0.1.0", source="pypi")
+        self.install(hrx_loom="0.2.0rc1", source="release", wheel_sha256="ef" * 32)
         self.assertNotEqual(run("matches", str(self.root), str(self.cfg)).returncode, 0)
+        self.install(hrx_loom="0.1.0", source="pypi")
+        self.assertEqual(run("matches", str(self.root), str(self.cfg)).returncode, 0)
 
     def test_stamp_refreshes_the_pin(self):
         self.cfg.write_text(json.dumps({"model_id": "m", "sdk": {"hrx_loom": "old", "source": "pypi"}}))
@@ -77,6 +113,30 @@ class EnsureSdkTests(unittest.TestCase):
                                capture_output=True, text=True, env=env)
             self.assertEqual(r.returncode, 0, r.stderr)
             self.assertEqual(r.stdout.strip(), str(pinned))
+
+    def fake_root(self, root, **ident):
+        for p in (".venv/bin/loom-serve", ".tools/bin/python"):
+            (root / p).parent.mkdir(parents=True, exist_ok=True)
+            (root / p).write_text("")
+            (root / p).chmod(0o755)
+        (root / "loom-install.json").write_text(json.dumps(ident))
+
+    def ensure(self, tmp, cfg):
+        env = {k: v for k, v in os.environ.items() if k != "LOOM_VERSION"}
+        return subprocess.run(["bash", str(SCRIPTS / "ensure_sdk.sh"), str(Path(tmp) / "loom"), str(cfg)],
+                              capture_output=True, text=True, env=env)
+
+    def test_pinless_config_picks_0_1_0_and_release_pin_picks_the_release(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.fake_root(Path(tmp) / "loom", hrx_loom="0.2.0rc1", source="release", wheel_sha256="ef" * 32)   # the default root is the rc
+            self.fake_root(Path(tmp) / "loom-0.1.0", hrx_loom="0.1.0", source="pypi")
+            cfg = Path(tmp) / "llm_config.json"
+            cfg.write_text("{}")
+            r = self.ensure(tmp, cfg)
+            self.assertEqual((r.returncode, r.stdout.strip()), (0, str(Path(tmp) / "loom-0.1.0")), r.stderr)
+            cfg.write_text(json.dumps({"sdk": RELEASE}))
+            r = self.ensure(tmp, cfg)
+            self.assertEqual((r.returncode, r.stdout.strip()), (0, str(Path(tmp) / "loom")), r.stderr)
 
 
 if __name__ == "__main__":

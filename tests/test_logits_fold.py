@@ -120,13 +120,13 @@ class LogitsFoldTests(unittest.TestCase):
         self.assertEqual(link_check.check(tool("loom-link"), str(pkg)), ([], []))
         saved = {n: (self.program / n).read_text() for n in ("storage.loom", "prepare.loom")}
         try:
-            for n, t in saved.items():   # the first kit: the key defined in storage, prepare and llm.loom
-                (self.program / n).write_text(t.replace("config.decl @llm.logits : i1", "config.def @llm.logits = false : i1"))
+            for n, t in saved.items():   # a key declared as a function in one input (hrx-loom 0.1.0: a key defined in storage, prepare and llm.loom was a load-time failure; 0.2.0 links duplicate defs)
+                (self.program / n).write_text(t.replace("config.decl @llm.logits : i1", "func.decl @llm.logits(%x: i64) -> (i64)"))
             bad, _ = link_check.check(tool("loom-link"), str(pkg))
         finally:
             for n, t in saved.items():
                 (self.program / n).write_text(t)
-        self.assertTrue(bad and "exact link selection" in bad[0], bad)   # the load-time failure of the first kit, caught offline
+        self.assertTrue(bad and "no accessible matching definition" in bad[0], bad)   # a load-time link failure, caught offline
 
     def test_host_programs_carry_the_guard_and_the_request_key(self):
         storage = (self.program / "storage.loom").read_text()

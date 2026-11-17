@@ -1,0 +1,23 @@
+{
+ "scope": "model/unsloth-Qwen3.5-4B-loom",
+ "match": {
+  "slug": [
+   "unsloth-Qwen3.5-4B-loom"
+  ]
+ },
+ "owner": "kb",
+ "choices": [
+  {
+   "when": {
+    "devices": [
+     "gfx1150"
+    ]
+   },
+   "set": {
+    "exec.context_capacity": 63488,
+    "exec.context_cap": 63488
+   },
+   "evidence": "gfx1150 laptop (HX 375, 32 GB, GTT 15.08 GiB), hrx-loom 0.2.0, 2026-11-16: the native 262144 is refused at registration under --memory_bytes=14e9 (code 8, cannot address one model context); build.py at LOOM_MEMORY_CAP_GIB=14 fits 63488; func + dev gates PASS and the card rows at that context (fleet/devices/gfx1150.json). draft_depth 3 and prefill_capacity 1024 measured best there (depth 2/4/5, chunk 512/2048; 4096 does not fit), so they stay the card's"
+  }
+ ]
+}

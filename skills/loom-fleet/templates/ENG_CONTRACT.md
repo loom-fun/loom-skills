@@ -4,8 +4,8 @@
   main checkout. Big outputs go to `@DIR@/eng/<name>/` on disk, never `/tmp` (often tmpfs = RAM). Delete build outputs when done.
 - PRs: base `@INTEGRATION@` only (`gh pr create --base @INTEGRATION@`); never `@BASE@` and never another branch. Labels and base
   changes via the REST API (`gh pr edit` fails here). PR body: what + why + evidence, a `loom-scope` block, then
-  `🤖 Generated with [Claude Code](https://claude.com/claude-code)`. Commit trailer: your own `Co-Authored-By` line. No model ids in
-  commits or PR text.
+  `🤖 Generated with [Claude Code](https://claude.com/claude-code)`. Commit trailer exactly `Co-Authored-By: Claude <noreply@anthropic.com>`; no model names or
+  versions anywhere in commits or PR text.
 - Declare the scope first (`skills/loom-kb/SKILL.md`, mandate rules); run `fleet/scope_lint.py --local` before opening the PR.
 - Tests: `python -m unittest discover -s tests` passes; add tests for what you build. Unless the task says otherwise, your change
   must not change any generated program or card: prove it with the fleet program diff (`fleet/README.md`).

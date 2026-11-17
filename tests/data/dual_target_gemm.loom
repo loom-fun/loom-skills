@@ -76,7 +76,7 @@ kernel.def export("g_gemm_q4_k_store") @g_gemm_q4_k_store(%rows: index, %n: inde
   %c32 = index.constant 32 : index
   %c64 = index.constant 64 : index
   %c256 = index.constant 256 : index
-  %nibble_mask = vector.constant 252645135 : vector<4xi32>
+  %nibble_mask = vector.splati 252645135 : vector<4xi32>
   %stage_bytes = index.constant 9216 : offset
   %row_tile_count = index.div %rows, %c64 : index
   %out_tile_count = index.div %n, %c64 : index
@@ -126,7 +126,7 @@ kernel.def export("g_gemm_q4_k_store") @g_gemm_q4_k_store(%rows: index, %n: inde
   %w_out_row = index.add %out_origin, %stage_row : index
   %bounded_w_out_row = index.assume %w_out_row [lt(%w_out_row, %n)] : index
   %w_row_origin = index.scale %bounded_w_out_row, %row_bytes : index, offset -> offset
-  %zero8 = vector.constant 0.0 : vector<8xf32>
+  %zero8 = vector.splatf 0.0 : vector<8xf32>
   %init = vector.fragment<init> %zero8 shape [%c16, %c16] : vector<8xf32>
   %k_steps = index.div %k, %c64 : index
   %s_view = buffer.view %scales[%origin] : buffer -> view<[%rows]x2xf32>
@@ -268,7 +268,7 @@ kernel.def target(@rdna4) export("g_gemm_q4_k_store_rdna4") @g_gemm_q4_k_store_r
   %c32 = index.constant 32 : index
   %c64 = index.constant 64 : index
   %c256 = index.constant 256 : index
-  %nibble_mask = vector.constant 252645135 : vector<4xi32>
+  %nibble_mask = vector.splati 252645135 : vector<4xi32>
   %stage_bytes = index.constant 9216 : offset
   %row_tile_count = index.div %rows, %c64 : index
   %out_tile_count = index.div %n, %c64 : index
@@ -322,7 +322,7 @@ kernel.def target(@rdna4) export("g_gemm_q4_k_store_rdna4") @g_gemm_q4_k_store_r
   %w_out_row = index.add %out_origin, %stage_row : index
   %bounded_w_out_row = index.assume %w_out_row [lt(%w_out_row, %n)] : index
   %w_row_origin = index.scale %bounded_w_out_row, %row_bytes : index, offset -> offset
-  %zero8 = vector.constant 0.0 : vector<8xf32>
+  %zero8 = vector.splatf 0.0 : vector<8xf32>
   %init = vector.fragment<init> %zero8 shape [%c16, %c16] : vector<8xf32>
   %k_steps = index.div %k, %c64 : index
   %s_view = buffer.view %scales[%origin] : buffer -> view<[%rows]x2xf32>
@@ -441,7 +441,7 @@ kernel.def target(@rdna4) export("g_gemm_q4_k_store_rdna4") @g_gemm_q4_k_store_r
 
 
 
-command.program.def public @dual_probe() launch(%weights: buffer, %x: buffer, %scales: buffer, %y: buffer) {
+command.def public @dual_probe() launch(%weights: buffer, %x: buffer, %scales: buffer, %y: buffer) {
   %t = index.constant 128 : index
   %n = index.constant 1024 : index
   %k = index.constant 1024 : index

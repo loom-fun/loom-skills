@@ -69,7 +69,7 @@ class FuseVerify(unittest.TestCase):
     def test_other_programs_unchanged(self):
         """only llm_verify and the kernel library change"""
         def progs(p):
-            return {m.group(1): m.group(0) for m in re.finditer(r"^command\.program\.def[^\n]*@(\w+)\(\)(?:.|\n)*?^\}\n", p, re.M)}
+            return {m.group(1): m.group(0) for m in re.finditer(r"^command\.def[^\n]*@(\w+)\(\)(?:.|\n)*?^\}\n", p, re.M)}
         a, b = progs(self.off), progs(self.on)
         self.assertEqual(set(a), set(b))
         for k in a:

@@ -111,7 +111,7 @@ def _encode(dst):
     if dst == "q8_0":   # d = amax / 127 (F16), q = round(x / d)
         return """    %zero_f = scalar.constant 0.0 : f32
     %c127 = scalar.constant 127.0 : f32
-    %zero32 = vector.constant 0.0 : vector<32xf32>
+    %zero32 = vector.splatf 0.0 : vector<32xf32>
     %a = vector.absf %v : vector<32xf32>
     %amax = vector.reduce<maxnumf> %a, %zero_f : vector<32xf32>, f32
     %d = scalar.divf %amax, %c127 : f32
@@ -149,14 +149,14 @@ def _encode(dst):
     %inv = scalar.divf %one_f, %d : f32
     %id = scf.select %nz, %inv, %zero_f : f32
     %idv = vector.splat %id : vector<32xf32>
-    %off = vector.constant 8.5 : vector<32xf32>
-    %top = vector.constant 15.0 : vector<32xf32>
+    %off = vector.splatf 8.5 : vector<32xf32>
+    %top = vector.splatf 15.0 : vector<32xf32>
     %sv = vector.fmaf %v, %idv, %off : vector<32xf32>
     %cl = vector.minnumf %sv, %top : vector<32xf32>
     %q = vector.fptosi %cl : vector<32xf32> to vector<32xi8>
     %ql = vector.slice %q[0] : vector<32xi8> -> vector<16xi8>
     %qh = vector.slice %q[16] : vector<32xi8> -> vector<16xi8>
-    %four = vector.constant 4 : vector<16xi8>
+    %four = vector.splati 4 : vector<16xi8>
     %qhs = vector.shli %qh, %four : vector<16xi8>
     %packed = vector.ori %ql, %qhs : vector<16xi8>
     %dh = scalar.fptrunc %d : f32 to f16
@@ -249,7 +249,7 @@ kernel.def export("g_prep_{n}") @g_prep_{n}(%blocks: index) {{
   kernel.return
 }}
 
-command.program.def public @llm_prep_{n}() launch(%output: buffer, %input: buffer) {{
+command.def public @llm_prep_{n}() launch(%output: buffer, %input: buffer) {{
   %b64 = config.get @llm.prep_blocks : i64
   %blocks = index.cast %b64 : i64 to index
   %in64 = config.get @llm.prep_input : i64
@@ -299,7 +299,7 @@ kernel.def export("g_prep_{n}") @g_prep_{n}(%blocks: index) {{
   kernel.return
 }}
 
-command.program.def public @llm_prep_{n}() launch(%output: buffer, %input: buffer) {{
+command.def public @llm_prep_{n}() launch(%output: buffer, %input: buffer) {{
   %b64 = config.get @llm.prep_blocks : i64
   %blocks = index.cast %b64 : i64 to index
   %in64 = config.get @llm.prep_input : i64
@@ -343,7 +343,7 @@ kernel.def export("g_prep_{n}") @g_prep_{n}(%blocks: index) {{
   kernel.return
 }}
 
-command.program.def public @llm_prep_{n}() launch(%output: buffer, %input: buffer) {{
+command.def public @llm_prep_{n}() launch(%output: buffer, %input: buffer) {{
   %b64 = config.get @llm.prep_blocks : i64
   %blocks = index.cast %b64 : i64 to index
   %in64 = config.get @llm.prep_input : i64
@@ -431,7 +431,7 @@ def policy(entries, what):
 """ if pairs[j][0] in SRC_SUPER else "") + "    }\n")
     second = f"""    %has2 = scalar.cmpi ne, %len2_{N}, %zero : i64
     %second = scf.if %has2 -> (i64) {{
-      %s2 = func.call @input(%source, {prev_src}, %off2_{N}, %len2_{N}, %align) : (i32, buffer, i64, i64, i64) -> (i64)
+      %s2 = func.call @input(%source, {prev_src}, %zero, %key_length, %off2_{N}, %len2_{N}, %align) : (i32, buffer, i64, i64, i64, i64, i64) -> (i64)
       scf.yield %s2 : i64
     }} else {{
       scf.yield %zero : i64
@@ -441,7 +441,7 @@ def policy(entries, what):
 // converted at load by llm_prep_<src>_<dst> (llm.loom); every other tensor keeps its file bytes. No converted
 // checkpoint is written or published.
 
-func.decl import("weights") @input(%source: i32, %key: buffer, %offset: i64, %length: i64, %alignment: i64) -> (i64)
+func.decl import("weights") @input(%source: i32, %key: buffer, %key_offset: i64, %key_length: i64, %offset: i64, %length: i64, %alignment: i64) -> (i64)
 
 func.decl import("prepare") @stage(%root: buffer, %tag: i64) -> (i32)
 
@@ -470,7 +470,9 @@ func.def public @prepare_weight(%key: buffer) -> (i64) {{
     %source = scalar.constant 0 : i32
     %align = scalar.constant 256 : i64
     {"%length = scalar.muli %blocks_" + str(N) + ", %inb_" + str(N) + " : i64" if not SUB else "%length = scalar.addi %len_" + str(N) + ", %zero : i64"}
-    %first = func.call @input(%source, {prev_src}, {"%off1_" + str(N) if SUB3 else "%zero"}, %length, %align) : (i32, buffer, i64, i64, i64) -> (i64)
+    %key_bytes = buffer.length {prev_src}
+    %key_length = index.cast %key_bytes : offset to i64
+    %first = func.call @input(%source, {prev_src}, %zero, %key_length, {"%off1_" + str(N) if SUB3 else "%zero"}, %length, %align) : (i32, buffer, i64, i64, i64, i64, i64) -> (i64)
 {second}{"".join(stage)}    %prepared = scalar.muli %blocks_{N}, %outb_{N} : i64
     scf.yield %prepared : i64
   }} else {{

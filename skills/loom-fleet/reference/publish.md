@@ -3,7 +3,20 @@
 How a package and its generated card reach the Hub, how the card's evidence is filled on DevLab, and when a regenerated
 package may replace a published one. The sampled promotion check for targeted work (`fleet/promote_check.py`, the baseline
 store) is [targeted-fix.md](targeted-fix.md) section 5; the ratchet's design is in [architecture.md](architecture.md);
-`loom-benchmark/scripts/card/promote_staging.py` moves approved staging packages to their final repos on the owner's go-ahead.
+`loom-benchmark/scripts/card/promote_staging.py` moves approved staging packages to their final repos on the owner's go-ahead; for an SDK
+migration, first tag the production repos with the outgoing SDK version (`loom-migrate` SKILL.md step 6, `scripts/tag_org.py`).
+
+**Release tags** (owner rule, 2026-11-16). loom-skills: every promotion to `main` (with its loom-fun cards) tags the merge commit
+`sdkX.Y.Z-uN`: X.Y.Z is the hrx-loom SDK version the release targets; N counts the promotions on that SDK, starting at 0 and resetting
+to 0 on a new SDK (`sdk0.1.0-u0`, `sdk0.1.0-u1`, `sdk0.2.0-u0`, ...). No `v` prefix and no dot before N: the tag is deliberately not semver
+(a semver tool would read `-N` as a pre-release) and stays unambiguous if the SDK ever uses four version parts.
+
+<a id="card-tags"></a>**Card tags** (loom-fun): a card tag `vX.Y.Z` means exactly one thing: the last commit of that card repo that worked
+with SDK X.Y.Z, before the card moved to a newer SDK, i.e. the repo's head at the time of the move. It is created only at that move,
+never on a new card. `scripts/tag_org.py` tags every `*-loom` repo whose head still pins the outgoing SDK, including cards the campaign did
+not migrate (their head stays the last commit on that SDK). Which loom-skills commit built a card is in its `info.json`
+(`versions.card_generator`), so cards carry no release tag.
+
 Which models need this work is [populate-org.md](populate-org.md).
 
 ## 2. Publish the initial result
@@ -20,6 +33,12 @@ audit or perf flags don't hold it back. The card is the record of progress: a fa
 dropped or loosened, and `org_status` marks the repo `fix` (populate-org.md step 4). Add the card to
 `.github/nightly-models.json` in the same PR, and republish as gates go green. Only `done` (below) needs every gate
 passing.
+
+**Card text rule: every fetch line names its preset** (owner rule, 2026-11-17). The renderer always prints
+`loom-fetch huggingface:REPO:PRESET ...` (legacy pins: `--preset=PRESET`), single-preset cards included (`...:chat`), on every GPU block.
+A preset added to a published card later must never break a published command: hrx-loom 0.1.0 and 0.2.0 both refuse a multi-preset
+card fetched without a preset ("select explicitly"). A card or doc that prints a fetch line without the preset is a bug
+(`tests/test_fetch_preset.py` fails on it).
 
 **The nightly entry matches the card exactly**: `memory_bytes`, the llama.cpp build and `features` (why: the nightly
 gates serve with the entry's values, so a mismatch gates a different configuration than the card claims).
@@ -70,7 +89,7 @@ the local GPU. Hand the card over and move the local GPU on to the next item.
      `publish_package.py upload DIR --repo loom-fun/REPO --card-only --parent-commit $sha` (fails if another worker
      published since: re-read and rebuild).
 3. A card with metrics missing or measured on other programs (`sweep`, `remeasure`): one `devlab-perf` job per card
-   (required: it is the only source of card performance) (`.github/devlab/perf.json`: card, memory_bytes, kit and llamacpp from `nightly-models.json`,
+   (required: it is the only source of card performance; llama.cpp steps are omitted when the card's stored llama.cpp rows are reusable, methodology rule 17) (`.github/devlab/perf.json`: card, memory_bytes, kit and llamacpp from `nightly-models.json`,
    llama_spec omitted = `matched`: llama.cpp gets the card's classified drafting choice (same method and drafter, its documented n-max;
    none if the classification says none; `../../loom-benchmark/reference/methodology.md`), an explicit `llama_spec` only overrides it (`{drafter}` = the
    card's drafter, `{hf:OWNER/REPO/FILE}` a Hub file, e.g. an MTP head the card doesn't ship); variant `{"name": "card"}`, steps `perf:card:1` x3 (6 for a fast model, decode > ~100 tok/s: also job field `"repeat_rows": 3`, perf.py `--repeat-rows`), the same count of `perf:card:1:long`, `c4:card`, `llama@rocm.np1:3 llama@rocm.np1:3:long` (6 for a fast model)
@@ -84,7 +103,7 @@ the local GPU. Hand the card over and move the local GPU on to the next item.
    rebuild the card as above.
    **Vulkan baseline** (every card, one job each; the same workloads and `llama_spec` as the ROCm baseline): job fields
    `llamacpp_vulkan: "b12211"`, variant `{"name": "card"}`, steps `llama@vulkan.np1:2 llama@vulkan.np1:2:long llamac4@vulkan.perslot.nodraft` (the same drafting choice as ROCm on 1-stream rows)
-   (add the ROCm and Loom steps to the same job for a same-runner comparison); at the card's own `memory_bytes`. Ingest:
+   (stored ROCm and Loom rows are reused while their inputs are unchanged, rule 17); at the card's own `memory_bytes`. Ingest:
    `make_info.py perf --backend vulkan --llama-jsonl perf_llamacpp-vulkan_nN.jsonl --c4-llama c4_llamacpp-vulkan_nN.txt
    --baseline-version b12211 --baseline-args "$(cat llamacpp_args-vulkan.txt)" --baseline-sha256 "$(cat
    llamacpp_release-vulkan.sha256)" --fetched-programs "$(cat programs_sha256.txt)" --differs "..." --package DIR

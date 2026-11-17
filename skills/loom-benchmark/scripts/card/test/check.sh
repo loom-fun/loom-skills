@@ -9,6 +9,7 @@ bad=0
 here=$(cd "$(dirname "$0")" && pwd); C=$here/..; tmp=$(mktemp -d); trap '[ -n "${KEEP:-}" ] || rm -rf "$tmp"' EXIT; echo "tmp $tmp"
 export LOOM_CARD_UPSTREAM=none   # offline: vision and audio the package lacks are n/a (no upstream probe)
 py() { python3 -I "$@"; }
+export LOOM_DEVICE_RESULTS=none   # hermetic: the cards below read no fleet/devices data file unless a case passes --device-results
 F=$here/flint; D=$here/d1
 GEN=0123456789abcdef0123456789abcdef01234567   # the card generator commit is an input, never read by the renderer
 SRC=(--device "$F/evidence/device.json" --hrx-loom "$F/evidence/hrx_loom.json" --package "$F/pkg")
@@ -424,7 +425,63 @@ mkdir -p "$tmp/r9700_noexec"; cp -r "$R/pkg/." "$tmp/r9700_noexec/"
 py "$C/make_info.py" build "$tmp/r9700_noexec" --repo loom-fun/unsloth-Qwen3-0.6B-loom --org loom-fun-staging "${R3[@]}" --memory-bytes 17000000000 \
   --gpus strix-halo,radeon-r9700 --fit "$R/fit_native.json" -o "$tmp/r9700_noexec/info.json" 2>/dev/null
 cmp -s "$tmp/r9700_noexec/model.json" "$R/pkg/model.json" && echo "OK   r9700 preset: a fit row without r9700_execution at native context leaves model.json alone" || { echo "FAIL r9700 preset: model.json changed without a block"; bad=1; }
-for n in r9700_two r9700_none r9700_staging r9700_preset r9700_exec; do
+# ---- four GPUs (fleet/devices data files, fixture): Strix Halo and the R9700 as in r9700_exec, the gfx1201 16 GB class (no DevLab runner; shares the
+# R9700's section; its preset chat-16gb is the R9700's with context_capacity = its max context) and gfx1150 (no DevLab runner, a named machine:
+# its own performance section, its preset only because its entry overrides prefill_capacity). The fixture's numbers are made up.
+DV=$here/devices
+MSRC=(--package "$R/pkg" --source-kind machine --device "$DV/machine.json" --hrx-loom "$R/evidence/hrx_loom.json" --gpu gfx1150)
+py "$C/make_info.py" perf --loom-jsonl "$R/evidence/loom.jsonl" --llama-jsonl "$R/evidence/llama.jsonl" --c4-loom "$R/evidence/c4_loom_runs.txt" \
+  --c4-llama "$R/evidence/c4_llama_runs.txt" "${ROCM[@]}" --metrics $SUB "${MSRC[@]}" -o "$tmp/m_perf.json" 2>/dev/null
+py "$C/make_info.py" gates "$R/evidence/gates.json" "${MSRC[@]}" -o "$tmp/m_gates.json" 2>/dev/null
+mkdir -p "$tmp/dev4"
+py -c "import json, sys
+for n in ('gfx1201-16gb', 'gfx1150'):
+    d = json.load(open(sys.argv[1] + '/' + n + '.json'))
+    if n == 'gfx1150':   # the named machine's session and gates ride in the entry
+        d['models']['unsloth-Qwen3-0.6B-loom']['evidence'] = [json.load(open(sys.argv[2])), json.load(open(sys.argv[3]))]
+    json.dump(d, open(sys.argv[4] + '/' + n + '.json', 'w'), indent=1)" "$DV" "$tmp/m_perf.json" "$tmp/m_gates.json" "$tmp/dev4"
+py "$C/make_info.py" devices "$tmp/dev4" > "$tmp/dev4.txt" 2>&1 \
+  && grep -q "gfx1150: 1 models, 1 fit, 1 with evidence" "$tmp/dev4.txt" && grep -q "gfx1201-16gb: 2 models, 1 fit, 0 with evidence, shares the radeon-r9700 section" "$tmp/dev4.txt" \
+  && echo "OK   devices: the data files validate and summarize" || { echo "FAIL devices: $(cat "$tmp/dev4.txt")"; bad=1; }
+mkdir -p "$tmp/gpus4"; cp -r "$R/pkg/." "$tmp/gpus4/"
+py "$C/make_info.py" build "$tmp/gpus4" --repo loom-fun/unsloth-Qwen3-0.6B-loom --org loom-fun-staging "${R3[@]}" --memory-bytes 17000000000 \
+  --device-results "$tmp/dev4" --gpus strix-halo,radeon-r9700 --fit "$R/fit_preset.json" --evidence "$tmp/r_gates.json" "$tmp/r_perf_sub.json" "$tmp/r_vk_sub.json" \
+  "$R/evidence/roofline_reduced.json" -o "$tmp/gpus4/info.json" 2>/dev/null
+py -c "import json, sys; sys.path.insert(0, sys.argv[1]); import card_lib as c
+d = sys.argv[2]; m = c.load_json(d + '/model.json'); old = c.load_json(sys.argv[3] + '/model.json'); i = c.load_json(d + '/info.json')
+assert c.validate(i) == [], c.validate(i)
+assert list(m['presets']) == ['chat', 'chat-r9700', 'chat-gfx1150', 'chat-16gb'], list(m['presets'])
+assert m['presets']['chat'] == old['presets']['chat'] and {k: v for k, v in m.items() if k != 'presets'} == {k: v for k, v in old.items() if k != 'presets'}
+x, g, r = (m['presets'][n]['execution'] for n in ('chat-16gb', 'chat-gfx1150', 'chat-r9700'))
+assert x == dict(r, context_capacity=18432, pool_capacity=18432), (x, r)   # the R9700 preset, context_capacity = the 16 GB class's max context (a v0.1 pool_capacity follows it)
+assert g == dict(old['presets']['chat']['execution'], prefill_capacity=512, context_capacity=16384, pool_capacity=16384), g
+assert sorted(i['devices']) == sorted(['strix-halo', 'radeon-r9700', 'gfx1201-16gb', 'gfx1150']), list(i['devices'])
+dv = i['devices']
+assert dv['gfx1201-16gb'] == {'state': 'not_measured', 'serve_args': ['--memory_bytes=15000000000', '--state_slab_bytes=4mib', '--weight_slab_bytes=64mib', '--parameter_mode=preload'], 'memory_bytes': 15000000000,
+                                 'served_context': 18432, 'shares_section_with': 'radeon-r9700'}, dv['gfx1201-16gb']
+assert dv['gfx1150']['served_context'] == 16384 and dv['gfx1150']['serve_args'] == [] and c.has_results(dv['gfx1150']) and dv['gfx1150']['gates']
+assert {s['kind'] for s in i['sources'].values() if s['device'] and 'gfx1150' in (s['device'].get('gpu') or '')} == {'machine'}
+assert all(c.serves(i, g) for g in dv)
+assert c.with_device_preset(m, 'gfx1201-16gb', {'context_capacity': 18432}, 'chat-r9700') == m   # idempotent" "$C" "$tmp/gpus4" "$R/pkg" \
+  && echo "OK   gpus4: build adds the gfx1201 16 GB class and gfx1150 entries, their presets (R9700-based, default untouched) and the machine evidence" \
+  || { echo "FAIL gpus4: four-GPU info.json or presets are wrong"; bad=1; }
+# a hrx-loom 0.2.0 PyPI pin (llm_config.json "sdk": {"hrx_loom": "0.2.0", "source": "pypi"}): every GPU's block installs `hrx-loom[hf]==0.2.0` from PyPI (no
+# wheel URL, no pre-release note), fetches `huggingface:REPO:PRESET` and serves the package directory
+mkdir -p "$tmp/gpus4_pypi"; cp -r "$tmp/gpus4/." "$tmp/gpus4_pypi/"
+py -c "import json, sys; p = sys.argv[1] + '/llm_config.json'; c = json.load(open(p)); c['sdk'] = {'hrx_loom': '0.2.0', 'source': 'pypi'}; json.dump(c, open(p, 'w'), indent=1)" "$tmp/gpus4_pypi"
+py "$C/render_card.py" "$tmp/gpus4_pypi" 2>/dev/null
+py -c "import sys; r = open(sys.argv[1] + '/README.md').read()
+assert r.count('pipx install \"hrx-loom[hf]==0.2.0\"') == 4 and r.count('<details>') == 4 == r.count('</details>'), r
+assert 'pre-release' not in r and 'releases/download' not in r and 'loom-fetch huggingface:loom-fun-staging/unsloth-Qwen3-0.6B-loom:chat-16gb --materialize=copy' in r
+assert \"loom-serve --model=Qwen3-0.6B '--device=amdgpu://?completion_spin_ns=4294967295' --memory_bytes=15000000000 --state_slab_bytes=4mib\" in r and '/model.json' not in r.split('## Performance')[0].split('loom-serve')[1]" "$tmp/gpus4_pypi" \
+  && echo "OK   gpus4: a PyPI 0.2.0 pin installs hrx-loom[hf]==0.2.0 in every GPU's block, no pre-release note" \
+  || { echo "FAIL gpus4: PyPI 0.2.0 Quick start"; bad=1; }
+# the data file is the only source of a device's data: rebuilding the card from itself (--from-info) with the same files doubles nothing
+mkdir -p "$tmp/gpus4b"; cp -r "$tmp/gpus4/." "$tmp/gpus4b/"
+py "$C/make_info.py" build "$tmp/gpus4b" --from-info "$tmp/gpus4/info.json" --generator-commit $GEN --device-results "$tmp/dev4" --report generated -o "$tmp/gpus4b/info.json" 2>/dev/null
+cmp -s "$tmp/gpus4/info.json" "$tmp/gpus4b/info.json" && echo "OK   gpus4: --from-info with the same device files regenerates the same info.json" \
+  || { echo "FAIL gpus4: --from-info changed info.json"; diff "$tmp/gpus4/info.json" "$tmp/gpus4b/info.json" | head; bad=1; }
+for n in r9700_two r9700_none r9700_staging r9700_preset r9700_exec gpus4; do
   py -c "import sys; sys.path.insert(0, sys.argv[1]); import card_lib as c
 assert c.validate(c.load_json(sys.argv[2])) == [], c.validate(c.load_json(sys.argv[2]))" "$C" "$tmp/$n/info.json" \
     || { echo "FAIL $n: info.json is not valid"; bad=1; }
@@ -445,7 +502,7 @@ assert set(r['gates']) >= {'golden', 'agent'} and 'performance' in r and 'roofli
   "$C" "$tmp/r9700_two" "$tmp/r9700_none" "$tmp/r9700_staging" "$tmp/r_strix_info.json" \
   && echo "OK   r9700: the strix-halo entry is the loom-card/2 card unchanged; R9700 evidence, state and served context are recorded per GPU" \
   || { echo "FAIL r9700: two-GPU info.json is wrong"; bad=1; }
-# loom-card/2 reads as one GPU: the old cards render exactly as before (only the schema string of the Versions line moved)
+# loom-card/2 reads as one GPU: the old cards render as before (the schema string of the Versions line moved; the Strix Quick start serves --pool_backing=fixed)
 for n in flint d1; do
   mkdir -p "$tmp/legacy_$n"; cp -r "$F/pkg/." "$tmp/legacy_$n/" 2>/dev/null; [ $n = d1 ] && { rm -rf "$tmp/legacy_$n"; mkdir -p "$tmp/legacy_$n"; cp -r "$tmp/d1/." "$tmp/legacy_$n/"; }
   cp "$here/legacy/$n/info.json" "$tmp/legacy_$n/info.json"
@@ -495,7 +552,44 @@ assert [k for k in ma if ma[k] != mb[k]] == ['prefill_8k'], [k for k in ma if ma
 assert mb['prefill_8k']['loom'] == round((1424.7 * 1.031 + 1424.7 * 1.034) / 2, 1) and mb['prefill_8k']['baseline'] == ma['prefill_8k']['baseline']
 assert b['remeasure']['improved']['prefill_8k']['published'] == 1424.7" "$C" "$tmp/flint/info.json" "$tmp/ratchet/info.json" \
   && echo "OK   ratchet: only the improved row's Loom value changed (mean of the two runs), llama.cpp kept" || { echo "FAIL ratchet: card values"; bad=1; }
-for n in flint d1 ratchet r9700_two r9700_none r9700_staging r9700_preset r9700_exec; do
+# hrx-loom 0.2.0rc1 packages (llm_config.json "sdk": a release pin): the Quick start installs the release wheel by URL (sha256 checked),
+# fetches `huggingface:REPO[:PRESET]`, serves the directory; sdk02: one preset, sdk02_presets: Strix Halo and R9700 presets
+SDK02='{"hrx_loom": "0.2.0rc1", "source": "release", "branch": "v0.2.0rc1", "hrx_system_sha": "0123456789abcdef0123456789abcdef01234567", "wheel_sha256": "869ba98dea2fef8355aa190f962241cf62b067b7f5788b5d59b55cebd30658cd"}'
+for pair in r9700_none:sdk02 r9700_preset:sdk02_presets; do
+  rm -rf "$tmp/${pair#*:}"; cp -r "$tmp/${pair%:*}" "$tmp/${pair#*:}"
+  py -c "import json, sys; p = sys.argv[1] + '/llm_config.json'; c = json.load(open(p)); c['sdk'] = json.loads(sys.argv[2])
+json.dump(c, open(p, 'w'), indent=1)" "$tmp/${pair#*:}" "$SDK02"
+done
+# a SDK 0.2 package's R9700 preset carries no pool_capacity (context_capacity and memory_bytes size the pool); a v0.1 preset's is clamped
+py -c "import json, sys; sys.path.insert(0, sys.argv[1]); import card_lib as c
+m = c.load_json(sys.argv[2] + '/model.json'); ex = {k: v for k, v in m['presets']['chat']['execution'].items() if k != 'pool_capacity'}
+m['presets']['chat']['execution'] = ex
+alt = c.with_gpu_preset(m, c.gpu_preset_execution({'r9700_execution': {'prefill_capacity': 2048}}, 20480))['presets']['chat-r9700']['execution']
+assert alt['context_capacity'] == 20480 and 'pool_capacity' not in alt, alt
+assert c.EXEC_KEYS == ('prefill_capacity', 'context_capacity', 'rows', 'draft_depth', 'cache_target_bytes')" "$C" "$R/pkg" \
+  && echo "OK   r9700 preset: no pool_capacity on SDK 0.2" || { echo "FAIL r9700 preset: pool_capacity written"; bad=1; }
+# a Loom-only card (regen.py --mode sdk-loom): Loom rows from a later job on the same runner type, the llama.cpp rows copied from the previous card
+# with their own date and run (metric baseline_from); the methodology says "different jobs", never "the same job". flint is the previous card.
+mkdir -p "$tmp/loomonly"; cp -r "$F/pkg/." "$tmp/loomonly/"
+py "$C/make_info.py" perf --gpu strix-halo --loom-jsonl "$F/evidence/loom.jsonl" --c4-loom "$F/evidence/c4_loom_runs.txt" --baseline-from-info "$tmp/flint/info.json" \
+  --date 2026-11-16 "${SRC[@]}" --run 3004 -o "$tmp/lo_perf.json" 2>/dev/null
+py "$C/make_info.py" build "$tmp/loomonly" --repo loom-fun/ggml-org-Flint-loom --generator-commit $GEN --memory-bytes 67000000000 --output flint --report generated \
+  --from-info "$tmp/flint/info.json" --reset-performance --evidence "$tmp/lo_perf.json" -o "$tmp/loomonly/info.json" 2>/dev/null
+py -c "import sys; sys.path.insert(0, sys.argv[1]); import card_lib as c
+o, p = c.load_json(sys.argv[2]), c.load_json(sys.argv[3])
+assert c.validate(o) == [], c.validate(o)
+od, pd = (c.normalize(x)['devices']['strix-halo']['performance'] for x in (o, p))
+assert len(od['sessions']) == 1 and od['sessions'][0]['date'] == '2026-11-16', 'the previous Loom sessions must go'
+want = {k: m['baseline'] for k, (m, _) in c.card_metrics({'performance': pd}).items() if m.get('baseline') is not None}
+got = {k: m['baseline'] for k, m in od['sessions'][0]['metrics'].items() if m.get('baseline') is not None}
+assert got and got == {k: want[k] for k in got}, 'the llama.cpp values are the previous card\'s'
+assert all(m['baseline_from']['date'] in ('2026-11-06', '2026-11-07') and m['baseline_from']['source'] in o['sources'] for m in od['sessions'][0]['metrics'].values() if m.get('baseline') is not None)
+assert od['baseline'] == pd['baseline'], 'the baseline block (build, arguments) is the previous card\'s'" "$C" "$tmp/loomonly/info.json" "$tmp/flint/info.json" \
+  && echo "OK   loomonly: Loom rows of the new job, llama.cpp rows and their provenance of the previous card" \
+  || { echo "FAIL loomonly: the Loom-only card does not carry the previous card's llama.cpp rows"; bad=1; }
+! py "$C/make_info.py" perf --gpu radeon-r9700 --loom-jsonl "$F/evidence/loom.jsonl" --baseline-from-info "$tmp/flint/info.json" "${SRC[@]}" --run 3005 -o "$tmp/lo_none.json" 2>/dev/null \
+  && echo "OK   loomonly: a device the previous card has no table for stops" || { echo "FAIL loomonly: perf --baseline-from-info accepted a device without a table"; bad=1; }
+for n in flint d1 ratchet r9700_two r9700_none r9700_staging r9700_preset r9700_exec gpus4 sdk02 sdk02_presets loomonly; do
   files="info.json README.md REPORT.md"; [ "$n" = flint ] && files="$files flags.json roofline_rows.json"
   py "$C/render_card.py" "$tmp/$n" 2>/dev/null
   py "$C/render_card.py" "$tmp/$n" -o "$tmp/${n}_README2.md" 2>/dev/null

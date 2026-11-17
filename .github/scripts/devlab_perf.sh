@@ -46,6 +46,14 @@
 #            config: generator-config overrides for a rebuild (e.g. {"layers": 12}: timing only)
 #            build: build.py with these env vars (and extra flags); ref: build with that commit's starter AND its knowledge base (skills/loom-kb:
 #            the choices the rebuild resolves; ab_jobs.py --base-ref/--head-ref --build writes fun/staging this way);
+# SDK per variant (SDK A/B, fleet/regen.py plan --mode sdk-ab): {"sdk": "0.1.0" | "0.2.0" | "card"} on a variant = the hrx-loom the variant is
+#            SERVED with. "card" (the default) = the pin of the package it serves (its llm_config.json "sdk", none = 0.1.0): ensure_sdk.sh gives
+#            every distinct SDK its own root ($WORK/loom-sdk-<version>, installed once per runner) and serve.sh runs with that root's VENV, so an
+#            old card on 0.1.0 and a package built from this checkout on 0.2.0 are measured in ONE job, ABBA (the steps list the order:
+#            perf:fun:1 perf:staging:1 perf:staging:1 perf:fun:1 ...). out/sdk_<variant>.json = the root's loom-install.json, install_<variant>.log.
+#            Job (or experiment) "sdk": the SDK of the TOOLS (build.py, perf.py, install.log = the identity ingest reads): a package built here
+#            is built and stamped by it; without it the tools come from the job card's own pin. A card is always fetched with the SDK it pins.
+#            The single-server `ab` step hosts all its variants in one loom-serve, so it refuses variants whose SDKs differ.
 # Job "require_preset_r9700": true (r9700_jobs.py, a package with a fit-row r9700_execution): serving fails unless the card has its <first>-r9700 preset.
 #            serve_args: extra loom-serve flags; execution: model.json overrides (every preset); double: ablation (each kernel.launch in PROGRAM matching REGEX twice).
 #            {"name": "parked", "active_wait": false}: the card's programs served with the SDK's default completion wait
@@ -88,7 +96,9 @@
 #                               at HxW pixels (default 320x224) on the package's weights (a safetensors package: the checkpoint's own tensors) vs
 #                               ref_vit.py, every output within 1.0 + 3 % of the reference; vtest_V.log, vtest_encoder_V.log
 #          gates:V:LEVEL        gates.sh against llama.cpp
-#            "elastic": true: on the R9700 serve with --memory_bytes (the elastic state backing) instead of the card's --pool_backing=fixed
+#            "elastic": true (variant): serve with --memory_bytes (the elastic state backing) on any GPU, instead of the device's card serve_args
+#            (Strix Halo and the R9700: --pool_backing=fixed, no --memory_bytes; added to every variant that brings no serve_args with --pool_backing
+#            and no memory_bytes of its own). The single-server `ab` step is always elastic (several models share one budget).
 # Runner: "runner": "strix" (default) | "r9700" on the experiment or a job picks the DevLab runner (workflow runs-on). On the
 #   R9700 (gfx1201, 32 GB VRAM, 31 GB host RAM, no HIP headers, no Vulkan loader) this script installs libvulkan1 +
 #   mesa-vulkan-drivers (sudo -n apt-get), sets LOOM_MEMORY_CAP_GIB=34 (the budget is VRAM there, not host RAM: memcheck.sh
@@ -177,8 +187,26 @@ trap cleanup EXIT
 # 1. Loom SDK + tools venv: the SDK the card pins in its llm_config.json (ensure_sdk.sh), else the default
 step "Loom SDK"
 curl -fsSL --retry 3 "https://huggingface.co/$repo/resolve/$([[ $repo_ref == *@* ]] && echo "${repo_ref#*@}" || echo main)/llm_config.json" -o "$out/llm_config.json" || { echo "FAIL: no llm_config.json in $repo"; exit 1; }
-root=$("$SV/ensure_sdk.sh" "${LOOM_ROOT:-$WORK/loom}" "$out/llm_config.json" 2> "$out/install.log") || { tail "$out/install.log"; exit 1; }
-export LOOM_ROOT=$root VENV=$root/.venv; T=$root/.tools/bin/python
+ROOT_BASE=${LOOM_ROOT:-$WORK/loom}
+root=$("$SV/ensure_sdk.sh" "$ROOT_BASE" "$out/llm_config.json" 2> "$out/install.log") || { tail "$out/install.log"; exit 1; }   # the job card's own SDK (loom-fetch of the card)
+# job "sdk": the tools' SDK differs from the card's pin (an old card on 0.1.0 next to a package built here on 0.2.0): install.log is that SDK's
+jsdk=$(q "print(j.get('sdk') or e.get('sdk') or 'card')"); troot=$root
+if [ "$jsdk" != card ]; then
+  troot=$(LOOM_VERSION=$jsdk "$SV/ensure_sdk.sh" "$WORK/loom-sdk-$jsdk" "" 2> "$out/install.log") || { tail "$out/install.log"; echo "FAIL: SDK $jsdk"; exit 1; }
+fi
+export LOOM_ROOT=$troot VENV=$troot/.venv; T=$troot/.tools/bin/python
+echo "SDK roots: tools $troot (job sdk $jsdk); job card $root"
+declare -A SDKROOT
+sdk_root() {   # sdk_root VARIANT -> SDKR = the root of the SDK the variant is served with (variant "sdk"; "card" = the pin of its package, a built package = the tools' SDK)
+  local v=$1 s r; SDKR=
+  [ -n "${SDKROOT[$v]:-}" ] && { SDKR=${SDKROOT[$v]}; return 0; }
+  s=$(qv "$v" "print(v.get('sdk') or 'card')")
+  if [ "$s" != card ]; then r=$(LOOM_VERSION=$s "$SV/ensure_sdk.sh" "$WORK/loom-sdk-$s" "" 2> "$out/install_$v.log") || { tail -5 "$out/install_$v.log" >&2; return 1; }
+  elif [ "$(qv "$v" "print('build' in v)")" = True ]; then r=$troot
+  else r=$("$SV/ensure_sdk.sh" "$ROOT_BASE" "$D/$v/pkg/llm_config.json" 2> "$out/install_$v.log") || { tail -5 "$out/install_$v.log" >&2; return 1; }; fi
+  SDKROOT[$v]=$r; SDKR=$r; cp "$r/loom-install.json" "$out/sdk_$v.json" 2>/dev/null
+  echo "variant $v: SDK $s -> root $r ($(python3 -c "import json,sys; d=json.load(open(sys.argv[1])); print(d.get('hrx_loom'), d.get('source'), str(d.get('hrx_system_sha'))[:12])" "$r/loom-install.json" 2>/dev/null))"
+}
 
 # 2. The card (fetched once per runner and card)
 fetch_card() {   # fetch_card REF -> sets CARD_DIR, CARD_BASE, CARD_REV: the card's files at one commit (REF = ORG/REPO[@REV]; a variant "card": REF fetches another card)
@@ -265,14 +293,19 @@ f = drafter_file(json.load(open(sys.argv[2])))   # the drafter / assistant GGUF 
 p = os.path.join(sys.argv[3], 'parameter', os.path.basename(f)) if f else ''
 print(p if p and os.path.exists(p) else '')" "$here/skills/loom-benchmark/scripts/card" "$card/llm_config.json" "$card")
 cardid=$("$T" -c "import json; print(json.load(open('$card/model.json'))['model']['id'])")
-# the card's own build settings (model id, depth, context, pool)
+# the card's own build settings (model id, depth, context, pool): v0.2 kits have no --pool (the server sizes the pool); a v0.1 card's pool_capacity is not passed to them
+POOLFLAG=0; grep -q -- '"--pool"' "$SK/loom-port-llm/starter/build.py" && POOLFLAG=1
 cardargs=$("$T" -c "
 import json; m=json.load(open('$card/model.json')); c=json.load(open('$card/llm_config.json')); ex=next(iter(m['presets'].values()))['execution']
-a=['--context', str(ex['context_capacity']), '--pool', str(ex.get('pool_capacity') or ex['context_capacity']), '--prefill', str(ex['prefill_capacity'])]
+a=['--context', str(ex['context_capacity']), *(['--pool', str(ex.get('pool_capacity') or ex['context_capacity'])] if '$POOLFLAG' == '1' else []), '--prefill', str(ex['prefill_capacity'])]
 d=c.get('draft') or {}
 a += (['--draft', d['kind'], '--draft-depth', str(d['depth'])] if d.get('kind') else [])
 print(' '.join(a))")
 
+slug_arg() {   # slug_arg BUILD_PY CARD_REPO -> "--slug <repo name>" when that build.py takes one (a kit without it has no slug-matched choices), else nothing
+  grep -q -- '"--slug"' "$1" && echo "--slug ${2##*/}"
+  return 0
+}
 hf_sub() {   # hf_sub TEXT -> TEXT with each {hf:OWNER/REPO/FILE} replaced by that Hub file's path, fetched once per runner
   local t=$1 h
   for h in $(echo "$t" | grep -oE '\{hf:[^}]+\}' | sort -u); do
@@ -301,11 +334,11 @@ for v in $variants; do
   pkg=$D/$v/pkg; mkdir -p "$D/$v"
   if [ "$(qv "$v" "print('build' in v)")" = True ]; then
     kit_for "$v" "$(qv "$v" "print(v.get('ref') or '')")" || exit 1
-    extra=$(qv "$v" "print(' '.join(v.get('build_args') or []) + (f\" --context {v['context']} --pool {v['context']}\" if v.get('context') else ''))")   # "context": N = the served context of a reduced-context model (later flags win)
+    extra=$(qv "$v" "print(' '.join(v.get('build_args') or []) + (f\" --context {v['context']}\" + (f\" --pool {v['context']}\" if '$POOLFLAG' == '1' else '') if v.get('context') else ''))")   # "context": N = the served context of a reduced-context model (later flags win)
     extra=$(hf_sub "$extra") || exit 1   # a build_args {hf:OWNER/REPO/FILE} (a Hub drafter the card does not ship)
     envs=$(qv "$v" "print(' '.join(f'{k}={x}' for k, x in (v.get('build') or {}).items()))")
     # the card's slug (its repo name): the knowledge base's model node of the package (exec.*, the kernel choices of its format) applies to a rebuild only with it
-    slugarg=""; grep -q '"--slug"' "${KIT[$v]}/build.py" && slugarg="--slug ${repo##*/}"
+    slugarg=$(slug_arg "${KIT[$v]}/build.py" "$repo")
     step "build $v: env $envs; build.py $slugarg $cardargs $extra"
     # "config": generator-config overrides for this variant's rebuild (e.g. {"layers": 12}: a truncated model; the step
     # time minus the layer-proportional part is the per-step fixed cost; outputs are garbage, only timing counts)
@@ -314,7 +347,9 @@ for v in $variants; do
 import json, sys
 c = json.load(open(sys.argv[1])); c.update(json.loads(sys.argv[3])); json.dump(c, open(sys.argv[2], "w"), indent=1)
 EOF2
-    ( cd "${KIT[$v]}" && env $envs ${KBV[$v]:+LOOM_KB_ROOT=${KBV[$v]}} "$T" build.py "$D/$v/cfg.json" "$pkg" --tokenizer "$card/tokenizer.json" --model-id "$cardid" $slugarg $cardargs $extra ) > "$out/build_$v.log" 2>&1 \
+    # the package's slug (the card's repo name) selects the knowledge base's slug-matched model nodes, as fleet/build_fleet.py's canonical build does:
+    # without it a model's program-level choices (e.g. Qwen3.6-35B-A3B decode.attn.kv_once.d256 on rdna4) are missing and the programs differ from the published ones
+    ( cd "${KIT[$v]}" && env $envs ${KBV[$v]:+LOOM_KB_ROOT=${KBV[$v]}} "$T" build.py "$D/$v/cfg.json" "$pkg" $slugarg --tokenizer "$card/tokenizer.json" --model-id "$cardid" $cardargs $extra ) > "$out/build_$v.log" 2>&1 \
       || { tail -30 "$out/build_$v.log"; echo "FAIL: build $v"; exit 1; }
     tail -3 "$out/build_$v.log"
   else
@@ -347,9 +382,9 @@ p, rules = sys.argv[1], [r.split(":", 1) for r in json.loads(sys.argv[2])]
 if rules:
     out, prog, n = [], None, 0
     for ln in open(p).read().split("\n"):
-        m = re.match(r"command\.program\.def\b.*\s@(\w+)\(", ln)
+        m = re.match(r"command\.(program\.)?def\b.*\s@(\w+)\(", ln)
         if m:
-            prog = m.group(1)
+            prog = m.group(2)
         out.append(ln)
         if re.match(r"\s*(kernel\.launch @|template\.apply<@)", ln) and any(pr in ("*", prog) and re.search(rx, ln) for pr, rx in rules):
             out.append(ln); n += 1
@@ -360,17 +395,22 @@ import json, sys
 m = json.load(open(sys.argv[1])); ex = next(iter(m["presets"].values()))["execution"]
 cap = json.loads(sys.argv[4])   # "cap_pool": N (R9700, fixed backing commits the pool eagerly): a pool above N shrinks to N, the context with it
 for pr in m["presets"].values():   # the overrides apply to every preset (build.py --prefill-r9700 adds a second one)
-    pr["execution"].update(json.loads(sys.argv[2]))
+    # a v0.2 package has no pool_capacity (the server derives the pool): an override of it is dropped there (and the served context is context_capacity)
+    pr["execution"].update({k: x for k, x in json.loads(sys.argv[2]).items() if k != "pool_capacity" or "pool_capacity" in pr["execution"]})
     if cap and (pr["execution"].get("pool_capacity") or 0) > cap:
         pr["execution"]["pool_capacity"] = cap
         pr["execution"]["context_capacity"] = min(pr["execution"]["context_capacity"], cap)
 json.dump(m, open(sys.argv[1], "w"), indent=1)
 # a small-context copy with its own model id, for several packages in one loom-serve (ab steps)
-m["model"]["id"] = sys.argv[3]; ex["context_capacity"] = 16384; ex["pool_capacity"] = 32768
+m["model"]["id"] = sys.argv[3]; ex["context_capacity"] = 16384
+if "pool_capacity" in ex:   # a v0.1 card; a v0.2 card has none (the server derives the pool from --memory_bytes)
+    ex["pool_capacity"] = 32768
 json.dump(m, open(sys.argv[1].replace("model.json", "model_ab.json"), "w"), indent=1)
 print("execution", {k: ex[k] for k in ex if k in ("draft_depth", "rows", "prefill_capacity")})
 EOF
   cp "$pkg/model.json" "$out/model_$v.json"; sha256sum "$pkg"/program/*.loom > "$out/programs_$v.sha256"
+  "$T" -I -c "import sys; sys.path.insert(0, sys.argv[1]); from card_lib import programs_sha256; print(programs_sha256(sys.argv[2]))" \
+    "$here/skills/loom-benchmark/scripts/card" "$pkg" > "$out/programs_sha256_$v.txt" 2>/dev/null   # the aggregate hash of THIS variant's programs (a built variant's: make_info.py --fetched-programs)
 done
 
 pkg_preset() {   # pkg_preset MODEL_JSON -> the preset this runner serves ("" for a card with one preset): the R9700's <first><suffix> when it has one, else the first
@@ -391,18 +431,26 @@ serve_alone() { # serve_alone VARIANT
   [ -z "$rp" ] && [ -z "$RDEV" ] && rp=$("$T" -c "import json,sys; p=list(json.load(open(sys.argv[1]))['presets']); print(p[0] if len(p) > 1 else '')" "$D/$1/pkg/model.json")
   if [ -n "$rp" ] && [[ "$sa" != *--preset=* ]]; then sa="--preset=$rp $sa"; fi
   vmem=$(qv "$1" "print(v.get('memory_bytes') or '$mem')")   # variant "memory_bytes": "none" with --pool_backing=fixed
-  # the R9700 is served as its card's Quick start serves it: card_lib.GPUS "serve_args" (--pool_backing=fixed, no --memory_bytes; the elastic
-  # backing's trim + compaction stalls the long-prefill rows), unless the variant brings its own serve_args/memory_bytes or is "elastic": true
-  gsa=""; if [ -n "$RDEV" ]; then gsa=$("$T" -I -c "import sys; sys.path.insert(0, sys.argv[1]); import card_lib; print(' '.join(card_lib.gpu_serve_args(sys.argv[2])))" "$here/skills/loom-benchmark/scripts/card" "$RDEV"); fi
+  # every GPU is served as its card's Quick start serves it: the registry device's card.serve_args (card_lib.GPUS "serve_args": --pool_backing=fixed on the
+  # R9700 and on Strix Halo, no --memory_bytes; the R9700's elastic trim + compaction stalls the long-prefill rows, hrx-loom 0.2.0's elastic backing
+  # costs Strix prefill, notes u1_rootcause), unless the variant brings its own serve_args/memory_bytes or is "elastic": true (--memory_bytes on any GPU)
+  # (+ --parameter_mode=preload where the package's weights fit the GPU's host copy limit: card_lib.package_serve_args, from the package's own model.json.lock sizes)
+  gsa=$("$T" -I -c "import sys; sys.path.insert(0, sys.argv[1]); import card_lib; print(' '.join(card_lib.package_serve_args(sys.argv[2], sys.argv[3])))" "$here/skills/loom-benchmark/scripts/card" "${RDEV:-strix-halo}" "$D/$1/pkg") \
+    || { echo "FAIL: card_lib.package_serve_args(${RDEV:-strix-halo}) (the device's card serve flags)"; return 1; }
+  local memneed=""
   if [ -n "$gsa" ] && [[ "$sa" != *--pool_backing=* ]] && [ "$(qv "$1" "print(bool(v.get('elastic') or v.get('memory_bytes')))")" = False ]; then
+    [[ "$sa" == *--parameter_mode=* ]] && gsa=$(printf '%s\n' $gsa | grep -v -- '^--parameter_mode=' | tr '\n' ' ')   # the variant's own parameter mode wins
     sa="$gsa $sa"
+    memneed=$vmem   # the elastic budget bounds what fixed backing commits: serve.sh's memcheck still guards the host (Strix memory is host RAM)
     vmem=none
   fi
+  sdk_root "$1" || { echo "FAIL: SDK of variant $1"; return 1; }; local vroot=$SDKR
+  export LOOM_ROOT=$vroot VENV=$vroot/.venv   # the variant's SDK serves it (and runs gates / kernel tests on it)
   [ -n "${PROFILE_SA:-}" ] && sa="$sa $PROFILE_SA"   # the profile step: --print_device_statistics
   # VRAM still held by the process that was just stopped (a vLLM / llama.cpp server, the reference fill, the last loom-serve) makes the load fail
   # (RESOURCE_EXHAUSTED / "model is unavailable"): wait until it is released, and log what was held (vram_log.txt)
   "$B/wait_vram.sh" "serve $1" 1024 180 "$out/vram_log.txt"
-  step "serve $1"; LOOM_ACTIVE_WAIT=$aw "$SV/serve.sh" "perf-$1" "$PORT" amdgpu "$vmem" "$D/$1/pkg/model.json" ${sa:+-- $sa} > "$out/serve_$1.out" 2>&1; tail -2 "$out/serve_$1.out"
+  step "serve $1 (SDK root $vroot)"; LOOM_MEMNEED=$memneed LOOM_ACTIVE_WAIT=$aw "$SV/serve.sh" "perf-$1" "$PORT" amdgpu "$vmem" "$D/$1/pkg/model.json" ${sa:+-- $sa} > "$out/serve_$1.out" 2>&1; tail -2 "$out/serve_$1.out"
   grep -q '^FAILED' "$out/serve_$1.out" && { echo "REGISTRATION FAILED on $RUNNER for variant $1 (fast fail, see serve_$1.out):"; grep -m6 -E 'AMDGPU|error|ERROR' "$out/serve_$1.out" | cut -c1-300; return 1; }
   curl -sf "$url/v1/models" >/dev/null || return 1
   # "ready" is the compiled registration; the weights load on the FIRST request, and until then every request is refused. Wait for that
@@ -521,6 +569,9 @@ while [ "$qi" -lt "${#queue[@]}" ]; do
   [ "${p2:-}" = - ] && p2=""
   case $kind in
     ab)
+      abr=(); for v in $variants; do sdk_root "$v" >/dev/null 2>&1; abr+=("${SDKR:-?}"); done
+      abroots=$(printf '%s\n' "${abr[@]}" | sort -u | wc -l)
+      [ "$abroots" -le 1 ] || { echo "ERROR: step $s hosts all variants in ONE loom-serve, but the variants use $abroots different SDKs (variant \"sdk\"): use perf:/c4: steps (one server per variant)"; res[$s]="ERROR: variants with different SDKs cannot share the ab server"; echo "RESULT $job $s: ${res[$s]}"; continue; }
       for f in "$LOOM_SERVE_STATE"/*.pid; do [ -f "$f" ] && "$SV/stop.sh" "$(basename "$f" .pid)" >/dev/null 2>&1; done
       "$B/llamacpp_server.sh" --stop "$LLAMA_PORT" >/dev/null 2>&1
       ms=(); ids=(); for v in $variants; do ms+=("$D/$v/pkg/model_ab.json"); ids+=("$cardid-$v"); done

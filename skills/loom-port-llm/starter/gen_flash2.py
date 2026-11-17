@@ -267,7 +267,7 @@ A('''kernel.def export("{P}_attention_flash2") @{P}_attention_flash2(%tokens: in
   %tokens = index.assume %tokens_arg [range(%tokens_arg, 16, 8192), multiple_of(%tokens_arg, 16)] : index
   %layer = index.assume %layer_arg [range(%layer_arg, 0, {CFG["layers"]})] : index
   %context = index.assume %context_arg [range(%context_arg, 16, 262144)] : index
-  %pool = index.assume %pool_arg [range(%pool_arg, 16, 1048576)] : index
+  %pool = index.assume %pool_arg [range(%pool_arg, 16, 2147483584)] : index
   %origin = index.constant 0 : offset
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
@@ -364,14 +364,14 @@ QLOAD = "\n".join(f'''  %qc{c} = index.constant {c} : index
   %qf{c} = vector.fragment<rhs> %qh{c} shape [%c16, %c16] : vector<16xf16>''' for c in range(NF))
 if not Q_IN_LOOP:
     A(QLOAD)
-A('''  %zero8 = vector.constant 0.0 : vector<8xf32>
+A('''  %zero8 = vector.splatf 0.0 : vector<8xf32>
   %init = vector.fragment<init> %zero8 shape [%c16, %c16] : vector<8xf32>
   %zero_f = scalar.constant 0.0 : f32
   %neg_big = scalar.constant -3.0e38 : f32
   %scale = scalar.constant {SCALE} : f32
   %scale_v = vector.splat %scale : vector<8xf32>
   %neg_v = vector.splat %neg_big : vector<8xf32>
-  %zero_v8 = vector.constant 0.0 : vector<8xf32>
+  %zero_v8 = vector.splatf 0.0 : vector<8xf32>
   %exchange = scalar.constant 16 : i32
   %width = scalar.constant 32 : i32
   %one_i32 = scalar.constant 1 : i32
@@ -392,7 +392,7 @@ A('''  %zero8 = vector.constant 0.0 : vector<8xf32>
   %ctpk = index.constant {TPK} : index
   %cdpt = index.constant {DPT} : index
 @@STAGING_SLOTS@@
-  %kz = vector.constant 0.0 : vector<{DPT}xf16>
+  %kz = vector.splatf 0.0 : vector<{DPT}xf16>
 ''')
 acc = ", ".join(f"%a{d} = %init : vector<8xf32>" for d in range(NF))
 if CFG["kv_f32"]:
@@ -529,7 +529,7 @@ A("""    %pos0_i32 = index.cast %pos0 : index to i32
     %pos15_i32 = scalar.addi %pos0_i32, %c15_i32m : i32
     %lane_col32m = index.cast %lane_col : index to i32
     %win_lo15 = scalar.subi %pos15_i32, %c2047_i32 : i32
-    %zero16h = vector.constant 0.0 : vector<16xf16>
+    %zero16h = vector.splatf 0.0 : vector<16xf16>
     %iota16 = vector.iota %c0_i32 step %c1_i32m : vector<16xi32>""")
 # A block that starts past the tile's last position holds no visible key: its weights are exactly 0 and its V is staged as
 # zeros, so adding it changes nothing (the plain path does it at the cost of one set of MMAs; it never takes the masked path).

@@ -34,7 +34,7 @@ def _nomma(t, mode):
 def _nodq(t, mode):
     t = re.sub(r"vector\.store %(?:lo16|hi16|blk)_(\d), (%w_stage_st\[[^\n]*)vector<32xi8>, ", r"vector.store %zero32, \2vector<32xi8>, ", t)
     t = re.sub(r"vector\.store %(?:lo16|hi16)_(\d), (%w_stage_st\[[^\n]*)vector<16xi8>, ", r"vector.store %zero16, \2vector<16xi8>, ", t)
-    return t.replace("  %origin = index.constant 0 : offset\n", "  %origin = index.constant 0 : offset\n  %zero16 = vector.constant 0 : vector<16xi8>\n  %zero32 = vector.constant 0 : vector<32xi8>\n", 1)
+    return t.replace("  %origin = index.constant 0 : offset\n", "  %origin = index.constant 0 : offset\n  %zero16 = vector.splati 0 : vector<16xi8>\n  %zero32 = vector.splati 0 : vector<32xi8>\n", 1)
 
 
 @_ablation("nofrag")     # LDS fragment reads of the first K substep only (every substep reuses them): ~1/8 of the LDS read traffic
@@ -177,7 +177,7 @@ PEAK8 = """kernel.def target(@rdna4) export("k_peak8") @k_peak8() {
   %b_view = buffer.view %stage[%origin] : buffer -> view<64x64xf8E5M2, %b_storage>
   %lhs = vector.fragment.load<lhs> %a_view[%c0, %c0] shape [%c16, %c16] : view<64x64xf8E4M3, %a_storage> -> vector<2xi32>
   %rhs = vector.fragment.load<rhs> %b_view[%c0, %c0] shape [%c16, %c16] : view<64x64xf8E5M2, %b_storage> -> vector<2xi32>
-  %zero = vector.constant 0.0 : vector<8xf32>
+  %zero = vector.splatf 0.0 : vector<8xf32>
   %init = vector.fragment<init> %zero shape [%c16, %c16] : vector<8xf32>
   %r0, %r1, %r2, %r3, %r4, %r5, %r6, %r7 = scf.for %i = [%c0 to %c256 step %c1](%a0 = %init : vector<8xf32>, %a1 = %init : vector<8xf32>, %a2 = %init : vector<8xf32>, %a3 = %init : vector<8xf32>, %a4 = %init : vector<8xf32>, %a5 = %init : vector<8xf32>, %a6 = %init : vector<8xf32>, %a7 = %init : vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) {
 """ + "".join(f"    %n{i} = vector.mma %lhs, %rhs, %a{i} : vector<2xi32>, vector<2xi32>, vector<8xf32>\n" for i in range(8)) + """    scf.yield %n0, %n1, %n2, %n3, %n4, %n5, %n6, %n7 : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>
@@ -236,7 +236,7 @@ PEAK8R = """kernel.def target(@rdna4) export("k_peak8r") @k_peak8r() {
   %b_view = buffer.view %stage[%origin] : buffer -> view<64x64xf8E5M2, %b_storage>
   %lhs = vector.fragment.load<lhs> %a_view[%c0, %c0] shape [%c16, %c16] : view<64x64xf8E4M3, %a_storage> -> vector<2xi32>
   %rhs = vector.fragment.load<rhs> %b_view[%c0, %c0] shape [%c16, %c16] : view<64x64xf8E5M2, %b_storage> -> vector<2xi32>
-  %zero = vector.constant 0.0 : vector<8xf32>
+  %zero = vector.splatf 0.0 : vector<8xf32>
   %init = vector.fragment<init> %zero shape [%c16, %c16] : vector<8xf32>
   %r0, %r1, %r2, %r3, %r4, %r5, %r6, %r7 = scf.for %i = [%c0 to %c256 step %c1](%a0 = %init : vector<8xf32>, %a1 = %init : vector<8xf32>, %a2 = %init : vector<8xf32>, %a3 = %init : vector<8xf32>, %a4 = %init : vector<8xf32>, %a5 = %init : vector<8xf32>, %a6 = %init : vector<8xf32>, %a7 = %init : vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) {
 """ + "".join(f"    %n{i} = vector.mma %lhs, %rhs, %a{i} : vector<2xi32>, vector<2xi32>, vector<8xf32>\n" for i in range(8)) + """    scf.yield %n0, %n1, %n2, %n3, %n4, %n5, %n6, %n7 : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>

@@ -26,7 +26,8 @@ class DeviceRegistry(unittest.TestCase):
     def test_tree_is_consistent(self):
         fams, devs = registry.families(), registry.devices()
         self.assertEqual(list(fams), ["rdna3", "rdna4", "cdna3", "xdna2"])
-        self.assertEqual(list(devs)[:3], ["strix-halo", "radeon-rx7900xtx", "radeon-r9700"])   # the first rows keep their order; a new device row may follow
+        old = ["strix-halo", "radeon-rx7900xtx", "radeon-r9700"]
+        self.assertEqual([d for d in devs if d in old], old)   # the first rows keep their relative order; a new device row may follow (gfx1201-16gb, gfx1150)
         for name, f in fams.items():
             self.assertTrue((KB / "device" / name / "README.md").exists(), name)
             for d in f["devices"]:
@@ -67,15 +68,21 @@ class DeviceRegistry(unittest.TestCase):
 
     def test_card_gpus(self):   # card_lib.GPUS as it was hard-coded
         g = card_lib.GPUS
-        self.assertEqual(list(g)[:3], ["strix-halo", "radeon-rx7900xtx", "radeon-r9700"])
+        old = ["strix-halo", "radeon-rx7900xtx", "radeon-r9700"]
+        self.assertEqual([d for d in g if d in old], old)
         self.assertEqual(list(g), list(registry.devices()))
+        # the card shows its GPUs in this order (device.json card.order, else the registry's): Strix Halo, R9700, gfx1201 16 GB, gfx1150
+        self.assertEqual([d for d in card_lib.GPU_ORDER if d != "radeon-rx7900xtx"],
+                         ["strix-halo", "radeon-r9700", "gfx1201-16gb", "gfx1150"])
         self.assertEqual({k: v for k, v in g["strix-halo"].items() if k != "detect"},
                          {"name": 'AMD Ryzen AI Max+ 395 "Strix Halo"', "short": "Strix Halo", "arch": "gfx1151", "memory": None,
-                          "roofline": "strix-halo", "memory_bytes": None, "runner": "Strix Halo", "tag": "strix-halo"})
+                          "roofline": "strix-halo", "memory_bytes": None, "runner": "Strix Halo", "tag": "strix-halo",
+                          "serve_args": ["--pool_backing=fixed"],
+                          "preload_max_weight_bytes": 40_000_000_000})   # Strix Halo is served like the R9700 (hrx-loom 0.2.0's elastic backing costs its prefill)
         self.assertEqual({k: v for k, v in g["radeon-r9700"].items() if k not in ("detect", "preset_suffix")},
                          {"name": "AMD Radeon AI PRO R9700", "short": "Radeon AI PRO R9700", "arch": "gfx1201", "memory": "32 GB",
                           "roofline": "radeon-r9700s", "memory_bytes": 34_000_000_000, "runner": "R9700", "tag": "radeon-r9700",
-                          "serve_args": ["--pool_backing=fixed"]})
+                          "serve_args": ["--pool_backing=fixed"], "preload_max_weight_bytes": None})
         self.assertEqual(g["radeon-r9700"]["preset_suffix"], "-r9700")
         self.assertEqual(card_lib.gpu_preset_name(["chat"]), "chat-r9700")
         self.assertEqual(card_lib.gpu_preset({"presets": ["chat", "chat-r9700"], "preset": "chat"}, "radeon-r9700"), "chat-r9700")

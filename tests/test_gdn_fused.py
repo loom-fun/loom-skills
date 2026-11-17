@@ -88,15 +88,15 @@ class FusedGdn(unittest.TestCase):
         %h8), only in @llm_advance and only when the fp8 operand %h8 exists; the default fp8 GEMM kernel text does not change."""
         import gen_mxfp4s as M
         mv = "kernel.launch @g_mv_mxfp4s_k5120_t16_q8[%nHV, %t](%nHV, %t, %zero_i32, %h16q, %w{0}_3, %w{0}_3_sc, %g{0}) : [index, index](index, index, i32, buffer, view<122880xi8>, view<7680xi8>, buffer)"
-        adv = ("command.program.def public @llm_advance() launch() {\n  %gemm = index.cmp uge, %t, %c64 : index\n  %h8 = buffer.alloca<global> align(256) %h8_size : buffer\n"
+        adv = ("command.def public @llm_advance() launch() {\n  %gemm = index.cmp uge, %t, %c64 : index\n  %h8 = buffer.alloca<global> align(256) %h8_size : buffer\n"
                "    scf.if %gemm {\n    kernel.launch @g_quant_q8[%t, %nH](%t, %nH, %h, %h16q) : [index, index](index, index, buffer, buffer)\n    " + mv.format("alpha") + "\n    } else {\n    }\n"
                "    scf.if %gemm {\n    " + mv.format("beta") + "\n    } else {\n    }\n}\n")
-        prog = "kernel.def export(\"k\") @k() {\n}\n" + adv + "command.program.def public @llm_verify() launch() {\n}\n"
+        prog = "kernel.def export(\"k\") @k() {\n}\n" + adv + "command.def public @llm_verify() launch() {\n}\n"
         out, n = M.ab_f8(prog, 48, 5120)
         self.assertEqual(n, 1)
         self.assertIn("// dual-group: rdna4 kernel.launch @g_ab_gemm_mxfp4s_store_pair_f8_m256_rdna4[%t, %nHV](%t, %k_ab, %nHV, %h8, %s_h8, %walpha_3, %walpha_3_sc, %wbeta_3, %wbeta_3_sc, %galpha, %gbeta)", out)
         self.assertEqual(out.count(mv.format("beta")), 2)   # inside the group (gfx11) and its non-32 else branch, gone from its own block
-        self.assertLess(out.index('export("g_ab_gemm_mxfp4s_store_pair_f8_m256_rdna4")'), out.index("command.program.def"))
+        self.assertLess(out.index('export("g_ab_gemm_mxfp4s_store_pair_f8_m256_rdna4")'), out.index("command.def"))
         self.assertIn("%ab_t32 = index.cmp eq, %ab_rem, %c0 : index", out)
         self.assertEqual(M.ab_f8(prog.replace("%h8 = buffer.alloca", "%hx = buffer.alloca"), 48, 5120)[1], 0)
         self.assertNotIn("%second", M.gemm_mxfp4s_f8_m256("store"))

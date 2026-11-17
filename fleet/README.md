@@ -19,6 +19,7 @@ published model, without a GPU and without any weights.
 | `route_load.py` | instruction load: lines a port / optimize run reads per fleet model (routed files + workflow and kb SKILL.md) vs the pre-refactor set at `--base`; `--md`, `--json` |
 | `replays/` | measure 2: past PRs replayed through the guards (`replay.py NAME`, `mkpatches.py`, `summarize.py`); evidence per PR and `REPLAYS.md` |
 | `regen.py` | regenerate many cards, one command per step (`plan submit poll collect rerun ingest publish status accept adopt`), state in one JSON file; `--mode card` for a new device: no A/B |
+| `devices/` | per-device results of GPUs with no DevLab runner (gfx1201 16 GB class, gfx1150): per model fits / max context / serve flags / preset overrides / evidence with provenance; schema `devices/device_results.schema.json`, `devices/README.md`; `make_info.py build` turns an entry into the card's GPU block, preset and section |
 | `rows_map.json` | kernel family -> card rows / gates (data; first matching rule wins) |
 
     python fleet/build_fleet.py --ref origin/r9700 --out $WORK/base --jobs 12      # ~2 min on 12 cores
@@ -38,7 +39,43 @@ Adding a model: `python fleet/add_model.py SLUG PACKAGE_DIR --staging-revision R
     regen.py submit S.json --max-inflight auto                               # a sweep in waves (the device's runner count); a --priority plan waits one wave at most
     regen.py rerun S.json && regen.py submit S.json                          # ONE confirming -r2 job where the ratchet asks for it
     regen.py publish S.json --dry-run                                        # card-only upload to loom-fun-staging (no flag: uploads)
+    regen.py package S.json --dry-run                                        # sdk-ab: the v0.2 package to staging before ingest (SDK A/B, below)
     regen.py status S.json --status-json status.json                         # models.<slug>.<gpu> stage / verdict / run
+    regen.py plan --base BRANCH --device strix-halo --device radeon-r9700 --mode sdk-ab --all --state S.json   # SDK migration A/B (below)
+
+**SDK A/B (`--mode sdk-ab`)**: per model and device ONE job, ABBA on one runner: `fun` = the published staging card (the staging head at plan time; the manifest revision can lag it) served on
+its own pin (hrx-loom 0.1.0), `staging` = the package BUILT in the job from the job's branch (`--base`) and served on hrx-loom 0.2.0 (variants name
+their `"sdk"`; `devlab_perf.sh` gives each SDK its own root and runs `serve.sh` with that root's VENV; the one-server `ab` step refuses mixed SDKs),
+plus the card job's func / ktest / gates and llama.cpp baselines. `collect` writes `perf` = % delta v0.2 vs v0.1 for decode, prefill (8k), longctx
+(decode_32k) and 4stream (positive = v0.2 faster) per model and device; `status --status-json` writes it as `models.<slug>.perf.<gpu>`. A metric more
+than 3 % slower queues ONE confirming `-r2` job (`rerun`); slower than 3 % in both runs = `needs_decision` with both numbers. `ingest` builds the v0.2
+card on the staging head and puts the delta line into the publish message. Order: `plan -> submit -> poll -> collect -> package -> ingest -> publish`.
+
+**Loom-only sweep (`--mode sdk-loom`)**: when the old card's llama.cpp rows and Loom rows are already measured and neither changed, re-measuring them is waste. Per model
+and device ONE job serves the package built in the job on the new SDK alone (variants `staging` + `stagingnd`, `ab_jobs.py --sdk-ab --loom-only`): Loom perf short and
+long at the card job's session count, c4, func, ktest, gates; no llama.cpp steps, no old-card variant. `collect` takes decode, prefill (8k), longctx (decode_32k) and
+4stream as the % delta of the job's Loom rows against the Loom rows of the OLD card's `info.json` for that device (the card at the old revision; another job on the
+same runner type). A gate failure holds. A metric more than 3 % off either way (or one the old card has and the job did not measure) makes the job's decision
+`confirm`; `rerun` then queues ONE targeted ABBA job for that model and device: the `sdk-ab` job without baselines (old card on its own pin against the new package, same
+job), and its verdict decides: slower than 3 % there = `needs_decision` with the numbers, else the first job promotes. State per job: `perf` (the cross-job deltas, with the ABBA
+ones on the confirmed rows), `perf_cross`, `confirmed` = {row: ABBA %}; `status --status-json` writes `models.<slug>.perf.<gpu>` and `models.<slug>.perf_confirmed.<gpu>`
+(the confirmed rows). `package` is unchanged; `ingest` builds the device's table from the first job's Loom rows (`make_info.py perf --baseline-from-info`) and the previous
+card's llama.cpp rows (ROCm: copied per row with its original run and date as `baseline_from`; Vulkan: the published session stays), never re-measured, and the card's
+methodology says "llama.cpp measured on D (run), Loom on D2 (run): same runner type, different jobs" instead of "same job" (`render_card.py`; a same-job card keeps its wording).
+Order: `plan -> submit -> poll -> collect -> (rerun -> submit -> poll -> collect) -> package -> ingest -> publish`.
+
+`regen.py package S.json [--dry-run] [--slugs S...] [--ref REF]` is the step between `collect` and `ingest` (`make_info.py` refuses programs other than the
+ones the job built, so the v0.2 package must be on staging before the card is made). It builds the base once, CPU only (`build_fleet.py --ref origin/<base>
+--with-gen`), snapshots each staging repo at its head (small files, never weights), and replaces `program/**`, the package-root `*.loom`, `gen/**`,
+`llm_config.json` and `model.json` with the canonical build's; `tokenizer.json`, `model.json.lock` and the card files stay (the old card until `ingest`).
+`model.json` is the canonical one with the published `origins` and parameter-file `origin`s carried over; it is checked against the published one first
+(`pool_capacity`, origins and the per-GPU presets aside): a field the canonical build adds is listed, a removed or changed one stops that model. The
+upload is `publish_package.py upload` (not `--card-only`) to loom-fun-staging with `--parent-commit` = the snapshot head, so a concurrent publish fails it.
+State per job: `package = {revision, programs_sha256, base}`; a rerun skips a published model, and a head that already holds the canonical programs is
+recorded without an upload. A job whose `programs_sha256_staging.txt` differs from the canonical build's stops that model (`needs_decision`); `ingest`
+stops a model without a package, with a package whose hash is not the job's, or whose staging head no longer holds the package's programs. Default
+selection: collected, promoted jobs; `--slugs` takes named models in any stage. `--dry-run` runs everything but the upload (publish_package.py's own dry run)
+and changes no state.
 
 Time model (measured on this campaign's 86 DevLab jobs; new GPU, 35 fitting models, 3 runners, `--mode card`): about 12.8 runner-h, 6.3 h wall
 (3.8 h of it measuring), 1 engineer with about 2 h of active work. `--mode card` costs about 0.75x of an A/B job (0.6x for large models); a

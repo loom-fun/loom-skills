@@ -19,7 +19,7 @@ def card():
     ex = {"rows": 4, "context_capacity": 16384, "draft_depth": 0}
     return {"origins": {"checkpoint": {"kind": "hf", "repository": "o/Q", "revision": "a" * 40},
                         "quantized": {"kind": "hf", "repository": "o/Q-GGUF", "revision": "b" * 40}},
-            "programs": {"source": {"inputs": ["program/a.loom"]}}, "services": {"chat": {"kind": "text"}, "other": {"kind": "text"}},
+            "programs": {"source": {"inputs": [{"path": "program/prepare.loom", "data": ["program/weights.loom"]}, "program/a.loom"]}}, "services": {"chat": {"kind": "text"}, "other": {"kind": "text"}},
             "variants": {"t": {"services": svc(model=files("q-1-of-2.gguf", "q-2-of-2.gguf"))},
                          "tm": {"services": svc(model=files("q-1-of-2.gguf", "q-2-of-2.gguf"), draft=files("mtp.gguf"))}},
             "presets": {"chat": {"service": "chat", "variant": "t", "execution": dict(ex),
@@ -62,6 +62,8 @@ class CatalogBuild(unittest.TestCase):
         self.assertEqual(list(m["variants"]), ["tm"])
         self.assertEqual(list(m["presets"]), ["mtp"])
         self.assertEqual(list(m["services"]), ["chat"])
+        # llm_config.json rides as prepare.loom's data so loom-fetch delivers it (as build.py does for kit packages)
+        self.assertEqual(m["programs"]["source"]["inputs"][0]["data"], ["program/weights.loom", "llm_config.json"])
         ex = m["presets"]["mtp"]["execution"]
         self.assertEqual((ex["context_capacity"], ex["draft_depth"], ex["max_tokens"]), (65536, 3, 4096))
         names = [e["path"] for e in m["variants"]["tm"]["services"]["chat"]["parameters"]["model"]["files"]]

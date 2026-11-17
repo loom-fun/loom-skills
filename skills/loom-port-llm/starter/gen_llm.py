@@ -216,7 +216,7 @@ func.def inline @g_kv_offset(%origins: buffer, %row: index, %position: index, %b
   %page = index.assume %page_value [range(%page_value, 0, %last), lt(%page_value, %blocks)] : index
   %map = buffer.view %origins[%map_origin] : buffer -> view<[%blocks]xi32>
   %physical32 = view.load %map[%page] : view<[%blocks]xi32> -> i32
-  %bounded_physical = scalar.assume %physical32 [range(%physical32, 0, 1048575)] : i32
+  %bounded_physical = scalar.assume %physical32 [range(%physical32, 0, 134217727)] : i32
   %physical = index.cast %bounded_physical : i32 to index
   %page_base = index.mul %physical, %c16 : index
   %within = index.rem %bounded_position, %c16 : index
@@ -287,7 +287,7 @@ func.def inline @g_q4_k_values(%w: buffer, %origin: offset, %group: index) -> (v
   %c4 = index.constant 4 : index
   %header_bytes = index.constant 16 : offset
   %page_bytes = index.constant 32 : offset
-  %nibble_mask = vector.constant 252645135 : vector<8xi32>
+  %nibble_mask = vector.splati 252645135 : vector<8xi32>
   %header_view = buffer.view %w[%origin] : buffer -> view<4xi32>
   %header = vector.load %header_view[0] : view<4xi32> -> vector<4xi32>
   %scale, %minimum = func.call @g_k_metadata(%header, %group) : (vector<4xi32>, index) -> (f32, f32)
@@ -330,10 +330,10 @@ func.def inline @g_q6_k_values(%w: buffer, %origin: offset, %group: index) -> (v
   %qh_base = index.constant 128 : index
   %sc_base = index.constant 192 : index
   %d_bytes = index.constant 208 : offset
-  %thirty_two = vector.constant 32.0 : vector<32xf32>
-  %low_mask = vector.constant 15 : vector<32xi8>
-  %two_bits = vector.constant 3 : vector<32xi8>
-  %four8 = vector.constant 4 : vector<32xi8>
+  %thirty_two = vector.splatf 32.0 : vector<32xf32>
+  %low_mask = vector.splati 15 : vector<32xi8>
+  %two_bits = vector.splati 3 : vector<32xi8>
+  %four8 = vector.splati 4 : vector<32xi8>
   %bounded = index.assume %group [range(%group, 0, 7)] : index
   %half = index.div %bounded, %c4 : index
   %j = index.rem %bounded, %c4 : index
@@ -402,9 +402,9 @@ func.def inline @g_q5_k_values(%w: buffer, %origin: offset, %group: index) -> (v
   %high_bytes = index.constant 16 : offset
   %low_bytes = index.constant 48 : offset
   %page_bytes = index.constant 32 : offset
-  %nibble_mask = vector.constant 252645135 : vector<8xi32>
-  %bit_mask = vector.constant 16843009 : vector<8xi32>
-  %four = vector.constant 4 : vector<8xi32>
+  %nibble_mask = vector.splati 252645135 : vector<8xi32>
+  %bit_mask = vector.splati 16843009 : vector<8xi32>
+  %four = vector.splati 4 : vector<8xi32>
   %header_view = buffer.view %w[%origin] : buffer -> view<4xi32>
   %header = vector.load %header_view[0] : view<4xi32> -> vector<4xi32>
   %scale, %minimum = func.call @g_k_metadata(%header, %group) : (vector<4xi32>, index) -> (f32, f32)
@@ -445,7 +445,7 @@ func.def inline @g_q4_k_codes(%w: buffer, %origin: offset, %group: index) -> (ve
   %c4 = index.constant 4 : index
   %header_bytes = index.constant 16 : offset
   %page_bytes = index.constant 32 : offset
-  %nibble_mask = vector.constant 252645135 : vector<8xi32>
+  %nibble_mask = vector.splati 252645135 : vector<8xi32>
   %header_view = buffer.view %w[%origin] : buffer -> view<4xi32>
   %header = vector.load %header_view[0] : view<4xi32> -> vector<4xi32>
   %scale, %minimum = func.call @g_k_metadata(%header, %group) : (vector<4xi32>, index) -> (f32, f32)
@@ -538,8 +538,8 @@ func.def inline @g_q4_0_icodes(%w: buffer, %origin: offset, %group: index) -> (v
   %scale_half = view.load %scale_view[0] : view<1xf16> -> f16
   %scale = scalar.extf %scale_half : f16 to f32
   %packed = vector.load %code_view[0] : view<16xi8> -> vector<16xi8>
-  %nibble_mask = vector.constant 15 : vector<16xi8>
-  %four = vector.constant 4 : vector<16xi8>
+  %nibble_mask = vector.splati 15 : vector<16xi8>
+  %four = vector.splati 4 : vector<16xi8>
   %low = vector.andi %packed, %nibble_mask : vector<16xi8>
   %high = vector.shrui %packed, %four : vector<16xi8>
   %codes = vector.concat<0> %low, %high : vector<16xi8>, vector<16xi8> -> vector<32xi8>
@@ -553,7 +553,7 @@ func.def inline @g_q4_k_icodes(%w: buffer, %origin: offset, %group: index) -> (v
   %c4 = index.constant 4 : index
   %header_bytes = index.constant 16 : offset
   %page_bytes = index.constant 32 : offset
-  %nibble_mask = vector.constant 252645135 : vector<8xi32>
+  %nibble_mask = vector.splati 252645135 : vector<8xi32>
   %header_view = buffer.view %w[%origin] : buffer -> view<4xi32>
   %header = vector.load %header_view[0] : view<4xi32> -> vector<4xi32>
   %scale, %minimum = func.call @g_k_metadata(%header, %group) : (vector<4xi32>, index) -> (f32, f32)
@@ -579,9 +579,9 @@ func.def inline @g_q5_k_icodes(%w: buffer, %origin: offset, %group: index) -> (v
   %high_bytes = index.constant 16 : offset
   %low_bytes = index.constant 48 : offset
   %page_bytes = index.constant 32 : offset
-  %nibble_mask = vector.constant 252645135 : vector<8xi32>
-  %bit_mask = vector.constant 16843009 : vector<8xi32>
-  %four = vector.constant 4 : vector<8xi32>
+  %nibble_mask = vector.splati 252645135 : vector<8xi32>
+  %bit_mask = vector.splati 16843009 : vector<8xi32>
+  %four = vector.splati 4 : vector<8xi32>
   %header_view = buffer.view %w[%origin] : buffer -> view<4xi32>
   %header = vector.load %header_view[0] : view<4xi32> -> vector<4xi32>
   %scale, %minimum = func.call @g_k_metadata(%header, %group) : (vector<4xi32>, index) -> (f32, f32)
@@ -620,10 +620,10 @@ func.def inline @g_q6_k_icodes(%w: buffer, %origin: offset, %group: index) -> (v
   %qh_base = index.constant 128 : index
   %sc_base = index.constant 192 : index
   %d_bytes = index.constant 208 : offset
-  %thirty_two = vector.constant 32 : vector<32xi8>
-  %low_mask = vector.constant 15 : vector<32xi8>
-  %two_bits = vector.constant 3 : vector<32xi8>
-  %four8 = vector.constant 4 : vector<32xi8>
+  %thirty_two = vector.splati 32 : vector<32xi8>
+  %low_mask = vector.splati 15 : vector<32xi8>
+  %two_bits = vector.splati 3 : vector<32xi8>
+  %four8 = vector.splati 4 : vector<32xi8>
   %bounded = index.assume %group [range(%group, 0, 7)] : index
   %half = index.div %bounded, %c4 : index
   %j = index.rem %bounded, %c4 : index
@@ -700,9 +700,9 @@ kernel.def export("g_quant_q8") @g_quant_q8(%rows: index, %width: index) {
   %zero_f = scalar.constant 0.0 : f32
   %c127 = scalar.constant 127.0 : f32
   %zero_i = scalar.constant 0 : i32
-  %zero8i = vector.constant 0 : vector<8xi32>
-  %ones8 = vector.constant 1 : vector<32xi8>
-  %zero32 = vector.constant 0.0 : vector<32xf32>
+  %zero8i = vector.splati 0 : vector<8xi32>
+  %ones8 = vector.splati 1 : vector<32xi8>
+  %zero32 = vector.splatf 0.0 : vector<32xf32>
   %groups = index.div %width, %c32 : index
   %wg = kernel.workgroup.id<x> : index
   %row_id = kernel.workgroup.id<y> : index
@@ -802,8 +802,8 @@ func.def inline @g_mxfp4_values(%w: buffer, %origin: offset, %group: index) -> (
   %bits = scf.select %e_low, %tiny, %normal : i32
   %d = scalar.bitcast %bits : i32 to f32
   %payload = vector.load %code_view[0] : view<16xi8> -> vector<16xi8>
-  %mask = vector.constant 15 : vector<16xi8>
-  %four = vector.constant 4 : vector<16xi8>
+  %mask = vector.splati 15 : vector<16xi8>
+  %four = vector.splati 4 : vector<16xi8>
   %lower = vector.andi %payload, %mask : vector<16xi8>
   %shifted = vector.shrui %payload, %four : vector<16xi8>
   %upper = vector.andi %shifted, %mask : vector<16xi8>
@@ -856,8 +856,8 @@ func.def inline @g_mxfp4s_values(%w: buffer, %ws: buffer, %origin: offset, %scal
   %bits = scf.select %e_low, %tiny, %normal : i32
   %d = scalar.bitcast %bits : i32 to f32
   %payload = vector.load %code_view[0] : view<16xi8> -> vector<16xi8>
-  %mask = vector.constant 15 : vector<16xi8>
-  %four = vector.constant 4 : vector<16xi8>
+  %mask = vector.splati 15 : vector<16xi8>
+  %four = vector.splati 4 : vector<16xi8>
   %lower = vector.andi %payload, %mask : vector<16xi8>
   %shifted = vector.shrui %payload, %four : vector<16xi8>
   %upper = vector.andi %shifted, %mask : vector<16xi8>
@@ -907,8 +907,8 @@ func.def inline @g_q5_0_icodes(%w: buffer, %origin: offset, %group: index) -> (v
   %scale_half = view.load %scale_view[0] : view<1xf16> -> f16
   %scale = scalar.extf %scale_half : f16 to f32
   %packed = vector.load %code_view[0] : view<16xi8> -> vector<16xi8>
-  %nibble_mask = vector.constant 15 : vector<16xi8>
-  %four = vector.constant 4 : vector<16xi8>
+  %nibble_mask = vector.splati 15 : vector<16xi8>
+  %four = vector.splati 4 : vector<16xi8>
   %low = vector.andi %packed, %nibble_mask : vector<16xi8>
   %high = vector.shrui %packed, %four : vector<16xi8>
   %nibbles = vector.concat<0> %low, %high : vector<16xi8>, vector<16xi8> -> vector<32xi8>
@@ -922,14 +922,14 @@ func.def inline @g_q5_0_icodes(%w: buffer, %origin: offset, %group: index) -> (v
   %step_i = scalar.constant 4 : i32
   %word_shift = vector.iota %zero_i step %step_i : vector<8xi32>
   %bits = vector.shrui %high_splat, %word_shift : vector<8xi32>
-  %m1 = vector.constant 1 : vector<8xi32>
-  %m2 = vector.constant 2 : vector<8xi32>
-  %m4 = vector.constant 4 : vector<8xi32>
-  %m8 = vector.constant 8 : vector<8xi32>
-  %s4 = vector.constant 4 : vector<8xi32>
-  %s11 = vector.constant 11 : vector<8xi32>
-  %s18 = vector.constant 18 : vector<8xi32>
-  %s25 = vector.constant 25 : vector<8xi32>
+  %m1 = vector.splati 1 : vector<8xi32>
+  %m2 = vector.splati 2 : vector<8xi32>
+  %m4 = vector.splati 4 : vector<8xi32>
+  %m8 = vector.splati 8 : vector<8xi32>
+  %s4 = vector.splati 4 : vector<8xi32>
+  %s11 = vector.splati 11 : vector<8xi32>
+  %s18 = vector.splati 18 : vector<8xi32>
+  %s25 = vector.splati 25 : vector<8xi32>
   %b0m = vector.andi %bits, %m1 : vector<8xi32>
   %b1m = vector.andi %bits, %m2 : vector<8xi32>
   %b2m = vector.andi %bits, %m4 : vector<8xi32>
@@ -951,7 +951,7 @@ func.def inline @g_q5_0_icodes(%w: buffer, %origin: offset, %group: index) -> (v
 func.def inline @g_q5_0_values(%w: buffer, %origin: offset, %group: index) -> (vector<32xf32>) {
   %codes, %scale, %minimum = func.call @g_q5_0_icodes(%w, %origin, %group) : (buffer, offset, index) -> (vector<32xi8>, f32, f32)
   %codes_f = vector.uitofp %codes : vector<32xi8> to vector<32xf32>
-  %sixteen = vector.constant 16.0 : vector<32xf32>
+  %sixteen = vector.splatf 16.0 : vector<32xf32>
   %centered = vector.subf %codes_f, %sixteen : vector<32xf32>
   %ds = vector.splat %scale : vector<32xf32>
   %values = vector.mulf %centered, %ds : vector<32xf32>
@@ -1169,7 +1169,7 @@ kernel.def export("{name}") @{name}(%n: index, %tokens: index) {{
   %row_bytes = index.constant {rb} : offset
   %block_bytes = index.constant {FMT[fmt]} : offset
   %zero_f = scalar.constant 0.0 : f32
-  %zero32 = vector.constant 0.0 : vector<32xf32>
+  %zero32 = vector.splatf 0.0 : vector<32xf32>
 """ + (f"""
   %x_view = buffer.view %x[%zero] : buffer -> view<[%tokens]x{groups}x32xf32>""" if not iq else f"""
   %xq_view = buffer.view %x[%zero] : buffer -> view<[%tokens]x{groups}x8xi32>
@@ -1187,9 +1187,9 @@ kernel.def export("{name}") @{name}(%n: index, %tokens: index) {{
   %within = index.rem %g, %cgpb : index
   %ba = index.scale %blk, %block_bytes : index, offset -> offset""" + ("""
   %zero_i = scalar.constant 0 : i32
-  %zero8i = vector.constant 0 : vector<8xi32>
-  %zero32i8 = vector.constant 0 : vector<32xi8>
-  %zero1i = vector.constant 0 : vector<1xi32>""" + bfly_setup(CHK) if iq else "")]
+  %zero8i = vector.splati 0 : vector<8xi32>
+  %zero32i8 = vector.splati 0 : vector<32xi8>
+  %zero1i = vector.splati 0 : vector<1xi32>""" + bfly_setup(CHK) if iq else "")]
     PV = f"""  %part_bytes = index.constant {waves * R * TG * nw * 4} : offset
   %parts = buffer.alloca<workgroup> align(16) %part_bytes : buffer
   %pv = buffer.view %parts[%zero] : buffer -> view<{nw}x{waves}x{R}x{TG}xf32>
@@ -1389,7 +1389,7 @@ kernel.def export("{name}") @{name}(%n: index, %tokens: index) {{
   %row_bytes = index.constant {rb} : offset
   %block_bytes = index.constant {FMT[fmt]} : offset
   %zero_f = scalar.constant 0.0 : f32
-  %zero32 = vector.constant 0.0 : vector<32xf32>
+  %zero32 = vector.splatf 0.0 : vector<32xf32>
   %x_view = buffer.view %x[%zero] : buffer -> view<[%tokens]x{groups}x32xf32>
   %row_base = index.mul %group_id, %rows_per : index
   %token0 = index.mul %tgroup_id, %tg : index
@@ -1690,7 +1690,7 @@ kernel.def export("g_embed") @g_embed(%tokens: index) {{
   %block_bytes = index.constant {FMT[EFMT]} : offset
   %row_origin = index.scale %id, %row_bytes : index, offset -> offset
   %active = index.cmp ult, %lane, %groups : index
-  %zero32 = vector.constant 0.0 : vector<32xf32>
+  %zero32 = vector.splatf 0.0 : vector<32xf32>
   %values = scf.if %active -> (vector<32xf32>) {{
     %block = index.div %lane, %c8 : index
     %within = index.rem %lane, %c8 : index
@@ -1737,7 +1737,7 @@ kernel.def export("g_post_add_norm") @g_post_add_norm(%tokens: index) {{
   %c0 = index.constant 0 : index
   %groups = index.constant {HG} : index
   %zero_f = scalar.constant 0.0 : f32
-  %zero32 = vector.constant 0.0 : vector<32xf32>
+  %zero32 = vector.splatf 0.0 : vector<32xf32>
   %count = scalar.constant {float(H)} : f32
   %active = index.cmp ult, %lane, %groups : index
   %bl_raw = index.min %lane, %groups : index
@@ -1893,9 +1893,9 @@ def live_row_scale(program):
     """In @llm_advance (prefill; the drafting programs keep g_row_scale_f16: their draft-block rows are not live but
     are computed), the epoch's token-row scales (g_row_scale_f16[%t]) take %info, so padding rows get scale 0."""
     import re as _re
-    parts = _re.split(r"(?m)^(?=command\.program\.def )", program)
+    parts = _re.split(r"(?m)^(?=command\.def )", program)
     for n, p in enumerate(parts):
-        if p.startswith("command.program.def public @llm_advance("):
+        if p.startswith("command.def public @llm_advance("):
             parts[n] = _re.sub(r"kernel\.launch @g_row_scale_f16\[%t\]\(%t, (.*?)\) : \[index\]\(index, index, buffer, buffer, buffer\)",
                                r"kernel.launch @g_row_scale_f16_live[%t](%t, %info, \1) : [index](index, buffer, index, buffer, buffer, buffer)", p)
     return "".join(parts)
@@ -1960,8 +1960,8 @@ def live_row_skip(text, prefill_conds=("%mm", "%gemm", "%big", "%huge"), skip_na
         m = re.match(r'kernel\.def export\("(\w+)"\)', d)
         if m and "  kernel.return\n}\n" in d:
             defs[m.group(1)] = d[:d.index("  kernel.return\n}\n") + len("  kernel.return\n}\n")]
-    a = text.index("command.program.def public @llm_advance(")
-    b = text.find("\ncommand.program.def ", a + 10)
+    a = text.index("command.def public @llm_advance(")
+    b = text.find("\ncommand.def ", a + 10)
     b = len(text) if b < 0 else b + 1
     new, out, stack = {}, [], []
     for line in text[a:b].split("\n"):
@@ -2097,7 +2097,7 @@ kernel.def export("g_deepstack") @g_deepstack(%tokens: index) {{
   %c0 = index.constant 0 : index
   %groups = index.constant {HG} : index
   %zero_f = scalar.constant 0.0 : f32
-  %zero32 = vector.constant 0.0 : vector<32xf32>
+  %zero32 = vector.splatf 0.0 : vector<32xf32>
 {ids_prelude()}{FEATURE_FLAG}  %active = index.cmp ult, %lane, %groups : index
   %work = scalar.andi %active, %is_feat : i1
   %x_view = buffer.view %x[%zero] : buffer -> view<[%tokens]x{HG}x32xf32>
@@ -2323,7 +2323,7 @@ kernel.def export("{name}") @{name}(%tokens: index) {{
   %tokens = index.assume %tokens_arg [range(%tokens_arg, 1, 8192)] : index
   %layer = index.assume %layer_arg [range(%layer_arg, 0, {L - 1})] : index
   %context = index.assume %context_arg [range(%context_arg, 16, 262144)] : index
-  %pool = index.assume %pool_arg [range(%pool_arg, 16, 1048576)] : index
+  %pool = index.assume %pool_arg [range(%pool_arg, 16, 2147483584)] : index
   %token_id = kernel.workgroup.id<x> : index
   %token = index.assume %token_id [lt(%token_id, %tokens)] : index
   %wave_id = kernel.subgroup.id : index
@@ -2992,7 +2992,7 @@ kernel.def export("{P}_attention_split") @{P}_attention_split(%tokens: index) {{
   %tokens = index.assume %tokens_arg [range(%tokens_arg, 1, 8192)] : index
   %layer = index.assume %layer_arg [range(%layer_arg, 0, 51)] : index
   %context = index.assume %context_arg [range(%context_arg, 16, 262144)] : index
-  %pool = index.assume %pool_arg [range(%pool_arg, 16, 1048576)] : index
+  %pool = index.assume %pool_arg [range(%pool_arg, 16, 2147483584)] : index
   %token_id = kernel.workgroup.id<x> : index
   %token = index.assume %token_id [lt(%token_id, %tokens)] : index
   %kv_id = kernel.workgroup.id<y> : index
@@ -4211,7 +4211,7 @@ def head_pieces(text, root, key, prefix, sizes, rows):
     pat = _re.compile(r'^([ \t]*)(%\w+) = command\.parameter ' + _re.escape(root) + r', "' + _re.escape(key) + r'" : view<(\d+)xi8>\n', _re.M)
     lpat = _re.compile(r'^([ \t]*)kernel\.launch @(g_head_mv\w*)\[([^\]]*)\]\(([^)]*)\) : \[index\]\(([^)]*)\)$', _re.M)
     c0 = [sum(sizes[:k]) // 128 for k in range(len(sizes))]
-    parts = text.split("\ncommand.program.def")
+    parts = text.split("\ncommand.def")
     hits = 0
     for b, blk in enumerate(parts[1:], 1):
         m0 = pat.search(blk)
@@ -4244,7 +4244,7 @@ def head_pieces(text, root, key, prefix, sizes, rows):
         assert not _re.search(_re.escape(var) + r'(?!\w)', blk.split("\n}\n", 1)[0]), f"head_pieces: {var} has a use that is not a head launch"
         parts[b] = blk
     assert hits, f"head_pieces: no parameter {key!r} on {root}"
-    return "\ncommand.program.def".join(parts), used
+    return "\ncommand.def".join(parts), used
 
 
 PHEAD_MAIN = {}      # proposal-head piece entries prepared by the main weight policy (draft.propose.head_pieces)
@@ -4297,7 +4297,7 @@ kernel.def export("{name}") @{name}(%spans: index) {{
   %row_bytes = index.constant {rb} : offset
   %block_bytes = index.constant {FMT[fmt]} : offset
   %zero_f = scalar.constant 0.0 : f32
-  %zero32 = vector.constant 0.0 : vector<32xf32>
+  %zero32 = vector.splatf 0.0 : vector<32xf32>
   %c0_i32 = scalar.constant 0 : i32
   %c1_i32 = scalar.constant 1 : i32
   %false = scalar.constant false : i1
@@ -4313,9 +4313,9 @@ kernel.def export("{name}") @{name}(%spans: index) {{
   %xm_off = index.scale %tokens, %xm_k : index, offset -> offset
   %xm_view = buffer.view %h[%xm_off] : buffer -> view<[%tokens]x{groups}x2xf32>
   %zero_i = scalar.constant 0 : i32
-  %zero8i = vector.constant 0 : vector<8xi32>
-  %zero32i8 = vector.constant 0 : vector<32xi8>
-  %zero1i = vector.constant 0 : vector<1xi32>""") + f"""
+  %zero8i = vector.splati 0 : vector<8xi32>
+  %zero32i8 = vector.splati 0 : vector<32xi8>
+  %zero1i = vector.splati 0 : vector<1xi32>""") + f"""
   %span0 = index.mul %sgroup, %tgc : index
   %ok = index.cmp ult, %workitem, %groups : index
   %g_last = index.constant {groups - 1} : index
@@ -4632,7 +4632,7 @@ def quant_wiring_mtp_only(program):
     """quant_wiring() over the MTP warm and propose programs alone (each one on its own text: the read / made sets are per program)."""
     import re as _re
     for name in ("llm_mtp_warm", "llm_mtp_propose"):
-        m = _re.search(r"command\.program\.def public @" + name + r"\(\).*?\n\}\n", program, _re.S)
+        m = _re.search(r"command\.def public @" + name + r"\(\).*?\n\}\n", program, _re.S)
         if m:
             program = program[:m.start()] + quant_wiring(m.group(0)) + program[m.end():]
     return program
@@ -4996,7 +4996,7 @@ def gelu_vectors(text):
     def sub(m):
         ind, o, x, ty = m.group(1), m.group(2), m.group(3), m.group(4)
         return (f"{ind}%{o}_x2 = vector.mulf %{x}, %{x} : {ty}\n{ind}%{o}_x3 = vector.mulf %{o}_x2, %{x} : {ty}\n"
-                f"{ind}%{o}_ca = vector.constant 0.044715 : {ty}\n{ind}%{o}_cb = vector.constant 1.5957691216057308 : {ty}\n"
+                f"{ind}%{o}_ca = vector.splatf 0.044715 : {ty}\n{ind}%{o}_cb = vector.splatf 1.5957691216057308 : {ty}\n"
                 f"{ind}%{o}_in = vector.fmaf %{o}_x3, %{o}_ca, %{x} : {ty}\n{ind}%{o}_ar = vector.mulf %{o}_in, %{o}_cb : {ty}\n"
                 f"{ind}%{o}_sg = vector.logisticf<afn> %{o}_ar : {ty}\n{ind}%{o} = vector.mulf %{x}, %{o}_sg : {ty}")
     return re.sub(r"( *)%(\w+) = vector\.siluf<afn> %(\w+) : (vector<\w+>)", sub, text)
@@ -5234,7 +5234,7 @@ kernel.def export("g_rows_gather") @g_rows_gather(%spans: index) {
   %quads = index.div %width, %c4 : index
   %src_view = buffer.view %src[%zero] : buffer -> view<[%tokens]x[%quads]x4xf32>
   %dst_view = buffer.view %dst[%zero] : buffer -> view<[%spans]x[%quads]x4xf32>
-  %z4 = vector.constant 0.0 : vector<4xf32>
+  %z4 = vector.splatf 0.0 : vector<4xf32>
   scf.for %q = [%lane to %quads step %c256] {
     %qb = index.assume %q [lt(%q, %quads)] : index
     %v = scf.if %live -> (vector<4xf32>) {
@@ -5472,9 +5472,9 @@ config.decl @llm.spans : %value: index where [range(%value, 1, 8192)]
 
 config.decl @llm.tokens : %value: index where [range(%value, 1, 8192)]
 
-config.decl @llm.pool : %value: index where [range(%value, 16, 1048576)]
+config.decl @llm.pool : %value: index where [range(%value, 16, 2147483584)]
 
-command.program.def public @llm_advance() launch(%weights: buffer, %residual: buffer, %metadata: buffer, %origins: buffer, %arena: buffer, %tokens: buffer, %outputs: buffer) {{
+command.def public @llm_advance() launch(%weights: buffer, %residual: buffer, %metadata: buffer, %origins: buffer, %arena: buffer, %tokens: buffer, %outputs: buffer) {{
   %t = config.get @llm.tokens : index
   %spans = config.get @llm.spans : index
   %context = config.get @llm.context : index
@@ -5843,7 +5843,7 @@ if __name__ == "__main__":
         # matvec re-read its weights per 4 tokens; Muse-Glimmer c4 epoch 161.5 -> 157.6 ms). Proposals keep the int8
         # matvec (the GEMM from 5 there: 161.5 -> 173.4 ms).
         import re as _re
-        _wm = _re.search(r"command\.program\.def public @llm_\w+_warm\(\).*?\n\}\n", program, _re.S)
+        _wm = _re.search(r"command\.def public @llm_\w+_warm\(\).*?\n\}\n", program, _re.S)
         if _wm and "%c5_mm = index.constant" in _wm.group(0):
             program = program[:_wm.start()] + _re.sub(r"%c5_mm = index\.constant \d+ : index", "%c5_mm = index.constant "
                       + os.environ.get("DRAFT_MM_FROM", "5") + " : index", _wm.group(0), count=1) + program[_wm.end():]
@@ -5886,7 +5886,7 @@ if __name__ == "__main__":
             _pf, _ps = ("q6_k", "_pq6") if PHEAD_ROWS and HPREP[HKEY][1] == "q6_k" else ("q4_0", "_p40")
             COMMON += "".join(head_mv(tg, _pf, iq=True, suffix=_ps) for tg in (1, 4, 8, 16))
             V, CHUNKS = _V, _CH
-            _pm = _re.search(r"command\.program\.def public @llm_" + gen_draft.DRAFT["kind"] + r"_propose\(\).*?\n\}\n", program, _re.S)
+            _pm = _re.search(r"command\.def public @llm_" + gen_draft.DRAFT["kind"] + r"_propose\(\).*?\n\}\n", program, _re.S)
             _pt = head_wiring(_pm.group(0)) if PH_ONLY else _pm.group(0)
             _pt = _re.sub(r"@(g_head_mv\w*_q8)\[", r"@\1" + _ps + "[", _pt)
             if PHEAD_ROWS and PHEAD_ROWS[2] < V:
@@ -5915,7 +5915,7 @@ if __name__ == "__main__":
         COMMON += BF16_VALUES
     if {f for f, *_ in USED_MV | USED_MV_R} & LOWBIT or set(USED_GEMM) & LOWBIT or any(t["type"] in LOWBIT for t in TENS.values()):
         COMMON += "\n" + open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "quant_values.loom")).read()
-    parts = [f"// Generated by gen_llm.py from {os.environ.get('LLM_CONFIG') or sys.argv[1]}.\n", COMMON.replace("%c8_q6", "%c8q6").replace(
+    parts = [f"// Generated by gen_llm.py from {os.path.basename(os.environ.get('LLM_CONFIG') or sys.argv[1])}.\n", COMMON.replace("%c8_q6", "%c8q6").replace(
         "  %c64 = index.constant 64 : index\n  %qh_base", "  %c64 = index.constant 64 : index\n  %c8q6 = index.constant 8 : index\n  %qh_base")]
     for TG in (1, 4):
         for fmt, K, sw in sorted((f, k, w) for f, k, w, t in USED_MV if t == TG):

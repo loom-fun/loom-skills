@@ -22,6 +22,12 @@ import os
 import subprocess
 import sys
 
+# The SDK the kit's programs need: written to llm_config.json "sdk" (the schema of loom-setup/scripts/sdk_pin.py). 0.2.0 is on PyPI
+# (a pre-release such as 0.2.0rc1 was a GitHub release instead): the wheel is pinned by sha256 and the commit is the v0.2.0 tag of ROCm/hrx-system.
+SDK_PIN = {"hrx_loom": "0.2.0", "source": "pypi",
+           "wheel_sha256": "5148f9e3a264af400ec4bae38bd7b06bf551d28cc33b7a61d67f7bcefa590438",
+           "hrx_system_sha": "0cd370f2baaa0cfef47cc23007f1a109906f8a52"}
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 SKILL_REL = os.path.join("skills", "loom-port-llm")
 

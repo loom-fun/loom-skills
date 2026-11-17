@@ -23,11 +23,16 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
 import sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+import loomtext  # noqa: E402
 
 ALLOWED_ADDED = ("g_logits_export", "llm.logits", "llm.logit_slots")
 SHAPES = {"decode": ("1", "1"), "prefill": ("256", "4")}   # llm.tokens, llm.spans
-START = re.compile(r"^(command\.program\.def|kernel\.def|func\.def|func\.decl|template\.def|template\.decl|global\.rodata\.def|config\.(?:def|decl)|target\.decl|amdgpu\.target)\b")
+START = re.compile(r"^(command\.program\.def|command\.def|kernel\.def|func\.def|func\.decl|template\.def|template\.decl|global\.rodata\.def|config\.(?:def|decl)|target\.decl|amdgpu\.target)\b")
 SYMBOL = re.compile(r'@([\w.$]+)')
 PASSES = ["--pass=canonicalize", "--pass=cse", "--pass=dce", "--pass=symbol-dce"]
 EXTRA = ["--config=llm.width=4", "--config=llm.gated=0", "--config=llm.epoch_spans=4", "--config=llm.epoch_tokens=64"]
@@ -35,7 +40,7 @@ TARGETS = ("amdgpu:gfx1151", "amdgpu:gfx1201")
 
 
 def tool(name):
-    for c in (os.environ.get(name.upper().replace("-", "_")), shutil.which(name), f"/home/jfowers/lt/loom010/.venv/bin/{name}"):
+    for c in (os.environ.get(name.upper().replace("-", "_")), shutil.which(name)):
         if c and os.path.exists(c):
             return c
     sys.exit(f"{name} not found (set {name.upper().replace('-', '_')})")
@@ -44,7 +49,14 @@ def tool(name):
 def fold(path, shape):
     tokens, spans = SHAPES[shape]
     cfg = [f"--config=llm.context=4096", f"--config=llm.pool=4096", f"--config=llm.tokens={tokens}", f"--config=llm.spans={spans}"] + EXTRA
-    r = subprocess.run([tool("loom-opt"), path] + PASSES + cfg, capture_output=True, text=True)
+    # v0.1 programs read as v0.2 (the loom-opt of the SDK under test only parses its own spelling)
+    with open(path) as fh:
+        text = loomtext.upgrade_v01(fh.read())
+    with tempfile.TemporaryDirectory() as td:
+        tmp = os.path.join(td, "llm.loom")
+        with open(tmp, "w") as fh:
+            fh.write(text)
+        r = subprocess.run([tool("loom-opt"), tmp] + PASSES + cfg, capture_output=True, text=True)
     if r.returncode:
         raise RuntimeError(f"loom-opt {path} ({shape}): {r.stderr[-300:]}")
     return re.sub(r"\$\d+", "$N", re.sub(r"%\d+", "%N", r.stdout))
@@ -64,7 +76,7 @@ def split(text):
                 blocks[key] = close()
             m = re.search(r'@([\w.$]+)\s*\(', line) or SYMBOL.search(line)
             n += 1
-            key = (START.match(line).group(1) + " " + (m.group(1) if m else f"#{n}"))
+            key = (START.match(line).group(1).replace("command.program.", "command.") + " " + (m.group(1) if m else f"#{n}"))
             cur = [line]
         elif cur:
             cur.append(line)
@@ -98,7 +110,7 @@ def check(slug, base, head, allow, do_compile):
             b, h = split(fold(bp, shape)), split(fold(hp, shape))
         except RuntimeError as e:
             return dict(res, status="ERROR", problems=[str(e)])
-        stages = {k: {"base": sha(v), "head": sha(h[k]) if k in h else None} for k, v in b.items() if k.startswith("command.program.def")}
+        stages = {k: {"base": sha(v), "head": sha(h[k]) if k in h else None} for k, v in b.items() if k.startswith("command.def")}
         removed = sorted(set(b) - set(h))
         changed = sorted(k for k in b if k in h and b[k] != h[k])
         added = sorted(set(h) - set(b))

@@ -8,6 +8,7 @@ measured) whose roofline preset is `radeon-r9700s` (the card uses it: `roofline.
   served at a reduced `served_context`; one whose weights do not fit is that GPU's `unsupported` state.
 - Serving: `--pool_backing=fixed` (`card.serve_args`): the elastic backing's trim + compaction after each session stalls the next long
   prefill; fixed backing commits the preset's `pool_capacity` eagerly.
+- Stock hosts: `--parameter_mode=preload` on every package that fits (`card.preload_max_weight_bytes` null = no weight limit; the host copy lives in system RAM): the default parameter mode fails under the stock 8 MiB memlock on Linux 7.0 (ROCm/hrx-system#3332).
 - Preset: `<first>-r9700` (`preset_suffix`; `build.py --prefill-r9700` = `--prefill-device radeon-r9700=N`, a larger prefill chunk, same programs); fit table
   `.github/devlab/r9700_fit.json` (sizing data; the preset's settings are `exec.*` rules on `model/<slug>` nodes). Runners `[self-hosted, devlab-dispatch, radeon-r9700]`, about 3 concurrent.
 

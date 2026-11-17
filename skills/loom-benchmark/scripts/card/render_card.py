@@ -15,6 +15,7 @@ no clock, no environment. Every sentence is part of this template; only the fill
 cards. Never edit a rendered README by hand: change the data (make_info.py) or this template, and re-render.
 """
 import argparse
+import html
 import json
 import os
 import re
@@ -22,7 +23,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from card_lib import (DEFAULT_GPU, FEATURES, GATE_NAMES, GATES, GPUS, HF, gpu_preset, LOOM_URL, METHOD, METRIC_KEYS, METRICS, SCHEMA_ID, SKILLS_URL,  # noqa: E402
-                      TIMED, card_gpus, card_metrics, derived_tags, beyond_context, gate_applies, generator_commit, gpu_context, gpu_memory, gpu_serve_args,
+                      TIMED, PRELOAD_FLAG, preload_mode, card_gpus, card_metrics, derived_tags, beyond_context, gate_applies, generator_commit, gpu_context, gpu_memory, gpu_serve_args, info_serve_args, serves,
                       gpu_view, has_results, has_runner, load_info, load_json, load_package, metric_applies, native_context, over_context,
                       package_facts, programs_sha256, require_valid, stale_metrics, with_gate_features)
 from matched_spec import TIE_BAND  # noqa: E402
@@ -65,8 +66,8 @@ def short(sha):
 def src_text(s):
     if not s:
         return "not recorded"
-    name = {"local": "local run", "devlab": "DevLab Dispatch run", "factory": "loom-factory run"}.get(s["kind"], f"{s['kind']} run")
-    if s["kind"] == "local":
+    name = {"local": "local run", "devlab": "DevLab Dispatch run", "factory": "loom-factory run", "machine": "named-machine run"}.get(s["kind"], f"{s['kind']} run")
+    if s["kind"] in ("local", "machine"):
         return name
     label = f"{name} {s['run']}" if s.get("run") else name
     return f"[{label}]({s['url']})" if s.get("url") else label
@@ -124,12 +125,33 @@ def required_sdk(facts, versions, sources):
     if pin and (pin.get("source") == "ci" or pin.get("hrx_loom")):
         return pin
     gen = (facts.get("generator") or {}).get("hrx_loom")
-    pypi = lambda x: isinstance(x, dict) and x.get("hrx_loom") and x.get("source") == "pypi"
+    pypi = lambda x: isinstance(x, dict) and x.get("hrx_loom") and (x.get("source") == "pypi" or release(x))
     for x in (gen, (versions.get("package") or {}).get("hrx_loom")):
         if pypi(x):
             return x
     seen = {x["hrx_loom"] for x in (s.get("hrx_loom") for s in sources.values()) if pypi(x)}
     return {"hrx_loom": seen.pop(), "source": "pypi"} if len(seen) == 1 else None
+
+
+RELEASE_URL = "https://github.com/ROCm/hrx-system/releases/download"
+
+
+def release(pin):
+    """True for a pin the Quick start can install from a GitHub release: source "release" with the wheel's sha256."""
+    return isinstance(pin, dict) and pin.get("source") == "release" and bool(pin.get("hrx_loom") and pin.get("wheel_sha256"))
+
+
+def sdk02(pin):
+    """True for a pin of hrx-loom 0.2 or later (a release candidate or PyPI): loom-fetch takes `huggingface:REPO[:PRESET]`, loom-serve the package directory."""
+    m = re.match(r"(\d+)\.(\d+)", (pin or {}).get("hrx_loom") or "") if isinstance(pin, dict) else None
+    return bool(m) and (int(m.group(1)), int(m.group(2))) >= (0, 2)
+
+
+def release_wheel(pin):
+    """(tag, wheel file name, url#sha256) of a release pin's Linux wheel (the pin names the sdk's own tag in "branch")."""
+    tag = pin.get("branch") or f"v{pin['hrx_loom']}"
+    whl = f"hrx_loom-{pin['hrx_loom']}-py3-none-manylinux_2_39_x86_64.whl"
+    return tag, whl, f"{RELEASE_URL}/{tag}/{whl}#sha256={pin['wheel_sha256']}"
 
 
 def margin(loom, base):
@@ -200,9 +222,11 @@ def methodology_other(base, spec, drafter, values, runs_c4, measured):
     return out
 
 
-def methodology(base, extra, spec, drafter, values, runs_c4, measured=True):
+def methodology(base, extra, spec, drafter, values, runs_c4, machine=False, cross=None, measured=True):
     """The card's methodology: the same short template on every card, filled from the card's own data (baseline server
-    arguments, drafting setting, runs). Anything that differs between the engines is stated as it is, not smoothed over."""
+    arguments, drafting setting, runs). Anything that differs between the engines is stated as it is, not smoothed over.
+    cross: {"llama": [(date, source)], "loom": (date, source)} when the llama.cpp rows were measured in another job than the Loom rows (a Loom-only
+    job; the row's baseline_from): the card says so instead of "the same job"."""
     if base["name"] != "llama.cpp":
         return methodology_other(base, spec, drafter, values, runs_c4, measured)
     vk = next((x["baseline"] for b, x in extra.items() if b == "vulkan"), None)
@@ -223,7 +247,8 @@ def methodology(base, extra, spec, drafter, values, runs_c4, measured=True):
                  + "; ".join(f"{n} " + (f"{m}" + (f" n-max {k}" if k else "") if m else "no drafting") for n, m, k in ll)
                  + " (NOT the same choice on both engines)")
         depth = ""
-    out = [f"- Compared: Loom against {ver}; the same GGUF, the same DevLab runner and job, the same prompts; Loom served with "
+    where = "DevLab runner type, different jobs" if cross else ("machine and session" if machine else "DevLab runner and job")
+    out = [f"- Compared: Loom against {ver}; the same GGUF, the same {where}, the same prompts; Loom served with "
            f"the active wait. {values} (4 streams: median of {runs_c4}); Loom is timed by the client, "
            "llama.cpp by its server.",
            "- Out of the box on both engines: Loom serves the preset shipped in this package; llama.cpp runs its build defaults "
@@ -235,6 +260,10 @@ def methodology(base, extra, spec, drafter, values, runs_c4, measured=True):
            "- Rows: decode = short-context decode; decode_2k / decode_32k = decode after a ~2k / ~32k-token context; "
            "prefill_Nk = prompt processing of an N k-token prompt; streams4 = 4-stream aggregate decode. A margin within "
            f"+-{round(TIE_BAND * 100)} % (the measured same-runner noise) is a tie."]
+    if cross:
+        when = lambda ds: "; ".join(f"{text(d)} ({src_text(s)})" for d, s in ds)
+        out.insert(1, f"- {base['name']} measured on {when(cross['llama'])}, Loom on {when([cross['loom']])}: same runner type, different jobs "
+                      f"({base['name']} was not re-measured for this package).")
     for n, b in engines:
         out.append(f"- {n} server arguments: " + (f"`{b['args']}`." if b.get("args") else "not recorded."))
     ns = [u if u.startswith("Loom:") else f"{n}: {u}" for n, b in engines for u in (b.get("differs") or [])]
@@ -375,8 +404,15 @@ def gib(n):
 
 
 def gpu_title(g):
-    """Strix Halo (gfx1151); Radeon AI PRO R9700 (gfx1201, 32 GB)"""
+    """Strix Halo (gfx1151); Radeon AI PRO R9700 (gfx1201, 32 GB); a device's own card.title (Radeon gfx1201, 16 GB (RX 9070 XT, RX 9070))"""
+    if GPUS[g].get("title"):
+        return GPUS[g]["title"]
     return f"{GPUS[g]['short']} ({GPUS[g]['arch']}" + (f", {GPUS[g]['memory']}" if GPUS[g]["memory"] else "") + ")"
+
+
+def gpu_label(g):
+    """The Quick start block's summary: `AMD Radeon AI PRO R9700 (gfx1201, 32 GB)`; a device with its own card.title uses it as it is"""
+    return GPUS[g].get("title") or f"{GPUS[g]['name']} ({gpu_arch(g)})"
 
 
 def gpu_arch(g):
@@ -389,6 +425,8 @@ def gpu_line(info, g):
     if dev.get("state") == "unsupported":
         return (f"{GPUS[g]['name']} ({gpu_arch(g)}): this package does not fit its "
                 f"{GPUS[g]['memory'] or 'memory'} (it needs about {dev['required_bytes'] / 1e9:.0f} GB).")
+    if "serve_args" in dev and not has_runner(g):   # a fleet/devices entry: the package serves here, nothing is measured yet
+        return f"{GPUS[g]['name']} ({gpu_arch(g)}): the package serves here (see Quick start); its performance is not measured yet."
     if dev.get("state") == "not_a_target":
         return f"{GPUS[g]['name']} ({gpu_arch(g)}): not a target of this package, not measured: {dev['reason']}"
     if not has_runner(g):   # no DevLab runner is registered for the device: it cannot be measured, so the card does not claim to serve it
@@ -404,11 +442,12 @@ def single_layout(info):
     return len(res) == 1 and all(info["devices"][g].get("state") in ("unsupported", "not_a_target") for g in gpus if g not in res)
 
 
-def serve_command(info, facts, feats, gpu, output):
-    serve = ["loom-serve", f"--model={output}/model.json", "'--device=amdgpu://?completion_spin_ns=4294967295'"]
+def serve_command(info, facts, feats, gpu, output, bare=False):
+    """bare: SDK 0.2 takes the package directory (it finds model.json in it); 0.1 needs the model.json path."""
+    serve = ["loom-serve", f"--model={output}" if bare else f"--model={output}/model.json", "'--device=amdgpu://?completion_spin_ns=4294967295'"]
     pkg_serve = (facts.get("serve") or {}).get("args")   # llm_config.json "serve": flags the package must be served with
     memory = gpu_memory(info, facts["memory_bytes"], gpu)
-    gpu_serve = gpu_serve_args(gpu)   # the GPU's own flags (R9700: --pool_backing=fixed), which take no --memory_bytes either
+    gpu_serve = info_serve_args(info, gpu, facts.get("weight_bytes"))   # the GPU's own flags (Strix Halo and R9700: --pool_backing=fixed, + --parameter_mode=preload where the host copy fits; a fleet/devices entry's: its measured memory budget), which take no --memory_bytes either
     if gpu_serve or pkg_serve:
         serve += gpu_serve + [a for a in (pkg_serve or []) if a not in gpu_serve]   # e.g. --pool_backing=fixed, which takes no --memory_bytes
     elif memory:
@@ -535,9 +574,14 @@ def perf_section(L, info, facts, feats, d, g, here, ctx):
     drafter = None
     if facts["drafter"]:
         drafter = f"{facts['drafter']['repo']} / {facts['drafter']['file']}"
-    L += ["", "**Methodology**", "", *methodology(base, extra, facts["spec"], drafter, values_of(tps_keys), runs_of(["streams4"], True),
+    machine = bool(psrc) and psrc["kind"] == "machine"   # a GPU with no DevLab runner: a named machine measured it
+    bfs = sorted({(m["baseline_from"]["date"] or "", m["baseline_from"]["source"]) for m, _ in rows.values() if m.get("baseline_from")})
+    cross = {"llama": [(d or None, sources[sid]) for d, sid in bfs],
+             "loom": (sessions[primary]["date"], sources[sessions[primary]["source"]])} if bfs and primary is not None else None
+    L += ["", "**Methodology**", "", *methodology(base, extra, facts["spec"], drafter, values_of(tps_keys), runs_of(["streams4"], True), machine, cross,
                                                         has_baseline_values(m for m, _ in (shown[k] for k, _ in METRICS if k in shown))),
-          f"- Measured on AMD DevLab Dispatch {GPUS[g]['runner']} runners (`devlab-perf` jobs); runners differ between sessions."]
+          (f"- Measured on {device_text(psrc['device'])}, a named machine (this GPU has no DevLab runner); both engines ran on it."
+           if machine else f"- Measured on AMD DevLab Dispatch {GPUS[g]['runner']} runners (`devlab-perf` jobs); runners differ between sessions.")]
     if psrc:
         L.append(f"- Measured {text(sessions[primary]['date'])}; device {device_text(psrc['device'])}; "
                  f"hrx-loom {sdk_text(psrc['hrx_loom'])}; source: {src_text(psrc)}.")
@@ -589,7 +633,9 @@ def render(d):
     gpus = card_gpus(info)
     solo = single_layout(info)
     live = [g for g in gpus if has_results(info["devices"][g])]
-    named = [g for g in gpus if info["devices"][g].get("state") not in ("unsupported", "not_a_target") and (has_results(info["devices"][g]) or has_runner(g))]
+    named = [g for g in gpus if serves(info, g)]
+    shared = {g: info["devices"][g]["shares_section_with"] for g in gpus   # a GPU printed in another's performance section (same programs, no results of its own)
+              if info["devices"][g].get("shares_section_with") in live}
     output = card.get("output") or facts["output"] or facts["name"]
     native = native_context(feats)
 
@@ -603,7 +649,8 @@ def render(d):
     L += ["tags:", *[f"- {t}" for t in tags], "---", ""]
 
     quant = f" ({c['quant']})" if c["quant"] else ""
-    where = " and ".join(GPUS[g]["name"] for g in named) if named else GPUS[DEFAULT_GPU]["name"]
+    names = [GPUS[g]["name"] for g in named]
+    where = (", ".join(names[:-1]) + " and " + names[-1] if len(names) > 1 else names[0]) if names else GPUS[DEFAULT_GPU]["name"]
     L += [f"# {facts['name']}{quant} for AMD Loom", "",
           f"A [Loom]({LOOM_URL}) package (`.loom` programs and a `model.json` card) for the unmodified {'safetensors' if st else 'GGUF'} checkpoint "
           f"{hf(c['repo'])} (`{c['file']}`), generated on an {where} with the "
@@ -612,14 +659,19 @@ def render(d):
           f"{hf(c['repo'])} (`{c['file']}`), for the {where} GPUs, generated with the "
           f"[loom-skills]({SKILLS_URL}) workflow. {LEARN_MORE}", ""]
 
+    pin = required_sdk(facts, versions, sources)
+
     def fetch_for(g):   # the fetch command of a GPU: its preset (the R9700's own when the package has one)
-        pr = gpu_preset(facts, g)
+        pr = gpu_preset(facts, g) or (facts.get("presets") or [None])[0]   # always named: a preset added later must not break a published command
+        if sdk02(pin):   # SDK 0.2: SOURCE is PROVIDER:OWNER/REPO[:PRESET]; the revision is resolved and pinned by loom-fetch
+            return " ".join(["loom-fetch", f"huggingface:{info['repo']}" + (f":{pr}" if pr else ""), "--materialize=copy", f"--output={output}"])
         return " ".join(["loom-fetch", f"{HF}/{info['repo']}/resolve/main/model.json"] + ([f"--preset={pr}"] if pr else [])
                         + ["--materialize=copy", f"--output={output}"])
     api = ("answers OpenAI-style `/v1/chat/completions` requests" if kind == "chat"
            else f"answers SystemOne decision requests at `{feats['api']['value']['endpoint']}`")
-    pin = required_sdk(facts, versions, sources)
-    if pin and pin.get("source") == "ci":
+    if release(pin):   # a GitHub release is not on PyPI: install the wheel by URL, checked against its sha256
+        install = [f"pipx install 'hrx-loom[hf] @ {release_wheel(pin)[2]}'"]
+    elif pin and pin.get("source") == "ci":
         root = f"~/loom-{pin['artifact_id']}"
         install = [f"git clone {SKILLS_URL}",
                    f"loom-skills/skills/loom-setup/scripts/install_loom.sh {root} ci:{pin['artifact_id']}",
@@ -628,21 +680,58 @@ def render(d):
         install = [f'pipx install "hrx-loom[hf]=={pin["hrx_loom"]}"']
     else:
         install = ['pipx install "hrx-loom[hf]"']   # no SDK version recorded anywhere (cannot happen for a built card)
-    # a GPU with no runner and no results is not measured at all: no Quick start for it (its line below says so)
-    serving = [g for g in gpus if info["devices"][g].get("state") not in ("unsupported", "not_a_target")
-               and (has_results(info["devices"][g]) or has_runner(g))] or [DEFAULT_GPU]
+    # a GPU with no runner, no results and no recorded serving is not measured at all: no Quick start for it (its line below says so)
+    serving = [g for g in gpus if serves(info, g)] or [DEFAULT_GPU]
+    bare = sdk02(pin)
+
+    def served_context_line(g, here):   # a GPU whose memory holds less KV cache than the native context needs serves a shorter context
+        sc = info["devices"][g].get("served_context")
+        if not sc:
+            return None
+        gs = info_serve_args(info, g, facts.get("weight_bytes"))
+        bound = (f"the package's preset sizes the memory pool (`{gs[0]}` commits it up front)" if gs and gs[0].startswith("--pool_backing")
+                 else f"`--memory_bytes={gpu_memory(info, facts['memory_bytes'], g)}` bounds the memory pool")
+        if here:
+            return f"On this GPU, {bound}: this package serves up to {sc:,} tokens per request (its native context is {native:,})."
+        return (f"On the {GPUS[g]['name']}, {bound}: this package serves up to {sc:,} tokens per request there "
+                f"(its native context is {native:,}); the package files are the same on every GPU.")
+
+    def preset_line(g, here):   # a GPU's own preset: what it sets differently from the default preset (same programs, weights, tokenizer)
+        pr = gpu_preset(facts, g)
+        if not (pr and pr != facts["preset"] and g != DEFAULT_GPU):
+            return None
+        pm = load_package(d)["model"]["presets"]
+        diff = {k: v for k, v in pm[pr]["execution"].items() if pm[next(iter(pm))]["execution"].get(k) != v}
+        if not diff:
+            return None
+        return (f"{'On this GPU' if here else 'On the ' + GPUS[g]['name']}, the Quick start fetches the `{pr}` preset of `model.json`: the default preset with "
+                + ", ".join(f"`{k}` {v:,}" if isinstance(v, int) and not isinstance(v, bool) else f"`{k}` {v}" for k, v in sorted(diff.items()))
+                + f" for its {GPUS[g]['memory'] or 'memory'}. The programs, weights and tokenizer are the same.")
+    def stock_line(g):   # a GPU whose host copy of the weights does not fit beside its memory keeps the default parameter mode (device.json card.preload_max_weight_bytes)
+        if preload_mode(g, facts.get("weight_bytes")) != "default" or "serve_args" in (info["devices"].get(g) or {}):
+            return None
+        return ("On a stock host (8 MiB memlock) start loom-serve as `systemd-run --user --pty --same-dir -p SystemCallFilter=~io_uring_setup "
+                "-p SystemCallErrorNumber=ENOSYS loom-serve ...` (no root; IREE falls back to its POSIX proactor), or raise `ulimit -l`.")
     if len(serving) == 1:
-        L += ["## Quick start", "", "```bash", *install, fetch_for(serving[0]), serve_command(info, facts, feats, serving[0], output), "```", ""]
-    elif len({fetch_for(g) for g in serving}) == 1:   # the same install and fetch; the serve line differs by the GPU's memory
-        L += ["## Quick start", "", "```bash", *install, fetch_for(serving[0]), "```", ""]
+        L += ["## Quick start", "", "```bash", *install, fetch_for(serving[0]), serve_command(info, facts, feats, serving[0], output, bare), "```", ""]
+        if stock_line(serving[0]):
+            L += [stock_line(serving[0]), ""]
+    else:   # one collapsed block per GPU, each self-contained: install, fetch with that GPU's preset, serve with that GPU's flags
+        L += ["## Quick start", "", "Open your GPU and copy its commands.", ""]
         for g in serving:
-            L += [f"Serve on the {GPUS[g]['name']} ({gpu_arch(g)}):", "", "```bash",
-                  serve_command(info, facts, feats, g, output), "```", ""]
-    else:   # a GPU with its own preset (R9700: larger prefill chunk): the fetch differs too, same install
-        L += ["## Quick start", "", "```bash", *install, "```", ""]
-        for g in serving:
-            L += [f"Fetch and serve on the {GPUS[g]['name']} ({gpu_arch(g)}):", "", "```bash",
-                  fetch_for(g), serve_command(info, facts, feats, g, output), "```", ""]
+            L += ["<details>", f"<summary>{html.escape(gpu_label(g), quote=False)}</summary>", "",
+                  "```bash", *install, fetch_for(g), serve_command(info, facts, feats, g, output, bare), "```", ""]
+            for line in (served_context_line(g, True), stock_line(g)):   # B1: the served-context cap and the stock-host note are the only sentences in a block
+                if line:
+                    L += [line, ""]
+            L += ["</details>", ""]
+    if any(PRELOAD_FLAG in serve_command(info, facts, feats, g, output, bare) for g in serving):
+        L += [f"`{PRELOAD_FLAG}` only changes how the weights are loaded on the host, so the performance rows were measured without it unless their job served with it.", ""]
+    if release(pin):
+        tag, whl, _ = release_wheel(pin)
+        L += [f"hrx-loom {pin['hrx_loom']} is a pre-release published on its [GitHub release]({RELEASE_URL.replace('/download', '/tag')}/{tag}), "
+              f"not on PyPI (the command above checks the wheel's sha256). On Windows install `{whl.replace('manylinux_2_39_x86_64', 'win_amd64')}` "
+              "from the same release.", ""]
     if pin and pin.get("source") == "ci":
         sha = (pin.get("hrx_system_sha") or "")[:8]
         L += [f"This package needs an hrx-loom development build (hrx-loom {pin.get('hrx_loom')}, ROCm/hrx-system "
@@ -652,23 +741,11 @@ def render(d):
               "deletes the CI artifact; after that the package's SDK pin has to be refreshed to a newer build "
               "(or a PyPI release that has the features), and this card republished.", ""]
     L += [f"The server listens on `127.0.0.1:8080` and {api}.", ""]
-    for g in serving:   # a GPU whose memory holds less KV cache than the native context needs serves a shorter context
-        sc = info["devices"][g].get("served_context")
-        if sc:
-            bound = (f"the package's preset sizes the memory pool (`{gpu_serve_args(g)[0]}` commits it up front)" if gpu_serve_args(g)
-                     else f"`--memory_bytes={gpu_memory(info, facts['memory_bytes'], g)}` bounds the memory pool")
-            L += [f"On the {GPUS[g]['name']}, {bound}: "
-                  f"this package serves up to {sc:,} tokens per request there (its native context is {native:,}); "
-                  "the package files are the same on every GPU.", ""]
-    for g in serving:   # a GPU's own preset: what it sets differently from the default preset (same programs, weights, tokenizer)
-        pr = gpu_preset(facts, g)
-        if pr and pr != facts["preset"] and g != DEFAULT_GPU:
-            pm = load_package(d)["model"]["presets"]
-            diff = {k: v for k, v in pm[pr]["execution"].items() if pm[next(iter(pm))]["execution"].get(k) != v}
-            if diff:
-                L += [f"On the {GPUS[g]['name']}, the Quick start fetches the `{pr}` preset of `model.json`: the default preset with "
-                      + ", ".join(f"`{k}` {v:,}" if isinstance(v, int) and not isinstance(v, bool) else f"`{k}` {v}" for k, v in sorted(diff.items()))
-                      + f" for its {GPUS[g]['memory'] or 'memory'}. The programs, weights and tokenizer are the same.", ""]
+    if len(serving) == 1:   # one GPU: its sentences follow the commands (a card of several GPUs says them inside each GPU's block)
+        for g in serving:
+            for line in (served_context_line(g, False), preset_line(g, False)):
+                if line:
+                    L += [line, ""]
     for g in gpus:
         if info["devices"][g].get("state") in ("unsupported", "not_a_target"):
             L += [gpu_line(info, g), ""]
@@ -682,9 +759,16 @@ def render(d):
         perf_section(L, info, facts, feats, d, live[0], here, gpu_context(info, live[0], native))
     else:
         for g in gpus:
-            L += [f"### {gpu_title(g)}", ""]
+            if g in shared:
+                continue   # printed in its host's section
+            members = [m for m, h in shared.items() if h == g]
+            L += [f"### {gpu_title(g)}" if not members else
+                  f"### {GPUS[g]['short']} / {' / '.join(GPUS[m]['short'].removeprefix('Radeon ') for m in members)} "
+                  f"({GPUS[g]['arch']}, {' / '.join([GPUS[g]['memory']] + [GPUS[m]['memory'] for m in members])})", ""]
             if has_results(info["devices"][g]):
                 perf_section(L, info, facts, feats, d, g, here, gpu_context(info, g, native))
+                for m in members:
+                    L += [f"The {GPUS[m]['name']} shares this section: it runs the same programs, and the numbers above were measured on the {GPUS[g]['name']}.", ""]
             else:
                 L += [gpu_line(info, g), ""]
 
@@ -703,8 +787,9 @@ def render(d):
     L.append("")
 
     # ---- correctness
-    cols = [live[0]] if solo else gpus
-    head = "| gate | description | result |" if solo else "| gate | description | " + " | ".join(GPUS[g]["short"] for g in cols) + " |"
+    cols = [live[0]] if solo else [g for g in gpus if g not in shared]
+    head = "| gate | description | result |" if solo else "| gate | description | " + " | ".join(
+        GPUS[g]["short"] + "".join(" / " + GPUS[m]["short"].removeprefix("Radeon ") for m, h in shared.items() if h == g) for g in cols) + " |"
     L += ["## Correctness", "", head, "|---|---|" + "---|" * len(cols)]
     ev = []
 
@@ -786,7 +871,9 @@ def method_text(gpus, aggs=(None,), engine="llama.cpp", checkpoint="GGUF"):
              "key was measured as the mean of its runs: its row says so)" if aggs == {"median"} else
              "the card shows the mean of the runs" if aggs <= {None} else
              "the card shows, per session, the median over its sessions (\"aggregate\": \"median\") or the mean of its runs (older sessions)")
-    runner = " or ".join(GPUS[g]["runner"] for g in gpus) if gpus else GPUS[DEFAULT_GPU]["runner"]
+    dl = [g for g in gpus if has_runner(g)]
+    runner = " or ".join(GPUS[g]["runner"] for g in dl) if dl else GPUS[DEFAULT_GPU]["runner"] if not gpus else ""
+    machines = [GPUS[g]["short"] for g in gpus if not has_runner(g)]
     return [
     "- `perf.py` (loom-benchmark) sends real-text requests: a short prompt for decode, decode after 2k and 32k tokens "
     "of context, and prefill of documents of about 1k, 2k, 8k, 16k and 32k tokens. Each run gives one value per "
@@ -795,9 +882,13 @@ def method_text(gpus, aggs=(None,), engine="llama.cpp", checkpoint="GGUF"):
     "4 are decoding; the card shows the median of the runs.",
     f"- One engine runs at a time on the same machine, with the same {checkpoint}. Loom rates are timed by the client; "
     + ("llama.cpp rates come from its server-side `timings`." if engine == "llama.cpp" else f"{engine} rates are timed by the client the same way."),
-    f"- Every performance value comes from a `devlab-perf` job (loom-skills) on an AMD DevLab Dispatch {runner} runner: "
-    f"Loom, served with the active wait (`--device=amdgpu://?completion_spin_ns=4294967295`), and {engine} on the same "
-    "runner, with the published programs.",
+    (f"- Every performance value comes from a `devlab-perf` job (loom-skills) on an AMD DevLab Dispatch {runner} runner: "
+     f"Loom, served with the active wait (`--device=amdgpu://?completion_spin_ns=4294967295`), and {engine} on the same "
+     "runner, with the published programs." if runner else
+     f"- Every performance value comes from a measuring session on a named machine (the {', '.join(machines)} has no DevLab runner; "
+     "the session below records the device and SDK): Loom, served with the active wait (`--device=amdgpu://?completion_spin_ns=4294967295`), "
+     f"and {engine} on the same machine, with the published programs.")
+    + (f" The {', '.join(machines)} values come from named machines (the sessions below record them), not DevLab runners." if runner and machines else ""),
     "- Drafted tokens accepted is the `spec` gate's count: accepted over proposed draft tokens across its requests.",
     "- Gates are loom-benchmark's `gates.sh` at the LEVEL shown; DevLab runs are the nightly-gates workflow on AMD "
     "DevLab Dispatch.",
@@ -944,6 +1035,8 @@ def render_report(d):
         report_gpu(L, info, facts, live[0], here, "##", True)
     else:
         for g in gpus:
+            if info["devices"][g].get("shares_section_with") in live:
+                continue   # its host's section holds the measurements (card: one shared section)
             L += [f"## {GPUS[g]['name']} ({gpu_arch(g)})", ""]
             if not has_results(info["devices"][g]):
                 L += [gpu_line(info, g), ""]

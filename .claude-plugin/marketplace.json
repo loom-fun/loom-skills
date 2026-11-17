@@ -6,7 +6,7 @@
     {
       "name": "loom",
       "source": "./",
-      "description": "Install, serve, port, optimize and benchmark LLMs (and ASR/TTS/image/embedding models) with AMD Loom on AMD GPUs and NPUs"
+      "description": "Install, serve, port, optimize, benchmark and SDK-migrate LLMs (and ASR/TTS/image/embedding models) with AMD Loom on AMD GPUs and NPUs"
     }
   ]
 }
