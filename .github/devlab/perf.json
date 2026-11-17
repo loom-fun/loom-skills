@@ -1,5 +1,5 @@
 {
- "_comment": "sdk020 U1 run 4 (never merge): elastic budget sweep (memory_bytes 6/17/40 GB) vs fixed backing, 0.6B, Strix Halo; per-request rates over 20 prefills per session.",
+ "_comment": "sdk020 U1 run 5 (never merge): SDK-authored control, hrx-loom-library moonshine-streaming-tiny at each SDK's catalog pin (kernels identical modulo the v0.2 rename), elastic and fixed backing, Strix Halo.",
  "runner": "strix",
  "memory_bytes": 17000000000,
  "kit": null,
@@ -7,7 +7,7 @@
  "card": "loom-fun-staging/unsloth-Qwen3-0.6B-loom@416fc147ec934f99e680bdae4c66f780c7137acc",
  "jobs": [
   {
-   "name": "u1m-qwen3-0-6b",
+   "name": "u1c-moonshine",
    "runner": "strix",
    "card": "loom-fun-staging/unsloth-Qwen3-0.6B-loom@416fc147ec934f99e680bdae4c66f780c7137acc",
    "memory_bytes": 17000000000,
@@ -15,40 +15,29 @@
    "sdk": "0.2.0",
    "variants": [
     {
-     "name": "fun",
-     "card": "loom-fun-staging/unsloth-Qwen3-0.6B-loom@416fc147ec934f99e680bdae4c66f780c7137acc",
-     "sdk": "card"
+     "name": "lib010",
+     "catalog": "https://raw.githubusercontent.com/ROCm/hrx-loom-library/dd23d2f510054918bc92cf356b70913155a001f5/model/moonshine-ai/moonshine-streaming-tiny/model.json",
+     "preset": "streaming",
+     "sdk": "0.1.0"
     },
     {
-     "name": "staging",
-     "build": {},
-     "build_args": [
-      "--memory-gib",
-      "4096"
-     ],
+     "name": "lib020",
+     "catalog": "https://raw.githubusercontent.com/ROCm/hrx-loom-library/v0.2.0/model/moonshine-ai/moonshine-streaming-tiny/model.json",
+     "preset": "streaming",
      "sdk": "0.2.0"
     },
     {
-     "name": "fun6",
-     "same_as": "fun",
-     "sdk": "card",
-     "memory_bytes": 6000000000
+     "name": "lib010fx",
+     "same_as": "lib010",
+     "sdk": "0.1.0",
+     "serve_args": [
+      "--pool_backing=fixed"
+     ],
+     "memory_bytes": "none"
     },
     {
-     "name": "staging6",
-     "same_as": "staging",
-     "sdk": "0.2.0",
-     "memory_bytes": 6000000000
-    },
-    {
-     "name": "staging40",
-     "same_as": "staging",
-     "sdk": "0.2.0",
-     "memory_bytes": 40000000000
-    },
-    {
-     "name": "stagingfx",
-     "same_as": "staging",
+     "name": "lib020fx",
+     "same_as": "lib020",
      "sdk": "0.2.0",
      "serve_args": [
       "--pool_backing=fixed"
@@ -57,30 +46,18 @@
     }
    ],
    "steps": [
-    "wl:fun:p1k:20",
-    "wl:staging:p1k:20",
-    "wl:staging:p1k:20",
-    "wl:fun:p1k:20",
-    "wl:fun:dec:3",
-    "wl:staging:dec:3",
-    "wl:staging:dec:3",
-    "wl:fun:dec:3",
-    "wl:fun6:p1k:20",
-    "wl:staging6:p1k:20",
-    "wl:staging6:p1k:20",
-    "wl:fun6:p1k:20",
-    "wl:fun6:dec:3",
-    "wl:staging6:dec:3",
-    "wl:staging6:dec:3",
-    "wl:fun6:dec:3",
-    "wl:staging40:p1k:20",
-    "wl:stagingfx:p1k:20",
-    "wl:stagingfx:p1k:20",
-    "wl:staging40:p1k:20",
-    "wl:staging40:dec:3",
-    "wl:stagingfx:dec:3",
-    "wl:stagingfx:dec:3",
-    "wl:staging40:dec:3"
+    "wl:lib010:asr:10",
+    "wl:lib020:asr:10",
+    "wl:lib020:asr:10",
+    "wl:lib010:asr:10",
+    "wl:lib010fx:asr:10",
+    "wl:lib020fx:asr:10",
+    "wl:lib020fx:asr:10",
+    "wl:lib010fx:asr:10",
+    "prof:lib010:asr:2",
+    "prof:lib020:asr:2",
+    "prof:lib020:asr:10",
+    "prof:lib010:asr:10"
    ]
   }
  ]

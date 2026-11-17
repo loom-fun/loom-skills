@@ -42,7 +42,7 @@ def chat(content, max_tokens):
 def asr(path):
     t0 = time.perf_counter()
     with open(path, "rb") as f:
-        r = requests.post(a.url + "/v1/audio/transcriptions", data={"model": a.model}, timeout=600,
+        r = requests.post(a.url + "/v1/audio/transcriptions", data={"model": a.model}, timeout=120,
                           files={"file": ("recording.pcm", f, "audio/pcm;rate=16000;channels=1")})  # no Expect header: an empty one makes loom-serve drop the connection
     dt = time.perf_counter() - t0
     if r.status_code != 200:
