@@ -76,6 +76,7 @@ def go(content, n):
         result["process_counter_delta"] = counter_delta(process_before, process_snapshot())
     if a.trace_gaps:
         gaps = [round(right - left, 6) for left, right in zip(arrivals, arrivals[1:])]
+        result["stream_chunk_arrivals_monotonic_ns"] = [round(value * 1e9) for value in arrivals]
         result["stream_chunk_gaps_s"] = gaps
         result["max_stream_chunk_gap_s"] = max(gaps, default=0)
     return result
