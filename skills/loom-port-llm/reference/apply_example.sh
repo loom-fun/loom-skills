@@ -13,17 +13,33 @@
 # into every package it builds (llm_config.json "generator"), and a hash that tells a later build whether the
 # kit was edited since.
 set -euo pipefail
-# `python3` is the Microsoft Store stub in some Windows Git Bash installs: resolve a real one.
-py3=$(command -v python3 2>/dev/null || true)
-case "$py3" in ''|*WindowsApps*) py3= ;; esac
-[ -n "$py3" ] || py3=$(command -v python 2>/dev/null || true)
-[ -n "$py3" ] || { echo "STOP: no python3/python on PATH" >&2; exit 2; }
+# Resolve a working Python once: `python3`/`python` on PATH are the Microsoft Store stubs on some
+# Windows installs, an existing Loom venv already holds the right one, and `py -3` knows where the
+# real interpreter lives. LOOM_PYTHON overrides the search.
+py_find() {  # $1: dir whose .venv may already provide an interpreter (may be empty)
+  for p in "${1:-}/.venv/Scripts/python.exe" "${1:-}/.venv/bin/python" "${LOOM_PYTHON:-}"; do
+    [ -n "$p" ] && [ -x "$p" ] && { printf '%s\n' "$p"; return 0; }
+  done
+  for c in python3 python py; do
+    p=$(command -v "$c" 2>/dev/null || true); [ -n "$p" ] || continue
+    case "$p" in *WindowsApps*) continue ;; esac
+    if [ "$c" = py ]; then
+      p=$("$p" -3 -c 'import sys;print(sys.executable)' 2>/dev/null || true)
+      p=$(printf '%s' "$p" | tr '\\' '/')
+      case "$p" in ''|*WindowsApps*) continue ;; esac
+    fi
+    "$p" -c 'import sys' >/dev/null 2>&1 || continue
+    printf '%s\n' "$p"; return 0
+  done
+  return 1
+}
+PY=$(py_find "") || { echo "STOP: no working python3/python found (WindowsApps stubs are skipped; set LOOM_PYTHON)" >&2; exit 2; }
 here=$(cd "$(dirname "$0")" && pwd)
 name=${1%-example}; ex=$here/$name-example; kit=$2
 if [ "$name" = starter ]; then
   [ -e "$kit" ] && { echo "$kit exists; apply_example.sh starter only makes a new kit"; exit 2; }
   cp -r "$here/../starter" "$kit"
-  "$py3" "$kit/kit_source.py" write "$kit" --skills-dir "$here/.."
+  "$PY" "$kit/kit_source.py" write "$kit" --skills-dir "$here/.."
   echo "OK: $kit = starter"; exit 0
 fi
 [ -d "$ex" ] || { echo "no example '$1' (have: starter $(cd "$here" && ls -d *-example | tr '\n' ' '))"; exit 2; }
@@ -32,10 +48,10 @@ fi
   mkdir -p "$kit/$(dirname "$f")"; cp "$ex/$f" "$kit/$f"
 done
 [ ! -s "$ex/starter.patch" ] || patch -p1 --forward --no-backup-if-mismatch -s -d "$kit" < "$ex/starter.patch"
-"$py3" "$kit/kit_source.py" write "$kit" --example "$name" --skills-dir "$here/.."
+"$PY" "$kit/kit_source.py" write "$kit" --example "$name" --skills-dir "$here/.."
 if [ -n "${3:-}" ]; then
-  rev=$(mktemp); "$py3" "$here/../find_reference.py" example-cfg "$name" -o "$rev" || { rm -f "$rev"; exit 1; }
-  "$py3" - "$rev" "$3" <<'PY'
+  rev=$(mktemp); "$PY" "$here/../find_reference.py" example-cfg "$name" -o "$rev" || { rm -f "$rev"; exit 1; }
+  "$PY" - "$rev" "$3" <<'PY'
 import json, sys
 rev, cfg = json.load(open(sys.argv[1], encoding="utf-8")), json.load(open(sys.argv[2], encoding="utf-8"))
 cfg.update(rev)

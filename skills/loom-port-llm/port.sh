@@ -30,11 +30,27 @@
 set -u
 spec=$1; work=$(mkdir -p "$2" && cd "$2" && pwd); port=${3:-8160}; mem_gib=${4:-auto}; model_id=${5:-}
 here=$(cd "$(dirname "$0")" && pwd); K=${KIT:-$here/starter}; S=$here/../loom-setup/scripts
-# `python3` is the Microsoft Store stub in some Windows Git Bash installs: resolve a real one.
-py3=$(command -v python3 2>/dev/null || true)
-case "$py3" in ''|*WindowsApps*) py3= ;; esac
-[ -n "$py3" ] || py3=$(command -v python 2>/dev/null || true)
-[ -n "$py3" ] || { echo "STOP: no python3/python on PATH" >&2; exit 4; }
+# Resolve a working Python once: `python3`/`python` on PATH are the Microsoft Store stubs on some
+# Windows installs, an existing Loom venv already holds the right one, and `py -3` knows where the
+# real interpreter lives. LOOM_PYTHON overrides the search.
+py_find() {  # $1: dir whose .venv may already provide an interpreter (may be empty)
+  for p in "${1:-}/.venv/Scripts/python.exe" "${1:-}/.venv/bin/python" "${LOOM_PYTHON:-}"; do
+    [ -n "$p" ] && [ -x "$p" ] && { printf '%s\n' "$p"; return 0; }
+  done
+  for c in python3 python py; do
+    p=$(command -v "$c" 2>/dev/null || true); [ -n "$p" ] || continue
+    case "$p" in *WindowsApps*) continue ;; esac
+    if [ "$c" = py ]; then
+      p=$("$p" -3 -c 'import sys;print(sys.executable)' 2>/dev/null || true)
+      p=$(printf '%s' "$p" | tr '\\' '/')
+      case "$p" in ''|*WindowsApps*) continue ;; esac
+    fi
+    "$p" -c 'import sys' >/dev/null 2>&1 || continue
+    printf '%s\n' "$p"; return 0
+  done
+  return 1
+}
+PY=$(py_find "${root:-}") || { echo "STOP: no working python3/python found (WindowsApps stubs are skipped; set LOOM_PYTHON)" >&2; exit 4; }
 export LOOM_KB_ROOT=${LOOM_KB_ROOT:-$here/../loom-kb}   # the choices build.py resolves (a kit copy finds the knowledge base here)
 use_root() {   # the Loom install (SDK venv + tools venv) every later stage uses
   root=$1; bin=$root/.tools/bin; [ -d "$bin" ] || bin=$root/.tools/Scripts
@@ -52,14 +68,14 @@ if [ -n "${CATALOG:-}" ] && [ "${FROM:-}" != build ]; then
   if [ -d "$here/reference/${CATALOG%-example}-example" ]; then "$here/reference/apply_example.sh" "$CATALOG" "$work/kit" | tail -1
   else
     "$here/reference/apply_example.sh" starter "$work/kit" | tail -1 && mkdir -p kit/catalog && cp -r "$CATALOG/." kit/catalog/ \
-      && "$py3" kit/kit_source.py write kit --skills-dir "$here/.." 2>/dev/null
+      && "$PY" kit/kit_source.py write kit --skills-dir "$here/.." 2>/dev/null
   fi
   K=$work/kit; export LOOM_KIT=$K
 fi
 unset CATALOG   # catalog.py finds it in the kit
 catalog=""; [ -f "$K/catalog/catalog.json" ] && catalog=$K/catalog
 if [ -n "$catalog" ]; then
-  IFS='|' read -r crepo crev cfile ctok cextra < <("$py3" -I "$K/catalog.py" source "$catalog")
+  IFS='|' read -r crepo crev cfile ctok cextra < <("$PY" -I "$K/catalog.py" source "$catalog")
   crepo=${crepo%$'\r'}; crev=${crev%$'\r'}; cfile=${cfile%$'\r'}; ctok=${ctok%$'\r'}; cextra=${cextra%$'\r'}
   [ "$repo" != catalog ] || repo=$crepo
   [ -n "$file" ] || file=$cfile
