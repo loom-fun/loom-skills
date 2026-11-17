@@ -22,7 +22,7 @@ One job per model, on ONE runner of the device, exactly as skills/loom-benchmark
   * a package whose fit row has "<runner key>_execution" (r9700: "r9700_execution") is served from its `<first><preset suffix>` preset
     (model.json, written by make_info.py build --fit); the job carries "require_preset_<runner key>": devlab_perf.sh fails unless the fetched
     card has that preset, so func, gates, perf and c4 measure exactly what the card's Quick start for the device serves.
-  * serving: the device is served as the card's Quick start serves it (card_lib.GPUS serve_args: the R9700's --pool_backing=fixed, which
+  * serving: the device is served as the card's Quick start serves it (card_lib.GPUS serve_args: --pool_backing=fixed on the R9700 and Strix Halo, which
     devlab_perf.sh adds), whose KV pool is the preset's pool_capacity (make_info build --fit caps it to the GPU). Below, the --memory_bytes
     budget is the llama.cpp sizing and the elastic variant's: what the card's rendered Quick start line once passed as --memory_bytes
     (card_lib.gpu_memory: the package's memory_bytes, at most the device's memory_bytes; the GPU's whole pool for a reduced context). A model whose

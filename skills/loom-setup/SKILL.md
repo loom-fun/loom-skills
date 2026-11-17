@@ -14,7 +14,7 @@ and in every new shell; it is not the working directory or SDK root. On Windows,
 paths for file tools; `/c/...` paths belong to Git Bash. Never run an unresolved placeholder. Run bundled commands by quoted absolute path; do not run `scripts/...` from the working directory
 or change into the installed skill tree. Install the complete Loom suite: sibling paths are required.
 
-Read the `loom` umbrella skill's hard rules first (memory limits, `--memory_bytes`,
+Read the `loom` umbrella skill's hard rules first (memory limits, `--pool_backing=fixed` / `--memory_bytes`,
 binary approval).
 
 ## 1. Install (≈30 s with a warm pip cache, a few minutes cold)
@@ -107,7 +107,9 @@ diagnostics and stops the server. Logs, PIDs and ports go in `~/.cache/loom-serv
 Use unique NAMEs. `stop.sh` refuses to kill a PID that is not a loom-serve.
 
 Raw form: `loom-serve '--device=amdgpu://?completion_spin_ns=4294967295' --listen=127.0.0.1:PORT
---model=pkg/model.json --workers=8 --memory_bytes=N [--preset=NAME] [--parameter_idle_ms=60000]`.
+--model=pkg/model.json --workers=8 --pool_backing=fixed [--preset=NAME]` (the card's serving on Strix Halo and the R9700: the preset's `context_capacity`
+KV and the weights are committed up front). The elastic option, for several models sharing one budget: `--memory_bytes=N [--parameter_idle_ms=60000]` instead of
+`--pool_backing=fixed` (hrx-loom 0.2.0's elastic backing is 5-8 % slower on Strix prefill).
 
 **Active wait (the default on `amdgpu`).** `serve.sh` turns `amdgpu` into
 `amdgpu://?completion_spin_ns=4294967295`: while GPU work is in flight, Loom's `amd-gpu-retire` thread spins on the

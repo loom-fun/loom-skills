@@ -84,7 +84,9 @@
 #                               --logits + gufo's logits_check.py); conformance_V.json (gate `gufo`), the raw files in out/gufo_V/
 #          ktest:V              make_kernel_tests.py + run_kernel_tests.sh with V's kit
 #          gates:V:LEVEL        gates.sh against llama.cpp
-#            "elastic": true: on the R9700 serve with --memory_bytes (the elastic state backing) instead of the card's --pool_backing=fixed
+#            "elastic": true (variant): serve with --memory_bytes (the elastic state backing) on any GPU, instead of the device's card serve_args
+#            (Strix Halo and the R9700: --pool_backing=fixed, no --memory_bytes; added to every variant that brings no serve_args with --pool_backing
+#            and no memory_bytes of its own). The single-server `ab` step is always elastic (several models share one budget).
 # Runner: "runner": "strix" (default) | "r9700" on the experiment or a job picks the DevLab runner (workflow runs-on). On the
 #   R9700 (gfx1201, 32 GB VRAM, 31 GB host RAM, no HIP headers, no Vulkan loader) this script installs libvulkan1 +
 #   mesa-vulkan-drivers (sudo -n apt-get), sets LOOM_MEMORY_CAP_GIB=34 (the budget is VRAM there, not host RAM: memcheck.sh
@@ -382,16 +384,20 @@ serve_alone() { # serve_alone VARIANT
   [ -z "$rp" ] && [ -z "$RDEV" ] && rp=$("$T" -c "import json,sys; p=list(json.load(open(sys.argv[1]))['presets']); print(p[0] if len(p) > 1 else '')" "$D/$1/pkg/model.json")
   if [ -n "$rp" ] && [[ "$sa" != *--preset=* ]]; then sa="--preset=$rp $sa"; fi
   vmem=$(qv "$1" "print(v.get('memory_bytes') or '$mem')")   # variant "memory_bytes": "none" with --pool_backing=fixed
-  # the R9700 is served as its card's Quick start serves it: card_lib.GPUS "serve_args" (--pool_backing=fixed, no --memory_bytes; the elastic
-  # backing's trim + compaction stalls the long-prefill rows), unless the variant brings its own serve_args/memory_bytes or is "elastic": true
-  gsa=""; if [ -n "$RDEV" ]; then gsa=$("$T" -I -c "import sys; sys.path.insert(0, sys.argv[1]); import card_lib; print(' '.join(card_lib.gpu_serve_args(sys.argv[2])))" "$here/skills/loom-benchmark/scripts/card" "$RDEV"); fi
+  # every GPU is served as its card's Quick start serves it: the registry device's card.serve_args (card_lib.GPUS "serve_args": --pool_backing=fixed on the
+  # R9700 and on Strix Halo, no --memory_bytes; the R9700's elastic trim + compaction stalls the long-prefill rows, hrx-loom 0.2.0's elastic backing
+  # costs Strix prefill, notes u1_rootcause), unless the variant brings its own serve_args/memory_bytes or is "elastic": true (--memory_bytes on any GPU)
+  gsa=$("$T" -I -c "import sys; sys.path.insert(0, sys.argv[1]); import card_lib; print(' '.join(card_lib.gpu_serve_args(sys.argv[2])))" "$here/skills/loom-benchmark/scripts/card" "${RDEV:-strix-halo}") \
+    || { echo "FAIL: card_lib.gpu_serve_args(${RDEV:-strix-halo}) (the device's card serve flags)"; return 1; }
+  local memneed=""
   if [ -n "$gsa" ] && [[ "$sa" != *--pool_backing=* ]] && [ "$(qv "$1" "print(bool(v.get('elastic') or v.get('memory_bytes')))")" = False ]; then
     sa="$gsa $sa"
+    memneed=$vmem   # the elastic budget bounds what fixed backing commits: serve.sh's memcheck still guards the host (Strix memory is host RAM)
     vmem=none
   fi
   sdk_root "$1" || { echo "FAIL: SDK of variant $1"; return 1; }; local vroot=$SDKR
   export LOOM_ROOT=$vroot VENV=$vroot/.venv   # the variant's SDK serves it (and runs gates / kernel tests on it)
-  step "serve $1 (SDK root $vroot)"; LOOM_ACTIVE_WAIT=$aw "$SV/serve.sh" "perf-$1" "$PORT" amdgpu "$vmem" "$D/$1/pkg/model.json" ${sa:+-- $sa} > "$out/serve_$1.out" 2>&1; tail -2 "$out/serve_$1.out"
+  step "serve $1 (SDK root $vroot)"; LOOM_MEMNEED=$memneed LOOM_ACTIVE_WAIT=$aw "$SV/serve.sh" "perf-$1" "$PORT" amdgpu "$vmem" "$D/$1/pkg/model.json" ${sa:+-- $sa} > "$out/serve_$1.out" 2>&1; tail -2 "$out/serve_$1.out"
   grep -q '^FAILED' "$out/serve_$1.out" && { echo "REGISTRATION FAILED on $RUNNER for variant $1 (fast fail, see serve_$1.out):"; grep -m6 -E 'AMDGPU|error|ERROR' "$out/serve_$1.out" | cut -c1-300; return 1; }
   curl -sf "$url/v1/models" >/dev/null
 }

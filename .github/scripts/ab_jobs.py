@@ -39,7 +39,9 @@ from the card's published Loom rows by the caller; a targeted ABBA confirmation 
 
 An A/A run (a package against itself, e.g. old = staging@REV, new = staging at main) measures the runner's own noise.
 
---device strix-halo: the Strix Halo runner (strix_ab_jobs.py is a wrapper with these defaults), the old card's --memory_bytes.
+--device strix-halo: the Strix Halo runner (strix_ab_jobs.py is a wrapper with these defaults). perf/c4/probe serve BOTH variants with the device's
+  --pool_backing=fixed (devlab_perf.sh serve_alone; the single-server `ab` step stays elastic with the old card's --memory_bytes); an old-card baseline
+  that must reproduce an elastic-era measurement sets "elastic": true on that variant.
 --device with a memory pool (radeon-r9700): the device's runner, both variants served as the NEW card's Quick start for it serves it
   (device_jobs.py, r9700_jobs.py): the fit row (--fit, default the device's fit table, device.json "fit_table") gives the <first>-r9700 preset (job "require_preset_r9700"), the served context of a
   reduced-context model and the llama.cpp ROCm KV size; the old package, which may carry no such preset, is served with the same

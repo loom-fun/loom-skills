@@ -16,7 +16,7 @@ A [Loom](https://github.com/ROCm/hrx-system) package (`.loom` programs and a `mo
 ```bash
 pipx install "hrx-loom[hf]==0.1.0"
 loom-fetch https://huggingface.co/loom-fun/unsloth-Qwen3-0.6B-loom/resolve/main/model.json --materialize=copy --output=Qwen3-0.6B
-loom-serve --model=Qwen3-0.6B/model.json '--device=amdgpu://?completion_spin_ns=4294967295' --memory_bytes=17000000000
+loom-serve --model=Qwen3-0.6B/model.json '--device=amdgpu://?completion_spin_ns=4294967295' --pool_backing=fixed
 ```
 
 The server listens on `127.0.0.1:8080` and answers OpenAI-style `/v1/chat/completions` requests.

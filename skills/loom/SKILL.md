@@ -186,9 +186,10 @@ Read it from there if it isn't in your skill list.
   kills the biggest cgroup: without a scope that is the editor/terminal holding every agent session.
   A Qwen3.8-27B `tune.py` (52 GB server) on top of a 21 GB scratchpad of kernel-test dumps got the
   whole VS Code scope (92 GB, all sessions) killed; rerun in its own scope, it finished.
-- **Always pass `--memory_bytes`** to `loom-serve` (weights + KV pool + ~2 GiB
-  workspace). Too small → HTTP 503 "retained state leaves insufficient completion
-  capacity". Several models can share one budget with `--parameter_idle_ms=60000`.
+- **Serve as the card's Quick start serves**: `--pool_backing=fixed` (no `--memory_bytes`) on Strix Halo and the R9700 (the preset's
+  `context_capacity` KV and the weights are committed up front; hrx-loom 0.2.0's elastic backing costs Strix prefill). To serve with the elastic
+  backing instead (several models sharing one budget with `--parameter_idle_ms=60000`), pass `--memory_bytes` (weights + KV pool + ~2 GiB
+  workspace); too small → HTTP 503 "retained state leaves insufficient completion capacity".
 - **Freshly downloaded binaries need explicit user approval before running**, except the two
   pre-approved sources: Loom from PyPI (pip) or a ROCm/hrx-system GitHub release (`install_loom.sh` checks its sha256) and lemonade-sdk/llamacpp-rocm releases
   (`fetch_llamacpp.sh`). Don't stop to ask about those.
