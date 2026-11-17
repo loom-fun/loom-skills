@@ -176,6 +176,24 @@ def card_model(a, api):
     return [] if local == remote else ["model.json"]
 
 
+def parse_upload_receipt(output, repo, parent_commit, endpoint=None):
+    """Validate the uploader's exact returned commit; never infer it from a later HEAD."""
+    endpoint = endpoint or os.environ.get("HF_ENDPOINT", "https://huggingface.co")
+    try:
+        receipt = json.loads(output)
+        if not isinstance(receipt, dict):
+            raise ValueError("not an object")
+        commit = receipt.get("commit")
+        if (not isinstance(parent_commit, str) or not re.fullmatch(r"[0-9a-f]{40}", parent_commit)
+                or receipt.get("repo") != repo or receipt.get("parent_commit") != parent_commit
+                or not isinstance(commit, str) or not re.fullmatch(r"[0-9a-f]{40}", commit)
+                or receipt.get("url") != f"{endpoint.rstrip('/')}/{repo}/commit/{commit}"):
+            raise ValueError("receipt fields differ from the expected upload")
+    except (ValueError, TypeError, AttributeError) as e:
+        raise ValueError("invalid/missing returned commit receipt; write may have occurred; reconcile before retry") from e
+    return receipt
+
+
 def cmd_upload(a):
     a.repo = target_repo(a.org, a.repo)
     check_card_text(a.out, a.repo)
@@ -237,10 +255,12 @@ def cmd_upload(a):
                                commit_message=a.message or ("Card" if a.card_only else "Loom package and card"),
                                parent_commit=parent)
     commit, url = getattr(result, "oid", None), getattr(result, "commit_url", None)
-    expected_url = f"{api.endpoint.rstrip('/')}/{a.repo}/commit/{commit}"
-    if not isinstance(commit, str) or not re.fullmatch(r"[0-9a-f]{40}", commit) or url != expected_url:
-        sys.exit("upload returned no valid commit receipt; write may have occurred, do not retry without reconciliation")
-    print(json.dumps({"repo": a.repo, "parent_commit": parent, "commit": commit, "url": url}, sort_keys=True))
+    try:
+        receipt = parse_upload_receipt(json.dumps({"repo": a.repo, "parent_commit": parent, "commit": commit, "url": url}),
+                                       a.repo, parent, api.endpoint)
+    except ValueError as e:
+        sys.exit(str(e))
+    print(json.dumps(receipt, sort_keys=True))
 
 
 def main(argv=None):

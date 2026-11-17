@@ -38,6 +38,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, "..", "..", "..", ".."))
 sys.path.insert(0, HERE)
 import card_lib  # noqa: E402
+from publish_package import parse_upload_receipt  # noqa: E402
 
 SRC, DST = "loom-fun-staging", "loom-fun"
 
@@ -181,15 +182,8 @@ def promote(api, slug, work, execute, staging_revision=None, target_revision=Non
                 r["executed"] = f"FAIL: {(u.stdout + u.stderr).strip()[-300:]}"
             else:
                 try:
-                    receipt = json.loads(u.stdout)
-                    if not isinstance(receipt, dict):
-                        raise ValueError("receipt is not an object")
-                    commit = receipt.get("commit")
-                    if (receipt.get("repo") != dst or receipt.get("parent_commit") != dsha
-                            or not isinstance(commit, str) or not re.fullmatch(r"[0-9a-f]{40}", commit)
-                            or receipt.get("url") != f"{api.endpoint.rstrip('/')}/{dst}/commit/{commit}"):
-                        raise ValueError("receipt fields do not match the upload")
-                except (ValueError, KeyError, TypeError, AttributeError):
+                    receipt = parse_upload_receipt(u.stdout, dst, dsha, api.endpoint)
+                except ValueError:
                     r["executed"] = "FAIL: invalid/missing returned commit receipt; reconcile, do not retry"
                 else:
                     r["receipt"] = receipt

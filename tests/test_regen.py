@@ -947,7 +947,7 @@ class PackageTest(Base):
         self.want = regen.card_lib.programs_sha256(os.path.join(self.canon, SLUG))
         self.st = self.plan("--mode", "sdk-ab")
 
-    def run_package(self, *args, head="h" * 40, new_head="n" * 40, snap_programs=None):
+    def run_package(self, *args, head="a" * 40, new_head="d" * 40, snap_programs=None, upload_stdout=None):
         uploads = []
         heads = iter([head, new_head])
 
@@ -955,7 +955,12 @@ class PackageTest(Base):
             if cmd[0] == "git":   # the default --ref lookup
                 return subprocess.CompletedProcess(cmd, 1, "", "")
             uploads.append([str(c) for c in cmd])
-            return subprocess.CompletedProcess(cmd, 0, "dry run: would upload 12 files to https://huggingface.co/x", "")
+            repo = f"{regen.STAGING_ORG}/{SLUG}"
+            receipt = {"repo": repo, "parent_commit": head, "commit": "b" * 40,
+                       "url": f"https://huggingface.co/{repo}/commit/" + "b" * 40}
+            stdout = ("dry run: would upload 12 files to https://huggingface.co/x" if "--dry-run" in cmd
+                      else json.dumps(receipt) if upload_stdout is None else upload_stdout)
+            return subprocess.CompletedProcess(cmd, 0, stdout, "")
 
         def snapshot(repo, rev, out):
             uploads.append(["snapshot", repo, rev])
@@ -973,7 +978,7 @@ class PackageTest(Base):
         up = next(c for c in calls if "upload" in c)
         self.assertIn("--dry-run", up)
         self.assertEqual(up[up.index("--org") + 1], "loom-fun-staging")
-        self.assertEqual(up[up.index("--parent-commit") + 1], "h" * 40)   # the snapshot's revision
+        self.assertEqual(up[up.index("--parent-commit") + 1], "a" * 40)   # the snapshot's revision
         self.assertNotIn("--card-only", up)
         self.assertIn("hrx-loom 0.2.0", up[up.index("--message") + 1])
         self.assertIn(self.want, out)
@@ -999,7 +1004,8 @@ class PackageTest(Base):
         up = next(c for c in calls if "upload" in c)
         self.assertNotIn("--dry-run", up)
         pk = st.jobs[JOB]["package"]
-        self.assertEqual((pk["revision"], pk["programs_sha256"], pk["base"]), ("n" * 40, self.want, "c" * 40))
+        self.assertEqual((pk["revision"], pk["programs_sha256"], pk["base"]), ("b" * 40, self.want, "c" * 40))
+        self.assertEqual(pk["receipt"]["commit"], pk["revision"])   # later HEAD would be d*40
         st, calls, out = self.run_package("--slugs", SLUG)   # nothing left to do: no snapshot, no upload
         self.assertFalse(calls)
         self.assertIn("already published", out)
@@ -1011,7 +1017,27 @@ class PackageTest(Base):
         shutil.copytree(pkg, self.snap)   # the head now holds exactly that package
         st, calls, _ = self.run_package("--slugs", SLUG)
         self.assertFalse([c for c in calls if "upload" in c])
-        self.assertEqual(st.jobs[JOB]["package"]["revision"], "h" * 40)
+        self.assertEqual(st.jobs[JOB]["package"]["revision"], "a" * 40)
+
+    def test_missing_receipt_stops_after_one_upload_without_retry(self):
+        st, calls, out = self.run_package("--slugs", SLUG, upload_stdout="")
+        self.assertEqual(len([c for c in calls if "upload" in c]), 1)
+        self.assertEqual(st.jobs[JOB]["stage"], "needs_decision")
+        self.assertNotIn("package", st.jobs[JOB])
+        self.assertIn("write may have occurred; reconcile before retry", out)
+
+    def test_wrong_receipt_binding_stops_after_one_upload_without_retry(self):
+        repo = f"{regen.STAGING_ORG}/{SLUG}"
+        for field, wrong in (("repo", "other/model"), ("parent_commit", "e" * 40)):
+            with self.subTest(field=field):
+                receipt = {"repo": repo, "parent_commit": "a" * 40, "commit": "b" * 40,
+                           "url": f"https://huggingface.co/{repo}/commit/" + "b" * 40}
+                receipt[field] = wrong
+                st, calls, out = self.run_package("--slugs", SLUG, upload_stdout=json.dumps(receipt))
+                self.assertEqual(len([c for c in calls if "upload" in c]), 1)
+                self.assertEqual(st.jobs[JOB]["stage"], "needs_decision")
+                self.assertNotIn("package", st.jobs[JOB])
+                self.assertIn("returned commit receipt", out)
 
     def test_a_card_steps_gpu_preset_on_the_head_is_kept_and_compares_equal(self):
         st, calls, _ = self.run_package("--dry-run", "--slugs", SLUG)
