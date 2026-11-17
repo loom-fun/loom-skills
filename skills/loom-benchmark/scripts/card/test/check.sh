@@ -566,7 +566,7 @@ m = c.load_json(sys.argv[2] + '/model.json'); ex = {k: v for k, v in m['presets'
 m['presets']['chat']['execution'] = ex
 alt = c.with_gpu_preset(m, c.gpu_preset_execution({'r9700_execution': {'prefill_capacity': 2048}}, 20480))['presets']['chat-r9700']['execution']
 assert alt['context_capacity'] == 20480 and 'pool_capacity' not in alt, alt
-assert c.EXEC_KEYS == ('prefill_capacity', 'context_capacity', 'rows', 'draft_depth')" "$C" "$R/pkg" \
+assert c.EXEC_KEYS == ('prefill_capacity', 'context_capacity', 'rows', 'draft_depth', 'cache_target_bytes')" "$C" "$R/pkg" \
   && echo "OK   r9700 preset: no pool_capacity on SDK 0.2" || { echo "FAIL r9700 preset: pool_capacity written"; bad=1; }
 # a Loom-only card (regen.py --mode sdk-loom): Loom rows from a later job on the same runner type, the llama.cpp rows copied from the previous card
 # with their own date and run (metric baseline_from); the methodology says "different jobs", never "the same job". flint is the previous card.

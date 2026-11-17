@@ -775,7 +775,7 @@ def fixed_pool_capacity(row, memory_bytes=None, gpu="radeon-r9700"):
 
 # --- the execution settings of a device's preset: scope.json rules (skills/loom-kb exec.* choices), not the fit table --------------
 REPO = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", ".."))
-EXEC_KEYS = ("prefill_capacity", "context_capacity", "rows", "draft_depth")   # model.json execution fields, in this order (SDK 0.2 has no pool_capacity: context_capacity and memory_bytes size the pool)
+EXEC_KEYS = ("prefill_capacity", "context_capacity", "rows", "draft_depth", "cache_target_bytes")   # model.json execution fields, in this order (SDK 0.2 has no pool_capacity: context_capacity and memory_bytes size the pool)
 _RESOLVERS = {}
 
 
