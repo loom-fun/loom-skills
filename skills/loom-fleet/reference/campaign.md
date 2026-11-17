@@ -27,10 +27,32 @@ Narrow changes inside a campaign are [targeted fixes](targeted-fix.md).
 | Engineers | one task at a time in their own worktree; PR against the integration branch; read `notes/ENG_CONTRACT.md` and their task file first | open PRs into the base or another branch, publish outside the task |
 | Dashboarder | keeps the tracker artifact current from `status.json` + `log.md` (counts, log entries, ETA, scope changes together, not counts alone); republishes only on an important change, at most hourly ("State files") | edit code or cards; republish on every change |
 
-Model tiers: the cheaper tier (sonnet) is the default for engineers, reviewers and the dashboarder; the strongest tier (opus) for tech leads and
-for design-heavy engineering (fused or persistent kernels, register/LDS budgets across fused stages, cross-workgroup sync, open-ended
-optimization). The task file's `Model:` line names the tier and the reason; a parallel cheaper-tier variant of a design is fine. Briefs for
-engineers are explicit and self-contained: they point at the files to read, never assume the conversation.
+## Model selection and dispatch
+
+Choose a tier from the work, then map it to controls the current host actually exposes. Ordinary bounded implementation, documentation, and
+routine review use the ordinary tier. Open-ended research or implementation use the research tier. Fused or persistent kernels, register/LDS
+budgets across fused stages, cross-workgroup synchronization, and open-ended optimization use the strongest available tier. A campaign owner's
+explicit model or reasoning preference takes precedence; record the preference and how it shaped the choice. These are task-fit tiers, not a
+claimed price or universal quality ranking.
+
+At startup, resume, and before every delegation (including nested delegation), inspect the current host's model and reasoning controls and
+its current model catalog. Map the task tier to a concrete model the host lists, using the catalog's descriptions and applicable owner
+preferences; do not reuse stale model IDs or infer a price/quality hierarchy. Record the task tier, reason, concrete host model, and the
+control/catalog evidence used. If a host exposes no model control, state that the model is inherited or otherwise unverified and why. Do not
+claim an override was applied when it was not.
+
+A delegator must pass the chosen model and reasoning control on the actual dispatch call. If an override requires a fresh/no-history fork,
+provide that fork mode and a self-contained brief with the goal, scope, read-first files, constraints, and deliverables. Inherit the parent's
+selection only when its tier is recorded and matches the delegated task; otherwise select and pass a model explicitly. Capture the accepted
+agent ID and the dispatch result. Report the requested model separately from runtime identity: if the host does not expose runtime identity,
+mark it unverified. A failed or unavailable override is a disclosed fallback, not evidence of successful selection. On resume, re-check the
+current controls and catalog, retain a still-valid recorded choice when appropriate, and never interrupt useful in-flight agents solely to
+retier them.
+
+Every task brief includes `Tier`, `Reason`, `Host model`, `Dispatch`, and `Verification`. `Dispatch` records the requested controls and the
+actual call/result; `Verification` records what the host confirmed or explicitly says `unverified` with the limitation. Engineer briefs are
+self-contained and point at the files to read; never assume the conversation. A parallel ordinary-tier variant of a design is fine only when
+the task makes that comparison useful and the lead can review it.
 
 ## State files (all in the campaign directory, all on disk, none in `/tmp`)
 
