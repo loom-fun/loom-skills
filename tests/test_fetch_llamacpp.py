@@ -63,7 +63,16 @@ class FetchLlamacppTests(unittest.TestCase):
             result = subprocess.run([*command, "fetch-test", *argv], env=env,
                                     text=True, capture_output=True, timeout=10)
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(result.stdout.strip(), release.as_posix())
+            reported = result.stdout.strip()
+            if os.name == "nt":
+                # Git Bash may rewrite HOME to /tmp or /c/...; compare the
+                # returned location in the native filesystem, including aliases.
+                native = subprocess.run(
+                    [*shell.bash_command('cygpath -w "$1"'), "reported-path", reported],
+                    env=env, text=True, capture_output=True, timeout=10)
+                self.assertEqual(native.returncode, 0, native.stderr)
+                reported = native.stdout.strip()
+            self.assertTrue(Path(reported).samefile(release), (reported, str(release)))
             self.assertEqual(result.stderr, "")
             api = (root / "curl.log").read_text().strip().split()[-1]
             expected = "latest" if len(args) < 2 else f"tags/{tag}"
