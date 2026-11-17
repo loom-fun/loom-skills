@@ -1098,11 +1098,14 @@ def cmd_package(a):
         try:
             if not os.path.isfile(os.path.join(canon, slug, ".ref")):
                 raise RuntimeError("canonical build failed: " + open(os.path.join(canon, slug, "build.log")).read()[-300:])
-            res = package_one(st, slug, canon, sha, a.dry_run, env)
-            for _, e in picked:   # a job that measured other programs than the canonical build's must not be ingested against them
+            want = card_lib.programs_sha256(os.path.join(canon, slug))
+            if not want:
+                raise RuntimeError("the canonical build has no programs")
+            for _, e in picked:   # validate measured programs before package_one can upload anything
                 built = job_programs(e) if e["slug"] == slug else None
-                if built and built != res["programs_sha256"]:
-                    raise RuntimeError(f"the job {e['device']} built programs {built[:12]}, the canonical build of {sha[:10]} has {res['programs_sha256'][:12]} (the base moved since the job was submitted)")
+                if built and built != want:
+                    raise RuntimeError(f"the job {e['device']} built programs {built[:12]}, the canonical build of {sha[:10]} has {want[:12]} (the base moved since the job was submitted)")
+            res = package_one(st, slug, canon, sha, a.dry_run, env)
         except (RuntimeError, SystemExit, ValueError) as ex:
             print(f"{slug}: package stopped: {str(ex)[-400:]}")
             if not a.dry_run:
