@@ -19,6 +19,7 @@ import html
 import json
 import os
 import re
+import shlex
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -456,6 +457,27 @@ def serve_command(info, facts, feats, gpu, output, bare=False):
 
 
 
+def chat_request(model, feats):
+    """A copyable request using model.json's exact selector and supported reasoning controls."""
+    body = {"model": model["model"]["id"], "messages": [{"role": "user", "content": "Hello"}]}
+    thinking = feats.get("thinking") or {}
+    effort = feats.get("reasoning_effort") or {}
+    note = "In another terminal, send a request:"
+    if thinking.get("status") == "yes" and (thinking.get("value") or {}).get("mode") == "toggle":
+        body["chat_template_kwargs"] = {"enable_thinking": False}
+        note = "In another terminal, send a request (optional thinking is turned off):"
+    elif effort.get("status") == "yes":
+        levels = (effort.get("value") or {}).get("levels") or []
+        lowest = next((x for x in ("none", "minimal", "low", "medium", "high", "max") if x in levels), None)
+        if lowest:
+            body["reasoning_effort"] = lowest
+            note = f"In another terminal, send a request (`reasoning_effort` is set to `{lowest}`):"
+    payload = shlex.quote(json.dumps(body, ensure_ascii=True))
+    return [note, "", "```bash", "curl http://127.0.0.1:8080/v1/chat/completions \\",
+            "  -H 'Content-Type: application/json' \\", f"  -d {payload}", "```", ""]
+
+
+
 def remeasure_lines(rm, g, sources, on):
     """The card lines about a same-runner A/B re-measure block (`on`: what was re-measured, "this package" or "programs SHA")."""
     L = []
@@ -712,10 +734,12 @@ def render(d):
             return None
         return ("On a stock host (8 MiB memlock) start loom-serve as `systemd-run --user --pty --same-dir -p SystemCallFilter=~io_uring_setup "
                 "-p SystemCallErrorNumber=ENOSYS loom-serve ...` (no root; IREE falls back to its POSIX proactor), or raise `ulimit -l`.")
+    request = chat_request(load_package(d)["model"], feats) if kind == "chat" else []
     if len(serving) == 1:
         L += ["## Quick start", "", "```bash", *install, fetch_for(serving[0]), serve_command(info, facts, feats, serving[0], output, bare), "```", ""]
         if stock_line(serving[0]):
             L += [stock_line(serving[0]), ""]
+        L += request
     else:   # one collapsed block per GPU, each self-contained: install, fetch with that GPU's preset, serve with that GPU's flags
         L += ["## Quick start", "", "Open your GPU and copy its commands.", ""]
         for g in serving:
@@ -724,6 +748,7 @@ def render(d):
             for line in (served_context_line(g, True), stock_line(g)):   # B1: the served-context cap and the stock-host note are the only sentences in a block
                 if line:
                     L += [line, ""]
+            L += request
             L += ["</details>", ""]
     if any(PRELOAD_FLAG in serve_command(info, facts, feats, g, output, bare) for g in serving):
         L += [f"`{PRELOAD_FLAG}` only changes how the weights are loaded on the host, so the performance rows were measured without it unless their job served with it.", ""]

@@ -89,6 +89,7 @@ def run(content, max_tokens):
     msgs = [{"role": "user", "content": content}]
     if a.kind in ("loom", "vllm"):
         s = stream(U, M, msgs, max_tokens, extra=TH)
+        out.setdefault("request_samples", []).append({k: v for k, v in s.items() if k != "text"} | {"max_tokens": max_tokens, "nonce": content.split("]", 1)[0] + "]"})
         status, error = s["status"], s.get("error")
     else:
         r = requests.post(U + "/v1/chat/completions", headers=H, json={"messages": msgs, "max_tokens": max_tokens, "temperature": 0, "cache_prompt": False, **TH})

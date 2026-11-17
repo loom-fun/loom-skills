@@ -125,7 +125,7 @@ B=$SK/loom-benchmark/scripts; SV=$SK/loom-setup/scripts
 WORK=${WORK:-$HOME/devlab-perf}; mkdir -p "$WORK"; WORK=$(cd "$WORK" && pwd)
 D=$WORK/$job; out=$D/out; rm -rf "$D"; mkdir -p "$out"
 export LOOM_SERVE_STATE=$D/state LLAMACPP_STATE=$D/llstate PYTHONDONTWRITEBYTECODE=1
-PORT=${LOOM_PORT:-8161}; LLAMA_PORT=${LLAMA_PORT:-8131}; url=http://127.0.0.1:$PORT; lurl=http://127.0.0.1:$LLAMA_PORT
+PORT=${LOOM_PORT:-8080}; LLAMA_PORT=${LLAMA_PORT:-8131}; url=http://127.0.0.1:$PORT; lurl=http://127.0.0.1:$LLAMA_PORT
 t0=$(date +%s); step() { echo "== $* ($(date +%T), +$(( $(date +%s) - t0 ))s)"; }
 q() { python3 -c "import json,sys; e=json.load(open('$exp')); j=next(j for j in e['jobs'] if j['name']=='$job'); $1"; }
 qv() { python3 -c "import json,sys; e=json.load(open('$exp')); j=next(j for j in e['jobs'] if j['name']=='$job'); v=next(v for v in j['variants'] if v['name']=='$1'); $2"; }
@@ -751,17 +751,29 @@ print('vllm', k, [x.get(k) for x in r if x.get(k)], 'median', round(st.median(v)
     smoke)   # smoke:V  one served chat request (the iterate preset's whole functional check: build, serve, answer; func:V is the full list)
       serve_alone "$p1" || { res[$s]=ERROR; continue; }
       step "smoke $p1"
-      "$T" - "$url" "$cardid" > "$out/smoke_$p1.log" 2>&1 <<'PY'
-import json, sys, urllib.request
-url, model = sys.argv[1:3]
-req = urllib.request.Request(url + "/v1/chat/completions", json.dumps({"model": model, "max_tokens": 16, "temperature": 0,
-        "messages": [{"role": "user", "content": "Reply with one short sentence about the sea."}]}).encode(), {"Content-Type": "application/json"})
-r = json.load(urllib.request.urlopen(req, timeout=300))
+      "$T" - "$here/skills/loom-benchmark/scripts/card" "$D/$p1/pkg" "$out" > "$out/smoke_$p1.log" 2>&1 <<'PYSMOKE'
+import json, pathlib, subprocess, sys
+sys.path.insert(0, sys.argv[1])
+from card_lib import load_package, package_facts
+from render_card import chat_request
+pkg = load_package(sys.argv[2])
+facts = package_facts(pkg)
+lines = chat_request(pkg["model"], facts["features"])
+command = "\n".join(lines).split("```bash\n", 1)[1].split("```", 1)[0]
+out = pathlib.Path(sys.argv[3])
+(out / "generated_curl.sh").write_text(command)
+print(command, flush=True)
+result = subprocess.run(["bash", "-c", command], capture_output=True, text=True, timeout=120)
+(out / "generated_curl_response.json").write_text(result.stdout)
+print(result.stderr, flush=True)
+result.check_returncode()
+r = json.loads(result.stdout)
 m = r["choices"][0]["message"]
-t = (m.get("content") or m.get("reasoning_content") or m.get("reasoning") or "").strip()
-print("SMOKE", "PASS" if t else "FAIL", repr(t[:80]))
+t = (m.get("content") or "").strip()
+print("selector", pkg["model"]["model"]["id"])
+print("SMOKE", "PASS" if t else "FAIL", repr(t[:200]))
 sys.exit(0 if t else 1)
-PY
+PYSMOKE
       res[$s]=$(tail -1 "$out/smoke_$p1.log" | cut -c1-200); [ -n "${res[$s]}" ] || res[$s]=ERROR;;
     func)
       serve_alone "$p1" || { res[$s]=ERROR; continue; }
