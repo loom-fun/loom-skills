@@ -420,7 +420,8 @@ CHOICE("prefill.gdn.fused2", "bool", False, "GDN_FUSED2", devices=["rdna4"], row
 CHOICE("prefill.gdn.share_lds", "bool", False, "GDN_FA_SHARE_LDS", enc=("1", None), per_target=True,
        devices=["rdna4"], rows=ROWS_PREFILL, kernels=["g_gdn_fa_rdna4"],
        doc="Fused gfx12 GDN phase A: delay independent V convolution after Q reads and T stores after all A reads, "
-           "sharing Q/V and A/T LDS allocations with unchanged padded layouts and arithmetic.")
+           "sharing Q/V and A/T LDS allocations, with independent V convolution on waves4..7 overlapping the wave0 solve; "
+           "unchanged padded layouts and arithmetic.")
 CHOICE("prefill.gdn.fused2_min", "int", 64, "GDN_FUSED2_MIN", devices=["rdna4"], rows=ROWS_PREFILL, kernels=["g_gdn_fa_rdna4", "g_gdn_fb_rdna4"],
        from_pr="mxfp4st olayer2",
        doc="With prefill.gdn.fused2: the smallest epoch (rows) that takes the fused pair: 64 = every GEMM-shape epoch; 128 = 64-row epochs (prompts and "

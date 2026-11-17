@@ -9,11 +9,13 @@
       "gen": "gdn_liveness/gen_bench.py",
       "gen_variants": [
         "base",
-        "shared"
+        "shared",
+        "overlap"
       ],
       "files": [
         "bench.loom",
-        "bench_shared.loom"
+        "bench_shared.loom",
+        "bench_overlap.loom"
       ],
       "tests": [
         "test.loom"

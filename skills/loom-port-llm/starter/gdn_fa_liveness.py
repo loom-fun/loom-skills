@@ -16,7 +16,7 @@ def enabled():
     return twin_env(env).get("GDN_FA_SHARE_LDS", "0").lower() not in ("", "0", "false", "no", "off")
 
 
-def rewrite(text):
+def rewrite(text, overlap=True):
     """Move independent work across existing barriers, then alias dead buffers.
 
     Exact producer structure is required. A generator change that invalidates
@@ -33,6 +33,17 @@ def rewrite(text):
     assert text.count(solve) == 1
     pos = text.index(solve)
     assert text[:pos].rstrip().endswith(barrier.strip())
+    if overlap:
+        # The solve uses only wave0. Give V to waves4..7 so those independent
+        # paths overlap before the same workgroup join, instead of serializing
+        # V then solve on wave0. Channel ownership remains exactly0..127.
+        old = '  %isv = index.cmp ult, %thread, %k128 : index'
+        assert v.count(old) == 1
+        v = v.replace(old, '  %isv = index.cmp uge, %thread, %k128 : index')
+        old = '    %vtv = index.assume %thread [range(%thread, 0, 127)] : index'
+        assert v.count(old) == 1
+        v = v.replace(old, '    %vtv_raw = index.sub %thread, %k128 : index\n'
+                          '    %vtv = index.assume %vtv_raw [range(%vtv_raw, 0, 127)] : index')
     text = text[:pos] + v + text[pos:]
     # V stores now follow the barrier ending every Q read. The existing
     # solve->W/U barrier publishes V to all waves before their first V load.

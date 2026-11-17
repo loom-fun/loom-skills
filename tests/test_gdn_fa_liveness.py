@@ -50,6 +50,21 @@ class SharedLifetimes(unittest.TestCase):
         self.assertLessEqual(view_bytes('bv_view'), view_bytes('q_view'))
         self.assertLessEqual(view_bytes('t_view'), view_bytes('a_view'))
 
+    def test_value_channels_move_to_waves_disjoint_from_solve(self):
+        # Channel ownership is a bijection, with no thread entering both tasks.
+        old = {thread: thread for thread in range(256) if thread < 128}
+        new = {thread: thread-128 for thread in range(256) if thread >= 128}
+        solve_threads = set(range(32))
+        self.assertEqual(set(old.values()), set(new.values()))
+        self.assertEqual(len(set(new.values())), 128)
+        self.assertFalse(set(new) & solve_threads)
+        self.assertTrue(set(old) & solve_threads)
+        text = L.rewrite(original())
+        self.assertIn('%isv = index.cmp uge, %thread, %k128', text)
+        self.assertIn('%vtv_raw = index.sub %thread, %k128', text)
+        # The measured D1 control retains its original first-half ownership.
+        self.assertIn('%isv = index.cmp ult, %thread, %k128', L.rewrite(original(), overlap=False))
+
     def test_actual_rdna4_rule_activates_both_aliases(self):
         kb = Path(__file__).resolve().parents[1] / 'skills/loom-kb'
         sys.path.insert(0, str(kb))
