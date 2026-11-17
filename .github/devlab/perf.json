@@ -7,64 +7,6 @@
  "card": "loom-fun-staging/unsloth-Qwen3-0.6B-loom@416fc147ec934f99e680bdae4c66f780c7137acc",
  "jobs": [
   {
-   "name": "u1p-qwen3-0-6b",
-   "runner": "strix",
-   "card": "loom-fun-staging/unsloth-Qwen3-0.6B-loom@416fc147ec934f99e680bdae4c66f780c7137acc",
-   "memory_bytes": 17000000000,
-   "kit": null,
-   "sdk": "0.2.0",
-   "variants": [
-    {
-     "name": "fun",
-     "card": "loom-fun-staging/unsloth-Qwen3-0.6B-loom@416fc147ec934f99e680bdae4c66f780c7137acc",
-     "sdk": "card"
-    },
-    {
-     "name": "staging",
-     "build": {},
-     "build_args": [
-      "--memory-gib",
-      "4096"
-     ],
-     "sdk": "0.2.0"
-    }
-   ],
-   "steps": [
-    "wl:fun:p1k:8",
-    "wl:staging:p1k:8",
-    "wl:staging:p1k:8",
-    "wl:fun:p1k:8",
-    "wl:fun:dec:3",
-    "wl:staging:dec:3",
-    "wl:staging:dec:3",
-    "wl:fun:dec:3",
-    "prof:fun:p1k:2",
-    "prof:staging:p1k:2",
-    "prof:staging:p1k:10",
-    "prof:fun:p1k:10",
-    "prof:fun:p2k:2",
-    "prof:staging:p2k:2",
-    "prof:staging:p2k:10",
-    "prof:fun:p2k:10",
-    "prof:fun:dec:1",
-    "prof:staging:dec:1",
-    "prof:staging:dec:5",
-    "prof:fun:dec:5",
-    "wl:staging:p1k:8",
-    "wl:fun:p1k:8",
-    "wl:fun:p1k:8",
-    "wl:staging:p1k:8",
-    "wl:staging:p2k:8",
-    "wl:fun:p2k:8",
-    "wl:fun:p2k:8",
-    "wl:staging:p2k:8",
-    "wl:staging:dec:3",
-    "wl:fun:dec:3",
-    "wl:fun:dec:3",
-    "wl:staging:dec:3"
-   ]
-  },
-  {
    "name": "u1p-moonshine",
    "runner": "strix",
    "card": "loom-fun-staging/unsloth-Qwen3-0.6B-loom@416fc147ec934f99e680bdae4c66f780c7137acc",
@@ -98,70 +40,6 @@
     "wl:lib010:asr:5",
     "wl:lib010:asr:5",
     "wl:lib020:asr:5"
-   ]
-  },
-  {
-   "name": "u1p-qwen3-8b",
-   "runner": "strix",
-   "card": "loom-fun-staging/unsloth-Qwen3-8B-loom@6318d783577386bb9ebc8bbb5bad7b1d04ad11d9",
-   "memory_bytes": 25000000000,
-   "kit": null,
-   "sdk": "0.2.0",
-   "variants": [
-    {
-     "name": "funnd",
-     "card": "loom-fun-staging/unsloth-Qwen3-8B-loom@6318d783577386bb9ebc8bbb5bad7b1d04ad11d9",
-     "sdk": "card",
-     "execution": {
-      "draft_depth": 0
-     }
-    },
-    {
-     "name": "stagingnd",
-     "build": {},
-     "build_args": [
-      "--memory-gib",
-      "4096"
-     ],
-     "sdk": "0.2.0",
-     "execution": {
-      "draft_depth": 0
-     }
-    }
-   ],
-   "steps": [
-    "wl:funnd:p1k:8",
-    "wl:stagingnd:p1k:8",
-    "wl:stagingnd:p1k:8",
-    "wl:funnd:p1k:8",
-    "wl:funnd:dec:3",
-    "wl:stagingnd:dec:3",
-    "wl:stagingnd:dec:3",
-    "wl:funnd:dec:3",
-    "prof:funnd:p1k:2",
-    "prof:stagingnd:p1k:2",
-    "prof:stagingnd:p1k:10",
-    "prof:funnd:p1k:10",
-    "prof:funnd:p2k:2",
-    "prof:stagingnd:p2k:2",
-    "prof:stagingnd:p2k:10",
-    "prof:funnd:p2k:10",
-    "prof:funnd:dec:1",
-    "prof:stagingnd:dec:1",
-    "prof:stagingnd:dec:5",
-    "prof:funnd:dec:5",
-    "wl:stagingnd:p1k:8",
-    "wl:funnd:p1k:8",
-    "wl:funnd:p1k:8",
-    "wl:stagingnd:p1k:8",
-    "wl:stagingnd:p2k:8",
-    "wl:funnd:p2k:8",
-    "wl:funnd:p2k:8",
-    "wl:stagingnd:p2k:8",
-    "wl:stagingnd:dec:3",
-    "wl:funnd:dec:3",
-    "wl:funnd:dec:3",
-    "wl:stagingnd:dec:3"
    ]
   }
  ]
