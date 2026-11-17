@@ -54,7 +54,7 @@ AMD Ryzen AI Max+ 395 "Strix Halo" (gfx1151): the results for this package are n
 
 ### Radeon AI PRO R9700 (gfx1201, 32 GB)
 
-| metric | llama.cpp | Loom | margin | roofline | Loom % of roofline | llama.cpp Vulkan |
+| metric | llama.cpp | Loom | margin vs best llama.cpp | roofline | Loom % of roofline | llama.cpp Vulkan |
 |---|---|---|---|---|---|---|
 | decode tok/s, short prompt | 781.9 | 1023.4 | +31 % | 1535.5 | 67 % | 744.4 |
 | decode tok/s, 2k context | 638.9 | 841.0 | +32 % | 967.5 | 87 % | 609.6 |
@@ -77,6 +77,7 @@ AMD Ryzen AI Max+ 395 "Strix Halo" (gfx1151): the results for this package are n
 - llama.cpp ROCm server arguments: `-ngl 99 -cram 0 -c 65536 -kvu -np 4`.
 - llama.cpp Vulkan server arguments: `-ngl 99 -cram 0 -c 65536 -kvu -np 4`.
 - Measured on AMD DevLab Dispatch R9700 runners (`devlab-perf` jobs); runners differ between sessions.
+- Margin vs best llama.cpp: (Loom / max(ROCm, Vulkan) - 1) × 100 %, using the available measured tokens/s for each row on this GPU. With only one valid backend, that backend is used; with neither, the margin is not measured. Raw backend values and their measurement sources are retained below and in the table.
 - Measured 2026-11-14; device TEST FIXTURE: made-up numbers, not a measurement, AMD Radeon AI PRO R9700S (gfx1201), Ubuntu 24.04; hrx-loom `0.1.0` (hrx-system `d01d1c1`); source: [DevLab Dispatch run 9000001](https://github.com/loom-fun/loom-skills/actions/runs/9000001).
 - llama.cpp Vulkan: measured 2026-11-14; source: [DevLab Dispatch run 9000001](https://github.com/loom-fun/loom-skills/actions/runs/9000001). Archive sha256 `aabbccd`.
 - Roofline: the hardware ceiling for this GGUF on AMD Radeon AI PRO R9700S (gfx1201, 32 GB, 2.35 GHz) at 600 GB/s and 77 TFLOP/s, from loom-roofline `roofline.py` (loom-skills `0123456`).
