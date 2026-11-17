@@ -310,6 +310,10 @@ CHOICE("prefill.post_add_row_scale", "bool", True, "POST_ADD_ROW_SCALE", kernels
 CHOICE("prefill.live_row_skip", "bool", True, "LIVE_ROW_SKIP", rows=ROWS_PREFILL,
        doc="Rows with scale 0 skipped in the row-local post-attention kernels.")
 
+CHOICE("prefill.prune_shared", "bool", False, "PRUNE_SHARED", kits=["gemma4"], rows=ROWS_PREFILL,
+       kernels=["g_token_info_tail", "g_attention*", "g_gemm*"], from_pr=554,
+       doc="Gemma4 shared-KV layers retain only the last live row per span in prefill; verify stays complete.")
+
 # ----- prefill flash attention (gen_flash2.py, gen_flash2s.py, mv_rows.py) -----------------------------------------------
 _FL = dict(kernels=["*_attention_flash2*"], rows=ROWS_PREFILL)
 _FLR4 = dict(kernels=["*_attention_flash2*_rdna4"], rows=ROWS_PREFILL, devices=["rdna4"])
