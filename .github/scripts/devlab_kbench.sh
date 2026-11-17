@@ -92,6 +92,14 @@ sys.exit(1 if bad else 0)
 PYT
   [ "${PIPESTATUS[0]}" = 0 ] || trc=1
 done
+# Strict negative controls are separate explicit modules; positive tests above are unchanged.
+while IFS= read -r neg; do
+  [ -n "$neg" ] || continue
+  nf=$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["file"])' "$neg")
+  mapfile -t nx < <(python3 -c 'import json,sys; print("\n".join(json.loads(sys.argv[1])["xfail"]))' "$neg")
+  step "negative controls $nf"
+  python3 "$here/.github/scripts/kbench_negative.py" "$root/.venv/bin/loom-test" "$nf" "$out/negative_${nf%.loom}.json" "${nx[@]}" || trc=1
+done < <(q "import json; [print(json.dumps(n)) for n in s.get('negative_tests', [])]")
 files=$(q "print(' '.join(s['files']))"); reps=$(q "print(s.get('repeats') or json.load(open('$kb')).get('repeats', 5))")
 cfgs=$(q "print(' '.join('--config='+c for c in s.get('config', [])))"); args=$(q "print(' '.join(s.get('args', [])))")
 vname() { local v=${1%.loom}; v=${v#bench_}; [ "$v" = bench ] && v=base; echo "$v"; }
