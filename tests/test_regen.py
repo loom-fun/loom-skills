@@ -601,6 +601,30 @@ class SdkLoomTest(Base):
                                             for k, r in vs_card.items()}, "gate_failures": gates or [], "degraded_runner": {}}, open(p, "w"))
         return p
 
+    def test_real_compare_marks_a_card_row_the_job_did_not_measure(self):
+        """through .github/scripts/strix_ab_compare.py: a Loom-only job without the 32k rows vs a card that has them -> longctx is confirmed, not n/a"""
+        d = os.path.join(self.tmp, "job")
+        shutil.copytree(os.path.join(DATA, "job_e2b"), d)
+        for f in os.listdir(d):
+            if "fun" in f:
+                os.remove(os.path.join(d, f))
+        p = os.path.join(d, "perf_staging.jsonl")   # drop the 32k rows: the job did not measure long context
+        strip = lambda o: {k: strip(v) for k, v in o.items() if "32k" not in k} if isinstance(o, dict) else o
+        open(p, "w").write("".join(json.dumps(strip(json.loads(l))) + "\n" for l in open(p) if l.strip()))
+        info = os.path.join(ROOT, "skills", "loom-benchmark", "scripts", "card", "test", "flint", "expected", "info.json")
+        out = os.path.join(self.tmp, "cmp.json")
+        subprocess.run([sys.executable, os.path.join(ROOT, ".github", "scripts", "strix_ab_compare.py"), d, "--json", out, "--fun-info", info,
+                        "--gpu", "strix-halo"], check=True, capture_output=True, text=True)
+        m = json.load(open(out))["metrics"]
+        self.assertIn("decode_32k", m)
+        self.assertIsNone(m["decode_32k"]["new"])
+        self.assertTrue(m["decode_32k"]["card"])
+        st = self.plan_loom() if hasattr(self, "plan_loom") else None
+        e = {"round": 1}
+        decision, reasons, *_ = regen.sdk_loom_decide(st, JOB, e, out)
+        self.assertEqual(decision, "confirm")
+        self.assertIn("longctx", e["confirm_rows"])
+
     def collect_cmp(self, cmp, name=JOB):
         def download(st, n, e):
             d = regen.job_dir(st, n)
