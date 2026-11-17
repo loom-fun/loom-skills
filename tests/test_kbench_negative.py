@@ -38,6 +38,21 @@ class NegativeControls(unittest.TestCase):
         with self.assertRaises(ValueError):
             M.validate(report(), ['@wrong=EXPECT/003', '@wrong=EXPECT/003'])
 
+    def test_configuration_validation_is_checked_before_any_tool(self):
+        valid = {'file': 'negative.loom', 'xfail': ['@wrong=EXPECT/003']}
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d)/'config.json'
+            for value, ok in (([], True), ([valid], True), (None, False), ({}, False),
+                              ([dict(valid, file=9)], False), ([dict(valid, xfail=None)], False),
+                              ([dict(valid, xfail=[42])], False),
+                              ([dict(valid, xfail=['@wrong=EXPECT/003']*2)], False)):
+                path.write_text(json.dumps({'suites': [{'suite': 's', 'negative_tests': value}]}))
+                r = subprocess.run([sys.executable, str(SCRIPT), '--plan', str(path), 's'], capture_output=True)
+                self.assertEqual(r.returncode, 0 if ok else 1, r.stderr)
+            path.write_text(json.dumps({'suites': [{'suite': 's'}]}))
+            self.assertEqual(M.plan(path, 's'), [])
+
+
     def test_cli_propagates_exit_and_xpass(self):
         with tempfile.TemporaryDirectory() as d:
             d = Path(d); tool = d/'fake.py'; tool.write_text('import os,json,sys\nopen(os.environ["ARGV"],"w").write(json.dumps(sys.argv))\nprint(os.environ["REPORT"])\nsys.exit(int(os.environ["EXIT"]))\n')

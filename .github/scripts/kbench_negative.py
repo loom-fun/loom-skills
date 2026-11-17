@@ -36,11 +36,47 @@ def validate(report, specs):
     return len(report['samples'])
 
 
+def plan(path, suite_name):
+    document = json.loads(Path(path).read_text())
+    suite = next(s for s in document['suites'] if s['suite'] == suite_name)
+    cases = suite.get('negative_tests', [])
+    if not isinstance(cases, list):
+        raise ValueError('negative_tests must be a list when declared')
+    for case in cases:
+        if not isinstance(case, dict) or set(case) != {'file', 'xfail'}:
+            raise ValueError('each negative test needs exactly file and xfail')
+        if not isinstance(case['file'], str) or not case['file'] or not case['file'].endswith('.loom'):
+            raise ValueError('negative test file must be a nonempty .loom path')
+        specs = case['xfail']
+        if not isinstance(specs, list) or not specs or any(not isinstance(x, str) for x in specs):
+            raise ValueError('negative test xfail must be a nonempty string list')
+        names = []
+        for item in specs:
+            parts = item.split('=')
+            if len(parts) != 2 or not parts[0].startswith('@') or len(parts[0]) < 2 or parts[1] != 'EXPECT/003':
+                raise ValueError('negative test specs require @record=EXPECT/003')
+            names.append(parts[0])
+        if len(set(names)) != len(names):
+            raise ValueError('duplicate negative test specs')
+    return cases
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument('tool'); ap.add_argument('source'); ap.add_argument('output')
-    ap.add_argument('xfail', nargs='+')
+    ap.add_argument('--plan', nargs=2, metavar=('CONFIG', 'SUITE'))
+    ap.add_argument('tool', nargs='?'); ap.add_argument('source', nargs='?'); ap.add_argument('output', nargs='?')
+    ap.add_argument('xfail', nargs='*')
     a = ap.parse_args()
+    if a.plan:
+        try:
+            for case in plan(*a.plan):
+                print(json.dumps(case))
+            return 0
+        except (ValueError, KeyError, TypeError, StopIteration, OSError) as e:
+            print(f'FAIL negative-control configuration: {e}', file=sys.stderr)
+            return 1
+    if not (a.tool and a.source and a.output and a.xfail):
+        ap.error('tool, source, output and explicit xfail specs are required')
     cmd = [a.tool, a.source, '--device=amdgpu'] + ['--xfail=' + s for s in a.xfail]
     r = subprocess.run(cmd, text=True, capture_output=True)
     Path(a.output).write_text(r.stdout)
