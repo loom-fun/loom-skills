@@ -132,10 +132,13 @@ or check depends on (tool dialect, vocab size, draft kind, dense/MoE, model size
 
 ## Baselines, quant, models, gates
 
-- **Baselines are apples to apples and out of the box**: llama.cpp at build defaults plus the standard flags, in the same job as Loom,
+- **Baselines are apples to apples and out of the box**: llama.cpp at build defaults plus the standard flags,
   with the package's drafting config on every row (4 streams: both off); no per-model sweeps, no best-of-configs mixing. Loom tuning
   counts only when baked into the package preset. Full rules: `skills/loom-benchmark/reference/methodology.md` and
   `skills/loom-kb/method/methodology.md`.
+- **Reuse stored measurements when nothing they measured changed** (methodology rule 15): same model files and same engine binary
+  (llama.cpp build, hrx-loom version) on the same GPU type means the stored rows stand. An SDK migration re-measures Loom only; llama.cpp
+  and the old card are never re-run except a targeted ABBA confirmation of a row outside its band.
 - **Quant**: plain Q4_K_M from the HF cache; never switch to another quant on your own, never download a GGUF that is cached under any
   repo, no big downloads without need. If the kit lacks a format Q4_K_M needs, add the format.
 - **Models**: nothing above 35B parameters on a local machine (MoE counts total); the shared box has room for one small build at a time.

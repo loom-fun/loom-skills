@@ -71,7 +71,7 @@ the local GPU. Hand the card over and move the local GPU on to the next item.
      `publish_package.py upload DIR --repo loom-fun/REPO --card-only --parent-commit $sha` (fails if another worker
      published since: re-read and rebuild).
 3. A card with metrics missing or measured on other programs (`sweep`, `remeasure`): one `devlab-perf` job per card
-   (required: it is the only source of card performance) (`.github/devlab/perf.json`: card, memory_bytes, kit and llamacpp from `nightly-models.json`,
+   (required: it is the only source of card performance; llama.cpp steps are omitted when the card's stored llama.cpp rows are reusable, methodology rule 15) (`.github/devlab/perf.json`: card, memory_bytes, kit and llamacpp from `nightly-models.json`,
    llama_spec omitted = `matched`: llama.cpp gets the card's classified drafting choice (same method and drafter, its documented n-max;
    none if the classification says none; `../../loom-benchmark/reference/methodology.md`), an explicit `llama_spec` only overrides it (`{drafter}` = the
    card's drafter, `{hf:OWNER/REPO/FILE}` a Hub file, e.g. an MTP head the card doesn't ship); variant `{"name": "card"}`, steps `perf:card:1` x3 (6 for a fast model, decode > ~100 tok/s: also job field `"repeat_rows": 3`, perf.py `--repeat-rows`), the same count of `perf:card:1:long`, `c4:card`, `llama@rocm.np1:3 llama@rocm.np1:3:long` (6 for a fast model)
@@ -85,7 +85,7 @@ the local GPU. Hand the card over and move the local GPU on to the next item.
    rebuild the card as above.
    **Vulkan baseline** (every card, one job each; the same workloads and `llama_spec` as the ROCm baseline): job fields
    `llamacpp_vulkan: "b12211"`, variant `{"name": "card"}`, steps `llama@vulkan.np1:2 llama@vulkan.np1:2:long llamac4@vulkan.perslot.nodraft` (the same drafting choice as ROCm on 1-stream rows)
-   (add the ROCm and Loom steps to the same job for a same-runner comparison); at the card's own `memory_bytes`. Ingest:
+   (stored ROCm and Loom rows are reused while their inputs are unchanged, rule 15); at the card's own `memory_bytes`. Ingest:
    `make_info.py perf --backend vulkan --llama-jsonl perf_llamacpp-vulkan_nN.jsonl --c4-llama c4_llamacpp-vulkan_nN.txt
    --baseline-version b12211 --baseline-args "$(cat llamacpp_args-vulkan.txt)" --baseline-sha256 "$(cat
    llamacpp_release-vulkan.sha256)" --fetched-programs "$(cat programs_sha256.txt)" --differs "..." --package DIR
