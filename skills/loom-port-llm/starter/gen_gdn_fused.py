@@ -489,7 +489,9 @@ kernel.def {tgt}export("{kname}") @{kname}(%tokens: index, %spans: index) {{
   %zero_i32 = view.load %zero_cell[%k0] : view<16xi32> -> i32
 """
     head = head.replace("@CONSTS@", _common_consts(consts))
-    return head + body + "\n  }\n  kernel.return\n}\n"
+    text = head + body + "\n  }\n  kernel.return\n}\n"
+    from gdn_fa_liveness import enabled as share_enabled, rewrite as share_lds
+    return share_lds(text) if not abl and share_enabled() else text
 
 
 def phase_b(G, NG, LB, eps, grouped, ratio, guard_open="", guard_close="", target=True, abl=()):

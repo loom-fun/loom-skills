@@ -1,29 +1,29 @@
 {
   "repeats": 4,
+  "sdk": "0.2.0",
   "suites": [
     {
-      "suite": "mxfp4_atiled",
+      "suite": "gdn_liveness",
       "runner": "r9700",
-      "dir": "mxfp4_atiled",
-      "gen": "mxfp4_atiled/gen_bench.py",
+      "dir": "gdn_liveness",
+      "gen": "gdn_liveness/gen_bench.py",
       "gen_variants": [
         "base",
-        "atiled"
+        "shared"
       ],
       "files": [
         "bench.loom",
-        "bench_atiled.loom"
+        "bench_shared.loom"
       ],
       "tests": [
-        "test.loom",
-        "producer.loom"
+        "test.loom"
       ],
       "negative_tests": [
         {
           "file": "negative.loom",
           "xfail": [
-            "@check_store_5120_zero_output=EXPECT/003",
-            "@check_store_5120_wrong_layout=EXPECT/003"
+            "@zero_o_control=EXPECT/006",
+            "@zero_arena_control=EXPECT/006"
           ]
         }
       ],
@@ -34,6 +34,5 @@
       ],
       "repeats": 4
     }
-  ],
-  "sdk": "0.2.0"
+  ]
 }
