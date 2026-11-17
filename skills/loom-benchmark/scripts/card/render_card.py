@@ -491,6 +491,26 @@ def chat_request(model, feats):
 
 
 
+def quickstart_flag_notes(fetch, serve):
+    """Explain only the flags present in this GPU's emitted commands."""
+    args = shlex.split(fetch) + shlex.split(serve)
+    notes = []
+    if "--materialize=copy" in args:
+        notes.append("`--materialize=copy` puts copies of the fetched package files in the output directory.")
+    if any(a.startswith("--device=") and "completion_spin_ns=4294967295" in a for a in args):
+        notes.append("`completion_spin_ns=4294967295` enables active waiting for GPU completions (uses CPU while GPU work is in flight); the card's performance measurements use this setting.")
+    if "--pool_backing=fixed" in args:
+        notes.append("`--pool_backing=fixed` commits the preset's memory pool up front instead of growing elastic backing.")
+    if any(a.startswith("--memory_bytes=") for a in args):
+        notes.append("`--memory_bytes` sets the serving memory budget for this GPU.")
+    for flag, kind in (("--state_slab_bytes", "state"), ("--weight_slab_bytes", "weight")):
+        if any(a.startswith(flag + "=") for a in args):
+            notes.append(f"`{flag}` sets the allocation slab size for {kind} memory.")
+    if PRELOAD_FLAG in args:
+        notes.append(f"`{PRELOAD_FLAG}` only changes how the weights are loaded on the host, so the performance rows were measured without it unless their job served with it.")
+    return ["- " + note for note in notes]
+
+
 def remeasure_lines(rm, g, sources, on):
     """The card lines about a same-runner A/B re-measure block (`on`: what was re-measured, "this package" or "programs SHA")."""
     L = []
@@ -755,6 +775,7 @@ def render(d):
     request = chat_request(load_package(d)["model"], feats) if kind == "chat" else []
     if len(serving) == 1:
         L += ["## Quick start", "", "```bash", *install, fetch_for(serving[0]), serve_command(info, facts, feats, serving[0], output, bare), "```", ""]
+        L += quickstart_flag_notes(fetch_for(serving[0]), serve_command(info, facts, feats, serving[0], output, bare)) + [""]
         if stock_line(serving[0]):
             L += [stock_line(serving[0]), ""]
         L += request
@@ -763,13 +784,12 @@ def render(d):
         for g in serving:
             L += ["<details>", f"<summary>{html.escape(gpu_label(g), quote=False)}</summary>", "",
                   "```bash", *install, fetch_for(g), serve_command(info, facts, feats, g, output, bare), "```", ""]
-            for line in (served_context_line(g, True), stock_line(g)):   # B1: the served-context cap and the stock-host note are the only sentences in a block
+            L += quickstart_flag_notes(fetch_for(g), serve_command(info, facts, feats, g, output, bare)) + [""]
+            for line in (served_context_line(g, True), stock_line(g)):   # GPU-specific startup notes precede the request example
                 if line:
                     L += [line, ""]
             L += request
             L += ["</details>", ""]
-    if any(PRELOAD_FLAG in serve_command(info, facts, feats, g, output, bare) for g in serving):
-        L += [f"`{PRELOAD_FLAG}` only changes how the weights are loaded on the host, so the performance rows were measured without it unless their job served with it.", ""]
     if release(pin):
         tag, whl, _ = release_wheel(pin)
         L += [f"hrx-loom {pin['hrx_loom']} is a pre-release published on its [GitHub release]({RELEASE_URL.replace('/download', '/tag')}/{tag}), "

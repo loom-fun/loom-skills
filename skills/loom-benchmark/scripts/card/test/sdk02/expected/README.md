@@ -19,6 +19,11 @@ loom-fetch huggingface:loom-fun/unsloth-Qwen3-0.6B-loom:chat --materialize=copy 
 loom-serve --model=Qwen3-0.6B '--device=amdgpu://?completion_spin_ns=4294967295' --pool_backing=fixed --parameter_mode=preload
 ```
 
+- `--materialize=copy` puts copies of the fetched package files in the output directory.
+- `completion_spin_ns=4294967295` enables active waiting for GPU completions (uses CPU while GPU work is in flight); the card's performance measurements use this setting.
+- `--pool_backing=fixed` commits the preset's memory pool up front instead of growing elastic backing.
+- `--parameter_mode=preload` only changes how the weights are loaded on the host, so the performance rows were measured without it unless their job served with it.
+
 In another terminal, send a request (optional thinking is turned off):
 
 ```bash
@@ -26,8 +31,6 @@ curl http://127.0.0.1:8080/v1/chat/completions \
   -H 'Content-Type: application/json' \
   -d '{"model": "Qwen/Qwen3-0.6B", "messages": [{"role": "user", "content": "Hello"}], "chat_template_kwargs": {"enable_thinking": false}}'
 ```
-
-`--parameter_mode=preload` only changes how the weights are loaded on the host, so the performance rows were measured without it unless their job served with it.
 
 hrx-loom 0.2.0rc1 is a pre-release published on its [GitHub release](https://github.com/ROCm/hrx-system/releases/tag/v0.2.0rc1), not on PyPI (the command above checks the wheel's sha256). On Windows install `hrx_loom-0.2.0rc1-py3-none-win_amd64.whl` from the same release.
 
