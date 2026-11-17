@@ -49,8 +49,8 @@ def case(h, rows, fused, test=False, zeros=False):
     expected = residual / np.sqrt(np.mean(residual.astype(np.float64)**2, axis=1, keepdims=True) + 1e-6) * wn
     np.save(OUT / (name + '_expected.npy'), expected.astype(np.float32))
     text = f'''check.case public @{name} {{
-  %t = index.constant {rows} : index
-  %width = index.constant {h} : index
+  %t = check.literal value({rows}) : index
+  %width = check.literal value({h}) : index
   %y = check.file.read.npy path("{name}_y.npy") : tensor<{n}xf32>
   %x = check.file.read.npy path("{name}_x.npy") : tensor<{n}xf32>
   %wn = check.file.read.npy path("{name}_wn.npy") : tensor<{h}xf32>
