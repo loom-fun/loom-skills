@@ -24,7 +24,7 @@ FAST, SLOW = "unsloth-Qwen3-0.6B-loom", "ggml-org-Qwen3-4B-loom"
 def run_script(name, args):
     """stdout of .github/scripts/NAME ARGS with the published decode rates stubbed (no network): the 0.6B is fast, the rest are not."""
     old = (card_lib.published_decode, sys.argv)
-    card_lib.published_decode = lambda slug, org="loom-fun": 300.0 if "0.6B" in slug else 60.0
+    card_lib.published_decode = lambda slug, org="loom-fun", gpu="strix-halo": 300.0 if "0.6B" in slug else 60.0
     sys.argv = [name] + args
     buf = io.StringIO()
     try:

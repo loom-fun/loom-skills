@@ -18,7 +18,7 @@ SLUG = "unsloth-Qwen3-0.6B-loom"
 
 
 def jobs(*args):
-    old, card_lib.published_decode = card_lib.published_decode, lambda slug, org="loom-fun": 300.0
+    old, card_lib.published_decode = card_lib.published_decode, lambda slug, org="loom-fun", gpu="strix-halo": 300.0
     buf = io.StringIO()
     try:
         with redirect_stdout(buf):

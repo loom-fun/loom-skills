@@ -57,8 +57,11 @@ class SamplingMetadataError(ValueError):
     """Published sampling metadata was unavailable or invalid, not an absent row."""
 
 
-def published_decode(slug, org="loom-fun"):
-    """Published Strix decode rate; None only for a valid card without that row.
+def published_decode(slug, org="loom-fun", gpu="strix-halo"):
+    """Published target-GPU decode rate; default Strix preserves existing callers.
+
+    None means a valid card without that target row. Legacy root performance is
+    a Strix-only fallback; never borrow another device's measurement.
 
     Retrieval or malformed metadata must not silently select the smaller normal
     plan. All job generators share this reader and propagate its failure.
@@ -76,10 +79,12 @@ def published_decode(slug, org="loom-fun"):
             info = obj(json.load(response), "info")
         if info.get("schema") not in (SCHEMA_ID, *LEGACY_SCHEMA_IDS):
             raise ValueError("unsupported or missing card schema")
-        legacy = obj(info.get("performance", {}), "performance")
         devices = obj(info.get("devices", {}), "devices")
-        strix = obj(devices.get("strix-halo", {}), "devices.strix-halo")
-        perf = legacy or obj(strix.get("performance", {}), "Strix performance")
+        target = obj(devices.get(gpu, {}), f"devices.{gpu}")
+        if "performance" in target:
+            perf = obj(target["performance"], f"{gpu} performance")
+        else:
+            perf = obj(info.get("performance", {}), "legacy Strix performance") if gpu == "strix-halo" else {}
         sessions = perf.get("sessions", [])
         if not isinstance(sessions, list):
             raise ValueError("performance.sessions must be a list")
@@ -94,7 +99,7 @@ def published_decode(slug, org="loom-fun"):
                 value = rate
         return value
     except (OSError, ValueError, TypeError, OverflowError) as exc:
-        raise SamplingMetadataError(f"Cannot determine sampling from {url}: {exc}. "
+        raise SamplingMetadataError(f"Cannot determine sampling for {gpu} from {url}: {exc}. "
                                     "Retry metadata access; refusing to infer normal-speed sampling.") from exc
 
 

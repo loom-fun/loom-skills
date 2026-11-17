@@ -28,7 +28,7 @@ RX, R9, STRIX = "radeon-rx7900xtx", "radeon-r9700", "strix-halo"
 
 def run(name, args):
     old = (card_lib.published_decode, sys.argv)
-    card_lib.published_decode = lambda slug, org="loom-fun": 300.0 if "0.6B" in slug else 60.0
+    card_lib.published_decode = lambda slug, org="loom-fun", gpu="strix-halo": 300.0 if "0.6B" in slug else 60.0
     sys.argv = [name] + args
     buf = io.StringIO()
     try:
