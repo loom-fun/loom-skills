@@ -1021,13 +1021,13 @@ def package_one(st, slug, canon, sha, dry, env):
     rev = hf_head(repo)
     snap, out = os.path.join(W, "snap"), os.path.join(W, "pkg")
     hf_snapshot_small(repo, rev, snap)
-    if card_lib.programs_sha256(snap) == want:   # a crashed run uploaded already, or the package was published by hand: nothing to do
-        return {"revision": rev, "programs_sha256": want, "base": sha, "already": True}
     alts = {card_lib.gpu_preset_name(sdk_package.load(os.path.join(snap, "model.json")), g) for g in card_lib.GPUS if card_lib.GPUS[g].get("preset_suffix")}
     changes = sdk_package.assemble(snap, os.path.join(canon, slug), out, alts)
     got = card_lib.programs_sha256(out)
     if got != want:
         raise RuntimeError(f"assembled package programs {str(got)[:12]} differ from the canonical build's {want[:12]}")
+    if sdk_package.same_files(snap, out):   # the head already holds exactly this package (programs AND llm_config pin, model.json, ...)
+        return {"revision": rev, "programs_sha256": want, "base": sha, "already": True}
     msg = f"Loom package rebuilt for hrx-loom {SDK_NEW} from loom-skills {sha[:10]} (card files unchanged until the card step)"
     r = sh([PY, f"{CARD}/publish_package.py", "upload", out, "--repo", slug, "--org", org, "--parent-commit", rev, "--message", msg]
            + (["--dry-run"] if dry else []), check=False, env=env)
