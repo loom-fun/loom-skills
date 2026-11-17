@@ -115,3 +115,21 @@ def assemble(snap, canon, out, alt_presets=()):
         json.dump(model, f, indent=1)
         f.write("\n")
     return changes
+
+
+def same_files(a, b, skip=("README.md", "info.json", "REPORT.md", ".gitattributes")):
+    """True when the two package dirs hold the same files with the same bytes, card files aside: an equal programs hash is not enough (a package
+    re-pinned to another SDK changes llm_config.json only)"""
+    def files(d):
+        out = {}
+        for root, dirs, fs in os.walk(d):
+            dirs[:] = [x for x in dirs if x != ".cache"]
+            for f in fs:
+                rel = os.path.relpath(os.path.join(root, f), d).replace(os.sep, "/")
+                if rel not in skip:
+                    out[rel] = os.path.join(root, f)
+        return out
+    fa, fb = files(a), files(b)
+    if set(fa) != set(fb):
+        return False
+    return all(open(fa[k], "rb").read() == open(fb[k], "rb").read() for k in fa)

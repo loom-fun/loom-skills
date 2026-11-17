@@ -834,6 +834,7 @@ class PackageTest(Base):
 
         def snapshot(repo, rev, out):
             uploads.append(["snapshot", repo, rev])
+            shutil.rmtree(out, ignore_errors=True)   # as hf_snapshot_small does
             shutil.copytree(self.snap, out)
         out = io.StringIO()
         with mock.patch.object(regen, "sh", sh), mock.patch.object(regen, "hf_head", lambda r: next(heads)), \
@@ -878,12 +879,21 @@ class PackageTest(Base):
         self.assertFalse(calls)
         self.assertIn("already published", out)
 
-    def test_a_head_that_already_holds_the_programs_is_recorded_not_uploaded(self):
-        shutil.rmtree(os.path.join(self.snap, "program"))
-        shutil.copytree(os.path.join(self.canon, SLUG, "program"), os.path.join(self.snap, "program"))
+    def test_a_head_that_already_holds_the_package_is_recorded_not_uploaded(self):
+        st, calls, _ = self.run_package("--dry-run", "--slugs", SLUG)   # assembles the package into the state's work dir
+        pkg = os.path.join(st.work, "package", SLUG, "pkg")
+        shutil.rmtree(self.snap)
+        shutil.copytree(pkg, self.snap)   # the head now holds exactly that package
         st, calls, _ = self.run_package("--slugs", SLUG)
         self.assertFalse([c for c in calls if "upload" in c])
         self.assertEqual(st.jobs[JOB]["package"]["revision"], "h" * 40)
+
+    def test_same_programs_but_another_sdk_pin_is_uploaded(self):
+        # the head holds the canonical programs but an older llm_config.json pin (a package re-pinned from a pre-release): upload, not "already"
+        shutil.rmtree(os.path.join(self.snap, "program"))
+        shutil.copytree(os.path.join(self.canon, SLUG, "program"), os.path.join(self.snap, "program"))
+        st, calls, _ = self.run_package("--slugs", SLUG)
+        self.assertTrue([c for c in calls if "upload" in c])
 
     def test_default_selection_is_the_promoted_collected_jobs(self):
         st, calls, out = self.run_package("--dry-run")
