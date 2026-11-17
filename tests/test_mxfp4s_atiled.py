@@ -1,5 +1,7 @@
 """The FP8 activation layout has one bijective byte mapping and unchanged math."""
 import os
+import json
+import tempfile
 import re
 import sys
 import unittest
@@ -40,6 +42,42 @@ class ActivationTiles(unittest.TestCase):
             self.assertEqual(instructions(base), instructions(tiled))
             self.assertNotIn('vector.fragment.load<lhs> %x_g8', tiled)
             self.assertIn('view<8xi8> -> vector<8xi8>', tiled)
+
+    def test_resolved_rdna4_rule_activates_matching_consumers_and_producer(self):
+        # Use the device-scoped exports from the actual build resolver.
+        kb = Path(__file__).resolve().parents[1] / 'skills/loom-kb'
+        sys.path.insert(0, str(kb))
+        import resolve
+        with tempfile.TemporaryDirectory() as tmp:
+            node = Path(tmp) / 'model' / 'activation-test'
+            node.mkdir(parents=True)
+            (node / 'scope.json').write_text(json.dumps({
+                'scope': 'model/activation-test', 'match': {'slug': 'activation-test'}, 'owner': 'test',
+                'choices': [{'when': {'devices': ['rdna4']},
+                             'set': {'prefill.gemm.mxfp4s_a_tiled': True},
+                             'evidence': 'test: device-scoped activation'}]}))
+            cfg = {'name': 'activation-test', 'arch': 'qwen3', 'hidden': 5120,
+                   'layers': 64, 'heads': 32, 'kv_heads': 8, 'head_dim': 128,
+                   'ffn': 17408, 'tensors': {}}
+            resolved = resolve.resolve_full(cfg, ('rdna3', 'rdna4'), tmp,
+                                            draft=None, slug='activation-test')
+        self.assertEqual(resolved['env'], {'GEMM_MXFP4S_A_TILED__RDNA4': '1'})
+        with patch.dict(os.environ, resolved['env'], clear=True):
+            self.assertTrue(A.enabled())
+            tiled = G.gemm_mxfp4s_f8_m256('store')
+            self.assertNotIn('vector.fragment.load<lhs> %x_g8', tiled)
+            import ast
+            module = ast.parse((kb.parent / 'loom-port-llm/starter/gen_llm.py').read_text())
+            source = next(ast.literal_eval(n.value) for n in module.body
+                          if isinstance(n, ast.Assign) and any(isinstance(t, ast.Name)
+                          and t.id == 'ROW_SCALE' for t in n.targets))
+            producer = G.f8_producer(source)
+            self.assertIn('%at_byte', producer)
+            self.assertNotIn('vector.store %q8, %x8_view', producer)
+        # An explicit disabled twin overrides an enabled base variable.
+        with patch.dict(os.environ, {'GEMM_MXFP4S_A_TILED': '1',
+                                     'GEMM_MXFP4S_A_TILED__RDNA4': ''}, clear=True):
+            self.assertFalse(A.enabled())
 
     def test_incompatible_permuted_k_design_fails_closed(self):
         with patch.dict(os.environ, {'GEMM_MXFP4S_A_TILED': '1'}):

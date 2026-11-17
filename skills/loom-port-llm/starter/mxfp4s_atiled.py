@@ -7,9 +7,11 @@ and retains its original ascending-K WMMA order and arithmetic. No source copied
 import os
 import re
 
+from flash2_rdna4 import twin_env
+
 
 def enabled():
-    return os.environ.get("GEMM_MXFP4S_A_TILED", "0").lower() not in ("", "0", "false", "no", "off")
+    return twin_env(os.environ).get("GEMM_MXFP4S_A_TILED", "0").lower() not in ("", "0", "false", "no", "off")
 
 
 def offset(row, col, width):
