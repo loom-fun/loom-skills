@@ -33,6 +33,9 @@ Entries: [versions/v0.1.0-to-v0.2.0.md](versions/v0.1.0-to-v0.2.0.md) (hrx-loom 
 
 ## The procedure (any adjacent pair)
 
+The end-to-end checklist for a whole release, including the repos and pages outside loom-skills and the promotion order:
+[reference/release-checklist.md](reference/release-checklist.md). Start the release's tracking issue from it.
+
 Order matters: each step's proof is the next step's precondition. Big outputs go on disk (campaign dir `eng/`), never `/tmp`.
 
 1. **Research first, before any migration code.** Write `notes/sdk<NNN>_research.md` in the campaign dir.
