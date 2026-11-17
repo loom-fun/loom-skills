@@ -154,6 +154,10 @@ class SubmitPollTest(Base):
                                                          ("PUT", "contents/.github/devlab/perf.json"), ("POST", "pulls"), ("POST", "issues/77/labels")])
         self.assertEqual(seen[4][2]["base"], "r9700")   # plan --base: the experiment branch is cut from it and targets it
         self.assertIn("kind: tooling", seen[4][2]["body"])
+        import scope_lint
+        scope, errors = scope_lint.parse_block(seen[4][2]["body"])
+        self.assertEqual(errors, [])
+        self.assertEqual(scope["scopes"], [])   # tooling has no selector; "none" would name a nonexistent KB node
         self.assertEqual(seen[5][2], {"labels[]": "devlab-perf"})
         st = regen.State(self.state)
         self.assertEqual((st.jobs[JOB]["stage"], st.jobs[JOB]["pr"]), ("submitted", 77))
