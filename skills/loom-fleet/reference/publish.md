@@ -9,8 +9,14 @@ migration, first tag the production repos with the outgoing SDK version (`loom-m
 **Release tags** (owner rule, 2026-11-16). loom-skills: every promotion to `main` (with its loom-fun cards) tags the merge commit
 `sdkX.Y.Z-uN`: X.Y.Z is the hrx-loom SDK version the release targets; N counts the promotions on that SDK, starting at 0 and resetting
 to 0 on a new SDK (`sdk0.1.0-u0`, `sdk0.1.0-u1`, `sdk0.2.0-u0`, ...). No `v` prefix and no dot before N: the tag is deliberately not semver
-(a semver tool would read `-N` as a pre-release) and stays unambiguous if the SDK ever uses four version parts. Card repos (loom-fun):
-A card tag `vX.Y.Z` means exactly one thing: the last commit of that card repo that worked with SDK X.Y.Z, before the card moved to a newer SDK. It is created only at that move, never on a new card. Which loom-skills commit built a card is in its `info.json` (`versions.card_generator`), so cards carry no release tag.
+(a semver tool would read `-N` as a pre-release) and stays unambiguous if the SDK ever uses four version parts.
+
+<a id="card-tags"></a>**Card tags** (loom-fun): a card tag `vX.Y.Z` means exactly one thing: the last commit of that card repo that worked
+with SDK X.Y.Z, before the card moved to a newer SDK, i.e. the repo's head at the time of the move. It is created only at that move,
+never on a new card. `scripts/tag_org.py` tags every `*-loom` repo whose head still pins the outgoing SDK, including cards the campaign did
+not migrate (their head stays the last commit on that SDK). Which loom-skills commit built a card is in its `info.json`
+(`versions.card_generator`), so cards carry no release tag.
+
 Which models need this work is [populate-org.md](populate-org.md).
 
 ## 2. Publish the initial result
