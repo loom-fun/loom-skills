@@ -5,7 +5,7 @@
  "same_programs_as": "radeon-r9700",
  "share_section_with": null,
  "preset": {
-  "always": false
+  "always": true
  },
  "sdk": {
   "hrx_loom": "0.2.0",
