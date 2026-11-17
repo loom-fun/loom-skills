@@ -43,14 +43,15 @@ preferences; do not reuse stale model IDs or infer a price/quality hierarchy. Re
 control/catalog evidence used. If a host exposes no model control, state that the model is inherited or otherwise unverified and why. Do not
 claim an override was applied when it was not.
 
-A delegator must pass the chosen model and any selected reasoning value the host supports on the actual dispatch call; do not invent
-unsupported arguments. If the host does not expose a needed control, disclose the fallback. If an override requires a fresh/no-history fork,
-provide that fork mode and a self-contained brief with the goal, scope, read-first files, constraints, and deliverables. Inherit the parent's
-selection only when its tier is recorded and matches the delegated task; otherwise select and pass a model explicitly. Capture the accepted
-agent ID and the dispatch result. Report the requested model separately from runtime identity: if the host does not expose runtime identity,
-mark it unverified. A failed or unavailable override is a disclosed fallback, not evidence of successful selection. On resume, re-check the
-current controls and catalog, retain a still-valid recorded choice when appropriate, and never interrupt useful in-flight agents solely to
-retier them.
+Before each spawn, including nested delegation, check that this payload has its own tier, reason, host model, and requested supported
+controls; a parent brief does not satisfy a child's fields. Pass the selected model and any selected reasoning value the host supports on the
+actual dispatch call; do not invent unsupported arguments. If the host does not expose a needed control, disclose the fallback. If an override
+requires a fresh/no-history fork, provide that fork mode and a self-contained brief with the goal, scope, read-first files, constraints, and
+deliverables. Inherit the parent's selection only when its tier is recorded and matches the delegated task; otherwise select and pass a model
+explicitly. After each call, capture the accepted agent ID and dispatch result. Report the requested model separately from runtime identity:
+if the host does not expose runtime identity, mark it unverified. A failed or unavailable override is a disclosed fallback, not evidence of
+successful selection. On resume, re-check current controls and catalog, keep existing worker continuation/status records separate from the
+new-spawn queue, and never relaunch or interrupt useful in-flight work solely to retier it.
 
 Every task brief includes `Tier`, `Reason`, `Host model`, `Dispatch`, and `Verification`. `Dispatch` records the requested supported controls
 and the actual call/result, including unavailable controls; `Verification` records what the host confirmed or explicitly says `unverified`
