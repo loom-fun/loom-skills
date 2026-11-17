@@ -5,6 +5,7 @@ Levers for 1-token and multi-token decode matvecs, attention and the head. Numbe
 ## Contents
 
 - Multi-token matrix-vector (`mv()` in gen_llm.py)
+- Planar Q8 activation ABI
 - Adaptive rows per workgroup (dense 4B-class decode: the biggest single win)
 - Fused 1-token QKV and paired-row gated FFN
 - Argmax head (`head_mv()`)
@@ -27,6 +28,13 @@ Levers for 1-token and multi-token decode matvecs, attention and the head. Numbe
   step %lanes]`). This bug produced garbage for hidden=1024 models.
 - **Q4_K folding.** `y = Σ_groups (d_g · dot(codes_g, x_g) − m_g · Σx_g)`. Σx_g is
   computed once per token.
+
+## Planar Q8 activation ABI
+
+The starter's `g_quant_q8` already publishes planar activations: int8 codes `[rows][width/32][32]`, followed at byte
+`rows*width` by F32 metadata `[rows][width/32][2]` (F16-rounded scale, exact code sum). Codes use the unrounded
+`max(abs(group))/127` scale. This is the representation in upstream `q8_1_planar.loom` at library v0.2.0
+(1fd6bd23); it is not a new weight format to repack. Producer fusion can reuse that ABI while preserving its rounding.
 
 ## Adaptive rows per workgroup (dense 4B-class decode: the biggest single win)
 
