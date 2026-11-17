@@ -17,6 +17,7 @@ cards. Never edit a rendered README by hand: change the data (make_info.py) or t
 import argparse
 import html
 import json
+import math
 import os
 import re
 import sys
@@ -158,6 +159,18 @@ def margin(loom, base):
     if loom is None or base is None or not base:
         return MISSING
     return f"{round((loom / base - 1) * 100):+d} %"
+
+
+def margin_baseline(key, metric, base, extra):
+    """The displayed row's baseline; additional backends never replace its raw evidence."""
+    value = metric.get("baseline")
+    if base["name"] != "llama.cpp":
+        return value   # safetensors cards retain their vLLM baseline
+    vulkan = extra.get("vulkan") or {}
+    vk = ((vulkan.get("session") or {}).get("metrics") or {}).get(key, {}).get("baseline")
+    values = [v for v in (value, vk) if isinstance(v, (int, float)) and not isinstance(v, bool)
+              and math.isfinite(v) and v > 0]
+    return max(values, default=None)
 
 
 LLAMA_METHOD = {"draft-dflash": "DFlash", "draft-mtp": "MTP", "ngram-simple": "n-gram", "ngram-mod": "n-gram"}
@@ -498,7 +511,8 @@ def perf_section(L, info, facts, feats, d, g, here, ctx):
     # further llama.cpp backends (performance.baselines): one column each, after the roofline
     extra = {b: x for b, x in (perf.get("baselines") or {}).items()}
     xnames = {b: f"{x['baseline']['name']} {b.capitalize()}" for b, x in extra.items()}
-    L += [f"| metric | {bname} | Loom | margin | roofline | Loom % of roofline "
+    margin_label = "margin vs best llama.cpp" if bname == "llama.cpp" else "margin"
+    L += [f"| metric | {bname} | Loom | {margin_label} | roofline | Loom % of roofline "
           + "".join(f"| {n} " for n in xnames.values()) + "|",
           "|---|---|---|---|---|---|" + "---|" * len(extra)]
 
@@ -529,7 +543,7 @@ def perf_section(L, info, facts, feats, d, g, here, ctx):
             cells = " | ".join([num(key, ceiling), pct(m.get('loom'), ceiling) + (f" {ABOVE}" if over100 else "")]
                                + [num(key, x['session']['metrics'].get(key, {}).get('baseline')) for x in extra.values()])
         L.append(f"| {label} | {num(key, m.get('baseline'))} | {loom} | "
-                 f"{MISSING if key == 'spec_acceptance' else margin(m.get('loom'), m.get('baseline'))} | {cells} |")
+                 f"{MISSING if key == 'spec_acceptance' else margin(m.get('loom'), margin_baseline(key, m, base, extra))} | {cells} |")
 
     def runs_of(keys, med):
         vals = set()
@@ -582,6 +596,10 @@ def perf_section(L, info, facts, feats, d, g, here, ctx):
                                                         has_baseline_values(m for m, _ in (shown[k] for k, _ in METRICS if k in shown))),
           (f"- Measured on {device_text(psrc['device'])}, a named machine (this GPU has no DevLab runner); both engines ran on it."
            if machine else f"- Measured on AMD DevLab Dispatch {GPUS[g]['runner']} runners (`devlab-perf` jobs); runners differ between sessions.")]
+    if bname == "llama.cpp":
+        L.append("- Margin vs best llama.cpp: (Loom / max(ROCm, Vulkan) - 1) × 100 %, using the available measured "
+                 "tokens/s for each row on this GPU. With only one valid backend, that backend is used; with neither, "
+                 "the margin is not measured. Raw backend values and their measurement sources are retained below and in the table.")
     if psrc:
         L.append(f"- Measured {text(sessions[primary]['date'])}; device {device_text(psrc['device'])}; "
                  f"hrx-loom {sdk_text(psrc['hrx_loom'])}; source: {src_text(psrc)}.")
