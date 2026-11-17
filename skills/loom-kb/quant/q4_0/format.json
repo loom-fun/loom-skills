@@ -7,7 +7,7 @@
   "bits_per_weight": 4.5,
   "low_bit": true,
   "int8_path": false,
-  "moe": false,
+  "moe": true,
   "dequant_helper": "gen_llm.py (proposal head copy; weights too)",
   "ktest": {
     "matvec_int8": false,
@@ -18,5 +18,5 @@
     "rdna3": true,
     "rdna4": true
   },
-  "evidence": "used by published packages (programs of the local copies define its dequant helper; all published packages are dual-target, built for gfx1151 and gfx1201)"
+  "evidence": "used by published packages (programs of the local copies define its dequant helper; all published packages are dual-target, built for gfx1151 and gfx1201); Q4_0 expert decode/grouped prefill added with independent synthetic reference suite (moe_q4_0), GPU qualification pending"
 }
