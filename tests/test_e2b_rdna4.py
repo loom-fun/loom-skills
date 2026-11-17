@@ -151,3 +151,89 @@ class FlashTrims(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FlashKeySplitD256(unittest.TestCase):
+    """gen_flash2s.py FLASH2_B=2 / 3 at head_dim 256 with 6 query heads per KV head (Qwen3.5-class 27B): the key-split loop of flash2_b2.py."""
+    CFG = ROOT / "fleet/amd-Qwen3.8-27B-Quark-AWQ-MXFP4-loom/llm_config.json"
+
+    def gen(self, tmp, **env):
+        out = Path(tmp) / "flash2.loom"
+        e = dict(os.environ, LLM_CONFIG=str(self.CFG), FLASH2_TARGET="llm", FLASH2_OUT=str(out), **env)
+        for k in ("FLASH2_B", "FLASH2_TRIM"):
+            if k not in env:
+                e.pop(k, None)
+        subprocess.run([sys.executable, str(STARTER / "gen_flash2.py")], check=True, env=e, capture_output=True)
+        return out.read_text()
+
+    def test_default_keeps_the_staged_twin(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertNotIn("%ql_view", self.gen(tmp))
+
+    def test_two_and_three_heads_per_wave(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            t2 = self.gen(tmp, FLASH2_B="2")
+            t3 = self.gen(tmp, FLASH2_B="3")
+        for t in (t2, t3):
+            self.assertEqual(t.count('export("g_attention_flash2_rdna4")'), 1)
+            self.assertEqual(t.count('export("g_attention_flash2_partial_rdna4")'), 1)
+            self.assertIn("%clanes = index.constant 128 : index", t)               # the four waves of a head group
+            self.assertIn("%head1 = index.assume", t)
+        self.assertIn("workgroups(%tiles, %ckv, %c1)", t2)
+        self.assertIn("%ckv = index.constant 12 : index", t2)                       # 4 KV heads x 3 head pairs
+        self.assertIn("view<2x32x136xf16>", t2)
+        self.assertNotIn("%head2 =", t2)
+        self.assertIn("%ckv = index.constant 8 : index", t3)                        # 4 KV heads x 2 head triples
+        self.assertIn("view<3x32x136xf16>", t3)
+        self.assertIn("%head2 = index.assume", t3)
+
+    def test_fixed_reference(self):
+        """FLASH2_B2_FM=1: both gfx12 kernels (whole and partial tiles: cut invariance) get the fixed-reference loops (unmasked + masked tail)
+        and the per-lane second pass; the gfx11 kernel is unchanged."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            t2 = self.gen(tmp, FLASH2_B="2")
+            fm = self.gen(tmp, FLASH2_B="2", FLASH2_B2_FM="1")
+        r4 = 'export("g_attention_flash2_rdna4")'
+        self.assertEqual(t2[:t2.index(r4)], fm[:fm.index(r4)])
+        cut = fm.index('export("g_attention_flash2_partial_rdna4")')
+        for w in (fm[fm.index(r4):cut], fm[cut:]):
+            self.assertIn("%sinitA = vector.fragment<init> %fm_nmv", w)              # S^T accumulated onto -m0
+            self.assertIn("%sinit2A = vector.fragment<init> %fm2_nmv", w)            # second pass: overflowed lanes at their true max
+            self.assertIn("[%c0 to %fm_nfull step %c1]", w)                           # unmasked loop below the diagonal
+            self.assertIn("[%fm_nfull to %nblk step %c1]", w)
+            self.assertIn("scf.if %fm_any", w)
+            self.assertNotIn("vector.expf<afn>", w)
+
+
+class RopeQg(unittest.TestCase):
+    """rope_qg.fuse: g_qk_rope_store_qg reads q|gate rows and copies the gate; trunk launches lose g_split_qgate, the MTP launch keeps both."""
+    PROG = '''kernel.def export("g_qk_rope_store") @g_qk_rope_store(%tokens: index) {
+} launch(%tokens_arg: index, %pool_arg: index, %q: buffer, %k: buffer) {
+  %q_view = buffer.view %q[%zero] : buffer -> view<[%tokens]x24x256xf32>
+  %x0 = view.load %q_view[%token, %qh, %d0] : view<[%tokens]x24x256xf32> -> f32
+  view.store %r0, %q_view[%token, %qh, %d0] : f32, view<[%tokens]x24x256xf32>
+  kernel.return
+}
+command.def public @p() launch() {
+  kernel.launch @g_split_qgate[%t](%t, %qg, %q, %gate) : [index](index, buffer, buffer, buffer)
+  kernel.launch @g_qk_rope_store[%t](%t, %layer_3, %rope_3, %context, %pool, %q, %k, %v, %qn, %kn) : [index](index, index, i32, index, index, buffer, buffer, buffer, view<256xf32>, view<256xf32>)
+  kernel.launch @g_split_qgate[%t](%t, %qg, %q, %gate) : [index](index, buffer, buffer, buffer)
+  kernel.launch @g_qk_rope_store[%t](%t, %mtp_layer, %rope_on, %context, %pool, %q, %k, %v, %qn, %kn) : [index](index, index, i32, index, index, buffer, buffer, buffer, view<256xf32>, view<256xf32>)
+}
+'''
+
+    def test_fuse(self):
+        import rope_qg
+        out, n = rope_qg.fuse(self.PROG)
+        self.assertEqual(n, 1)
+        self.assertIn("%pool_arg: index, %qg: buffer, %q: buffer, %gate: buffer, %k: buffer", out)
+        self.assertIn("view.load %qg_view[%token, %qh, 0, %d0] : view<[%tokens]x24x2x256xf32> -> f32", out)
+        self.assertIn("view.load %qg_view[%token, %qh, 1, %d0]", out)
+        self.assertIn("view.store %r0_gate, %gate_view[%token, %qh, %d0]", out)
+        self.assertIn("@g_qk_rope_store_qg[%t](%t, %layer_3, %rope_3, %context, %pool, %qg, %q, %gate, %k,", out)
+        self.assertIn("index, index, i32, index, index, buffer, buffer, buffer, buffer, buffer, view<256xf32>", out)
+        self.assertEqual(out.count("@g_split_qgate["), 1)                          # the MTP pair keeps its split
+        self.assertIn("@g_qk_rope_store[%t](%t, %mtp_layer", out)

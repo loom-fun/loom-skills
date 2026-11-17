@@ -1,0 +1,84 @@
+{
+ "family": "llama",
+ "doc": "HF LlamaForCausalLM (Llama 2/3.x dense GQA transformers) -> the starter's internal (GGUF-style) tensor names. No layer_types, recurrent, MTP or q/k-norm entries: the inspector treats absent keys as 'not in this family'. HF stores q/k rows in rotate_half (neox) pair order, so rope_type is neox and no weight is permuted (llama.cpp's converter permutes to interleaved pairs, which is why GGUF llama configs say rope_type norm). RMSNorm is the plain w * x / rms(x): norm weights are read as stored (bf16), no prepared copy. llama3 rope scaling becomes cfg rope_freq_factors (computed by the inspector as llama.cpp's converter does).",
+ "architectures": [
+  "LlamaForCausalLM"
+ ],
+ "arch": "llama",
+ "text_config": null,
+ "config": {
+  "hidden": "hidden_size",
+  "layers": "num_hidden_layers",
+  "heads": "num_attention_heads",
+  "kv_heads": "num_key_value_heads",
+  "head_dim": "head_dim",
+  "ffn": "intermediate_size",
+  "context_length": "max_position_embeddings",
+  "rms_eps": "rms_norm_eps",
+  "rope_theta": "rope_parameters.rope_theta"
+ },
+ "vocab_from": "token_embd.weight",
+ "rope_dims": {
+  "head_dim": "head_dim",
+  "factor": null
+ },
+ "fixed": {
+  "rope_type": "neox",
+  "qk_norm": false,
+  "attn_gate": false,
+  "post_norms": false,
+  "ffn_norm_tensor": "post_attention_norm",
+  "attn_sinks": false,
+  "embed_norm": false,
+  "embed_scale": null,
+  "sliding_window": 0,
+  "sliding_layers": [],
+  "nope_layers": []
+ },
+ "tied_embeddings_key": "tie_word_embeddings",
+ "global": {
+  "token_embd.weight": {
+   "hf": "model.embed_tokens.weight"
+  },
+  "output.weight": {
+   "hf": "lm_head.weight"
+  },
+  "output_norm.weight": {
+   "hf": "model.norm.weight"
+  }
+ },
+ "layer": {
+  "prefix": "model.layers.{i}.",
+  "common": {
+   "attn_norm.weight": {
+    "hf": "input_layernorm.weight"
+   },
+   "post_attention_norm.weight": {
+    "hf": "post_attention_layernorm.weight"
+   },
+   "ffn_gate.weight": {
+    "hf": "mlp.gate_proj.weight"
+   },
+   "ffn_up.weight": {
+    "hf": "mlp.up_proj.weight"
+   },
+   "ffn_down.weight": {
+    "hf": "mlp.down_proj.weight"
+   }
+  },
+  "full_attention": {
+   "attn_q.weight": {
+    "hf": "self_attn.q_proj.weight"
+   },
+   "attn_k.weight": {
+    "hf": "self_attn.k_proj.weight"
+   },
+   "attn_v.weight": {
+    "hf": "self_attn.v_proj.weight"
+   },
+   "attn_output.weight": {
+    "hf": "self_attn.o_proj.weight"
+   }
+  }
+ }
+}

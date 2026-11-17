@@ -166,7 +166,9 @@ def build(slug, pkgdir, work, extra=()):
     """Rebuild slug's package into work/pkg with this checkout's kit. Returns (ok, message, program_dir)."""
     pcfg = json.load(open(f"{pkgdir}/llm_config.json"))
     os.makedirs(work, exist_ok=True)
-    names = [pcfg["gguf"]]
+    src = pcfg.get("source") or {}
+    st = not pcfg.get("gguf") and src.get("kind") == "safetensors"   # an HF safetensors checkpoint: no GGUF to link, the inspector reads the header
+    names = [] if st else [pcfg["gguf"]]
     for k in ("drafter", "assistant"):
         if (pcfg.get(k) or {}).get("gguf"):
             names.append(pcfg[k]["gguf"])
@@ -187,9 +189,12 @@ def build(slug, pkgdir, work, extra=()):
         shutil.copytree(STARTER, kit)
     py = sys.executable
     fresh = os.path.join(work, "fresh.json")
-    rc, out = sh([py, f"{kit}/inspect_gguf.py", os.path.basename(pcfg["gguf"]), fresh], work)
+    if st:   # header and small files by HTTP range reads of the pinned revision (no weights); weights_bytes comes from the header sizes
+        rc, out = sh([py, f"{kit}/inspect_safetensors.py", src["repo"], fresh, "--revision", src.get("revision") or "main"], work)
+    else:
+        rc, out = sh([py, f"{kit}/inspect_gguf.py", os.path.basename(pcfg["gguf"]), fresh], work)
     if rc:
-        return False, "inspect_gguf: " + out.strip().splitlines()[-1][-250:], None
+        return False, "inspect: " + out.strip().splitlines()[-1][-250:], None
     cfg = json.load(open(fresh))
     cfg.update({k: v for k, v in pcfg.items() if k not in ("tensors", "generator", "resolved")})
     json.dump(cfg, open(os.path.join(work, "cfg.json"), "w"), indent=1)

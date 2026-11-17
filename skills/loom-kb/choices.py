@@ -239,6 +239,19 @@ CHOICE("decode.mv.q8_r32", "bool", True, "MV_Q8_R32", doc="Int8 16-token matvecs
 CHOICE("decode.spec.gdn_copy_split", "int", 1, "GDN_COPY_SPLIT", kernels=["g_gdn_capture*", "g_gdn_restore*"], rows=ROWS_DECODE, devices=["rdna4"], per_target=True,
        doc="Workgroups per token of the gated delta-net capture / restore copies of a drafted step (gfx12 twin; 1 = the one-workgroup-per-token "
            "kernel on both targets). R9700 Qwen3.8-27B MTP 3: 8 = -0.8 ms of a 40 ms step.")
+CHOICE("decode.spec.gdn_fold", "bool", False, "GDN_FOLD", enc=("1", None),
+       kernels=["g_gdn_conv_bank", "g_gdn_recurrence_rec*", "g_gdn_fold*", "g_gdn_capture*", "g_gdn_restore*"], rows=ROWS_DECODE, from_pr="mxfp4st-ogdn",
+       doc="Drafted verification of a gated delta-net hybrid without capture / restore / replay: the verification records each speculative "
+           "step's fold factors (raw conv input + key, update scalar per value column, decay per head) and, after acceptance, one launch "
+           "folds the accepted steps into every layer's state and one commits the conv histories (gen_gdn.fold_kernels). Published state "
+           "bit-identical to the replay's; the verify scratch holds 8 rows per span instead of every epoch token's replay inputs.")
+CHOICE("decode.spec.gdn_fold_defer", "bool", False, "GDN_FOLD_DEFER", enc=("1", None),
+       kernels=["g_gdn_recurrence_rec*", "g_gdn_fold*", "g_gdn_pend*", "g_gdn_flush"], rows=ROWS_DECODE, from_pr="mxfp4st-defold",
+       doc="With decode.spec.gdn_fold: the fold of a drafted verification is deferred. The accepted steps' factors become the writer "
+           "slot's pending fold (each slot layer holds 8 steps of keys + dk + decay); the next verification's recurrence applies them in "
+           "registers and writes the folded state back (one state read per drafted step instead of two), and every other reader (advance "
+           "epochs, publishing spans, forks) applies them first (g_gdn_flush + g_gdn_pend_clear at the program start). Bit-identical to "
+           "the eager fold (gen_gdn.defer_kernels).")
 CHOICE("decode.mv.pair_proj", "str", "qg", "PAIR_PROJ", kernels=["g_mv*_pair"], rows=ROWS_DECODE + ROWS_STREAMS,
        doc="Paired projections: qg (q + gate), kv (k + v), 1 (both), 0 (off). k + v measured no faster end to end.")
 
@@ -258,6 +271,28 @@ CHOICE("prefill.gemm.f16o_swiglu", "bool", False, "GEMM_F16O", kernels=["g_gemm_
        doc="gfx12 f16-output swiglu group with its row scale (the R9700 prefill stack of #656). Opt-in per model: llm_config "
            "rdna4_f16_ffn is its default there. Also turns on prefill.attn.flash2_trim and prefill.attn.flash2_b2 (cfg-driven).",
        generator_defaults=("",))
+CHOICE("decode.mxfp4s.act_q8", "bool", False, "MXFP4S_Q8", kernels=["g_mv_mxfp4s_*_q8*", "g_mxfp4s_icodes"], rows=ROWS_DECODE + ROWS_STREAMS, from_pr="mxfp4st-kern",
+       doc="MXFP4 split-plane dense matvecs take int8 activations (ACT_Q8's dot4 path, as Q8_0 / the K-quants) instead of f32 conversions and fused multiply-adds: the 4-token verify "
+           "matvec of a drafted decode is ALU-bound on the f32 path (the GGUF MXFP4 Qwen3.8-27B measured 47 tok/s drafted vs 74 with int8 activations). Opt-in per model.")
+CHOICE("decode.verify.fuse", "str", None, "VERIFY_FUSE", kernels=["g_pmv_*"], rows=ROWS_DECODE, from_pr="mxfp4st-ostep",
+       doc="Drafted verify epochs of 2-4 tokens on the int8 matvec path run fused layers (starter gen_pstep.py; the layer as generated stays "
+           "for every other epoch, every value is the launch chain's: kernel tests compare with equality). swq: gate + up + g_silu_mul + "
+           "g_quant_q8 of the FFN in one launch (32-row workgroups whose epilogue writes the down projection's int8 input; kbench pstep_r9700 "
+           "43811425655: FFN block 262 -> 251 us; in the model, R9700 run 43812485595: 157.3 us vs 2 x 78.9, decode tie). swqn: swq and every g_post_add_norm + g_quant_q8(h) pair as one g_post_add_norm_q8 launch (7.2 us vs 2.9 + 2.7: a loss). full: every projection takes its producer as a prologue (rmsnorm / f32 / silu + quant) and "
+           "the out / down projections accumulate into the residual (7 launches -> 2 per FFN, but 261 -> 335+ us: the prologue is paid per workgroup).")
+CHOICE("decode.verify.persist", "int", 0, "MV_PERSIST", kernels=["g_pmv_*"], rows=ROWS_DECODE, from_pr="mxfp4st-ostep",
+       doc="decode.verify.fuse's matvecs as persistent row loops: min(G, row groups) workgroups each walk row groups id, id + G, ... "
+           "(the prologue runs once per workgroup instead of once per row group); 0: one workgroup per row group.")
+CHOICE("prefill.gemm.mxfp4s_f8", "bool", False, "GEMM_MXFP4S_F8", kernels=["g_gemm_mxfp4s_*_f8_*", "g_row_scale_f16*_f8_*", "g_post_add_norm_rs*_f8_*"], rows=ROWS_PREFILL,
+       devices=["rdna4"], from_pr="mxfp4st-kern",
+       doc="gfx12: MXFP4 split-plane (mxfp4s) prefill GEMMs on fp8 WMMA (v_wmma_f32_16x16x16_fp8_bf8): the nibble and scale planes are read as stored, weights decoded to bf8 "
+           "exactly in LDS, activations fp8 e4m3 with a per-row power-of-two scale written by the row-scale producers' _f8_rdna4 twins (lossy activations, gated against the "
+           "golden reference). Opt-in per model; every block exponent of the checkpoint must be in 107..132 (scan_mxfp4s_exponents.py). The gfx11 programs are unchanged.")
+CHOICE("prefill.gemm.mxfp4s_f8_kernel", "str", None, "GEMM_MXFP4S_F8_KERNEL", kernels=["g_gemm_mxfp4s_*_f8_*"], rows=ROWS_PREFILL, devices=["rdna4"], from_pr="mxfp4st-ogemm",
+       doc="The design of prefill.gemm.mxfp4s_f8's GEMM kernels (gen_mxfp4s.F8_KERNELS; None = v1, the #879 kernel). lvs: the store GEMMs load their operands lane-vector "
+           "(one 16-byte load per lane covers two K substeps: activations global_load_b128 with immediate offsets, weights ds_load_b128; both operands in the same permuted K "
+           "order) and issue the next K pair's loads before this pair's WMMAs; the SwiGLU pair stays v1. lv: lane-vector without the pipelining (SwiGLU at 64-row waves); "
+           "ws: wave-specialized (4 producer waves decode the next step into a second LDS buffer). kbench gemm_mxfp4s (R9700): lvs store -5..-6 % at 1024 rows, lv +3..7 %, ws +8..19 %.")
 CHOICE("prefill.attn.no_flash2", "bool", False, "NO_FLASH2", kernels=["*_attention_flash2*"], rows=ROWS_PREFILL, enc=("1", "0"),
        doc="No prefill flash attention (every token takes the listed split-K path).")
 CHOICE("prefill.gemm.off", "bool", False, "NO_GEMM", kernels=["g_gemm_*"], rows=ROWS_PREFILL, enc=("1", None), experiment=True,
@@ -298,7 +333,17 @@ CHOICE("prefill.attn.flash2_swa_twin", "str", None, "FLASH2_SWA_TWIN", dynamic=T
 CHOICE("prefill.attn.flash2_trim", "bool", False, "FLASH2_TRIM", derive=_trim, from_pr="#656",
        doc="gfx12 flash twin trims (flash2_trim.py) as one switch; the per-trim switches below default to it.", **_FLR4)
 CHOICE("prefill.attn.flash2_b2", "str", None, "FLASH2_B", derive=_flash_b, from_pr="#656", generator_defaults=("2", None),
-       doc="2: key-split two-heads-per-wave global-layer flash twin at head_dim 512 / G 8 (gemma4 E2B) on gfx12.", **_FLR4)
+       doc="2: key-split two-heads-per-wave global-layer flash twin on gfx12 (flash2_b2.py): head_dim 512 / 8 query heads per KV head (gemma4 E2B) or head_dim 256 / 6 "
+           "(Qwen3.5-class 27B, three head pairs per KV head). 3: three heads per wave at head_dim 256 / 6 (256 VGPRs: measured slower than 2).", **_FLR4)
+CHOICE("prefill.attn.flash2_b2_fm", "bool", None, "FLASH2_B2_FM", from_pr="mxfp4st-oattn2",
+       doc="With prefill.attn.flash2_b2 = 2 at head_dim 256 / 6 query heads per KV head: the whole-tile key-split loop uses a fixed softmax reference "
+           "(the max of the first and the diagonal page; no running max, no per-block max exchange or O rescale, one barrier per 64 keys; when a "
+           "lane has a later score above its reference + 15 in log2 units the workgroup reruns the loops with that lane's true max and every other "
+           "lane's reference unchanged, so a token's bits depend on that token only), V^T prefetch, exp2 and an unmasked loop below the diagonal; "
+           "whole- and partial-tile kernels alike (flash2_b2.py fmax).", **_FLR4)
+CHOICE("prefill.attn.rope_qg", "bool", False, "ROPE_QG", kernels=["g_qk_rope_store*", "g_split_qgate"], rows=ROWS_ALL,
+       doc="Gated attention with a fused q|gate projection (qwen35 family): the norm + RoPE kernel reads the query heads from the projection's rows and copies the gate half "
+           "(g_qk_rope_store_qg), so g_split_qgate and a pass over q disappear. Full-attention layers only; no projection biases, no sliding layers.")
 for _k, _env, _what in (("sx", "FLASH2_SX", "S partials exchanged as the lanes' own vectors"),
                         ("lazy", "FLASH2_LAZY", "O^T rescale only when a column's max changed"),
                         ("kvh", "FLASH2_KVH", "loop-invariant half of the paged-KV lookup hoisted"),
@@ -361,6 +406,25 @@ CHOICE("hybrid.gdn.chunk", "bool", False, "GDN_CHUNK", devices=["rdna4"], rows=R
        from_pr="q38r9700 gdnpf",
        doc="gfx12 chunked (WY) gated delta-net prefill (gen_gdn_chunk.py): spans of 64+ tokens run g_gdn_chunk_rdna4 (f16 WMMA, f32 state), the "
            "sequential kernel's gfx12 twin the shorter ones; the gfx11 kernels do not change (128 x 128 heads only).")
+CHOICE("prefill.gdn.fused2", "bool", False, "GDN_FUSED2", devices=["rdna4"], rows=ROWS_PREFILL, kernels=["g_gdn_fa_rdna4", "g_gdn_fb_rdna4"],
+       from_pr="mxfp4st olayer",
+       doc="gfx12 fused gated delta-net prefill in two launches (gen_gdn_fused.py): g_gdn_fa_rdna4 (conv + SiLU, q/k norms, gates, the WY solve "
+           "and W = T beta e^gc K, U = T beta V, P per (value head, 32-token chunk), fully parallel) and g_gdn_fb_rdna4 (the serial state pass "
+           "d = U - W S, O = e^gc Q S + P d, S update, norm-gate epilogue, conv history commit) replace conv, commit, qk_norm, the chunk kernel and "
+           "norm_gate in GEMM-shape epochs; gfx11 and short epochs keep the chain (128 x 128 heads, conv 4).")
+CHOICE("prefill.gdn.fused2_min", "int", 64, "GDN_FUSED2_MIN", devices=["rdna4"], rows=ROWS_PREFILL, kernels=["g_gdn_fa_rdna4", "g_gdn_fb_rdna4"],
+       from_pr="mxfp4st olayer2",
+       doc="With prefill.gdn.fused2: the smallest epoch (rows) that takes the fused pair: 64 = every GEMM-shape epoch; 128 = 64-row epochs (prompts and "
+           "tails under 64 tokens) keep the chain, whose spans under 64 tokens run the exact sequential recurrence.")
+CHOICE("prefill.gdn.ab_f8", "bool", False, "GDN_AB_F8", devices=["rdna4"], rows=ROWS_PREFILL, kernels=["g_ab_gemm_mxfp4s_store_pair_f8_m256_rdna4"],
+       from_pr="mxfp4st olayer2",
+       doc="MXFP4 split-plane hybrids with prefill.gdn.ab_q8 and the fp8 GEMMs (gen_mxfp4s.ab_f8): in GEMM-shape epochs whose rows are a multiple of 32 "
+           "the 48-row GDN alpha / beta projections run as ONE paired skinny fp8 WMMA GEMM (32 x 48 tiles, both weights, K step 256) on the fp8 rows the "
+           "producer twin already wrote for the qkv GEMM (%h8), not g_quant_q8 + two int8 16-token matvecs; gfx11 keeps the int8 launches.")
+CHOICE("prefill.gdn.ab_q8", "bool", False, "GDN_AB_Q8", devices=["rdna4"], rows=ROWS_PREFILL, kernels=["g_quant_q8", "g_mv_mxfp4s_k5120_t16_q8"],
+       from_pr="mxfp4st olayer",
+       doc="MXFP4 split-plane hybrids, GEMM-shape epochs: the 48-row GDN alpha / beta projections run as the 16-token int8 matvec on h quantized "
+           "once to int8, not as the f32 4-token matvec over h (gen_llm.ab_q8).")
 
 # ======================================================================================================================
 # Speculative decoding (gen_llm.py, draft/)
@@ -375,7 +439,21 @@ CHOICE("draft.propose.head", "str", "q4_0", "PROPOSE_HEAD", doc="q4_0: the propo
        "target's head (off: the head itself; q6_k: with PROPOSE_HEAD_ROWS the subset's rows stay Q6_K).", **_SP)
 CHOICE("draft.propose.head_rows", "int", 0, "PROPOSE_HEAD_ROWS", kernels=["g_prep_*", "g_head_mv*_p40", "g_head_select_p"], rows=ROWS_DECODE + ROWS_STREAMS,
        doc="MTP proposals over a reduced draft vocabulary (0: off, the target's own head): the proposals' head pass reads a load-time Q4_0 "
-       "copy of a Q6_K head's rows [0, N) plus every added-token row (draft/prep_weights.py); verification keeps the head, so only acceptance moves.", **{})
+       "copy of a Q6_K or BF16 head's rows [0, N) plus every added-token row (draft/prep_weights.py); verification keeps the head, so only acceptance moves.", **{})
+CHOICE("draft.propose.block", "str", None, "MTP_BLOCK_PREP", kernels=["g_prep_*", "g_mv_*_q8*"], rows=ROWS_DECODE + ROWS_STREAMS,
+       doc="MTP proposals of a safetensors checkpoint whose NextN block is BF16: the block's matrices (eh_proj, attention, FFN) are read from a "
+       "load-time Q8_0 or Q4_0 copy (q8_0 | q4_0; empty: as stored). The block feeds proposals only (verification never reads it), so only "
+       "acceptance moves (draft/prep_weights.py, weights.loom).", **{})
+CHOICE("draft.propose.head_pieces", "bool", False, "PROPOSE_HEAD_PIECES", enc=("1", "0"), kernels=["g_prep_*", "g_head_mv*_p40_pc*"], rows=ROWS_DECODE + ROWS_STREAMS,
+       doc="The proposal head's copy (draft.propose.head_rows, BF16 head) as several load-time prepared tensors of decode.head.piece_rows rows "
+       "(draft/prep_weights.piece_entries): hrx-loom stages a prepared tensor's input whole through four lanes, so one N-row copy costs "
+       "4 x N x 2H bytes of device budget while loading, pieces 4 x piece x 2H; one head launch per piece (g_head_mv*_pc<chunks>).", **{})
+CHOICE("decode.head.verify", "str", None, "VERIFY_HEAD_PREP", kernels=["g_prep_*", "g_head_mv*_q8_pc*"], rows=ROWS_DECODE + ROWS_STREAMS,
+       doc="q8_0: the verified head of a safetensors checkpoint with an untied BF16 head reads a load-time Q8_0 copy (int8 activations, "
+       "decode.head.piece_rows-row prepared tensors) instead of the BF16 tensor: about half the head bytes per step, and the BF16 tensor is "
+       "no longer resident. CHANGES the verified output (lossy weights): opt-in, gated (golden vs the reference, near-tie statistics).", **{})
+CHOICE("decode.head.piece_rows", "int", 16384, "HEAD_PIECE_ROWS", kernels=["g_head_mv*_pc*"], rows=ROWS_DECODE + ROWS_STREAMS,
+       doc="Rows per prepared piece of a pieced head (draft.propose.head_pieces, decode.head.verify); a multiple of 128.", **{})
 CHOICE("draft.dflash.splits", "int", 32, "DFL_SPLITS", kernels=["g_dfl_attention", "g_dfl_ctx_split"], rows=ROWS_DECODE,
        doc="DFlash context-attention splits.")
 CHOICE("draft.dflash.prep_weights", "bool", True, "DRAFTER_PREP", kernels=["g_dfl_*"], rows=ROWS_DECODE + ROWS_STREAMS,
@@ -392,6 +470,7 @@ CHOICE("feature.logits_export", "bool", True, "LLM_LOGITS", kernels=["g_logits_e
 # ======================================================================================================================
 # Not choices: everything else the generators and their tools read from the environment
 # ======================================================================================================================
+NOT("kbench experiment options of the gfx12 flash kernels (flash_r9700 suite; the shipped variants are choices)", "FLASH2_B2_OPTS", "FLASH2_G6_OPTS")
 NOT("input path or file selection (not a model-affecting knob)", "CATALOG", "LOOM_SKILLS", "LOOM_KB_ROOT", "LOOM_ROOT", "VENV", "HF", "HF_HOME",
     "HF_HUB_CACHE", "LD_LIBRARY_PATH", "LOOM_SERVE_STATE", "VISION_TEST_DIR", "FLASH2_OUT", "LLM_OUT")
 NOT("transport between a generator and its subprocesses (set by the caller from cfg / the build)", "LLM_CONFIG", "LLM_DRAFT",
@@ -408,6 +487,7 @@ NOT("build input with a command-line twin: the drafting config of a package is l
 NOT("machine memory facts used to size context and pool in model.json (build.py memory_cap), not a model choice",
     "LOOM_MEMORY_CAP_GIB", "LOOM_RESERVED_GIB")
 NOT("checkpoint selection (the quantization is never a knob: plain Q4_K_M as on the cards)", "QUANT_TIER")
+NOT("credential of the Hugging Face range reads (inspect_safetensors.py), never part of a build", "HF_TOKEN")
 NOT("catalog build switch: hand-written catalog packages are exempt from resolution (build.py hands over before it)", "VISION")
 NOT("provenance of a snapshot build (the stamp records it), not a model choice", "LOOM_SKILLS_COMMIT")
 NOT("profiling ablation or debug switch, never part of a published build", "FLASH2_ABL", "DBG_NO_FLASH", "DBG_NO_GEMM")

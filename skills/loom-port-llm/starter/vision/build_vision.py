@@ -166,20 +166,24 @@ def write_component(pkg, card, vcfg, vc, max_rows=None):
     T = max_rows * F["merge"] ** 2; Tp = -(-T // 256) * 256; Mp = -(-max_rows // 64) * 64
     scratch = sum((Tp if r == "Tp" else Mp) * w * b for r, w, b in EN.buffer_exprs(vc).values()) + 4096 * (f * max_rows ** 0.5 + 64) * 3 * 2
     open(os.path.join(prog, "vision_control.loom"), "w").write(GC.control_program(vc, vc["out_row"], max_rows, int(scratch)))
-    name = os.path.basename(vcfg["mmproj"])
-    link = os.path.join(pkg, "parameter", name)
-    if os.path.lexists(link):
-        os.remove(link)
-    try:
-        os.symlink(os.path.abspath(vcfg["mmproj"]), link)
-    except OSError:
-        os.link(os.path.realpath(vcfg["mmproj"]), link)
+    if vcfg.get("source") == "safetensors":   # the tower's tensors are in the checkpoint files the package already links (no projector file)
+        files = [{"path": f"parameter/{n}", "format": "safetensors"} for n in vcfg["parameter_files"]]
+    else:
+        name = os.path.basename(vcfg["mmproj"])
+        link = os.path.join(pkg, "parameter", name)
+        if os.path.lexists(link):
+            os.remove(link)
+        try:
+            os.symlink(os.path.abspath(vcfg["mmproj"]), link)
+        except OSError:
+            os.link(os.path.realpath(vcfg["mmproj"]), link)
+        files = [{"path": f"parameter/{name}", "format": "gguf"}]
     src = card["programs"]["source"]
     src["inputs"] += ["program/vision_prepare.loom", "program/vision_control.loom"]
     src["libraries"] += ["program/vision_stages.loom", "program/vision_encoder.loom"]
     card["services"]["chat"]["components"] = {"image": {"version": 1}}
     svc = card["variants"]["gguf"]["services"]["chat"]
-    svc["parameters"]["vision"] = {"files": [{"path": f"parameter/{name}", "format": "gguf"}]}
+    svc["parameters"]["vision"] = {"files": files}
     return card
 
 

@@ -23,6 +23,11 @@
 # ~the package's native context_capacity and cancels it once the server has accepted it (seconds, no long prefill). A
 # refusal (4xx/503: a KV pool or memory budget below the context) fails the run: gates.json "context_admit"
 # {"admitted", "tokens", "context", "detail"} (make_info.py ignores it), a "CONTEXT_ADMIT FAIL ..." line precedes the GATES line, which says FAIL (exit 1).
+# SAFETENSORS PACKAGES (llm_config.json source.kind == "safetensors", e.g. Quark MXFP4): the reference engine is vLLM (ROCm) serving the
+# checkpoint with its own quantization config, through vllm_shim.py (a llama-server look-alike: every gate below is unchanged, "llama.cpp"
+# in this file and its logs then means the reference server). GGUF is the 3rd argument for a GGUF package; here it is the checkpoint
+# directory (or HF repo id) vLLM loads. VLLM_VERSION / VLLM_ROCM_VARIANT / VLLM_EXTRA_ENV: vllm_server.sh. The references are cached as below,
+# keyed by repo@revision + the vLLM version; reference.json records the engine, version, revision and quantization for the card.
 # llama.cpp references are cached in BENCH_DIR/llama_cache (they depend on the GGUF and the request,
 # not on the Loom build), so only the first run pays for them. llama-server starts lazily, on the
 # first cache miss: a later run that is fully cached never loads it. LLAMA_URL=http://... uses an
@@ -38,13 +43,35 @@ export LOOM_NO_AUDIT=1 LLAMA_CACHE=$bench/llama_cache
 long=$("$T" -c "print(','.join(str(n) for n in (1000, 2000, 16000, 32000) if n + 2000 <= $ctx))")
 slot=$("$T" -c "print(min($ctx, 65536) + 1024)")
 cd "$bench"
+# REFERENCE_ALT=record (a job's "env"): this job takes the committed store's SECOND recording of the golden and vision requests (salt
+# bench_common.ALT_SALT_*, read back by compare.py / vision_golden.py as the --alt rule) and nothing else: only for a request whose first recording
+# was in the store when the job started (stored_keys.txt), so the two are independent jobs' answers. Add the job's llama_cache.tgz with reference_cache.py merge.
+if [ "${REFERENCE_ALT:-}" = record ]; then
+  [ -f stored_keys.txt ] || { find llama_cache -name '*.json' -printf '%f\n' 2>/dev/null | sed 's/\.json$//' > stored_keys.txt; }
+  export REFERENCE_STORED_KEYS=$bench/stored_keys.txt
+  echo "REFERENCE_ALT=record: $(wc -l < stored_keys.txt) keys stored at the start"
+fi
 defer=0
 # A package with image input: llama-server also loads its projector (MMPROJ), for the vision gate.
 MMPROJ=${MMPROJ:-$("$T" -c "import json; print((json.load(open('$pkg/llm_config.json')).get('vision') or {}).get('mmproj', ''))" 2>/dev/null)}; export MMPROJ
+safetensors=$("$T" -c "import json; print(1 if (json.load(open('$pkg/llm_config.json')).get('source') or {}).get('kind') == 'safetensors' else '')" 2>/dev/null)
+# REFERENCE_CHECKPOINT=ORG/REPO: use vLLM on that checkpoint for a GGUF package (checks of the adapter itself on a small model)
+[ -n "${REFERENCE_CHECKPOINT:-}" ] && { safetensors=1; }
+ckpt=${REFERENCE_CHECKPOINT:-$3}   # the checkpoint as given: _lib.sh made $gguf an absolute path, which would break an HF repo id (ORG/REPO)
+if [ -n "$safetensors" ]; then   # vLLM reference: the projector is vLLM's own, so any package with a vision block gets the vision gate
+  MMPROJ=$("$T" -c "import json; print(1 if json.load(open('$pkg/llm_config.json')).get('vision') else '')"); export MMPROJ
+fi
 if [ "${NO_LLAMA:-0}" = 1 ]; then
   L=""   # Loom-only: no golden/compare; agent and sampling run their reference-free checks
 elif [ -n "${LLAMA_URL:-}" ]; then
   L=$LLAMA_URL   # an already running llama-server (both models loaded: only if memory allows)
+elif [ -n "$safetensors" ]; then
+  L=http://127.0.0.1:$lport
+  [ -n "$MMPROJ" ] && export VLLM_IMAGES=${VLLM_IMAGES:-2}   # the vision gate sends images; text-only packages keep vLLM's vision profile off
+  export VLLM_STATE=${VLLM_STATE:-$bench/vllm-state} LLAMA_CACHE_BUILD=vllm-${VLLM_VERSION:-0.18.0}
+  export LLAMA_START="'$S/vllm_server.sh' '$ckpt' $lport $slot"
+  export LLAMA_STOP="'$S/vllm_server.sh' --stop $lport"
+  defer=1   # one model at a time here too: the 27B does not fit next to Loom
 else
   L=http://127.0.0.1:$lport
   : "${LLAMACPP_DIR:?set LLAMACPP_DIR to the llama.cpp ROCm build (or LLAMA_URL to a running llama-server)}"
@@ -137,6 +164,17 @@ dev_gates() {
   [ -n "$drafting" ] && run spec spec_gate
 }
 all_gates() {
+  if [ "${REFERENCE_ALT:-}" = record ]; then   # the second recording only (the gates' request sets of this level), no verdicts about Loom
+    [ -n "$L" ] || return 0
+    if [ "$level" = dev ]; then
+      run golden "$T" "$S/golden.py" "$pkg" golden_dev.json --llama "$L" --short 12 --long "$("$T" -c "print(','.join(str(n) for n in (1000, 2000) if n + 2000 <= $ctx))")"
+      [ -n "$MMPROJ" ] && run vision "$T" "$S/vision_golden.py" "$pkg" --url "$url" --llama "$L" --cases shapes,wide
+    else
+      run golden "$T" "$S/golden.py" "$pkg" golden.json --llama "$L" --long "$long"
+      [ -n "$MMPROJ" ] && run vision "$T" "$S/vision_golden.py" "$pkg" --url "$url" --llama "$L"
+    fi
+    return 0
+  fi
   # VISION_ONLY=1 [VISION_ARGS="--cases wide,wide_pre"]: just the vision gate (DevLab diagnostics for one failing case)
   if [ -n "${VISION_ONLY:-}" ]; then
     [ -n "$MMPROJ" ] && [ -n "$L" ] && run vision "$T" "$S/vision_golden.py" "$pkg" --url "$url" --llama "$L" ${VISION_ARGS:-}
@@ -173,8 +211,9 @@ for round in 1 2 3 4 5; do
   loom_down
   files=(); for p in "${pending[@]}"; do files+=("pending_$p.jsonl"); done
   "$T" "$S/llama_fill.py" "$L" "${files[@]}" > llama_fill.log 2>&1; tail -1 llama_fill.log
+  [ -n "$safetensors" ] && curl -s "$L/props" > reference.json   # engine, version, revision, quantization: the card states the reference
   rm -f "${files[@]}"
-  "$S/llamacpp_server.sh" --stop "$lport"
+  if [ -n "$safetensors" ]; then "$S/vllm_server.sh" --stop "$lport"; else "$S/llamacpp_server.sh" --stop "$lport"; fi
   loom_up || { echo "FAIL: could not restart Loom after the llama.cpp fill"; exit 1; }
 done
 for p in "${pending[@]}"; do result[$p]=1; order+=("$p"); echo "== $p: references still pending after 5 rounds (FAIL)"; done

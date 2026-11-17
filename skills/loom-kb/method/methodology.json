@@ -180,7 +180,7 @@
     }
   },
   "baselines": {
-    "note": "llama.cpp builds every Loom-vs-llama.cpp comparison on that device uses (one pinned build per backend; its stored rows are reused across jobs while the build and GGUF are unchanged, methodology rule 15)",
+    "note": "llama.cpp builds every Loom-vs-llama.cpp comparison on that device uses (one pinned build per backend; its stored rows are reused across jobs while the build and GGUF are unchanged, methodology rule 17)",
     "strix-halo": {
       "rocm": {
         "build": "per card (nightly-models.json llamacpp)",
@@ -297,5 +297,16 @@
       }
     },
     "including_bimodal": "with the two bimodal models in (26 pairs) decode exceeds 19 % (p95 3.9 %) and streams4 11.5 % (p95 9.8 %): bimodal-mode flips, not row noise; handled by the mode-aware rule, not a wider band."
+  },
+  "safetensors_cards": {
+    "rule": 15,
+    "baseline_engine": "vllm",
+    "baseline_note": "vLLM ROCm (wheel pinned by skills/loom-benchmark/scripts/vllm_server.sh), same runner and job as Loom, out of the box: --max-model-len and the card's --speculative-config only; no llama.cpp rows",
+    "devices": "the GPUs whose family a weight format lists in quant/<format>/format.json target_families (mxfp4s: rdna4); the others are not_a_target on the card",
+    "steps": [
+      "vllm:N",
+      "vllm:N:long",
+      "vllmc4:N"
+    ]
   }
 }

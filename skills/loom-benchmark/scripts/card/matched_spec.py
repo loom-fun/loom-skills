@@ -35,6 +35,11 @@ def matched_spec(repo):
     return classification(repo)["llama_spec"]
 
 
+def vllm_spec(repo):
+    """vLLM's --speculative-config JSON for the card's drafting choice (a safetensors card's baseline engine is vLLM ROCm), "" for none."""
+    return classification(repo).get("vllm_spec") or ""
+
+
 # THE per-row drafting table (final rule): the 1-stream rows (decode, decode_2k, decode_32k, prefill_*) load each engine once with
 # the card's drafting choice; streams4 is loaded without drafting on every engine (the one allowed load-time exception).
 ROWS = {"decode": 1, "decode_2k": 1, "decode_32k": 1, "prefill_1k": 1, "prefill_2k": 1, "prefill_4k": 1, "prefill_8k": 1,

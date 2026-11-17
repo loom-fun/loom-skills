@@ -875,20 +875,39 @@ def ingest_full(st, name, e, W):
     run_tool([f"{S}/pull_devlab.py", "--identity", d, "--gpu", dev, "--device-out", "dev.json", "--hrx-out", "hrx.json"], W)
     llm, vk = g("perf_llamacpp-rocm.np1_n*.jsonl"), g("perf_llamacpp-vulkan.np1_n*.jsonl")
     c4l, c4v = g("c4_llamacpp-rocm.nodraft_n*.txt"), g("c4_llamacpp-vulkan.perslot.nodraft_n*.txt")
-    if loom_only:   # the job measured Loom alone: the llama.cpp rows (ROCm and Vulkan) are the previous card's, with their own run and date
+    vl, c4vl = g("perf_vllm_n*.jsonl"), g("c4_vllm_n*.txt")   # a safetensors card: vLLM ROCm is the baseline engine (devlab_perf.sh vllm: steps)
+    st_card = (json.load(open(os.path.join(ROOT, "fleet", slug, "llm_config.json"))).get("source") or {}).get("kind") == "safetensors"
+    if loom_only:   # the job measured Loom alone: the baseline rows (llama.cpp ROCm and Vulkan, or vLLM) are the previous card's, with their own run and date
         run_tool([f"{S}/make_info.py", "perf", "--gpu", dev, "--loom-jsonl", f"{d}/perf_{V}.jsonl", "--c4-loom", f"{d}/c4_{ND}.txt",
                   "--baseline-from-info", "info_prev.json", "--package", out, *src, "--device", "dev.json", "--hrx-loom", "hrx.json",
                   "--fetched-programs", rd("programs_sha256_staging.txt"), "-o", "ev_perf.json"], W)
     else:
-        if not (llm and c4l):
+        if not st_card and not (llm and c4l):
             raise RuntimeError("the job has no llama.cpp ROCm files (a job without --baselines cannot make this device's table)")
         baseline = card_lib.registry.methodology()["baselines"][dev]
-        run_tool([f"{S}/make_info.py", "perf", "--gpu", dev, "--loom-jsonl", f"{d}/perf_{V}.jsonl", "--llama-jsonl", *llm, "--c4-loom", f"{d}/c4_{ND}.txt",
-                  "--c4-llama", c4l[0], "--package", out, *src, "--device", "dev.json", "--hrx-loom", "hrx.json",
-                  "--baseline-version", "llamacpp-rocm/" + baseline["rocm"]["build"], "--baseline-args", rd("llamacpp_args-rocm.np1.txt"),
-                  "--fetched-programs", rd("programs_sha256_staging.txt" if sdk else "programs_sha256.txt"), "-o", "ev_perf.json"], W)
+        perf = [f"{S}/make_info.py", "perf", "--gpu", dev, "--loom-jsonl", f"{d}/perf_{V}.jsonl", "--c4-loom", f"{d}/c4_{ND}.txt", "--package", out, *src,
+                "--device", "dev.json", "--hrx-loom", "hrx.json", "--fetched-programs", rd("programs_sha256_staging.txt" if sdk else "programs_sha256.txt"),
+                "-o", "ev_perf.json"]
+        if st_card:   # no llama.cpp: the baseline column is vLLM ROCm on the same runner when the job measured it, else none (the card says so)
+            c4vl = [f for f in c4vl if "agg_tps" in open(f).read()]   # a c4 file without a rate (the engine served too few streams) is not a baseline
+            if vl:
+                perf += ["--llama-jsonl", *vl, *(["--c4-llama", c4vl[0]] if c4vl else []), "--baseline-name", "vLLM",
+                         "--baseline-version", "vllm/" + rd("vllm_version.txt").strip(), "--baseline-args", rd("vllm_args_on.txt")]
+                if os.path.exists(os.path.join(d, "vllm_note.txt")):   # rows vLLM could not serve on this GPU (never silent)
+                    kv = (" (vLLM reports: " + "; ".join(x for x in rd("vllm_kv_on.txt").split("\n") if x.strip()) + ")") if os.path.exists(os.path.join(d, "vllm_kv_on.txt")) else ""
+                    perf += ["--differs", rd("vllm_note.txt").strip().rstrip(".") + kv]
+                if os.path.exists(os.path.join(d, "vllm_note_c4.txt")):
+                    perf += ["--differs", rd("vllm_note_c4.txt").strip()]
+            else:
+                why = ("the job's vLLM step failed: " + rd("vllm_error.txt").strip()[:300]) if os.path.exists(os.path.join(d, "vllm_error.txt")) \
+                    else "not measured on this card yet (llama.cpp cannot read the safetensors checkpoint)"
+                perf += ["--baseline-name", "vLLM", "--differs", why]
+        else:
+            perf += ["--llama-jsonl", *llm, "--c4-llama", c4l[0], "--baseline-version", "llamacpp-rocm/" + baseline["rocm"]["build"],
+                     "--baseline-args", rd("llamacpp_args-rocm.np1.txt")]
+        run_tool(perf, W)
     ev = ["ev_perf.json"]
-    if vk and c4v and not loom_only:
+    if vk and c4v and not loom_only and not st_card:
         run_tool([f"{S}/make_info.py", "perf", "--gpu", dev, "--backend", "vulkan", "--llama-jsonl", *vk, "--c4-llama", c4v[0],
                   "--baseline-version", baseline["vulkan"]["build"], "--baseline-args", rd("llamacpp_args-vulkan.np1.txt"),
                   "--baseline-sha256", rd("llamacpp_release-vulkan.np1.sha256"), "--fetched-programs", rd("programs_sha256_staging.txt" if sdk else "programs_sha256.txt"), "--package", out,

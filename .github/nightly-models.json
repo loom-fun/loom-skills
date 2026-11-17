@@ -533,6 +533,17 @@
     "draft",
     "thinking-toggle"
    ]
+  },
+  {
+   "repo": "loom-fun/amd-Qwen3.8-27B-Quark-AWQ-MXFP4-loom",
+   "slug": "qwen3.8-27b-mxfp4",
+   "memory_bytes": 51000000000,
+   "kit": null,
+   "llamacpp": null,
+   "features": [
+    "draft",
+    "thinking-toggle"
+   ]
   }
  ]
 }

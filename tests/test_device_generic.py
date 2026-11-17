@@ -55,6 +55,41 @@ class DeviceJobs(unittest.TestCase):
         r = subprocess.run([sys.executable, os.path.join(SCRIPTS, "device_jobs.py"), "--device", RX, "x"], capture_output=True, text=True)
         self.assertNotEqual(r.returncode, 0)   # argparse: RX is not a choice (no runner, no pool fit table, no baselines)
 
+    def test_r9700_card_job_of_a_safetensors_package(self):   # the measured context cap serves the preset, Loom steps only, no llama.cpp anywhere
+        r = subprocess.run([sys.executable, os.path.join(SCRIPTS, "device_jobs.py"), "--device", R9, "--gates", "dev", "amd-Qwen3.8-27B-Quark-AWQ-MXFP4-loom"],
+                           capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        doc = json.loads(r.stdout)
+        (j,) = doc["jobs"]
+        self.assertTrue(j["require_preset_r9700"])
+        self.assertEqual(j["served_context"], 110592)   # exec.context_cap of the model node (measured with the MTP proposal copies: func passes on every runner)
+        self.assertFalse([x for x in j["steps"] if x.startswith("llama")])
+        has_vllm = os.path.exists(os.path.join(ROOT, "skills", "loom-benchmark", "scripts", "vllm_shim.py"))   # the gates step needs the vLLM reference
+        self.assertEqual(any(x.startswith("gates") for x in j["steps"]), has_vllm)
+        for k in ("llamacpp", "llamacpp_vulkan", "llama_spec"):
+            self.assertNotIn(k, j)
+            self.assertNotIn(k, doc)
+
+    def test_vllm_baseline_steps_where_the_reference_engine_exists(self):   # #875 (vllm_shim.py) merged: gates + the vLLM baseline steps
+        from unittest import mock
+        buf = io.StringIO()
+        with mock.patch.object(device_jobs, "reference_only", return_value=True), contextlib.redirect_stdout(buf):
+            device_jobs.main(["--device", R9, "--gates", "dev", "amd-Qwen3.8-27B-Quark-AWQ-MXFP4-loom"])
+        (j,) = json.loads(buf.getvalue())["jobs"]
+        self.assertIn("gates:card:dev", j["steps"])
+        self.assertEqual(j["vllm_spec"], '{"method": "mtp", "num_speculative_tokens": 3}')   # the card's MTP, depth 3 as Loom's
+        self.assertEqual(j["vllm_max_len"], device_jobs.VLLM_MAX_LEN)   # a 32k document + its answer: the model's native 262144 does not fit 32 GB
+        n = j["steps"].count("perf:card:1")
+        self.assertEqual([x for x in j["steps"] if x.startswith("vllm")], [f"vllm:{n}", f"vllm:{n}:long", f"vllmc4:{n}"])
+        self.assertTrue(any(x.startswith("vllmc4") for x in j["steps"]))
+        self.assertFalse([x for x in j["steps"] if x.startswith("llama")])
+
+    def test_mxfp4s_is_a_target_of_the_fp8_wmma_family_only(self):
+        nt = card_lib.non_targets({"formats": ["bf16", "f32", "mxfp4s"]})
+        self.assertIn(STRIX, nt)
+        self.assertNotIn(R9, nt)
+        self.assertEqual(card_lib.non_targets({"formats": ["q4_k", "q6_k"]}), {})   # a GGUF card is a target of every device
+
     def test_field_names_follow_the_runner_key(self):
         row = {"slug": "s", "w": 3e9, "kv": 40e9, "kvpp": 4e5, "ctx": 1e5, "verdict": "fits (reduced ctx)", "rx7900xtx_execution": {"prefill_capacity": 2048}}
         job, ex_ctx, old, ctx, preset = device_jobs.device_fields(RX, row, {"memory_bytes": 20e9}, 24e9)

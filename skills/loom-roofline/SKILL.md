@@ -18,7 +18,7 @@ The point is to decide **once, up front, with numbers**, what the port should re
 so the optimization loop (`loom-optimize`) has a finish line, and so a stopping
 decision is a measurement rather than a debate.
 
-## 0. Effort: what the user asked for
+## 0. Target and budget: what the user asked for
 
 Read the request for two optional inputs: a **performance target** and a **time
 budget**. A budget the user states covers what they asked for; by default it is the
@@ -98,7 +98,7 @@ Per metric it then prints a row:
 | TARGET | ceiling × the **best efficiency a Loom port has actually reached** on this hardware (`EFF` in the script; sources in the loom-kb `roofline` topic (`kb.py route --topic roofline`)). Realistic by construction. |
 | margin | TARGET ÷ llama.cpp − 1. Reported as is, with no cap and no label. |
 | stretch | ceiling × `STRETCH`: what the known but not yet built levers should give (GEMM efficiency already seen in isolation, small-op fusion, batched expert gather). |
-| at-ceiling | Under 3 % headroom: llama.cpp is near the roofline. Target parity and spend the effort elsewhere. |
+| at-ceiling | Under 3 % headroom: llama.cpp is near the roofline. Target parity and spend runner time elsewhere. |
 
 **Sanity-check the model before trusting it.** If llama.cpp's `eff` is above about
 0.95 on any metric, the roofline undercounts. Check for a missed sliding window, KV
@@ -155,8 +155,8 @@ A port for the R9700 needs gfx12 variants of those kernels before any of these c
 
 For a throughput metric, `gap_ms = 1000/current − 1000/target` per token. For
 decode, the time at the roofline is `1000/ceiling`; everything above it is overhead.
-Attribute that overhead by ablation (`loom-optimize` step 2: double or skip a
-kernel, rebuild, measure). Typical buckets:
+Attribute that overhead with a per-kernel profile (`loom-optimize` step 2: the
+HAL's dispatch timestamps; doubling or skipping a kernel only as a cross-check). Typical buckets:
 - matvecs under-filling the GPU, which is fixed with rows-per-workgroup / wave shape;
 - attention;
 - small-op kernels (norms, rope, PLE, gates);
@@ -215,14 +215,14 @@ The horizon is what is left of the budget, minus the reserve.
 
 ### Plateau review (REVIEW verdict): pivot or stop
 
-1. **Re-ablate the current best build.** Diminishing returns usually mean the cost
+1. **Re-profile the current best build.** Diminishing returns usually mean the cost
    has moved. The kernel you were optimizing may no longer be the biggest one.
 2. **List candidate paths, each with an expected rate:**
    `expected ms/h = (ms the lever can remove, from the ablation × the fraction
    plausibly removable) ÷ (estimated hours, including build, A/B and gates)`.
    Draw the candidates from:
    - the rest of the ablation table;
-   - the `loom-optimize` catalog;
+   - the levers `kb.py route` prints for the model and device (`loom-optimize`);
    - a **new kernel** (section 3);
    - **forks from prior decisions**: reopen an option from `bench/decisions.jsonl`
      whose rejection reason no longer holds. For example, fusing the norm into the

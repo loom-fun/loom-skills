@@ -705,7 +705,8 @@ o = m.outcome   # win > +3 %, tie within +-3 %, loss < -3 % against the BETTER l
 assert (o(104, 100), o(103, 100), o(97, 100), o(96.9, 100), o(120, [100, 125]), o(None, 100), o(100, []), o(100, None)) == ('win', 'tie', 'tie', 'loss', 'loss', None, None, None)
 t = m.tally(['win', 'tie', None]); assert t['wins_or_ties_every_row'] and not t['wins_every_row'] and not t['loses_a_row']
 assert m.tally(['win', 'win'])['wins_every_row'] and m.tally(['win', 'loss'])['loses_a_row'] and not m.tally([None])['wins_every_row']
-cls = json.load(open(m.DATA)); assert len(cls) == 51
+import os; nightly = json.load(open(os.path.join(os.path.dirname(m.DATA), '..', '..', '..', '.github', 'nightly-models.json')))['models']
+cls = json.load(open(m.DATA)); assert len(cls) == len(nightly) and set(cls) == {n['repo'] for n in nightly}   # one entry per nightly card
 assert all(c['choice'] in ('mtp', 'dflash', 'assist', 'none') and 'ngram' not in c['llama_spec'] for c in cls.values()), 'ngram in the classification'
 r = next(k for k, c in cls.items() if c['choice'] == 'dflash'); n = next(k for k, c in cls.items() if c['choice'] == 'none')
 spec = cls[r]['llama_spec']; rows = m.row_states(r)

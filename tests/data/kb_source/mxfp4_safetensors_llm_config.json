@@ -1,0 +1,6 @@
+{"arch": "qwen35", "name": "Qwen3.8 27B Quark AWQ MXFP4 (routing fixture; the port PR's real config replaces its keys)",
+ "layers": 64, "kv_layers": 16, "heads": 24, "kv_heads": 4, "head_dim": 256, "hidden": 5120, "vocab": 248320,
+ "recurrent_layers": [0, 1, 2], "gdn": {"conv_kernel": 4}, "attn_gate": "fused_q", "mtp": {"layers": 1},
+ "source": {"kind": "safetensors", "repo": "amd/Qwen3.8-27B-Quark-AWQ-MXFP4", "revision": "93245f7", "files": ["model.safetensors"]},
+ "quark": {"quant_method": "quark", "export": {"pack_method": "reorder"}},
+ "formats": ["mxfp4s", "bf16"]}

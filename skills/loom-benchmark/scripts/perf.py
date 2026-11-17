@@ -56,8 +56,9 @@ from bench_common import acceptance_between, doc, long_prompt, perf_metrics, ser
 ap = argparse.ArgumentParser()
 ap.add_argument("url")
 ap.add_argument("label")
-ap.add_argument("--kind", default="loom", choices=["loom", "llama"])
-ap.add_argument("--model", default=None, help="Loom model id (model.json model.id)")
+ap.add_argument("--kind", default="loom", choices=["loom", "llama", "vllm"],
+                help="the engine: loom, llama (llama.cpp's server-side timings), vllm (an OpenAI server timed by the client like Loom, no drafted-token counters)")
+ap.add_argument("--model", default=None, help="Loom model id (model.json model.id), or the vLLM server's served model name")
 ap.add_argument("--long", action="store_true")
 ap.add_argument("--log", default="perf_log.jsonl")
 ap.add_argument("--reverted", action="store_true", help="this build is not kept (still logged: its time counts)")
@@ -86,7 +87,7 @@ class OverContext(Exception):
 def run(content, max_tokens):
     """-> (prompt_tokens, prefill_tps, decode_tps, completion_tokens); raises OverContext on HTTP 400"""
     msgs = [{"role": "user", "content": content}]
-    if a.kind == "loom":
+    if a.kind in ("loom", "vllm"):
         s = stream(U, M, msgs, max_tokens, extra=TH)
         status, error = s["status"], s.get("error")
     else:
@@ -96,7 +97,7 @@ def run(content, max_tokens):
         raise OverContext(error)
     if status != 200:
         raise RuntimeError(f"HTTP {status}: {error}")
-    if a.kind == "loom":
+    if a.kind in ("loom", "vllm"):
         return s["prompt_tokens"], s["prompt_tokens"] / s["ttft"], s["decode_tps"], s["tokens"]
     d = r.json()
     t = d["timings"]

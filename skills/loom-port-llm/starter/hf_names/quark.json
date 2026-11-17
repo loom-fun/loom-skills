@@ -1,0 +1,12 @@
+{
+ "producer": "quark",
+ "doc": "AMD Quark export, quant_method quark, weight dtype fp4 / group 32 / scale format e8m0 (OCP MXFP4). A quantized linear <name>.weight is U8 [rows, K/2] (two E2M1 codes per byte: element 2j in the low nibble, 2j+1 in the high one; vLLM mxfp4_w4a8_gemv_rdna3 documents `low nibble = even k`) with <name>.weight_scale U8 [rows, K/32] (E8M0: 2^(e-127)); value = E2M1(code) * 2^(e-127), E2M1 codes {0, .5, 1, 1.5, 2, 3, 4, 6}, bit 3 = sign. export.pack_method `reorder` only affects int4 packing (quark/torch/utils/pack.py Pack_4_bits); the fp4 planes are stored in element order. Layers in quantization_config.exclude stay bf16 (their tensors have no weight_scale). Activations are quantized dynamically per 32 values to fp4 by the producer's semantics (input_tensors), which the card's reference models.",
+ "quant_method": "quark",
+ "weight": {"dtype": "fp4", "group_size": 32, "scale_format": "e8m0", "qscheme": "per_group"},
+ "format": "mxfp4s",
+ "weight_dtype": "U8",
+ "scale_suffix": "_scale",
+ "scale_dtype": "U8",
+ "element_order": "low-nibble-first",
+ "exclude_key": "exclude"
+}

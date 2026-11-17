@@ -1,0 +1,78 @@
+[
+ [
+  "prep (load-time, once)",
+  "^g_prep"
+ ],
+ [
+  "GEMM swiglu (fp8)",
+  "^g_gemm_mxfp4s_swiglu"
+ ],
+ [
+  "GEMM store (fp8)",
+  "^g_gemm_mxfp4s_store_f8"
+ ],
+ [
+  "GEMM f16 (rows beyond the 256-row tiles / MTP)",
+  "^g_gemm_mxfp4s"
+ ],
+ [
+  "GEMM q8_0 (MTP block and head copies)",
+  "^g_gemm_q8"
+ ],
+ [
+  "GDN chunk (recurrence)",
+  "^g_gdn_recurrence|^g_gdn_chunk"
+ ],
+ [
+  "GDN conv+commit",
+  "^g_gdn_conv"
+ ],
+ [
+  "GDN norm_gate + qk_norm",
+  "^g_gdn_norm_gate|^g_gdn_qk_norm"
+ ],
+ [
+  "GDN state capture/restore/fold (spec rollback)",
+  "^g_gdn_(capture|restore|fold|pend|flush)"
+ ],
+ [
+  "alpha/beta matvecs (in_proj_a/b)",
+  "^g_mv_mxfp4s_k5120_t4$"
+ ],
+ [
+  "producers (norm/residual/row-scale/quant/silu)",
+  "^g_row_scale|^g_post_add_norm|^g_quant|^g_silu_mul|^g_add|^g_rms"
+ ],
+ [
+  "attention (flash + rope + qgate + split/combine)",
+  "^g\\d*_attention|^g_qk_rope|^g_split_qgate|^g_qk_norm"
+ ],
+ [
+  "MTP proposals: block + head copy (q8_0/q4_0)",
+  "^g_mv_q8_0|^g_head_mv_q8"
+ ],
+ [
+  "verify head (bf16 lm_head)",
+  "^g_head"
+ ],
+ [
+  "verify matvecs, MXFP4 linears (t4)",
+  "^g_mv_mxfp4s_.*_t4_"
+ ],
+ [
+  "matvecs, MXFP4 linears (non-t4: rows beyond the GEMM tiles)",
+  "^g_mv_mxfp4s"
+ ],
+ [
+  "embed",
+  "^g_embed"
+ ],
+ [
+  "bookkeeping (token_info, launch counts)",
+  "^g_token_info|^__command"
+ ],
+ [
+  "spec misc (mtp concat, rmsnorm, sampling)",
+  "^g_spec|^g_mtp|^g_sample|^g_argmax"
+ ]
+]

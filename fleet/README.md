@@ -10,6 +10,7 @@ published model, without a GPU and without any weights.
 | `<slug>/tokenizer_min.json` | the tokenizer's added tokens (content, id): all the programs read of the tokenizer (`gen_llm.py` stop-token restore) |
 | `<slug>/gguf/<file>.json.gz` + `blobs/` | GGUF header dumps (metadata, tensor infos, size, rope_freqs data); vocab arrays and chat templates in the shared content-addressed `blobs/` |
 | `gguf_stub.py` | `dump` a GGUF (file or URL, HTTP range reads) / `stub` a sparse header-only file `inspect_gguf.py` and `build.py` accept |
+| `st_stub.py` | `dump` an HF safetensors checkpoint (directory or repo, HTTP range reads of the headers) into `<slug>/safetensors/<file>.json.gz`: tensor table, config.json, generation_config, tokenizer_config, chat template, added tokens; `build_fleet.py` builds such a model with `inspect_safetensors.py` from the dump (manifest `files.<name>.kind: safetensors`) |
 | `add_model.py` | add or refresh a model from its package directory (reads only small files) |
 | `build_fleet.py` | `--ref REF` / `--tree PATH` `--out DIR`: programs-only build of the fleet, CPU only, both targets |
 | `diff_fleet.py` | `BASE_DIR HEAD_DIR --json --md`: per model changed files, blocks, GPU target, card rows, strata, model.json |

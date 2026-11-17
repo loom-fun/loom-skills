@@ -2,7 +2,7 @@
 """Same-runner A/B jobs for the devlab-perf workflow, on any registered device: write .github/devlab/perf.json for some models.
 
 usage: ab_jobs.py --device DEVICE (any registry device with a runner: strix-halo, radeon-r9700, ...) [--old-org ORG] [--new-org ORG] [--old-rev REV] [--new-rev REV] [--refs MAP.json]
-                  [--base-ref GITREF --head-ref GITREF [--build]] [--baselines] [--gates dev] [--reps N] [--suffix -r2] SLUG... > .github/devlab/perf.json
+                  [--base-ref GITREF --head-ref GITREF [--build]] [--baselines] [--preset full|iterate|final] [--gates dev] [--reps N] [--suffix -r2] SLUG... > .github/devlab/perf.json
 
 One job per model on ONE runner of the device: the old package (variant "fun") and the new package (variant "staging") served one
 after the other with the same prompts and settings, in an ABBA order so a runner's drift cancels:
@@ -36,6 +36,9 @@ variant names stay fun / staging so strix_ab_compare.py and make_info.py read th
 them (the fun half of perf / c4, textmatch) are dropped, so the job serves the package built in the job on --new-sdk alone: perf short and long (the
 card job's session count), c4 on stagingnd, func, ktest and gates. No llama.cpp steps (run without --baselines). The deltas against the old card are taken
 from the card's published Loom rows by the caller; a targeted ABBA confirmation is this tool's normal --sdk-ab job.
+
+--preset (job_presets.py): full (default; what regen.py and a card regeneration need) | iterate (build + ktest + perf + c4 + text match, NO gates, one
+smoke request instead of func: the loop of an optimization) | final (func + ktest + gates:LEVEL once on `staging`, no perf, the unchanged base not built).
 
 An A/A run (a package against itself, e.g. old = staging@REV, new = staging at main) measures the runner's own noise.
 
@@ -79,6 +82,7 @@ sys.path.insert(0, os.path.join(ROOT, "skills", "loom-benchmark", "scripts", "ca
 import card_lib  # noqa: E402
 sys.path.insert(0, HERE)
 import device_jobs  # noqa: E402
+import job_presets  # noqa: E402
 
 # the devices an A/B can run on: the device registry's devices with a DevLab runner (skills/loom-kb: device.json runner, methodology.json
 # baselines per device); a device without a runner or baselines cannot be measured
@@ -205,6 +209,9 @@ def build(a):
     models = {m["repo"].split("/")[-1]: m for m in json.load(open(os.path.join(ROOT, ".github", "nightly-models.json")))["models"]}
 
     def steps_of(n, nc, lr, rot=0, ext=()):
+        return job_presets.apply(a.preset, full_steps(n, nc, lr, rot, ext), "staging", a.gates)
+
+    def full_steps(n, nc, lr, rot=0, ext=()):
         return ([f"perf:{v}:1" for v in abba(n, start=rot)] + [f"perf:{v}:1:long" for v in abba(n, start=1 + rot)]
                 + [f"c4:{v}nd" for v in abba(nc, start=rot)] + list(ext) + ["textmatch:fun", "textmatch:staging",
                  "func:staging", "ktest:staging", *([f"gates:staging:{a.gates}"] if a.gates else []),
@@ -305,6 +312,8 @@ def parser(device=None):
     else:
         ap.set_defaults(device=device)
     ap.add_argument("--gates", default="dev")
+    ap.add_argument("--preset", choices=job_presets.PRESETS, default="full",
+                    help="step list: full (func, ktest, gates, perf, c4: the default), iterate (no gates, smoke instead of func), final (func + ktest + gates once, new variant only)")
     ap.add_argument("--reps", type=int, default=None, help="serve sessions per side for the 1-stream rows (default: 3; 6 for a fast model, which also gets --repeat-rows 3)")
     ap.add_argument("--fast-tps", type=float, default=100, help="a model whose published Strix decode is above this gets 6 short-row sessions and 4 c4 sessions per side")
     ap.add_argument("--old-org", default="loom-fun")
@@ -377,9 +386,15 @@ def build_replicas(a):
     (same runner, perf.json order: all replica 1 jobs, then replica 2, ...) to the one document."""
     a.replica = 1
     doc = build(a)
+    if a.preset == "final":
+        for j in doc["jobs"]:
+            job_presets.trim_variants(j)
     for r in range(2, a.replicas + 1):
         a.replica = r
-        doc["jobs"] += build(a)["jobs"]
+        more = build(a)["jobs"]
+        if a.preset == "final":
+            more = [job_presets.trim_variants(j) for j in more]
+        doc["jobs"] += more
     if a.sdk_ab:
         sdk_ab(doc, a.old_sdk, a.new_sdk, card_lib.registry.device(a.device)["runner"]["key"])
         if a.loom_only:

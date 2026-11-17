@@ -24,6 +24,18 @@
   "n_exp": 0
  },
  {
+  "slug": "amd-Qwen3.8-27B-Quark-AWQ-MXFP4-loom",
+  "w": 24041681728,
+  "kv": 18253611008,
+  "kv32": 2281701376,
+  "kvpp": 69632,
+  "ctx": 262144,
+  "mem": 30000000000,
+  "need": 44295292736.0,
+  "verdict": "fits (reduced ctx)",
+  "n_exp": 0
+ },
+ {
   "slug": "bartowski-LFM3-1.7B-loom",
   "w": 2448688192,
   "kv": 5905580032,

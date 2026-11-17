@@ -402,10 +402,14 @@ def _wload(fmt, view, idx, out):
     {out} = scalar.extf {out}_h : {fmt} to f32'''
 
 # ---- patch embedding: y[t, e] = sum_k w[e, k] * patch_t[k] (+ w2) (+ b); k = (c, ky, kx) ----
-def patch_embed(P, E, fmt, order, dual=False, bias=False):
+def patch_embed(P, E, fmt, order, dual=False, bias=False, layout="gguf"):
+    """layout "hf3d": one weight tensor [E, 3, 2, P, P] holding both temporal taps (a checkpoint's conv3d weight); the sum of the
+    two taps is applied to the patch (a still image repeats its frame), i.e. dual with no second tensor."""
     K = 3 * P * P; KP = (K + 255) // 256 * 256
-    name = f"v_patch_{P}_{E}_{fmt}_{order}" + ("_dual" if dual else "") + ("_bias" if bias else "")
-    wargs = ", %w: buffer" + (", %w2: buffer" if dual else "") + (", %b: buffer" if bias else "")
+    hf3d = layout == "hf3d"
+    assert not hf3d or dual, "hf3d is the two-tap kernel"
+    name = f"v_patch_{P}_{E}_{fmt}_{order}" + ("_dual" if dual else "") + ("_hf3d" if hf3d else "") + ("_bias" if bias else "")
+    wargs = ", %w: buffer" + (", %w2: buffer" if dual and not hf3d else "") + (", %b: buffer" if bias else "")
     lines = [T('''kernel.def export("$NAME") @$NAME(%tokens: index) {
   %c1 = index.constant 1 : index
   %c256 = index.constant 256 : index
@@ -462,23 +466,37 @@ def patch_embed(P, E, fmt, order, dual=False, bias=False):
   kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
   %wn = index.constant $WN : index
   %wv = buffer.view %w[%zero] : buffer -> view<[%wn]x$WT>''', KB=KP * 4, KP=KP, WN=E * K, WT=fmt)]
-    if dual:
+    if hf3d:   # the file holds [E, 3, 2, P, P]: tap t of weight (e, c, r) is at ((e * 3 + c) * 2 + t) * PP + r
+        lines.append(T("  %wn2 = index.constant $WN2 : index\n  %wvh = buffer.view %w[%zero] : buffer -> view<[%wn2]x$WT>\n  %cK2 = index.constant $K2 : index",
+                       WN2=2 * E * K, WT=fmt, K2=2 * K))
+    elif dual:
         lines.append(T("  %wv2 = buffer.view %w2[%zero] : buffer -> view<[%wn]x$WT>", WT=fmt))
     lines.append(T('''  %yv = buffer.view %y[%zero] : buffer -> view<[%tokens]x$Exf32>
   scf.for %e = [%lane to %cE step %c256] {
     %be = index.assume %e [lt(%e, %cE)] : index
-    %wrow = index.mul %be, %cK : index
+    %wrow = index.mul %be, %''' + ("cK2" if hf3d else "cK") + ''' : index
     %acc = scf.for %k = [%c0 to %cK step %c1](%a = %zf : f32) -> (f32) {
       %bk = index.assume %k [lt(%k, %cKP)] : index
       %xk = view.load %sv[%bk] : view<$KPxf32> -> f32
-      %wi = index.add %wrow, %k : index
-      %bwi = index.assume %wi [lt(%wi, %wn)] : index''', E=E, KP=KP))
-    lines.append(_wload(fmt, "%wv", "%bwi", "%wk"))
-    if dual:
-        lines.append(_wload(fmt, "%wv2", "%bwi", "%wk2"))
+      %wi = index.add %wrow, %k : index''', E=E, KP=KP))
+    if hf3d:
+        lines.append(T('''      %wch = index.div %k, %cPP : index
+      %wch_off = index.mul %wch, %cPP : index
+      %wi0 = index.add %wi, %wch_off : index
+      %wi1 = index.add %wi0, %cPP : index
+      %bwi0 = index.assume %wi0 [lt(%wi0, %wn2)] : index
+      %bwi1 = index.assume %wi1 [lt(%wi1, %wn2)] : index'''))
+        lines.append(_wload(fmt, "%wvh", "%bwi0", "%wk").replace("[%wn]", "[%wn2]"))
+        lines.append(_wload(fmt, "%wvh", "%bwi1", "%wk2").replace("[%wn]", "[%wn2]"))
         lines.append("    %wks = scalar.addf %wk, %wk2 : f32")
     else:
-        lines.append("    %wks = scalar.addf %wk, %zf : f32")
+        lines.append("      %bwi = index.assume %wi [lt(%wi, %wn)] : index")
+        lines.append(_wload(fmt, "%wv", "%bwi", "%wk"))
+        if dual:
+            lines.append(_wload(fmt, "%wv2", "%bwi", "%wk2"))
+            lines.append("    %wks = scalar.addf %wk, %wk2 : f32")
+        else:
+            lines.append("    %wks = scalar.addf %wk, %zf : f32")
     lines.append('''      %na = scalar.fmaf %wks, %xk, %a : f32
       scf.yield %na : f32
     }''')

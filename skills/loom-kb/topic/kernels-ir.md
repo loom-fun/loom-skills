@@ -4,7 +4,7 @@ The upstream language guide is in hrx-system at `loom/docs/src/guide/*.md`; read
 `kernels-and-launch`, `buffers-views-memory`, `facts-and-specialization`,
 `vectors-and-structured-compute`, and `command-programs`. This file collects what
 mattered in practice when writing LLM kernels. Proof facts, diagnostics, kernel tests and the
-compile errors hit most often (with fixes) are topic `ir-debug`.
+compile errors hit most often (with fixes) are topic `ir-debug`; what the SDK cannot do yet, per version, is topic `sdk`.
 
 ## Shape of a kernel
 

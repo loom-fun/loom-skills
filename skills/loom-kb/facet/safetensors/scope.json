@@ -1,0 +1,10 @@
+{
+ "scope": "facet/safetensors",
+ "match": {
+  "has": [
+   "source"
+  ]
+ },
+ "owner": "kb",
+ "choices": []
+}

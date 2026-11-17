@@ -1,5 +1,6 @@
 # Task: <one line> (engineer "<name>")
 Read first: BRIEF.md, DECISIONS.md (sections ...), notes/ENG_CONTRACT.md, <the files and PRs this task builds on>.
+Model: <sonnet | opus> (<reason: opus only for design-heavy work>).
 Branch @INTEGRATION@-<name>, PR -> @INTEGRATION@. Dependencies in flight: <engineer: files, so you code against their schema or an adapter>.
 
 ## Scope (loom-scope block to put in the PR)

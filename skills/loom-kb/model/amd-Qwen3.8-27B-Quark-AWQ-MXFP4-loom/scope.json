@@ -1,0 +1,83 @@
+{
+ "scope": "model/amd-Qwen3.8-27B-Quark-AWQ-MXFP4-loom",
+ "match": {
+  "slug": [
+   "amd-Qwen3.8-27B-Quark-AWQ-MXFP4-loom"
+  ]
+ },
+ "owner": "port",
+ "choices": [
+  {
+   "when": {
+    "devices": [
+     "radeon-r9700"
+    ]
+   },
+   "set": {
+    "exec.prefill_capacity": 1024,
+    "exec.context_capacity": 110592,
+    "exec.pool_capacity": 110592,
+    "exec.context_cap": 110592
+   },
+   "evidence": "first DevLab R9700 runs (devlab-perf 43771486278, 43772073750: 64k serves) and the context sweeps. Text only, before the image component: 113664 admits, func passes and a request of 113586 tokens finishes in 159 s; 131072 aborts (43776909193, 43778943962). With the image component the image encoder's scratch sets the limit. Package with the draft copies, prefill improvements and fast kernels (mxfp4st f4ff200d), context = pool N, func (chat, tools, image input) and a full-context request, two runners each (43811635523 + 43811643657 and 43819381665 + 43819391099): 73728 .. 110592 pass func and complete a full-context request (110514 tokens in 69 s); 113664, 118784 and 122880 complete the full-context request but fail image input (503); 131072 aborts the connection. 110592 is the largest served context that keeps every claimed feature on 2 runners. The first one or two serves of a DevLab job lose their model on the first request whatever the context (503 'model is unavailable' for the whole step): a cold-start load failure, not a context limit (wait_model.py, PR on devlab_perf). Prefill chunks of 1024 tokens as the Q4_K_M 27B card."
+  },
+  {
+   "when": {
+    "devices": [
+     "rdna4"
+    ]
+   },
+   "set": {
+    "prefill.gemm.mxfp4s_f8": true,
+    "prefill.attn.flash2_trim": true,
+    "hybrid.gdn.chunk": true,
+    "prefill.attn.flash2_b2": "2",
+    "prefill.attn.flash2_b2_fm": true,
+    "prefill.gdn.fused2": true,
+    "prefill.gdn.ab_q8": true,
+    "prefill.gdn.ab_f8": true
+   },
+   "evidence": "DevLab R9700 run 43773677422 (one job, kern PR): the simple f16 GEMMs prefill 867 / 898 / 915 / 899 tok/s at 1k / 2k / 8k / 16k, the fp8 WMMA GEMMs 1922 / 2399 / 2553 / 2419 (with the int8 matvecs); every block exponent of the checkpoint is in 107..128 (scan_mxfp4s_exponents.py), the weight decode is exact; activations are fp8 e4m3 (lossy, gated by the golden gate against the vLLM reference); prefill.attn.flash2_trim (pfrest exp4, DevLab R9700 run 43799119336, one job, two ABBA repeats, context 65536): prefill 2k/8k/16k/32k 2696/2916/2747/2429 -> 2696/2929/2771/2469 tok/s (tie / +0.5 / +0.9 / +1.7 %), ktest 78/78 (attention cases included); hybrid.gdn.chunk (pfrest exp1, DevLab R9700 run 43787206494, one job, ABBA, context 65536): chunked WY GDN prefill (grouped value heads) prefill 1k/2k/8k/16k/32k 1946/2429/2579/2442/2175 -> 2041/2584/2771/2611/2313 tok/s (+4.9/+6.4/+7.4/+6.9/+6.4 %), decode tie; ktest 76/76 incl. gdn_chunk_spans Flash attention (head_dim 256, 6 query heads per KV head): the key-split two-heads-per-wave loop (flash2_b2.py, gfx12 twin only): DevLab R9700 one job, ABBA (fattn exp4, run 43808920153), prefill vs the staged twin 1k / 2k / 8k / 16k / 32k: 0 / +0.3 / +1.5 / +2.6 / +4.3 %; the attention bucket (doubling) 0.0141 / 0.0295 / 0.0533 / 0.0994 -> 0.0074 / 0.0212 / 0.0419 / 0.0828 ms/token at 2k / 8k / 16k / 32k; ktest 93/93; three heads per wave (FLASH2_B=3, run 43805820597) is slower. Fused two-launch GDN prefill + int8 alpha/beta + paired skinny fp8 alpha/beta (prefill.gdn.fused2 / ab_q8 / ab_f8, olayer #942): DevLab R9700, one job each, ABBA, context 65536: fused2+ab_q8 prefill 1k-32k +2.4/+3.6/+4.5/+4.0/+3.5 % (run 43815627777; pf8k non-GEMM bucket 0.115 -> 0.098 ms/token), 1k/2k +2.3/+4.0 % (run 43824481645); + ab_f8 a further +1.0..+1.5 % at 1k/2k (run 43831050582: 1k 2139 -> 2215, 2k 2721 -> 2862 vs base); ktest 94/94 incl. gdn_fused_spans, gdn_fused_serve (serving-shaped mixed epochs) and gm8s_ab; dev gates vs vLLM: spec, consistency, agent x2, golden, sampling PASS (43824481645, 43831050582); compare (2 BAD short prompts) and vision (shapes) fail identically on base in the same job (gates:base:fast, run 43831050582): pre-existing."
+  },
+  {
+   "set": {
+    "decode.mxfp4s.act_q8": true
+   },
+   "evidence": "the f32 matvec of the split-plane kernels is ALU-bound at the 4-row verify of a drafted decode: DevLab R9700 run 43773677422 (one job) drafted decode 38.5 -> 53.0 tok/s, 4 streams 76.9 -> 125.5, same acceptance (0.50-0.52)"
+  },
+  {
+   "when": {},
+   "set": {
+    "draft.propose.head_rows": 65536,
+    "draft.propose.block": "q4_0",
+    "draft.propose.head_pieces": true
+   },
+   "evidence": "MTP proposals read load-time copies, the verified path keeps the checkpoint's bf16 tensors (llm_advance / llm_verify byte-identical with the choices off): the NextN block's matrices as Q8_0 (0.85 GB bf16 -> 0.45 GB) and a Q4_0 copy of head rows [0, 49152) + the added-token rows (0.15 GB; the bf16 head is 2.54 GB). DevLab R9700, MTP depth 3, one job each, ABBA sessions, repeat-rows 3 (exp5 43790944592, on the fast kernels): decode 53.1 -> 69.0 tok/s (+30 %), decode_2k 51.1 -> 69.6, decode_32k 46.5 -> 55.3, acceptance .50 -> .46 (bf16 head, bf16 block: .50); before the fast kernels (exp4 43786704337): 38.4 -> 42.7. Head rows N (exp5 / exp4): 49152 69.0 (acceptance .46), 65536 71.1 (.48), 81920 70.5 (.48), head only (bf16 block) at 65536 66.7; Q4_0 block 71.8 vs Q8_0 71.1 at 65536 (not chosen: lower acceptance .47 vs .48, the block is 0.2 GB smaller); depth 3 is best (2: 64.3, 4: 68.5 at N = 65536). Memory: the preparation stages the head's needed rows through 4 lanes (hrx-loom weights.h), 4 x N x 10 KB of device budget during load: N = 81920 fails chat at 81920 context and image input at 65536, N = 65536 serves 98304 with every feature, N = 49152 serves 106496 (func pass incl. image input). Reference-free dev gates (consistency, agent, sampling, spec drafted == undrafted) PASS (43786704337). Decode PR (devlab-perf 43804664636, 43806245145, 43808693848; one job each, ABBA, repeat-rows 3; dev gates vs vLLM all PASS on the final config, 43818717444): the block as Q4_0 instead of Q8_0: decode 69.3 -> 71.9 / 70.9 (+3 % with the split below), decode_2k tie..+4 %, decode_32k 51.8 -> 54.7 (+6 %), acceptance .458 -> .445; 0.2 GB less resident, the context ladder is unchanged (98304 passes func, 106496 fails chat/tools/image input in 43806245145). Head pieces (vhead, experiment PR #944): the proposal head's Q4_0 copy as 16384-row tensors prepared by the main weight policy (draft.propose.head_pieces). A separate head_weights.loom preparation plan made the FIRST load of every fresh R9700 VM fail (RESOURCE_EXHAUSTED; any staging size, 8192-row pieces too; run 43854018704); with the pieces in the main policy every fresh-VM first load passes text + image: N 49152 / 65536 at 98304, 65536 at 106496 (run 43864913856). N = 65536 then costs no context: one job each, ABBA, repeat-rows 3 (43854018704, 43864913856): decode 73.02 / 72.66 -> 73.75 / 73.77 (+1.0 / +1.5 %, acceptance .445 -> .470), decode_2k 73.79 / 73.02 -> 72.95 / 71.97 (-1 %, acceptance noise), decode_32k 57.4 -> 55.0 / 58.3 (noise); N 81920 and the full vocabulary lose (tps 71.6 / 65.9 vs 72.5, run 43828798197). p65 at 106496: func pass + a 106418-token request completes (43854018704); kernel tests head_pieces_p / head_pieces_v PASS."
+  },
+  {
+   "when": {
+    "devices": [
+     "rdna4"
+    ]
+   },
+   "set": {
+    "decode.spec.gdn_copy_split": 8
+   },
+   "evidence": "q38r9700 verify (devlab-perf 43763681525, Q4_K_M card): +1.9 %. This card (devlab-perf 43806245145, one job, ABBA, Q4_0 block both sides): decode 70.0 -> 71.4 (+2.0 %), decode_2k 71.7 -> 73.6 (+2.6 %), decode_32k 52.6 -> 55.5 (+5 %); spec gate (drafted == undrafted) PASS."
+  },
+  {
+   "when": {},
+   "set": {
+    "decode.spec.gdn_fold": true
+   },
+   "evidence": "ogdn (PR mxfp4st-ogdn): the drafted verification records fold factors and one g_gdn_fold + one g_gdn_fold_hist launch replace the GDN capture / restore / replay (289 launches per step -> 2). kbench gdn_fold (run 43820013544): fold path == replay path bit-exact on gfx1201, GDN part of a step 3.07 -> 1.54 ms. DevLab R9700, one job each, base = this node with gdn_copy_split 8 + Q4_0 block: drafted step 33.94 -> 33.45 ms device (GDN 2.00 -> 1.48 ms/step) (run 43830461301); decode 71.72 -> 73.15 tok/s (+2.0 %, 3 ABBA sessions each, run 43840095234; 71.77 -> 73.05 in 43830461301), decode_2k 73.4 -> 74.2, decode_32k 54.4 vs 54.0 (tie); ktest incl. gdn_fold_vs_replay PASS, spec gate PASS 6/6 (drafted == undrafted), consistency PASS; verify scratch at the largest packing shape 4.73 -> 3.68 GiB."
+  },
+  {
+   "when": {},
+   "set": {
+    "decode.head.verify": "q8_0"
+   },
+   "evidence": "vhead (#960; DECISIONS D21, BRIEF exception: A/B + gates + decision record): the verified head reads a pieced load-time Q8_0 copy of the bf16 lm_head (int8 activations). DevLab R9700, one job each, ABBA, repeat-rows 3 (43854018704, 43864913856), with the N 65536 proposal pieces: decode 73.75 -> 75.28 / 75.23 (+2 %), decode_2k +2.4..+2.8 %, decode_32k +2.4 %; the bf16 head is no longer resident (VRAM peak 33.05 -> 31.86 GB at 98304); fresh-VM first load passes at 106496 and 114688; dev gates vs vLLM 8/8 PASS (consistency, spec, agent, agent_think_off, golden, sampling, compare, vision; 43854018704), golden matched prefix / gaps identical to the bf16-head build (14 prompts, 0 bad)."
+  }
+ ]
+}

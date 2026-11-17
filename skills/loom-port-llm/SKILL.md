@@ -125,7 +125,7 @@ valid calls), and `ctx_admit.py` shows the full context capacity admitted.
 
 Facts about families, facets, devices and tasks are in `loom-kb`, not here. Route the topics this port needs:
 `python3 "${LOOM_SKILL_DIR}/../loom-kb/kb.py" route --config cfg.json --device strix-halo --topic porting,kernels-ir`
-(cfg.json is the `inspect_gguf.py` output; before it exists use `--gguf MODEL.gguf`). The router prints a node's facts for each topic you name.
+(cfg.json is the `inspect_gguf.py` output, or `inspect_safetensors.py` for a safetensors source: the router then adds its nodes; before it exists use `--gguf MODEL.gguf`). The router prints a node's facts for each topic you name.
 
 | Need | Topic |
 |---|---|

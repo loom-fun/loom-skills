@@ -9,6 +9,9 @@
 #               "suites": [{"suite": name, "dir": "<dir under .github/devlab/kbench>", "files": ["a.loom", ...],
 #                           "config": ["k=v", ...] (--config=), "args": ["--measure=...", ...] (loom-benchmark flags),
 #                           "repeats": N (optional), "runner": "strix" (default) | "r9700" (workflow runs-on),
+#                           "probes": [{"name": N, "args": [...]}] (optional): after the timing runs, the FIRST file once more per probe with these extra
+#                           loom-benchmark flags (JSONL rows, raw profile bundles) -> probe_N.jsonl/.log, probe_N_artifacts/: hardware counters,
+#                           executable traces, compile report details; a probe that fails is recorded, never fails the suite,
 #                           "gen": generator script under .github/devlab/kbench (run as `gen CHECKOUT RUNDIR VARIANT...`), "gen_variants": [...]}]}
 # Variant name = file name without "bench_" prefix / ".loom" ("bench.loom" is "base"). Benchmarks that read .npy
 # weights (check.file.read.npy path("w/x.npy")) that are not in the suite dir get random int8 weights of the
@@ -38,7 +41,8 @@ cp -r "$src"/. "$D/run/"; cd "$D/run" || exit 1
 gen=$(q "print(s.get('gen', ''))")
 if [ -n "$gen" ]; then
   step "generate bench files: $gen $(q "print(' '.join(s.get('gen_variants', [])))")"
-  python3 "$here/.github/devlab/kbench/$gen" "$here" "$D/run" $(q "print(' '.join(s.get('gen_variants', [])))") || exit 1
+  TP=python3; [ -x "$root/.tools/bin/python" ] && TP=$root/.tools/bin/python   # the tools venv has numpy (generators of the suites that build reference data)
+  "$TP" "$here/.github/devlab/kbench/$gen" "$here" "$D/run" $(q "print(' '.join(s.get('gen_variants', [])))") || exit 1
 fi
 python3 - <<'PY' || exit 1
 import glob, os, re
@@ -63,6 +67,31 @@ for path, n in seen.items():
     print("generated", path, n)
 PY
 
+# a suite may carry correctness cases ("tests": ["test.loom", ...], check.case files run with loom-test): PASS/FAIL per case, the job fails on any FAIL
+trc=0
+for t in $(q "print(' '.join(s.get('tests', [])))"); do
+  step "loom-test $t"
+  "$root/.venv/bin/loom-test" "$t" --device=amdgpu > "$out/test_${t%.loom}.json" 2> "$out/test_${t%.loom}.err"
+  ncase=$(grep -c '^check.case' "$t")   # loom-test can silently skip cases (a file through dual_target / template.apply): every case must report a sample
+  python3 - "$out/test_${t%.loom}.json" "$out/test_${t%.loom}.err" "$ncase" <<'PYT' | tee "$out/test_${t%.loom}.txt"
+import json, sys
+try:
+    d = json.load(open(sys.argv[1]))
+except ValueError:
+    print("FAIL compile: loom-test produced no results"); print("".join(l for l in open(sys.argv[2], errors="replace") if not l.startswith('{"format'))[-3000:]); sys.exit(1)
+bad = 0
+for s in d["samples"]:
+    fails = [f.get("detail", f.get("message", "")) if isinstance(f, dict) else str(f) for f in s["expectations"].get("failures", [])]
+    issues = [i.get("message", "") for i in s.get("issues", [])]
+    bad += not s["passed"]
+    print(("PASS " if s["passed"] else "FAIL ") + s["case"], *(x[:300] for x in issues + fails[:2]))
+print(f"{len(d['samples']) - bad}/{len(d['samples'])} passed ({sys.argv[3]} cases in the file)")
+if len(d["samples"]) < int(sys.argv[3]):
+    print(f"FAIL: {int(sys.argv[3]) - len(d['samples'])} case(s) of the file ran no sample (silently skipped)"); bad += 1
+sys.exit(1 if bad else 0)
+PYT
+  [ "${PIPESTATUS[0]}" = 0 ] || trc=1
+done
 files=$(q "print(' '.join(s['files']))"); reps=$(q "print(s.get('repeats') or json.load(open('$kb')).get('repeats', 5))")
 cfgs=$(q "print(' '.join('--config='+c for c in s.get('config', [])))"); args=$(q "print(' '.join(s.get('args', [])))")
 vname() { local v=${1%.loom}; v=${v#bench_}; [ "$v" = bench ] && v=base; echo "$v"; }
@@ -77,7 +106,18 @@ for i in $(seq 1 "$reps"); do
   done
 done
 
-python3 - "$out" "$suite" "$(for f in $files; do vname "$f"; done | tr '\n' ' ')" <<'PY'
+# probes (profiling evidence, not timings): the first file with extra flags; their failure is data (the counters' state on this GPU)
+nprobe=$(q "print(len(s.get('probes', [])))")
+for pi in $(seq 0 $((nprobe - 1))); do
+  pn=$(q "print(s['probes'][$pi]['name'])"); pa=$(q "print(' '.join(s['probes'][$pi].get('args', [])))"); f0=${files%% *}
+  step "probe $pn: $f0 $pa"; mkdir -p "$out/probe_${pn}_artifacts"
+  "$LB" "$f0" --device=amdgpu $cfgs $args --compile-report=summary $pa --output-format=jsonl --profile-artifacts-dir="$out/probe_${pn}_artifacts" \
+    --file-output-root="$D/run/fo_probe_$pn" --output="$out/probe_$pn.jsonl" > "$out/probe_$pn.log" 2>&1; echo "probe $pn rc=$?" | tee -a "$out/probes.txt"
+  tail -3 "$out/probe_$pn.log" | cut -c1-300; rm -rf "$D/run/fo_probe_$pn"
+  du -sh "$out/probe_${pn}_artifacts" 2>/dev/null | tee -a "$out/probes.txt"
+done
+
+CASE_TIMING=$(q "print(1 if s.get('case_timing') else 0)") python3 - "$out" "$suite" "$(for f in $files; do vname "$f"; done | tr '\n' ' ')" <<'PY'
 import glob, json, os, statistics as S, sys
 out, suite, variants = sys.argv[1], sys.argv[2], sys.argv[3].split()
 fails = {}
@@ -90,6 +130,9 @@ for v in variants:
         for w in d.get("work_items", []):
             if w.get("state") not in (None, "completed", "succeeded", "passed") and not w.get("profile_replay"):
                 fails.setdefault(v, {})[w.get("benchmark")] = (w.get("failure") or {}).get("message", w.get("state"))
+            if os.environ.get("CASE_TIMING") == "1" and w.get("benchmark"):   # suite option "case_timing": the whole case (all its launches) per logical operation, host wall
+                try: by.setdefault("k_case_" + w["benchmark"], []).append(w["measurement"]["operation_timing_ns"]["p50"] / 1e6)
+                except KeyError: pass
             for r in w.get("profile_replay", {}).get("summary", {}).get("rows", []):
                 n = r.get("function_name", "")
                 if n.startswith("k_"): by.setdefault(n, []).append(r["timing"]["mean_ns"] / 1e6)
@@ -113,4 +156,5 @@ open(f"{out}/summary.md", "w").write("\n".join(lines) + "\n")
 json.dump({"suite": suite, "variants": variants, "ms": res, "failures": fails}, open(f"{out}/summary.json", "w"), indent=1)
 print("\n".join(lines))
 PY
+[ "$trc" = 0 ] || rc=1
 exit $rc

@@ -10,12 +10,21 @@ FMT = {  # bytes per superblock of SB[fmt] values
     "f16": 64,   # small F16 projections of unsloth UD quants (Qwen3.5 ssm_alpha/beta): @g_f16_values, emitted when used
     "bf16": 64,  # BF16 matrices (vendor drafters published only in BF16, used as-is): @g_bf16_values, emitted when used
     "mxfp4": 17,  # OCP MX FP4 (gpt-oss experts): E8M0 scale byte + 16 bytes of E2M1 nibbles: gen_llm.MXFP4, emitted when used
+    # OCP MX FP4, split planes (Quark / vLLM safetensors): 16 bytes of E2M1 nibbles per 32 values in one tensor (byte j = values 2j
+    # low nibble, 2j+1 high) and the E8M0 scales, one byte per 32 values, in a second tensor: gen_llm.MXFP4S, emitted when used. The
+    # kernels take two operands (nibbles, scales); the block size below counts the nibble plane only.
+    "mxfp4s": 16,
 }
 SB = {"q4_k": 256, "q5_k": 256, "q6_k": 256, "q8_0": 32, "f32": 32,
-      "q4_0": 32, "iq4_nl": 32, "iq4_xs": 256, "q3_k": 256, "iq3_s": 256, "q5_0": 32, "f16": 32, "bf16": 32, "mxfp4": 32}
+      "q4_0": 32, "iq4_nl": 32, "iq4_xs": 256, "q3_k": 256, "iq3_s": 256, "q5_0": 32, "f16": 32, "bf16": 32, "mxfp4": 32, "mxfp4s": 32}
 LOWBIT = {"q4_0", "iq4_nl", "iq4_xs", "q3_k", "iq3_s"}
 # Formats whose decode matvecs and head take int8 activations (ACT_Q8): gen_llm.py has their @g_<fmt>_icodes.
-ICODES = frozenset({"q8_0", "q4_k", "q5_k", "q6_k", "q5_0"})
+import os as _os
+# MXFP4 split planes (choice decode.mxfp4s.act_q8, env MXFP4S_Q8): opt-in per model, gen_mxfp4s.mxfp4s_icodes.
+ICODES = frozenset({"q8_0", "q4_k", "q5_k", "q6_k", "q5_0"} | ({"mxfp4s"} if _os.environ.get("MXFP4S_Q8", "0").lower() not in ("", "0", "false", "no", "off") else set()))
+# Formats stored as two tensors (weight plane + scale plane): a call site passes two views, the second named <weight>_sc.
+SPLIT = frozenset({"mxfp4s"})
+SCALE_DIV = {"mxfp4s": 16}   # nibble-plane bytes per scale-plane byte
 # GGUF tensor type names (gguf.GGMLQuantizationType, lower case) the kit decodes.
 DECODES = frozenset(FMT)
 

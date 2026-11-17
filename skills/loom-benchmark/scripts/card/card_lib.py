@@ -749,7 +749,7 @@ def serves(info, gpu):
     """Whether the card shows a Quick start block for a GPU: the package fits it (not unsupported) and the GPU has results, a DevLab
     runner, or serve flags recorded for it (fleet/devices: a fit without measurements yet)."""
     dev = (info.get("devices") or {}).get(gpu)
-    return dev is not None and dev.get("state") != "unsupported" and (has_results(dev) or has_runner(gpu) or "serve_args" in dev)
+    return dev is not None and dev.get("state") not in ("unsupported", "not_a_target") and (has_results(dev) or has_runner(gpu) or "serve_args" in dev)
 
 
 def info_serve_args(info, gpu, weight_bytes=None):
@@ -919,6 +919,25 @@ def with_gpu_preset(model, execution, gpu="radeon-r9700"):
     return doc
 
 
+def non_targets(cfg):
+    """{device: reason} of the registry devices a package is not a target of: a weight format of its llm_config.json that names
+    `target_families` (loom-kb quant/<format>/format.json) restricts the package to the devices of those families (mxfp4s: the FP8-WMMA
+    family rdna4). Empty when no format restricts it."""
+    fams, reasons = None, []
+    for f in (cfg or {}).get("formats") or []:
+        try:
+            with open(os.path.join(REPO, "skills", "loom-kb", "quant", f, "format.json"), encoding="utf-8") as fh:
+                fm = json.load(fh)
+        except OSError:
+            continue
+        if fm.get("target_families"):
+            fams = set(fm["target_families"]) if fams is None else fams & set(fm["target_families"])
+            reasons.append(fm.get("target_reason") or f"format {f}")
+    if fams is None:
+        return {}
+    return {g: "; ".join(reasons) for g, d in registry.devices().items() if d.get("family") not in fams}
+
+
 def fit_served_context(row, memory_bytes):
     """Tokens one request holds on a GPU, from a fit-table row: None when the native context fits (the package's own
     context), else what the memory leaves after the weights; a row's optional "ctx_cap" (a measured limit, e.g. the
@@ -1069,6 +1088,8 @@ def validate(info):
             errs.append(f"{at}: a GPU that shares another's section has no results of its own")
         if dev.get("state") == "unsupported" and not dev.get("required_bytes"):
             errs.append(f"{at}: state unsupported needs required_bytes")
+        if dev.get("state") == "not_a_target" and not dev.get("reason"):
+            errs.append(f"{at}: state not_a_target needs a reason")
         p = dev.get("performance") or {}
         for i, s in enumerate(p.get("sessions", [])):
             if s["source"] not in ids:

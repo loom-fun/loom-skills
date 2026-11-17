@@ -38,6 +38,7 @@ for i, r in enumerate(queue):
         os.environ.update(LLAMA_FILL_VARIANT=variant, LLAMA_FILL_SPEC=SERVER_VARIANTS[variant])
         started = variant
     os.environ["LLAMA_GGUF"] = r["gguf"] or ""
+    os.environ["REFERENCE_IDENTITY"] = r.get("identity") or ""   # a safetensors package's reference (vLLM): no GGUF
     out = llama_completion(url, r["body"], None, r["salt"])
     n = len(out.get("tokens") or out.get("completion_probabilities") or [])
     print(f"[fill {i + 1}/{len(todo)}] {len(r['body'].get('prompt', []))} prompt tokens -> {n} tokens"

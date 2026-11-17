@@ -23,7 +23,7 @@ tracking issue loom-fun/loom-skills#1172). SKILL.md has the per-step detail for 
 - [ ] Research, version entry, mechanical steps, fleet proof (SKILL.md steps 1-4); diff RC -> stable for breaking changes too.
 - [ ] SDK pin everywhere: `skills/loom-setup/scripts/install_loom.sh`, loom-setup docs, card Quick start pin, CI install steps and
       `.github/nightly-models.json`, starter kit pins (the version entry lists the files).
-- [ ] Sweep = new package on the new SDK only (methodology rule 15): Loom rows + gates. Reuse the stored llama.cpp rows and the old card's
+- [ ] Sweep = new package on the new SDK only (methodology rule 17): Loom rows + gates. Reuse the stored llama.cpp rows and the old card's
       Loom rows; a same-runner ABBA job only confirms a row outside its band.
 - [ ] In-job builds equal the published package (same build flags incl. `--slug`, programs hash compared before measuring).
 - [ ] Every slowdown root-caused before it is accepted: kernel GPU time vs wall time per dispatch, a catalog-model control, per-GPU split.
@@ -69,5 +69,5 @@ tracking issue loom-fun/loom-skills#1172). SKILL.md has the per-step detail for 
 7. [ ] Clean up: close experiment PRs, delete merged branches, archive campaign dirs, final report.
 
 ## 6. Rules learned the hard way
-- Re-measure only what changed (rule 15); every DevLab job is a cost.
+- Re-measure only what changed (rule 17); every DevLab job is a cost.
 - Cancel unstarted jobs when the target changes; a plain cancel may not take, force-cancel and confirm the queue is empty.
