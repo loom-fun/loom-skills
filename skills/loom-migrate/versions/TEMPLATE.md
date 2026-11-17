@@ -39,7 +39,7 @@ Optimizations the release opens, with the evidence and the issue link.
 Changes in the release notes that do not touch this repo, with the reason (so the next reader need not re-check).
 
 ## 11. Promotion
-Before the staging cards go to production: `scripts/tag_org.py --org loom-fun --tag v<from>` (the outgoing cards stay addressable); after it, tag the new state `v<to>`.
+Before the staging cards go to production: `scripts/tag_org.py --org loom-fun --tag v<from>` (the outgoing cards stay addressable). The card-tag rule: `loom-fleet` reference/publish.md "Card tags". The loom-skills promotion commit gets `sdk<to>-u0` (`loom-fleet` publish.md "Release tags").
 
 ## 12. Campaign evidence
 Links: the campaign PRs, DevLab run ids, the published staging cards, the final report.

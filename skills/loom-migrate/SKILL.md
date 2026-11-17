@@ -72,7 +72,9 @@ Order matters: each step's proof is the next step's precondition. Big outputs go
    against the old card; publish partial progress; verify the live card (session and programs hash). Never production.
    **Before promoting the staging cards to the production org** (owner's go-ahead), tag every production repo's current head with the
    OUTGOING SDK version (`scripts/tag_org.py --org loom-fun --tag v<old>`), so the old card stays addressable at
-   `.../resolve/v<old>/model.json`; after the promotion tag the new state with the new version.
+   `.../resolve/v<old>/model.json`. The card-tag rule: `loom-fleet` reference/publish.md "Card tags". The promoted (new-SDK) cards get no tag now; they are tagged
+   when they in turn move to the next SDK. The loom-skills merge commit of the promotion gets the release tag `sdkX.Y.Z-uN`
+   (`loom-fleet` reference/publish.md "Release tags").
 7. **Report the perf delta** per model and device: equal or better on a supermajority of metrics, and every regression over 3 % explained
    (an upstream issue, or here). A result without its explanation is not reported as "fine".
 8. **Simplification ledger** (`notes/simplifications.md`): what the new SDK lets us delete (a flag, a computation, a workaround). Land what
