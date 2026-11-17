@@ -33,9 +33,9 @@ byte-identical files.
       --next-steps FILE: the card's next steps, one per line (a leading "- " is dropped; an empty FILE removes
       them); --status paused|active (active removes the status). Both are kept from OLD.json unless given.
 
-      fleet/devices/<device>.json (loom-device-results/1; README there): a GPU with no DevLab runner (radeon-rx9070xt, gfx1150) is on the
+      fleet/devices/<device>.json (loom-device-results/1; README there): a GPU with no DevLab runner (the gfx1201 16 GB class, gfx1150) is on the
       card where its file says this package's model fits: its devices entry gets serve_args, served_context (max_context below the
-      native one), the evidence of the entry (a "machine" source) and, when the file asks, shares_section_with; its preset (chat-9070xt) is
+      native one), the evidence of the entry (a "machine" source) and, when the file asks, shares_section_with; its preset (chat-16gb) is
       written into model.json. --device-results DIR (none: ignore the files; default $LOOM_DEVICE_RESULTS, else fleet/devices).
   make_info.py devices [DIR]: validate the device results files and summarize them.
 
@@ -120,7 +120,7 @@ from card_lib import (DEFAULT_GPU, DRAFTED_ROWS, EVIDENCE_ID, GPUS, METRIC_KEYS,
                       HF, RETIRED_GATES, ROOFLINE_METRIC, SCHEMA_ID, build_tag, card_metrics, derived_tags, dumps, gate_applies, gpu_from_device,
                       gpu_view, load_info, load_json, load_package, metric_applies, native_context, over_context, package_facts,
                       programs_sha256, require_valid, fixed_pool_capacity, gpu_preset_execution, gpu_preset_name, with_gpu_preset, served_context, fit_served_context, upstream_facts, with_gate_features, write_json,
-                      SERVE_HEADROOM, registry, fit_rows, load_device_results, validate_device_results, with_device_preset, DEVICE_RESULTS_ID)
+                      SERVE_HEADROOM, registry, fit_rows, load_device_results, validate_device_results, with_device_preset, DEVICE_RESULTS_ID, card_serve_args)
 
 
 # ---------------------------------------------------------------- sources
@@ -285,7 +285,7 @@ def device_native_context(feats):
 
 
 def write_device_preset(pkg_dir, gpu, doc, entry):
-    """Add the GPU's `<first><suffix>` preset (chat-9070xt) to the package's model.json from its fleet/devices entry: a copy of the preset of
+    """Add the GPU's `<first><suffix>` preset (chat-16gb) to the package's model.json from its fleet/devices entry: a copy of the preset of
     the device whose programs it serves (doc["same_programs_as"]: the R9700's, when the package has one), with the entry's `execution` over
     it and context_capacity = the entry's max_context. Written when the file asks for it for every model (preset.always), or the entry has
     execution overrides or admits less context than the base preset serves; otherwise the GPU reuses the default preset. Returns the preset
@@ -310,9 +310,10 @@ def write_device_preset(pkg_dir, gpu, doc, entry):
     return gpu_preset_name(new, gpu)
 
 
-def device_meta(gpu, doc, entry, feats):
+def device_meta(gpu, doc, entry, feats, weight_bytes=None):
     """The devices entry fields a fleet/devices entry gives its GPU on a card: how it is served and the context it admits."""
-    args = list(entry["serve_args"]) if "serve_args" in entry else list(GPUS[gpu].get("serve_args") or [])
+    # a file entry's own flags as they are; else the GPU's registry flags plus --parameter_mode=preload where the device's preload rule says so
+    args = list(entry["serve_args"]) if "serve_args" in entry else card_serve_args(gpu, weight_bytes)
     m = {"serve_args": args}
     mem = next((int(x.split("=", 1)[1]) for x in args if x.startswith("--memory_bytes=") and x.split("=", 1)[1].isdigit()), None)
     if mem:
@@ -518,7 +519,7 @@ def cmd_build(a):
         m = gpu_state(gpu)["meta"]
         for k in ("state", "required_bytes", "memory_bytes", "served_context"):
             m.pop(k, None)
-        m.update(device_meta(gpu, doc, entry, facts["features"]))
+        m.update(device_meta(gpu, doc, entry, facts["features"], facts.get("weight_bytes")))
         write_device_preset(a.pkg, gpu, doc, entry)
     for gpu, (doc, entry) in dev_serve.items():   # a GPU that shares another's performance section: that GPU is on the card
         share = doc.get("share_section_with")

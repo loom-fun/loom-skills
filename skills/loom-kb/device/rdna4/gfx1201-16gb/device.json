@@ -1,0 +1,59 @@
+{
+  "schema": "loom-kb/device/1",
+  "device": "gfx1201-16gb",
+  "order": 2,
+  "family": "rdna4",
+  "gfx": "gfx1201",
+  "aliases": [
+    "gfx1201-16gb",
+    "16gb",
+    "rx9070xt",
+    "9070xt"
+  ],
+  "name": "AMD Radeon gfx1201 16 GB class (RX 9070 XT, RX 9070)",
+  "short": "Radeon gfx1201 16 GB",
+  "memory": "16 GB",
+  "memory_bytes": 15000000000,
+  "memory_note": "the 16 GB gfx1201 VRAM class (RX 9070 XT, RX 9070): loom-serve gets 15e9 bytes (16 GiB board - 2 GiB for the desktop session and driver). Measured on a Radeon RX 9070 XT; per-model values live in fleet/devices/gfx1201-16gb.json",
+  "card": {
+    "runner": "gfx1201 16 GB",
+    "tag": "gfx1201-16gb",
+    "detect": {
+      "pattern": "gfx1201-16gb|9070",
+      "flags": "i"
+    },
+    "serve_args": [
+      "--memory_bytes=15000000000",
+      "--state_slab_bytes=4mib",
+      "--weight_slab_bytes=64mib"
+    ],
+    "title": "Radeon gfx1201, 16 GB (RX 9070 XT, RX 9070)",
+    "serve_args_note": "elastic backing; 4 MiB state slabs and 64 MiB weight slabs keep the 15 GB budget from being stranded in 64 MiB / 1 GiB commits",
+    "preload_max_weight_bytes": null,
+    "preload_note": "preload: --parameter_mode=preload (stock-host fix for ROCm/hrx-system#3332) on every package that fits the GPU (a stock Ubuntu host's 8 MiB memlock makes the default file mode fail at the first request): null = no weight limit, the host copy lives in system RAM, not in the 16 GB"
+  },
+  "roofline": {
+    "default": "gfx1201-16gb",
+    "presets": {
+      "gfx1201-16gb": {
+        "name": "AMD Radeon RX 9070 XT (gfx1201, 16 GB)",
+        "bw": 640000000000.0,
+        "flops": 194600000000000.0,
+        "note": "SPEC, not measured: GDDR6 20 Gbps, 256-bit = 640 GB/s peak; 64 CUs x 1024 x 2.97 GHz = 195 TFLOP/s dense f16 WMMA (AMD's spec). A measured bandwidth would replace the peak"
+      }
+    }
+  },
+  "runner": {
+    "key": "gfx1201-16gb",
+    "labels": [],
+    "note": "no DevLab runner: results come from a named machine (fleet/devices/gfx1201-16gb.json, provenance per session)"
+  },
+  "preset_suffix": "-16gb",
+  "fit_table": null,
+  "prefill_flag": null,
+  "devlab_device_block": {
+    "cpu": "DevLab Dispatch runner {runner}",
+    "gpu": "AMD Radeon RX 9070 XT (gfx1201)",
+    "os": "Linux"
+  }
+}

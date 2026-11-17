@@ -15,7 +15,7 @@
   },
   "devices": [
     "radeon-r9700",
-    "radeon-rx9070xt"
+    "gfx1201-16gb"
   ],
   "note": "A kernel with a gfx12 version K_rdna4 selects it per device (dual_target.py). gen_gemm_rdna4.twin() and flash2_rdna4.to_rdna4() rewrite the RDNA3 text; flash2_b2/trim/vpack/prefetch and f16o_fuse are gfx12-only."
 }

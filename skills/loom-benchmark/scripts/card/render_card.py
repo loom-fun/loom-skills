@@ -349,8 +349,15 @@ def gib(n):
 
 
 def gpu_title(g):
-    """Strix Halo (gfx1151); Radeon AI PRO R9700 (gfx1201, 32 GB)"""
+    """Strix Halo (gfx1151); Radeon AI PRO R9700 (gfx1201, 32 GB); a device's own card.title (Radeon gfx1201, 16 GB (RX 9070 XT, RX 9070))"""
+    if GPUS[g].get("title"):
+        return GPUS[g]["title"]
     return f"{GPUS[g]['short']} ({GPUS[g]['arch']}" + (f", {GPUS[g]['memory']}" if GPUS[g]["memory"] else "") + ")"
+
+
+def gpu_label(g):
+    """The Quick start block's summary: `AMD Radeon AI PRO R9700 (gfx1201, 32 GB)`; a device with its own card.title uses it as it is"""
+    return GPUS[g].get("title") or f"{GPUS[g]['name']} ({gpu_arch(g)})"
 
 
 def gpu_arch(g):
@@ -651,7 +658,7 @@ def render(d):
     else:   # one collapsed block per GPU, each self-contained: install, fetch with that GPU's preset, serve with that GPU's flags
         L += ["## Quick start", "", "Open your GPU and copy its commands.", ""]
         for g in serving:
-            L += ["<details>", f"<summary>{html.escape(GPUS[g]['name'], quote=False)} ({gpu_arch(g)})</summary>", "",
+            L += ["<details>", f"<summary>{html.escape(gpu_label(g), quote=False)}</summary>", "",
                   "```bash", *install, fetch_for(g), serve_command(info, facts, feats, g, output, bare), "```", ""]
             for line in (served_context_line(g, True), stock_line(g)):   # B1: the served-context cap and the stock-host note are the only sentences in a block
                 if line:
