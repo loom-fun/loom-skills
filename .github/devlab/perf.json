@@ -9,36 +9,65 @@
   "LOOM_PROFILE_TRACE_GAPS": "1",
   "LOOM_PROFILE_PROCESS_IO": "1",
   "LOOM_PROFILE_TOKENS": "300",
-  "LOOM_PROFILE_TIMEOUT": "120"
+  "LOOM_PROFILE_TIMEOUT": "120",
+  "LOOM_PROFILE_PERF_WARMUP": "1"
  },
  "jobs": [
   {
-   "name": "flashnext-1196-literal",
+   "name": "flashnext-1196-warmup",
    "variants": [
     {
      "name": "currenta"
     },
     {
      "name": "oldabia",
-     "build": {
-      "VISION": "0"
-     }
+     "build": {}
     },
     {
-     "name": "oldabib",
-     "build": {
-      "VISION": "0"
+     "name": "oldsdka",
+     "build": {},
+     "ref": "9690f1f9ef44e4c94c79fe227edcc87fbd71a099",
+     "sdk": "ci:13628412621"
+    },
+    {
+     "name": "nocachea",
+     "execution": {
+      "cache_target_bytes": 0
      }
     },
     {
      "name": "currentb"
+    },
+    {
+     "name": "oldabib",
+     "build": {}
+    },
+    {
+     "name": "oldsdkb",
+     "build": {},
+     "ref": "9690f1f9ef44e4c94c79fe227edcc87fbd71a099",
+     "sdk": "ci:13628412621"
+    },
+    {
+     "name": "nocacheb",
+     "execution": {
+      "cache_target_bytes": 0
+     }
     }
    ],
    "steps": [
+    "trace:currenta:dec",
+    "trace:oldabia:dec",
+    "trace:oldsdka:dec",
+    "trace:nocachea:dec",
+    "trace:nocacheb:dec",
+    "trace:oldsdkb:dec",
+    "trace:oldabib:dec",
+    "trace:currentb:dec",
     "profile:currenta:dec",
     "profile:oldabia:dec",
-    "profile:oldabib:dec",
-    "profile:currentb:dec"
+    "profile:oldsdka:dec",
+    "profile:nocachea:dec"
    ]
   }
  ]

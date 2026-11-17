@@ -42,6 +42,9 @@ def main():
     rows = parse(open(a.log, errors="replace").read())
     req = json.loads(open(a.requests).read().strip().splitlines()[-1])
     reqs = req.get("requests") or []
+    includes_warmup = req.get("warmup_mode") == "perf-essay"
+    if includes_warmup:
+        reqs = [req["warmup"], *reqs]
     if req["scenario"] in ("pf2k", "pf8k"):
         toks = sum(r["prompt_tokens"] for r in reqs)   # the warm-up's few tokens are in the totals too (negligible vs thousands)
     else:
@@ -52,7 +55,7 @@ def main():
         f = by.setdefault(family(n, fams), {"count": 0, "ms": 0.0, "kernels": {}})
         f["count"] += c; f["ms"] += t; f["kernels"][n] = [c, t]
     wall = sum((r["ttft_s"] if req["scenario"] != "dec" else r["total_s"]) for r in reqs) * 1e3
-    res = {"scenario": req["scenario"], "tokens": toks, "busy_ms": round(total, 2), "wall_ms": round(wall, 1), "steps": a.steps or None,
+    res = {"scenario": req["scenario"], "includes_warmup": includes_warmup, "tokens": toks, "busy_ms": round(total, 2), "wall_ms": round(wall, 1), "steps": a.steps or None,
            "ms_per_token_busy": round(total / toks, 4) if toks else None, "families": {}, "kernels": {}}
     L = [f"### {req['scenario']}: {toks} tokens, device busy {total:.1f} ms ({total / toks:.4f} ms/token), request wall {wall:.1f} ms"
          + (f", {a.steps:.0f} verify steps ({total / a.steps:.2f} ms/step)" if a.steps else ""), "",

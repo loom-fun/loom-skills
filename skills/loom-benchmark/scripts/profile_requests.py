@@ -23,11 +23,15 @@ ap.add_argument("--reps", type=int, default=3)
 ap.add_argument("--tokens", type=int, default=int(os.environ.get("LOOM_PROFILE_TOKENS", "400")))
 ap.add_argument("--literal-decode", action="store_true", default=os.environ.get("LOOM_PROFILE_LITERAL_DECODE") == "1",
                 help="profile perf.py's exact short-decode prompt without a nonce (diagnostic only)")
+ap.add_argument("--perf-warmup", action="store_true", default=os.environ.get("LOOM_PROFILE_PERF_WARMUP") == "1",
+                help="use perf.py's nonced 300-token essay warmup")
 ap.add_argument("--process-io", action="store_true", default=os.environ.get("LOOM_PROFILE_PROCESS_IO") == "1")
 ap.add_argument("--trace-gaps", action="store_true", default=os.environ.get("LOOM_PROFILE_TRACE_GAPS") == "1")
 ap.add_argument("--timeout", type=float, default=float(os.environ.get("LOOM_PROFILE_TIMEOUT", "300")),
                 help="per-request connect/read timeout in seconds")
 a = ap.parse_args()
+if a.perf_warmup and a.scenario != "dec":
+    ap.error("--perf-warmup is a decode-only diagnostic")
 TH = thinking_extra("off")
 nonce = str(time.time())
 
@@ -77,17 +81,22 @@ def go(content, n):
     return result
 
 
-out = {"scenario": a.scenario, "warmup": go(f"[warm-up {nonce}] Say hi.", 2)}
+ESSAY = "Write a detailed 300-word essay about the history of the printing press."
+warmup = f"[warm-up {nonce}] " + (ESSAY if a.perf_warmup else "Say hi.")
+before_warmup = server_draft_counters(a.url) if a.perf_warmup else {}
+out = {"scenario": a.scenario, "warmup_mode": "perf-essay" if a.perf_warmup else "tiny",
+       "warmup": go(warmup, 300 if a.perf_warmup else 2)}
 if a.scenario != "probe":
     before = server_draft_counters(a.url)
+    if a.perf_warmup:
+        out["warmup_draft"] = {k: before.get(k, 0) - before_warmup.get(k, 0) for k in before}
     reqs = []
     if a.scenario in ("pf2k", "pf8k"):
         n = 2000 if a.scenario == "pf2k" else 8000
         for i in range(a.reps):
             reqs.append(go(f"[{nonce} {i}] Summarize this documentation in one sentence.\n\n" + doc(n), 2))
     else:
-        essay = "Write a detailed 300-word essay about the history of the printing press."
-        content = essay if a.literal_decode else f"[{nonce}] {essay}"
+        content = ESSAY if a.literal_decode else f"[{nonce}] {ESSAY}"
         out["prompt_mode"] = "literal-perf" if a.literal_decode else "nonce"
         reqs.append(go(content, a.tokens))
     after = server_draft_counters(a.url)

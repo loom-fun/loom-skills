@@ -27,7 +27,7 @@ class ProfileRequests(unittest.TestCase):
             return dict(status=200, prompt_tokens=32, tokens=tokens, ttft=.2,
                         decode_tps=40, total=8, text='fixture')
 
-        counters = iter(({'draft_proposed_tokens': 3}, {'draft_proposed_tokens': 9}))
+        counters = iter({'draft_proposed_tokens': value} for value in (3, 9, 15))
         bench = types.SimpleNamespace(doc=lambda n: 'doc', stream=stream,
                                       thinking_extra=lambda mode: {},
                                       server_draft_counters=lambda url: next(counters))
@@ -35,7 +35,7 @@ class ProfileRequests(unittest.TestCase):
         with patch.dict(sys.modules, {'bench_common': bench}), patch.object(sys, 'argv',
                 [str(SCRIPT), 'http://fixture', 'model', 'dec', *args]), \
                 patch.dict(os.environ, {k: '' for k in ('LOOM_PROFILE_LITERAL_DECODE',
-                    'LOOM_PROFILE_TRACE_GAPS', 'LOOM_PROFILE_PROCESS_IO')}, clear=False), \
+                    'LOOM_PROFILE_TRACE_GAPS', 'LOOM_PROFILE_PROCESS_IO', 'LOOM_PROFILE_PERF_WARMUP')}, clear=False), \
                 contextlib.redirect_stdout(output):
             runpy.run_path(str(SCRIPT), run_name='__main__')
         return calls, json.loads(output.getvalue())
@@ -48,6 +48,15 @@ class ProfileRequests(unittest.TestCase):
         self.assertEqual(result['requests'][0]['max_stream_chunk_gap_s'], 3.0)
         self.assertEqual(result['requests'][0]['stream_chunk_gaps_s'], [.02, 3.0])
         self.assertEqual(result['draft']['draft_proposed_tokens'], 6)
+
+    def test_perf_warmup_matches_essay_length_and_counts_its_work(self):
+        calls, result = self.run_profile('--perf-warmup', '--literal-decode', '--tokens', '300')
+        self.assertEqual(calls[0][1], 300)
+        self.assertTrue(calls[0][0].endswith(ESSAY))
+        self.assertNotEqual(calls[0][0], ESSAY)
+        self.assertEqual(calls[1][0], ESSAY)
+        self.assertEqual(result['warmup_mode'], 'perf-essay')
+        self.assertEqual(result['warmup_draft']['draft_proposed_tokens'], 6)
 
     def test_default_keeps_nonced_profile_prompt(self):
         calls, result = self.run_profile()
