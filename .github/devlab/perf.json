@@ -1,5 +1,5 @@
 {
- "_comment": "sdk020 U1 root cause (never merge): per-dispatch HAL statistics (dispatch-events) vs wall, v0.1 card on 0.1.0 vs sdk020 package on 0.2.0, same job, ABBA; SDK-authored control (hrx-loom-library moonshine-streaming-tiny at each SDK's catalog pin). Strix Halo only.",
+ "_comment": "sdk020 U1 run 2 (never merge): queue-family ablation (device URI queue_family) of the 0.6B gap, v0.1 card on 0.1.0 vs sdk020 package on 0.2.0, Strix Halo.",
  "runner": "strix",
  "memory_bytes": 17000000000,
  "kit": null,
@@ -7,7 +7,7 @@
  "card": "loom-fun-staging/unsloth-Qwen3-0.6B-loom@416fc147ec934f99e680bdae4c66f780c7137acc",
  "jobs": [
   {
-   "name": "u1p-moonshine",
+   "name": "u1q-qwen3-0-6b",
    "runner": "strix",
    "card": "loom-fun-staging/unsloth-Qwen3-0.6B-loom@416fc147ec934f99e680bdae4c66f780c7137acc",
    "memory_bytes": 17000000000,
@@ -15,31 +15,107 @@
    "sdk": "0.2.0",
    "variants": [
     {
-     "name": "lib010",
-     "catalog": "https://raw.githubusercontent.com/ROCm/hrx-loom-library/dd23d2f510054918bc92cf356b70913155a001f5/model/moonshine-ai/moonshine-streaming-tiny/model.json",
-     "preset": "streaming",
-     "sdk": "0.1.0"
+     "name": "fun",
+     "card": "loom-fun-staging/unsloth-Qwen3-0.6B-loom@416fc147ec934f99e680bdae4c66f780c7137acc",
+     "sdk": "card"
     },
     {
-     "name": "lib020",
-     "catalog": "https://raw.githubusercontent.com/ROCm/hrx-loom-library/v0.2.0/model/moonshine-ai/moonshine-streaming-tiny/model.json",
-     "preset": "streaming",
+     "name": "staging",
+     "build": {},
+     "build_args": [
+      "--memory-gib",
+      "4096"
+     ],
      "sdk": "0.2.0"
+    },
+    {
+     "name": "fun_q0",
+     "same_as": "fun",
+     "sdk": "card",
+     "device": "amdgpu://?queue_family=0"
+    },
+    {
+     "name": "staging_q0",
+     "same_as": "staging",
+     "sdk": "0.2.0",
+     "device": "amdgpu://?queue_family=0"
+    },
+    {
+     "name": "fun_q1",
+     "same_as": "fun",
+     "sdk": "card",
+     "device": "amdgpu://?queue_family=1"
+    },
+    {
+     "name": "staging_q1",
+     "same_as": "staging",
+     "sdk": "0.2.0",
+     "device": "amdgpu://?queue_family=1"
+    },
+    {
+     "name": "fun_q2",
+     "same_as": "fun",
+     "sdk": "card",
+     "device": "amdgpu://?queue_family=2"
+    },
+    {
+     "name": "staging_q2",
+     "same_as": "staging",
+     "sdk": "0.2.0",
+     "device": "amdgpu://?queue_family=2"
     }
    ],
    "steps": [
-    "wl:lib010:asr:5",
-    "wl:lib020:asr:5",
-    "wl:lib020:asr:5",
-    "wl:lib010:asr:5",
-    "prof:lib010:asr:2",
-    "prof:lib020:asr:2",
-    "prof:lib020:asr:8",
-    "prof:lib010:asr:8",
-    "wl:lib020:asr:5",
-    "wl:lib010:asr:5",
-    "wl:lib010:asr:5",
-    "wl:lib020:asr:5"
+    "info:fun",
+    "info:staging",
+    "wl:fun:dec:3",
+    "wl:staging:dec:3",
+    "wl:staging:dec:3",
+    "wl:fun:dec:3",
+    "wl:fun:p2k:8",
+    "wl:staging:p2k:8",
+    "wl:staging:p2k:8",
+    "wl:fun:p2k:8",
+    "prof:fun:dec:1",
+    "prof:staging:dec:1",
+    "prof:staging:dec:5",
+    "prof:fun:dec:5",
+    "wl:fun_q0:dec:3",
+    "wl:staging_q0:dec:3",
+    "wl:staging_q0:dec:3",
+    "wl:fun_q0:dec:3",
+    "wl:fun_q0:p2k:8",
+    "wl:staging_q0:p2k:8",
+    "wl:staging_q0:p2k:8",
+    "wl:fun_q0:p2k:8",
+    "prof:fun_q0:dec:1",
+    "prof:staging_q0:dec:1",
+    "prof:staging_q0:dec:5",
+    "prof:fun_q0:dec:5",
+    "wl:fun_q1:dec:3",
+    "wl:staging_q1:dec:3",
+    "wl:staging_q1:dec:3",
+    "wl:fun_q1:dec:3",
+    "wl:fun_q1:p2k:8",
+    "wl:staging_q1:p2k:8",
+    "wl:staging_q1:p2k:8",
+    "wl:fun_q1:p2k:8",
+    "prof:fun_q1:dec:1",
+    "prof:staging_q1:dec:1",
+    "prof:staging_q1:dec:5",
+    "prof:fun_q1:dec:5",
+    "wl:fun_q2:dec:3",
+    "wl:staging_q2:dec:3",
+    "wl:staging_q2:dec:3",
+    "wl:fun_q2:dec:3",
+    "wl:fun_q2:p2k:8",
+    "wl:staging_q2:p2k:8",
+    "wl:staging_q2:p2k:8",
+    "wl:fun_q2:p2k:8",
+    "prof:fun_q2:dec:1",
+    "prof:staging_q2:dec:1",
+    "prof:staging_q2:dec:5",
+    "prof:fun_q2:dec:5"
    ]
   }
  ]

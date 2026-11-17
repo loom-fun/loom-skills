@@ -285,6 +285,8 @@ kit_for() {   # kit_for VARIANT REF -> builds D/<variant>/kit from REF's starter
 for v in $variants; do
   pkg=$D/$v/pkg; mkdir -p "$D/$v"
   # U1 experiment: variant "catalog": URL of an hrx-loom-library model.json (+ "preset"), fetched with the variant's own SDK (an SDK-authored control)
+  same=$(qv "$v" "print(v.get('same_as') or '')")   # U1 experiment: "same_as": X = variant X's package (X listed earlier), served with this variant's settings
+  if [ -n "$same" ]; then rm -rf "$pkg"; cp -r "$D/$same/pkg" "$pkg"; cp "$pkg/model.json" "$out/model_$v.json"; continue; fi
   curl_cat=$(qv "$v" "print(v.get('catalog') or '')")
   if [ -n "$curl_cat" ]; then
     sdk_root "$v" || { echo "FAIL: SDK of variant $v"; exit 1; }
@@ -395,7 +397,7 @@ serve_alone() { # serve_alone VARIANT
   fi
   sdk_root "$1" || { echo "FAIL: SDK of variant $1"; return 1; }; local vroot=$SDKR
   export LOOM_ROOT=$vroot VENV=$vroot/.venv   # the variant's SDK serves it (and runs gates / kernel tests on it)
-  step "serve $1 (SDK root $vroot)"; LOOM_ACTIVE_WAIT=$aw "$SV/serve.sh" "perf-$1" "$PORT" amdgpu "$vmem" "$D/$1/pkg/model.json" ${sa:+-- $sa} > "$out/serve_$1.out" 2>&1; tail -2 "$out/serve_$1.out"
+  step "serve $1 (SDK root $vroot)"; LOOM_ACTIVE_WAIT=$aw "$SV/serve.sh" "perf-$1" "$PORT" "$(qv "$1" "print(v.get('device') or 'amdgpu')")" "$vmem" "$D/$1/pkg/model.json" ${sa:+-- $sa} > "$out/serve_$1.out" 2>&1; tail -2 "$out/serve_$1.out"
   grep -q '^FAILED' "$out/serve_$1.out" && { echo "REGISTRATION FAILED on $RUNNER for variant $1 (fast fail, see serve_$1.out):"; grep -m6 -E 'AMDGPU|error|ERROR' "$out/serve_$1.out" | cut -c1-300; return 1; }
   curl -sf "$url/v1/models" >/dev/null
 }
@@ -503,14 +505,17 @@ print('$p1', k, [x.get(k) for x in r if x.get(k)], 'median', round(st.median(v),
         [ -f "$D/long.pcm" ] || for i in 1 2 3 4 5 6 7 8; do cat "$D/short.pcm"; done > "$D/long.pcm"   # 30.7 s (the model takes up to 40.96 s)
         wl=asr:$D/long.pcm; fi
       mid=$("$T" -c "import json; print(json.load(open('$D/$p1/pkg/model.json'))['model']['id'])")
-      tag=${kind}_${p1}_${p2}_${p3}
+      u1t=${kind}_${p1}_${p2}_${p3}; [ "$kind" = wl ] && u1t=${u1t}_s$qi   # wl sessions repeat (ABBA): one file each
       step "$kind $p1 $p2 x $p3 ($mid) $PA"
-      "$T" "$here/.github/scripts/u1_prof.py" "$url" "$mid" "$wl" "$p3" --log "$out/$tag.json" 2>&1 | tail -3
+      "$T" "$here/.github/scripts/u1_prof.py" "$url" "$mid" "$wl" "$p3" --log "$out/$u1t.json" 2>&1 | tail -3
       pid=$(cat "$LOOM_SERVE_STATE/perf-$p1.pid" 2>/dev/null); kill "$pid" 2>/dev/null
       for i in $(seq 360); do kill -0 "$pid" 2>/dev/null || break; sleep 0.5; done
       kill -0 "$pid" 2>/dev/null && { echo "WARNING: perf-$p1 did not exit in 180 s (killed: no statistics)"; kill -9 "$pid"; }
-      rm -f "$LOOM_SERVE_STATE/perf-$p1.pid"; cp "$LOOM_SERVE_STATE/perf-$p1.log" "$out/$tag.log"
-      res[$s]="$(grep -c ' dispatch ' "$out/$tag.log") dispatch rows; $(grep -m1 -o 'dropped_records=[0-9]*' "$out/$tag.log")";;
+      rm -f "$LOOM_SERVE_STATE/perf-$p1.pid"; cp "$LOOM_SERVE_STATE/perf-$p1.log" "$out/$u1t.log"
+      res[$s]="$(grep -c ' dispatch ' "$out/$u1t.log") dispatch rows; $(grep -m1 -o 'dropped_records=[0-9]*' "$out/$u1t.log")";;
+    info)   # U1 experiment: info:V = amdf-info of V's SDK root (0.2+: queue families and their ordinals)
+      sdk_root "$p1"; "$SDKR/.venv/bin/amdf-info" --details > "$out/amdf_info_$p1.txt" 2>&1; "$SDKR/.venv/bin/amdf-info" --details --format=json > "$out/amdf_info_$p1.json" 2>&1
+      grep -i -E "family|aql|pm4|queue" "$out/amdf_info_$p1.txt" | head -20; res[$s]="amdf-info rc $?";;
     probe)   # probe:V: stall_probe.py (when does a prefill stall? TTFT + GPU clocks per request)
       serve_alone "$p1" || { res[$s]=ERROR; continue; }
       step "stall probe $p1"
