@@ -156,7 +156,7 @@ def build_refs(a, dev, models, refs, steps_of):
             m = models[slug]
             old = (refs.get(slug) or {}).get("old") or ref(a.old_org, slug, a.old_rev)
             new = (refs.get(slug) or {}).get("new") or ref(a.new_org, slug, a.new_rev)
-            dec = card_lib.published_decode(slug, a.old_org)
+            dec = card_lib.published_decode(slug, a.old_org, gpu=a.device)
             n, rr = card_lib.sampling_plan(dec, a.fast_tps)
             n = a.reps or n
             nc = 4 if rr > 1 else 2
@@ -244,7 +244,7 @@ def build(a):
         old = (refs.get(slug) or {}).get("old") or ref(a.old_org, slug, a.old_rev)
         new = (refs.get(slug) or {}).get("new") or ref(a.new_org, slug, a.new_rev)
         # a fast model's decode rate is bimodal per serve session (Qwen3-0.6B: ~297 or ~330 tok/s, both packages): more sessions per side
-        dec = card_lib.published_decode(slug, a.old_org)   # the published Strix decode (--old-org, never a pinned ref's org: a staging card may carry no Strix number)
+        dec = card_lib.published_decode(slug, a.old_org, gpu=a.device)   # the published target-GPU decode (--old-org, never a pinned ref's org: a staging card may carry no target-GPU number)
         n, rr = card_lib.sampling_plan(dec, a.fast_tps)   # the sampling rule (methodology rule 5): fast: 6 sessions, 3 samples per session
         n = a.reps or n
         nc = 4 if rr > 1 else 2
@@ -315,7 +315,7 @@ def parser(device=None):
     ap.add_argument("--preset", choices=job_presets.PRESETS, default="full",
                     help="step list: full (func, ktest, gates, perf, c4: the default), iterate (no gates, smoke instead of func), final (func + ktest + gates once, new variant only)")
     ap.add_argument("--reps", type=int, default=None, help="serve sessions per side for the 1-stream rows (default: 3; 6 for a fast model, which also gets --repeat-rows 3)")
-    ap.add_argument("--fast-tps", type=float, default=100, help="a model whose published Strix decode is above this gets 6 short-row sessions and 4 c4 sessions per side")
+    ap.add_argument("--fast-tps", type=float, default=100, help="a model whose published target-GPU decode is above this gets 6 short-row sessions and 4 c4 sessions per side")
     ap.add_argument("--old-org", default="loom-fun")
     ap.add_argument("--new-org", default="loom-fun-staging")
     ap.add_argument("--old-rev", help="pin the old card of every slug to this revision (ORG/SLUG@REV)")
