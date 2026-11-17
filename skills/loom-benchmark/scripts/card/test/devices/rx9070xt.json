@@ -1,0 +1,24 @@
+{
+ "schema": "loom-device-results/1",
+ "device": "radeon-rx9070xt",
+ "gpu": "AMD Radeon RX 9070 XT (Navi 48, gfx1201, 16 GB): a test fixture, made-up numbers",
+ "same_programs_as": "radeon-r9700",
+ "share_section_with": "radeon-r9700",
+ "preset": {"always": true},
+ "sdk": {"hrx_loom": "0.2.0"},
+ "models": {
+  "unsloth-Qwen3-0.6B-loom": {
+   "fits": true,
+   "date": "2026-11-16",
+   "max_context": 18432,
+   "native_context": 40960,
+   "serve_args": ["--memory_bytes=15000000000", "--state_slab_bytes=4mib"]
+  },
+  "other-Model-loom": {
+   "fits": false,
+   "date": "2026-11-16",
+   "max_context": null,
+   "reason": "not run: the package's files are 22.6 GB, beyond a 16 GB card"
+  }
+ }
+}

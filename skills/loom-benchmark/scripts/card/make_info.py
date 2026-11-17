@@ -33,6 +33,12 @@ byte-identical files.
       --next-steps FILE: the card's next steps, one per line (a leading "- " is dropped; an empty FILE removes
       them); --status paused|active (active removes the status). Both are kept from OLD.json unless given.
 
+      fleet/devices/<device>.json (loom-device-results/1; README there): a GPU with no DevLab runner (radeon-rx9070xt, gfx1150) is on the
+      card where its file says this package's model fits: its devices entry gets serve_args, served_context (max_context below the
+      native one), the evidence of the entry (a "machine" source) and, when the file asks, shares_section_with; its preset (chat-9070xt) is
+      written into model.json. --device-results DIR (none: ignore the files; default $LOOM_DEVICE_RESULTS, else fleet/devices).
+  make_info.py devices [DIR]: validate the device results files and summarize them.
+
   make_info.py perf [--gpu GPU] --loom-jsonl LOOM.jsonl --llama-jsonl LLAMA.jsonl [--c4-loom F] [--c4-llama F]
                     --baseline-version llamacpp-rocm/bNNNN [--baseline-args "ARGS"] [--metrics decode,...]
                     [--command CMD ...] [--package PKG] [--date YYYY-MM-DD] [SOURCE] -o perf_evidence.json
@@ -71,11 +77,11 @@ byte-identical files.
       records which ("acceptance_from": session | spec_gate): the gate's text can accept far more or less than the
       row's workload, which moves that row's ceiling by the same factor.
 
-  SOURCE (perf and gates): --source-kind devlab|factory|local (perf: default devlab; gates: default local) [--run ID --url URL] [--device auto|none|FILE.json]
+  SOURCE (perf and gates): --source-kind devlab|factory|local|machine (perf: default devlab; gates: default local; machine: a named machine of a GPU with no DevLab runner, fleet/devices) [--run ID --url URL] [--device auto|none|FILE.json]
       [--hrx-loom auto|none|FILE.json]. auto records this machine's device and the Loom SDK under $LOOM_ROOT
       (../machine_info.py); on downloaded DevLab job files: --device none --hrx-loom none. Card performance comes
       only from AMD DevLab Dispatch (a devlab-perf job or a scripted DevLab port, kind devlab; the loom-factory
-      workflow, kind factory): perf refuses --source-kind local. Gates may come from any source.
+      workflow, kind factory), or from a named machine for a GPU with no DevLab runner (kind machine): perf refuses --source-kind local. Gates may come from any source.
 
 Evidence file (loom-card-evidence/2), every block optional:
   {"evidence": "loom-card-evidence/2", "gpu": "strix-halo" | "radeon-r9700",   # the GPU that produced it (perf, gates, roofline
@@ -111,7 +117,7 @@ from card_lib import (DEFAULT_GPU, DRAFTED_ROWS, EVIDENCE_ID, GPUS, METRIC_KEYS,
                       HF, RETIRED_GATES, ROOFLINE_METRIC, SCHEMA_ID, build_tag, card_metrics, derived_tags, dumps, gate_applies, gpu_from_device,
                       gpu_view, load_info, load_json, load_package, metric_applies, native_context, over_context, package_facts,
                       programs_sha256, require_valid, fixed_pool_capacity, gpu_preset_execution, gpu_preset_name, with_gpu_preset, served_context, fit_served_context, upstream_facts, with_gate_features, write_json,
-                      SERVE_HEADROOM, registry, fit_rows)
+                      SERVE_HEADROOM, registry, fit_rows, load_device_results, validate_device_results, with_device_preset, DEVICE_RESULTS_ID)
 
 
 # ---------------------------------------------------------------- sources
@@ -271,6 +277,49 @@ def write_gpu_preset(pkg_dir, model, verdict_path, repo, ctx, gpu="radeon-r9700"
     return doc["presets"][gpu_preset_name(doc, gpu)]["execution"]
 
 
+def device_native_context(feats):
+    return native_context(feats)
+
+
+def write_device_preset(pkg_dir, gpu, doc, entry):
+    """Add the GPU's `<first><suffix>` preset (chat-9070xt) to the package's model.json from its fleet/devices entry: a copy of the preset of
+    the device whose programs it serves (doc["same_programs_as"]: the R9700's, when the package has one), with the entry's `execution` over
+    it and context_capacity = the entry's max_context. Written when the file asks for it for every model (preset.always), or the entry has
+    execution overrides or admits less context than the base preset serves; otherwise the GPU reuses the default preset. Returns the preset
+    name written, else None. Idempotent; the default preset, programs, weights and lock are untouched."""
+    path = os.path.join(pkg_dir, "model.json")
+    model = load_json(path)
+    first = next(iter(model["presets"]))
+    other = doc.get("same_programs_as")
+    base = f"{first}{GPUS[other].get('preset_suffix', '')}" if other in GPUS else None
+    base_ex = (model["presets"].get(base) or model["presets"][first])["execution"]
+    ex = dict(entry.get("execution") or {})
+    if entry.get("max_context"):
+        ex.setdefault("context_capacity", entry["max_context"])
+    needed = ((doc.get("preset") or {}).get("always") or entry.get("execution")
+              or (ex.get("context_capacity") or 0) < (base_ex.get("context_capacity") or 1 << 62))
+    if not needed or not ex:
+        return None
+    new = with_device_preset(model, gpu, ex, base)
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
+        json.dump(new, f, indent=1, ensure_ascii=False)
+        f.write("\n")
+    return gpu_preset_name(new, gpu)
+
+
+def device_meta(gpu, doc, entry, feats):
+    """The devices entry fields a fleet/devices entry gives its GPU on a card: how it is served and the context it admits."""
+    args = list(entry["serve_args"]) if "serve_args" in entry else list(GPUS[gpu].get("serve_args") or [])
+    m = {"serve_args": args}
+    mem = next((int(x.split("=", 1)[1]) for x in args if x.startswith("--memory_bytes=") and x.split("=", 1)[1].isdigit()), None)
+    if mem:
+        m["memory_bytes"] = mem
+    native = device_native_context(feats)
+    if entry.get("max_context") and (not native or entry["max_context"] < native):
+        m["served_context"] = entry["max_context"]
+    return m
+
+
 def cmd_build(a):
     pkg = load_package(a.pkg)
     upstream = None
@@ -347,8 +396,21 @@ def cmd_build(a):
         st["baseline"] = perf["baseline"]
         st["sessions"] = [dict(s, source=osrc(s["source"])) for s in perf["sessions"]]
         st["baselines"] = {b: dict(x, session=dict(x["session"], source=osrc(x["session"]["source"]))) for b, x in (perf.get("baselines") or {}).items()}
-    for i, path in enumerate(a.evidence or []):
-        ev = load_json(path)
+    # fleet/devices data files: a GPU with no DevLab runner shows only where its file has data for this card's model (fits true); the
+    # entry's evidence applies after the --evidence files, like any evidence
+    slug = (a.repo or "").split("/")[-1]
+    dev_serve = {}
+    evs = [(path, None) for path in a.evidence or []]
+    if slug and a.device_results != "none":
+        for gpu, doc in load_device_results(a.device_results).items():
+            entry = doc["models"].get(slug)
+            if entry and entry["fits"]:
+                dev_serve[gpu] = (doc, entry)
+                evs += [(f"{gpu}:{slug}.evidence[{j}]", dict(e, gpu=gpu)) for j, e in enumerate(entry.get("evidence") or [])]
+    for gpu in dev_serve:   # the device file is the only source of that GPU's data: an --from-info card's earlier copy of it is replaced, not doubled
+        G.pop(gpu, None)
+    for i, (path, ev) in enumerate(evs):
+        ev = ev or load_json(path)
         if ev.get("evidence") != EVIDENCE_ID:
             sys.exit(f"{path}: not a {EVIDENCE_ID} file")
         c = ev.get("card") or {}
@@ -447,6 +509,16 @@ def cmd_build(a):
                     m["served_context"] = ctx
                 if need is None:
                     write_gpu_preset(a.pkg, pkg["model"], fit, a.repo, ctx, gpu)
+    for gpu, (doc, entry) in dev_serve.items():   # how the GPU serves this package (fleet/devices), and its preset
+        m = gpu_state(gpu)["meta"]
+        for k in ("state", "required_bytes", "memory_bytes", "served_context"):
+            m.pop(k, None)
+        m.update(device_meta(gpu, doc, entry, facts["features"]))
+        write_device_preset(a.pkg, gpu, doc, entry)
+    for gpu, (doc, entry) in dev_serve.items():   # a GPU that shares another's performance section: that GPU is on the card
+        share = doc.get("share_section_with")
+        if share and (share in G or share in (a.gpus or "").split(",")):
+            gpu_state(gpu)["meta"]["shares_section_with"] = share
     gpus = [g for g in GPUS if g in G or g in (a.gpus or "").split(",")]
     for g in (a.gpus or "").split(",") if a.gpus else []:
         if g and g not in GPUS:
@@ -834,6 +906,18 @@ def acceptance(paths):
     return None
 
 
+def cmd_devices(a):
+    """Validate the per-device results files and list, per device, the models it serves (a data file's author runs this before a PR)."""
+    docs = load_device_results(a.dir)   # exits on an invalid file
+    for gpu, doc in docs.items():
+        fits = [s for s, m in doc["models"].items() if m["fits"]]
+        measured = [s for s in fits if doc["models"][s].get("evidence")]
+        print(f"{gpu}: {len(doc['models'])} models, {len(fits)} fit, {len(measured)} with evidence"
+              + (f", shares the {doc['share_section_with']} section" if doc.get("share_section_with") else ""))
+    if not docs:
+        print("no device results files")
+
+
 def cmd_gates(a):
     out, src, spec_date, logs = [], source_arg(a), None, [a.spec_log] if a.spec_log else []
     psha = programs_sha256(a.package) if a.package else None
@@ -1077,7 +1161,7 @@ def next_steps_file(path):
 
 
 def add_source_args(p, kind):
-    p.add_argument("--source-kind", default=kind, choices=["devlab", "factory", "local"])
+    p.add_argument("--source-kind", default=kind, choices=["devlab", "factory", "local", "machine"])
     p.add_argument("--run")
     p.add_argument("--url")
     p.add_argument("--device", default="auto", help="auto (this machine), none, or a JSON file with {cpu, gpu, os}")
@@ -1103,6 +1187,8 @@ def main(argv=None):
     b.add_argument("--generator-commit", help="loom-skills commit of the card scripts, or 'unknown' (default: this "
                    "checkout's HEAD)")
     b.add_argument("--evidence", nargs="*")
+    b.add_argument("--device-results", default=None, help="the directory of per-device results files (default: $LOOM_DEVICE_RESULTS, else this checkout's "
+                   "fleet/devices; none: no device files): a GPU with no DevLab runner is on the card where its file says this model fits")
     b.add_argument("--memory-bytes", type=int)
     b.add_argument("--output")
     b.add_argument("--license")
@@ -1188,8 +1274,10 @@ def main(argv=None):
     e.add_argument("--time")
     add_source_args(e, "local")
     e.add_argument("-o", required=True)
+    dv = sub.add_parser("devices", help="validate fleet/devices/*.json (loom-device-results/1) and summarize them")
+    dv.add_argument("dir", nargs="?", default=None, help="the directory (default: $LOOM_DEVICE_RESULTS, else fleet/devices)")
     a = ap.parse_args(argv)
-    {"build": cmd_build, "equivalent": cmd_equivalent, "perf": cmd_perf, "gates": cmd_gates, "roofline": cmd_roofline, "remeasure": cmd_remeasure}[a.cmd](a)
+    {"devices": cmd_devices, "build": cmd_build, "equivalent": cmd_equivalent, "perf": cmd_perf, "gates": cmd_gates, "roofline": cmd_roofline, "remeasure": cmd_remeasure}[a.cmd](a)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,52 @@
+{
+  "schema": "loom-kb/device/1",
+  "device": "radeon-rx9070xt",
+  "order": 1,
+  "family": "rdna4",
+  "gfx": "gfx1201",
+  "aliases": [
+    "rx9070xt",
+    "9070xt"
+  ],
+  "name": "AMD Radeon RX 9070 XT",
+  "short": "Radeon RX 9070 XT",
+  "memory": "16 GB",
+  "memory_bytes": 15000000000,
+  "memory_note": "the board has 16 GB; loom-serve gets 15e9 bytes (a desktop session holds about 1.5 GB of it). Per-model values live in fleet/devices/rx9070xt.json",
+  "card": {
+    "runner": "RX 9070 XT",
+    "tag": "radeon-rx9070xt",
+    "detect": {
+      "pattern": "9070 ?xt",
+      "flags": "i"
+    },
+    "serve_args": [
+      "--memory_bytes=15000000000",
+      "--state_slab_bytes=4mib"
+    ]
+  },
+  "roofline": {
+    "default": "radeon-rx9070xt",
+    "presets": {
+      "radeon-rx9070xt": {
+        "name": "AMD Radeon RX 9070 XT (gfx1201, 16 GB)",
+        "bw": 640000000000.0,
+        "flops": 194600000000000.0,
+        "note": "SPEC, not measured: GDDR6 20 Gbps, 256-bit = 640 GB/s peak; 64 CUs x 1024 x 2.97 GHz = 195 TFLOP/s dense f16 WMMA (AMD's spec). A measured bandwidth would replace the peak"
+      }
+    }
+  },
+  "runner": {
+    "key": "rx9070xt",
+    "labels": [],
+    "note": "no DevLab runner: results come from a named machine (fleet/devices/rx9070xt.json, provenance per session)"
+  },
+  "preset_suffix": "-9070xt",
+  "fit_table": null,
+  "prefill_flag": null,
+  "devlab_device_block": {
+    "cpu": "DevLab Dispatch runner {runner}",
+    "gpu": "AMD Radeon RX 9070 XT (gfx1201)",
+    "os": "Linux"
+  }
+}

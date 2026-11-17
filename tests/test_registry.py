@@ -26,7 +26,8 @@ class DeviceRegistry(unittest.TestCase):
     def test_tree_is_consistent(self):
         fams, devs = registry.families(), registry.devices()
         self.assertEqual(list(fams), ["rdna3", "rdna4", "cdna3", "xdna2"])
-        self.assertEqual(list(devs)[:3], ["strix-halo", "radeon-rx7900xtx", "radeon-r9700"])   # the first rows keep their order; a new device row may follow
+        old = ["strix-halo", "radeon-rx7900xtx", "radeon-r9700"]
+        self.assertEqual([d for d in devs if d in old], old)   # the first rows keep their relative order; a new device row may follow (rx9070xt, gfx1150)
         for name, f in fams.items():
             self.assertTrue((KB / "device" / name / "README.md").exists(), name)
             for d in f["devices"]:
@@ -67,8 +68,12 @@ class DeviceRegistry(unittest.TestCase):
 
     def test_card_gpus(self):   # card_lib.GPUS as it was hard-coded
         g = card_lib.GPUS
-        self.assertEqual(list(g)[:3], ["strix-halo", "radeon-rx7900xtx", "radeon-r9700"])
+        old = ["strix-halo", "radeon-rx7900xtx", "radeon-r9700"]
+        self.assertEqual([d for d in g if d in old], old)
         self.assertEqual(list(g), list(registry.devices()))
+        # the card shows its GPUs in this order (device.json card.order, else the registry's): Strix Halo, R9700, RX 9070 XT, gfx1150
+        self.assertEqual([d for d in card_lib.GPU_ORDER if d != "radeon-rx7900xtx"],
+                         ["strix-halo", "radeon-r9700", "radeon-rx9070xt", "gfx1150"])
         self.assertEqual({k: v for k, v in g["strix-halo"].items() if k != "detect"},
                          {"name": 'AMD Ryzen AI Max+ 395 "Strix Halo"', "short": "Strix Halo", "arch": "gfx1151", "memory": None,
                           "roofline": "strix-halo", "memory_bytes": None, "runner": "Strix Halo", "tag": "strix-halo"})

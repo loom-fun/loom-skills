@@ -18,6 +18,7 @@ published model, without a GPU and without any weights.
 | `route_load.py` | instruction load: lines a port / optimize run reads per fleet model (routed files + workflow and kb SKILL.md) vs the pre-refactor set at `--base`; `--md`, `--json` |
 | `replays/` | measure 2: past PRs replayed through the guards (`replay.py NAME`, `mkpatches.py`, `summarize.py`); evidence per PR and `REPLAYS.md` |
 | `regen.py` | regenerate many cards, one command per step (`plan submit poll collect rerun ingest publish status accept adopt`), state in one JSON file; `--mode card` for a new device: no A/B |
+| `devices/` | per-device results of GPUs with no DevLab runner (RX 9070 XT, gfx1150): per model fits / max context / serve flags / preset overrides / evidence with provenance; schema `devices/device_results.schema.json`, `devices/README.md`; `make_info.py build` turns an entry into the card's GPU block, preset and section |
 | `rows_map.json` | kernel family -> card rows / gates (data; first matching rule wins) |
 
     python fleet/build_fleet.py --ref origin/r9700 --out $WORK/base --jobs 12      # ~2 min on 12 cores

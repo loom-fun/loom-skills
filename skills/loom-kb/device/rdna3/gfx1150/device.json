@@ -1,0 +1,50 @@
+{
+  "schema": "loom-kb/device/1",
+  "device": "gfx1150",
+  "order": 2,
+  "family": "rdna3",
+  "gfx": "gfx1150",
+  "aliases": [
+    "gfx1150",
+    "strix-point"
+  ],
+  "name": "AMD Radeon 890M",
+  "short": "Radeon 890M",
+  "memory": null,
+  "memory_bytes": null,
+  "memory_note": "Strix Point APU (RDNA 3.5); an APU: shares system memory like Strix Halo; loom-serve takes the package's own budget unless fleet/devices/gfx1150.json says otherwise",
+  "card": {
+    "runner": "gfx1150",
+    "tag": "gfx1150",
+    "order": 10,
+    "detect": {
+      "pattern": "gfx1150|radeon 8[89]0m",
+      "flags": "i"
+    },
+    "serve_args": []
+  },
+  "roofline": {
+    "default": "gfx1150",
+    "presets": {
+      "gfx1150": {
+        "name": "AMD Radeon 890M (gfx1150)",
+        "bw": 120000000000.0,
+        "flops": 23800000000000.0,
+        "note": "SPEC, not measured: LPDDR5X-7500, 128-bit = 120 GB/s peak; 16 CUs x 512 x 2.9 GHz = 23.8 TFLOP/s dense f16 WMMA (AMD's spec). A measured bandwidth would replace the peak"
+      }
+    }
+  },
+  "runner": {
+    "key": "gfx1150",
+    "labels": [],
+    "note": "no DevLab runner: results come from a named machine (fleet/devices/gfx1150.json, provenance per session)"
+  },
+  "preset_suffix": "-gfx1150",
+  "fit_table": null,
+  "prefill_flag": null,
+  "devlab_device_block": {
+    "cpu": "DevLab Dispatch runner {runner}",
+    "gpu": "AMD Radeon 890M (gfx1150)",
+    "os": "Linux"
+  }
+}

@@ -14,22 +14,29 @@ A [Loom](https://github.com/ROCm/hrx-system) package (`.loom` programs and a `mo
 
 ## Quick start
 
+Open your GPU and copy its commands.
+
+<details>
+<summary>AMD Ryzen AI Max+ 395 "Strix Halo" (gfx1151)</summary>
+
 ```bash
 pipx install "hrx-loom[hf]==0.1.0"
 loom-fetch https://huggingface.co/loom-fun-staging/unsloth-Qwen3-0.6B-loom/resolve/main/model.json --materialize=copy --output=Qwen3-0.6B
-```
-
-Serve on the AMD Ryzen AI Max+ 395 "Strix Halo" (gfx1151):
-
-```bash
 loom-serve --model=Qwen3-0.6B/model.json '--device=amdgpu://?completion_spin_ns=4294967295' --memory_bytes=17000000000
 ```
 
-Serve on the AMD Radeon AI PRO R9700 (gfx1201, 32 GB):
+</details>
+
+<details>
+<summary>AMD Radeon AI PRO R9700 (gfx1201, 32 GB)</summary>
 
 ```bash
+pipx install "hrx-loom[hf]==0.1.0"
+loom-fetch https://huggingface.co/loom-fun-staging/unsloth-Qwen3-0.6B-loom/resolve/main/model.json --materialize=copy --output=Qwen3-0.6B
 loom-serve --model=Qwen3-0.6B/model.json '--device=amdgpu://?completion_spin_ns=4294967295' --pool_backing=fixed
 ```
+
+</details>
 
 The server listens on `127.0.0.1:8080` and answers OpenAI-style `/v1/chat/completions` requests.
 
