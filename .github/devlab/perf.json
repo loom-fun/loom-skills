@@ -26,7 +26,7 @@
     {
      "name": "oldsdka",
      "build": {},
-     "ref": "9690f1f9ef44e4c94c79fe227edcc87fbd71a099",
+     "ref": "d2be0384d7ee4ffe37581b6ce72a70b38f1a9298",
      "sdk": "ci:13628412621"
     },
     {
@@ -45,7 +45,7 @@
     {
      "name": "oldsdkb",
      "build": {},
-     "ref": "9690f1f9ef44e4c94c79fe227edcc87fbd71a099",
+     "ref": "d2be0384d7ee4ffe37581b6ce72a70b38f1a9298",
      "sdk": "ci:13628412621"
     },
     {
@@ -56,6 +56,10 @@
     }
    ],
    "steps": [
+    "perf:currenta:1",
+    "perf:oldsdka:1",
+    "perf:oldsdkb:1",
+    "perf:currentb:1",
     "trace:currenta:dec",
     "trace:oldabia:dec",
     "trace:oldsdka:dec",
