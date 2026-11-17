@@ -118,10 +118,19 @@ class T(unittest.TestCase):
 
     def test_invalid_declaration_stops_before_planning_matrix(self):
         body = Path(self.r.d, "pr-body.md")
-        body.write_text("kind: unknown\n")
+        body.write_text("kind: architecture\nkernels: attention\n")
         output = Path(self.r.d, "plan.json")
         with mock.patch.object(PLAN, "make_plan", side_effect=AssertionError("matrix planning must not run")):
-            with self.assertRaisesRegex(SystemExit, "invalid loom-scope declaration"):
+            with self.assertRaisesRegex(SystemExit, "unknown family 'attention'"):
+                PLAN.main(["plan", "--repo", self.r.d, "--base", "base", "--pr-body", str(body), "--out", str(output)])
+        self.assertFalse(output.exists())
+
+    def test_empty_pr_body_file_is_invalid(self):
+        body = Path(self.r.d, "empty-pr-body.md")
+        body.write_text("")
+        output = Path(self.r.d, "plan.json")
+        with mock.patch.object(PLAN, "make_plan", side_effect=AssertionError("matrix planning must not run")):
+            with self.assertRaisesRegex(SystemExit, "no loom-scope block given"):
                 PLAN.main(["plan", "--repo", self.r.d, "--base", "base", "--pr-body", str(body), "--out", str(output)])
         self.assertFalse(output.exists())
 
@@ -133,6 +142,14 @@ class T(unittest.TestCase):
         body.write_text("kind: architecture\n")
         output = Path(self.r.d, "plan.json")
         PLAN.main(["plan", "--repo", self.r.d, "--base", "base", "--pr-body", str(body), "--out", str(output)])
+        self.assertEqual(json.loads(output.read_text()), expected)
+
+    def test_standalone_plan_without_pr_body_keeps_previous_output(self):
+        self.r.write("fleet/manifest.json", json.dumps({"models": {}}))
+        self.r.commit()
+        expected = PLAN.make_plan(self.r.d, "base")
+        output = Path(self.r.d, "standalone-plan.json")
+        PLAN.main(["plan", "--repo", self.r.d, "--base", "base", "--out", str(output)])
         self.assertEqual(json.loads(output.read_text()), expected)
 
     def test_targeted_pass(self):
