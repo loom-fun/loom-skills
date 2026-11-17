@@ -21,7 +21,7 @@ split='''func.def inline @g_split_count(%visible: index) -> (index) {
 
 subprocess.run([sys.executable,str(here/'stage_q.py'),str(out)],check=True)
 rng=np.random.default_rng(555)
-# Poison future values; exact partial comparison detects every difference, including causal leaks.
+# Deterministic inputs; exact partial comparison detects every arithmetic difference.
 ctx=32832
 q=rng.standard_normal((8,32,128)).astype(np.float32)
 arena=rng.standard_normal((2,ctx,8,128)).astype(np.float16)
@@ -44,8 +44,9 @@ for t,p0 in [(1,32768),(3,32767),(4,32765),(5,32764),(8,32760)]:
 """
   for suffix in (['a','b'] if compare else ['a']):
    kernel='baseline' if suffix=='a' and compare else which
-   s+=f""" %pa{suffix} = check.generate.fill value(0.0) : tensor<{t*32*128*128}xf32>
- %pm{suffix} = check.generate.fill value(0.0) : tensor<{t*32*128*2}xf32>
+   sentinel=42.0 if suffix=='b' else 0.0
+   s+=f""" %pa{suffix} = check.generate.fill value({sentinel}) : tensor<{t*32*128*128}xf32>
+ %pm{suffix} = check.generate.fill value({sentinel}) : tensor<{t*32*128*2}xf32>
  kernel.launch @{kernel}[%t](%t, %l, %sl, %ctx, %ctx, %q, %i, %orig, %arena, %pa{suffix}, %pm{suffix}) : [index](index, index, i32, index, index, tensor<8x32x128xf32>, tensor<{t}x4xi32>, tensor<{10+ctx//16}xi32>, tensor<2x{ctx}x8x128xf16>, tensor<{t*32*128*128}xf32>, tensor<{t*32*128*2}xf32>)
 """
   if compare:
