@@ -14,14 +14,10 @@
  },
  "jobs": [
   {
-   "name": "flashnext-1196-warmup",
+   "name": "flashnext-1196-sdk-isolation",
    "variants": [
     {
      "name": "currenta"
-    },
-    {
-     "name": "oldabia",
-     "build": {}
     },
     {
      "name": "oldsdka",
@@ -30,48 +26,26 @@
      "sdk": "ci:13628412621"
     },
     {
-     "name": "nocachea",
-     "execution": {
-      "cache_target_bytes": 0
-     }
-    },
-    {
      "name": "currentb"
-    },
-    {
-     "name": "oldabib",
-     "build": {}
     },
     {
      "name": "oldsdkb",
      "build": {},
      "ref": "d2be0384d7ee4ffe37581b6ce72a70b38f1a9298",
      "sdk": "ci:13628412621"
-    },
-    {
-     "name": "nocacheb",
-     "execution": {
-      "cache_target_bytes": 0
-     }
     }
    ],
    "steps": [
-    "perf:currenta:1",
-    "perf:oldsdka:1",
-    "perf:oldsdkb:1",
-    "perf:currentb:1",
+    "perf:currenta:2",
+    "perf:oldsdka:2",
+    "perf:oldsdkb:2",
+    "perf:currentb:2",
     "trace:currenta:dec",
-    "trace:oldabia:dec",
     "trace:oldsdka:dec",
-    "trace:nocachea:dec",
-    "trace:nocacheb:dec",
     "trace:oldsdkb:dec",
-    "trace:oldabib:dec",
     "trace:currentb:dec",
     "profile:currenta:dec",
-    "profile:oldabia:dec",
-    "profile:oldsdka:dec",
-    "profile:nocachea:dec"
+    "profile:oldsdka:dec"
    ]
   }
  ]
