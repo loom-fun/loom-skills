@@ -14,7 +14,7 @@
  "serve": {
   "device": "amdgpu://?completion_spin_ns=4294967295",
   "memory": "elastic backing, --memory_bytes inside the GTT (half of RAM by default)",
-  "host": "stock Ubuntu (RLIMIT_MEMLOCK 8 MiB, no root, no preload): loom-serve runs under the gfx1150 registry row's card.serve_prefix (systemd-run --user ... SystemCallFilter=~io_uring_setup), which makes hrx-loom use its POSIX I/O backend; every result below was measured that way"
+  "host": "stock Ubuntu (RLIMIT_MEMLOCK 8 MiB, no root): serve with --parameter_mode=preload (host-memory parameter handles; no GPU file staging, whose io_uring pins exceed the limit). The evidence sessions ran in the default file mode under `systemd-run --user -p SystemCallFilter=~io_uring_setup -p SystemCallErrorNumber=ENOSYS` (POSIX I/O backend); preload was spot-checked against them on the same machine"
  },
  "provenance": {
   "kind": "machine",
@@ -41,9 +41,10 @@
    "max_context": 63488,
    "native_context": 262144,
    "serve_args": [
-    "--memory_bytes=14000000000"
+    "--memory_bytes=14000000000",
+    "--parameter_mode=preload"
    ],
-   "note": "262144 is refused at registration under a GTT-sized budget on 0.2.0 (code 8, cannot address one model context); draft depth 3 and prefill 1024 measured best here (skills/loom-kb/device/rdna3/gfx1150/decode.md)",
+   "note": "--parameter_mode=preload is required on a stock host (8 MiB memlock; default file mode fails at the first request). Evidence: the full methodology ran in file mode under a no-root seccomp prefix (same programs); preload was checked on the same machine: decode 31.7/31.6 vs 31.1, prefill 1k/2k 1016/1029 vs 996/1016, streams4 82.6 vs 82.3, decode_2k within the acceptance spread; host RSS +3.4 GiB. 262144 is refused under a GTT-sized budget on 0.2.0 (code 8); depth 3 / chunk 1024 measured best",
    "evidence": [
     {
      "evidence": "loom-card-evidence/2",

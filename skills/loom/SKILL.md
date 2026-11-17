@@ -225,9 +225,8 @@ Read it from there if it isn't in your skill list.
 
 **Another GPU:** run `python3 "${LOOM_SKILL_DIR}/../loom-kb/kb.py" list` and route with `--device` (a key such as
 `gfx1150`, or an alias such as `strix-point`); never reuse the numbers above. On a **Strix Point** laptop (gfx1150, Radeon 890M)
-read `loom-kb/device/rdna3/gfx1150/README.md` before serving: with Ubuntu's default 8 MiB `ulimit -l`, every weight load fails after registration
-reports ready unless loom-serve starts under `systemd-run --user --pty --same-dir -p SystemCallFilter=~io_uring_setup
--p SystemCallErrorNumber=ENOSYS` (no root; the scripts' serve.sh does not add it yet), and `--memory_bytes` must fit the GTT
+read `loom-kb/device/rdna3/gfx1150/README.md` before serving: with Ubuntu's default 8 MiB `ulimit -l`, serve with `--parameter_mode=preload` (the default mode fails
+every weight load after registration reports ready; serve.sh does not add it yet), and `--memory_bytes` must fit the GTT
 (`mem_info_gtt_total`, half of RAM by default), not 60 % of RAM. Pass `roofline.py --device gfx1150`.
 
 ## Where things are documented upstream

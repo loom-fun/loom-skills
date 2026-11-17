@@ -45,13 +45,11 @@ builds cards the same way): nothing here is measured by the renderer.
   is not measured yet.
 - `fits: false` or no entry for the model: the GPU does not appear on that card.
 
-## A launch prefix a GPU needs (printed in its Quick start block)
+## Host-dependent serve flags
 
-A GPU's registry row may carry `card.serve_prefix` (`skills/loom-kb/device/<family>/<id>/device.json`): `linux` (the words before
-`loom-serve`), `text` (one sentence for the card) and `evidence`. It belongs to the GPU and its host, not to a model, so it lives in the
-registry, not in these files. gfx1150: on a stock Ubuntu host (8 MiB locked memory) hrx-loom 0.2.0's io_uring weight loading fails after
-registration reports ready; `systemd-run --user --pty --same-dir -p SystemCallFilter=~io_uring_setup -p SystemCallErrorNumber=ENOSYS`
-before `loom-serve` makes it use the POSIX I/O backend, with no root (source lines in `device/rdna3/gfx1150/README.md`).
+`serve_args` is what the card prints after `loom-serve`, so a flag a stock host needs belongs there. gfx1150:
+`--parameter_mode=preload` on a stock Ubuntu host (8 MiB locked memory), where hrx-loom 0.2.0's default parameter mode fails at the first
+request; the cause and the other fixes are in `skills/loom-kb/device/rdna3/gfx1150/README.md`.
 
 ## Filling a file
 

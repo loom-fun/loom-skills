@@ -9,26 +9,40 @@ RDNA 3.5 APU, 16 CUs, shared LPDDR5X (120 GB/s peak). Family `rdna3` (gfx11-gene
 - `kb.py route --device gfx1150` (aliases `strix-point`, `890m`). Measured on one laptop: HP OmniBook Ultra 14 (Ryzen AI 9 HX 375,
   32 GB LPDDR5X-7500), Ubuntu, Linux 7.0, 2026-11-16; the published programs compile and run unchanged (no new kernels).
 
-## Stock Ubuntu host: start loom-serve without io_uring (model-independent, no root)
+## Stock Ubuntu host: `--parameter_mode=preload` (model-independent, no root)
 
-Ubuntu's default `RLIMIT_MEMLOCK` is 8 MiB (also the hard limit). hrx-loom 0.2.0 loads weights through GPU file staging buffers of
-8 lanes x 2 MiB = 16 MiB (`hal/driver/amd/gpu/device.c:1303-1308`, `1343-1350`, hard-coded) and pins each through io_uring whenever the
-kernel offers concurrent buffer registration (`gpu/queue/file_staging.c:1557-1562`; Linux 7.0 does). A failed pin fails the allocation
-(`fabric/memory.c:552-559`; `async/platform/io_uring/proactor_registration.c:323-366` has no ENOMEM fallback: the RLIMIT_MEMLOCK fallback at
-lines 1086/1138 covers `register_slab` only). Symptom: registration reports `ready`, the first request returns an empty reply, the log shows
-`driver_failure ... proactor_registration.c:358: RESOURCE_EXHAUSTED; buffer pin preparation failed (12)` and the model stays `failed`.
-No loom-serve flag, environment variable or package setting reaches the staging size or the proactor capabilities (`allowed_capabilities` is
-never set outside tests).
+Serve with `--parameter_mode=preload` on a host whose `ulimit -l` is the Ubuntu default (8 MiB). Without it, hrx-loom 0.2.0 registers
+(`ready`), the first request returns an empty reply, the log shows
+`driver_failure: status=RESOURCE_EXHAUSTED(8) ... io_uring/proactor_registration.c:358: RESOURCE_EXHAUSTED; buffer pin preparation failed (12)`
+and the model stays `failed` (code 8) until restart. Measured with preload (Qwen3.5-4B, same machine): decode, prefill and 4 streams within
++-2 % of the default mode, decode @2k within the acceptance spread; cost: the parameter files are read into host memory (+3.4 GiB RSS).
+`--parameter_mode=direct` fails like the default.
 
-User-level fix: start loom-serve with `io_uring_setup` filtered out, so IREE falls back to its POSIX proactor (`async/proactor_platform.c:39-46`;
-ENOSYS/EPERM count as unavailable, `io_uring/uring.c:83-85`). An unprivileged systemd user unit can install the seccomp filter:
+### Root cause (notes for the owner; hrx-system tag v0.2.0, `0cd370f`)
 
-    systemd-run --user --pty --same-dir -p SystemCallFilter=~io_uring_setup -p SystemCallErrorNumber=ENOSYS \
-      loom-serve --model=PKG '--device=amdgpu://?completion_spin_ns=4294967295' --memory_bytes=14000000000
-
-The card prints it as the gfx1150 Quick start prefix (`device.json` `card.serve_prefix`). A host with `ulimit -l unlimited`
-(`* - memlock unlimited` in `/etc/security/limits.d/`) can drop it. Measured with it: the full card methodology (func, dev gates, perf,
-baselines) passes and the rows match the io_uring-off runs (`fleet/devices/gfx1150.json`).
+- `--parameter_mode=file` (default) and `direct` open parameter files for async I/O (`runtime/src/iree/tooling/parameter_util.c:50-56`); the
+  AMD GPU device reads them through file staging buffers of a hard-coded 8 lanes x 2 MiB = 16 MiB per pool
+  (`hal/driver/amd/gpu/device.c:1303-1308` queue family, `1343-1350` each transfer family).
+- The staging memory is registered with io_uring whenever the proactor reports `CONCURRENT_BUFFER_REGISTRATION`
+  (`hal/driver/amd/gpu/queue/file_staging.c:1557-1562`, comment: "Retained pins accelerate repeated I/O but are not required"). The capability is
+  set when io_uring's buffer-clone probe succeeds (`async/platform/io_uring/proactor.c:238-251`); Linux 7.0 has it.
+- Allocation calls `iree_async_proactor_prepare_buffer` for each proactor and fails on any error (`hal/driver/amd/fabric/memory.c:552-559`). The
+  io_uring implementation pins the whole buffer (`async/platform/io_uring/proactor_registration.c:323-366`, error at 353-358) and has no ENOMEM
+  fallback. The RLIMIT_MEMLOCK fallback (lines 1086-1095, 1138-1143; `async/region.h:208`) is on the other registration path,
+  `fixed_buffers_register` / `register_slab`, not this one.
+- No flag or environment variable changes the staging size or masks the capability: `allowed_capabilities` is only ever the default `ALL`
+  (`async/proactor.h:450`). `preload` (`parameter_util.c:45-48`) gives host-memory file handles that never reach file staging.
+- **Who it hits:** any AMD GPU served by the `amdgpu` driver on Linux (Strix Halo, R9700, RX 9070 XT and gfx1150 alike: `device.c` is not
+  device-specific), in the default parameter mode, on a kernel with io_uring buffer clone, with `RLIMIT_MEMLOCK` below the staging pin (16 MiB
+  per pool). Hosts with a raised memlock limit (as DevLab runners may have) or an older kernel do not see it. Windows (IOCP) is not affected.
+- **Minimal SDK fix:** make the pin optional where the comment says it is: in `fabric/memory.c:552-559` (or for file staging only,
+  `file_staging.c:1557`), treat `RESOURCE_EXHAUSTED` from `prepare_buffer` as "no registration" and keep the allocation
+  (`file_staging_attach_view` already skips a missing `block->preparation`, `file_staging.c:707-710`), with the same WARNING the
+  `register_slab` path prints. A smaller staging pool (e.g. 4 x 1 MiB) would also fit under 8 MiB, but it only moves the threshold.
+- Other user-level fixes, each verified here: `ulimit -l unlimited` (root: `* - memlock unlimited` in `/etc/security/limits.d/`), or start
+  loom-serve under `systemd-run --user --pty --same-dir -p SystemCallFilter=~io_uring_setup -p SystemCallErrorNumber=ENOSYS` (no root: IREE
+  falls back to its POSIX proactor, `async/proactor_platform.c:39-46`). The full card methodology passed that way; it is where the
+  evidence in `fleet/devices/gfx1150.json` comes from.
 
 **Memory budget = GTT, not 60 % of RAM.** GTT defaults to half of RAM (15.08 GiB on 32 GB). A budget above it (the Strix Halo quick start's
 28e9) registers and then fails every allocation; `--pool_backing=fixed` fails at registration for a 262k-context preset. Serve elastic with
@@ -45,7 +59,7 @@ baselines) passes and the rows match the io_uring-off runs (`fleet/devices/gfx11
   until restart. No OOM kill, the desktop stays usable. Do not serve budget-less on this device.
 - Fit of the fleet at 14e9 (`.github/scripts/fit.py --device gfx1150 --approx`): 11 native, 18 reduced context, 22 do not fit.
 
-## Measured (Qwen3.5-4B Q4_K_M, hrx-loom 0.2.0, served context 63488, DFlash depth 3, stock host: memlock 8 MiB under the serve prefix, 2026-11-16)
+## Measured (Qwen3.5-4B Q4_K_M, hrx-loom 0.2.0, served context 63488, DFlash depth 3, stock host, memlock 8 MiB: default file mode under the seccomp prefix; preload spot-checked within +-2 %, 2026-11-16)
 
 | row | Loom | llama.cpp ROCm b1374 | llama.cpp Vulkan b12211 | Strix Halo card (Loom) |
 |---|---|---|---|---|
