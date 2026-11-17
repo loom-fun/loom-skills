@@ -790,7 +790,8 @@ def render(d):
     # ---- correctness
     cols = [live[0]] if solo else [g for g in gpus if g not in shared]
     head = "| gate | description | result |" if solo else "| gate | description | " + " | ".join(
-        GPUS[g]["short"] + "".join(" / " + GPUS[m]["short"].removeprefix("Radeon ") for m, h in shared.items() if h == g) for g in cols) + " |"
+        ((has_results(info["devices"][g]) and GPUS[g].get("measured_title")) or GPUS[g]["short"])   # a class measured on one board: that board
+        + "".join(" / " + GPUS[m]["short"].removeprefix("Radeon ") for m, h in shared.items() if h == g) for g in cols) + " |"
     L += ["## Correctness", "", head, "|---|---|" + "---|" * len(cols)]
     ev = []
 

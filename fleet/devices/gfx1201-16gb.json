@@ -2354,25 +2354,1614 @@
    "fits": true,
    "date": "2026-11-17",
    "max_context": 128000,
-   "native_context": 128000
+   "native_context": 128000,
+   "evidence": [
+    {
+     "evidence": "loom-card-evidence/2",
+     "gpu": "gfx1201-16gb",
+     "performance": {
+      "baseline": {
+       "args": "-ngl 99 -cram 0 -c 65536 -np 1",
+       "name": "llama.cpp",
+       "version": "llamacpp-rocm/b1375"
+      },
+      "session": {
+       "aggregate": "median",
+       "commands": [
+        "devlab_perf.sh (local, RX 9070 XT): perf:ws64:1 x2 + perf:ws64:1:long x2 ABBA, c4:ws64nd x2 (--preset=chat-16gb); llama@rocm.np1:3 (+:long), llamac4@rocm.nodraft"
+       ],
+       "date": "2026-11-17",
+       "metrics": {
+        "decode": {
+         "baseline": 108.8,
+         "baseline_runs": [
+          108.82,
+          108.83,
+          108.9
+         ],
+         "loom": 117.3,
+         "loom_runs": [
+          117.17,
+          117.47
+         ]
+        },
+        "decode_2k": {
+         "baseline": 104.5,
+         "baseline_runs": [
+          104.63,
+          104.34,
+          104.54
+         ],
+         "loom": 108.0,
+         "loom_runs": [
+          107.81,
+          108.11
+         ]
+        },
+        "decode_32k": {
+         "baseline": 70.5,
+         "baseline_runs": [
+          70.48,
+          70.51,
+          70.49
+         ],
+         "loom": 68.7,
+         "loom_runs": [
+          68.8,
+          68.59
+         ]
+        },
+        "prefill_16k": {
+         "baseline": 3343.6,
+         "baseline_runs": [
+          3334.2,
+          3343.6,
+          3346.1
+         ],
+         "loom": 5298.5,
+         "loom_runs": [
+          5289.1,
+          5307.8
+         ]
+        },
+        "prefill_1k": {
+         "baseline": 4345.2,
+         "baseline_runs": [
+          4347.2,
+          4345.2,
+          4335.7
+         ],
+         "loom": 6041.5,
+         "loom_runs": [
+          6069.7,
+          6013.4
+         ]
+        },
+        "prefill_2k": {
+         "baseline": 4342.9,
+         "baseline_runs": [
+          4342.9,
+          4342.9,
+          4344.8
+         ],
+         "loom": 6421.5,
+         "loom_runs": [
+          6438.7,
+          6404.3
+         ]
+        },
+        "prefill_32k": {
+         "baseline": 2624.6,
+         "baseline_runs": [
+          2622.7,
+          2624.6,
+          2625.9
+         ],
+         "loom": 3797.5,
+         "loom_runs": [
+          3799.1,
+          3795.9
+         ]
+        },
+        "prefill_8k": {
+         "baseline": 3901.0,
+         "baseline_runs": [
+          3896.8,
+          3907.5,
+          3901.0
+         ],
+         "loom": 5928.9,
+         "loom_runs": [
+          5926.4,
+          5931.3
+         ]
+        },
+        "streams4": {
+         "baseline": 299.6,
+         "baseline_runs": [
+          300.2,
+          299.3,
+          299.6
+         ],
+         "loom": 430.9,
+         "loom_runs": [
+          430.5,
+          430.9,
+          431.2,
+          431.0,
+          431.1,
+          430.3
+         ]
+        }
+       },
+       "programs_sha256": "caa3d32208fe79a0d3c57fc73225e4c17e341a18b7a76edfc9efcf4fca38fee6",
+       "runs": {
+        "decode_prefill": 2,
+        "streams4": 6
+       },
+       "source": {
+        "device": {
+         "cpu": "AMD Ryzen 7 9800X3D 8-Core Processor",
+         "gpu": "AMD Radeon RX 9070 XT",
+         "os": "Ubuntu 26.04"
+        },
+        "hrx_loom": {
+         "artifact_id": null,
+         "branch": "v0.2.0",
+         "hrx_loom": "0.2.0",
+         "hrx_system_sha": "0cd370f2baaa0cfef47cc23007f1a109906f8a52",
+         "source": "pypi",
+         "wheel_sha256": "5148f9e3a264af400ec4bae38bd7b06bf551d28cc33b7a61d67f7bcefa590438"
+        },
+        "kind": "machine",
+        "run": null,
+        "url": null
+       }
+      }
+     }
+    },
+    {
+     "evidence": "loom-card-evidence/2",
+     "gpu": "gfx1201-16gb",
+     "roofline": {
+      "checkpoint": "Qwen2.5-VL-7B-Instruct-Q4_K_M.gguf",
+      "device": {
+       "bandwidth_bytes_per_s": 640000000000.0,
+       "name": "AMD Radeon RX 9070 XT (gfx1201, 16 GB)",
+       "peak_flops": 194600000000000.0
+      },
+      "drafting": null,
+      "metrics": {
+       "decode": {
+        "ceiling": 146.4,
+        "efficiency": 0.875
+       },
+       "decode_2k": {
+        "ceiling": 142.7,
+        "efficiency": 0.879
+       },
+       "decode_32k": {
+        "ceiling": 103.1,
+        "efficiency": 0.92
+       },
+       "prefill_16k": {
+        "ceiling": 11966.7,
+        "efficiency": 0.33
+       },
+       "prefill_1k": {
+        "ceiling": 14685.4,
+        "efficiency": 0.33
+       },
+       "prefill_2k": {
+        "ceiling": 14466.3,
+        "efficiency": 0.33
+       },
+       "prefill_32k": {
+        "ceiling": 9993.3,
+        "efficiency": 0.33
+       },
+       "prefill_8k": {
+        "ceiling": 13277.6,
+        "efficiency": 0.33
+       },
+       "streams4": {
+        "ceiling": 567.9,
+        "efficiency": 0.7
+       }
+      },
+      "tool": {
+       "script": "skills/loom-roofline/roofline.py",
+       "sha256": "d2408190b0988ebfe5b9e6b4dbaf5d301f83775915ce405262a24b9ae8f1ae22",
+       "skills_commit": "89252053af2e437d94efe0f79a1b1a39399bcd49"
+      }
+     }
+    }
+   ]
   },
   "ggml-org-Qwen3-1.7B-loom": {
    "fits": true,
    "date": "2026-11-17",
    "max_context": 40960,
-   "native_context": 40960
+   "native_context": 40960,
+   "evidence": [
+    {
+     "evidence": "loom-card-evidence/2",
+     "gpu": "gfx1201-16gb",
+     "performance": {
+      "baseline": {
+       "args": "-ngl 99 -cram 0 -c 65536 -np 1",
+       "name": "llama.cpp",
+       "version": "llamacpp-rocm/b1375"
+      },
+      "session": {
+       "aggregate": "median",
+       "commands": [
+        "devlab_perf.sh (local, RX 9070 XT): perf:ws64:1 x2 + perf:ws64:1:long x2 ABBA, c4:ws64nd x2 (--preset=chat-16gb); llama@rocm.np1:3 (+:long), llamac4@rocm.nodraft"
+       ],
+       "date": "2026-11-17",
+       "metrics": {
+        "decode": {
+         "baseline": 248.8,
+         "baseline_runs": [
+          247.16,
+          248.85,
+          249.74
+         ],
+         "loom": 314.7,
+         "loom_runs": [
+          311.97,
+          317.44
+         ]
+        },
+        "decode_2k": {
+         "baseline": 220.7,
+         "baseline_runs": [
+          220.34,
+          220.74,
+          221.81
+         ],
+         "loom": 248.7,
+         "loom_runs": [
+          245.52,
+          251.93
+         ]
+        },
+        "decode_32k": {
+         "baseline": 98.3,
+         "baseline_runs": [
+          98.42,
+          98.14,
+          98.28
+         ],
+         "loom": 103.9,
+         "loom_runs": [
+          103.95,
+          103.84
+         ]
+        },
+        "prefill_16k": {
+         "baseline": 9878.8,
+         "baseline_runs": [
+          9884.0,
+          9874.0,
+          9878.8
+         ],
+         "loom": 14237.2,
+         "loom_runs": [
+          14343.9,
+          14130.6
+         ]
+        },
+        "prefill_1k": {
+         "baseline": 14908.9,
+         "baseline_runs": [
+          14922.4,
+          14767.2,
+          14908.9
+         ],
+         "loom": 20645.4,
+         "loom_runs": [
+          20668.2,
+          20622.6
+         ]
+        },
+        "prefill_2k": {
+         "baseline": 15288.7,
+         "baseline_runs": [
+          15288.7,
+          15243.7,
+          15414.7
+         ],
+         "loom": 22045.2,
+         "loom_runs": [
+          22090.7,
+          21999.6
+         ]
+        },
+        "prefill_32k": {
+         "baseline": 6759.8,
+         "baseline_runs": [
+          6761.4,
+          6759.8,
+          6746.0
+         ],
+         "loom": 8694.1,
+         "loom_runs": [
+          8731.5,
+          8656.7
+         ]
+        },
+        "prefill_8k": {
+         "baseline": 13069.9,
+         "baseline_runs": [
+          13090.5,
+          13050.9,
+          13069.9
+         ],
+         "loom": 18253.7,
+         "loom_runs": [
+          18373.1,
+          18134.2
+         ]
+        },
+        "streams4": {
+         "baseline": 645.2,
+         "baseline_runs": [
+          643.7,
+          645.2,
+          649.0
+         ],
+         "loom": 1130.2,
+         "loom_runs": [
+          1128.5,
+          1126.3,
+          1126.5,
+          1134.0,
+          1133.8,
+          1105.6
+         ]
+        }
+       },
+       "programs_sha256": "c73056e50241496f4be781731da4b7d2d795789edf0696a9418d3d6d8781b0df",
+       "runs": {
+        "decode_prefill": 2,
+        "streams4": 6
+       },
+       "source": {
+        "device": {
+         "cpu": "AMD Ryzen 7 9800X3D 8-Core Processor",
+         "gpu": "AMD Radeon RX 9070 XT",
+         "os": "Ubuntu 26.04"
+        },
+        "hrx_loom": {
+         "artifact_id": null,
+         "branch": "v0.2.0",
+         "hrx_loom": "0.2.0",
+         "hrx_system_sha": "0cd370f2baaa0cfef47cc23007f1a109906f8a52",
+         "source": "pypi",
+         "wheel_sha256": "5148f9e3a264af400ec4bae38bd7b06bf551d28cc33b7a61d67f7bcefa590438"
+        },
+        "kind": "machine",
+        "run": null,
+        "url": null
+       }
+      }
+     }
+    },
+    {
+     "evidence": "loom-card-evidence/2",
+     "gpu": "gfx1201-16gb",
+     "performance": {
+      "backend": "vulkan",
+      "baseline": {
+       "args": "-ngl 99 -cram 0 -c 36864 -np 1",
+       "name": "llama.cpp",
+       "sha256": "9759acd293d3738f39d3ceed740bd3125d87dfb492ef8c4f00114d3393d37942",
+       "version": "llamacpp-vulkan/b12211"
+      },
+      "session": {
+       "aggregate": "median",
+       "date": "2026-11-17",
+       "metrics": {
+        "decode": {
+         "baseline": 306.4,
+         "baseline_runs": [
+          305.28,
+          308.06,
+          306.38
+         ]
+        },
+        "decode_2k": {
+         "baseline": 271.9,
+         "baseline_runs": [
+          271.13,
+          272.1,
+          271.91
+         ]
+        },
+        "decode_32k": {
+         "baseline": 108.2,
+         "baseline_runs": [
+          108.15,
+          108.15,
+          108.17
+         ]
+        },
+        "prefill_16k": {
+         "baseline": 9546.0,
+         "baseline_runs": [
+          9577.6,
+          9546.0,
+          9529.6
+         ]
+        },
+        "prefill_1k": {
+         "baseline": 13903.2,
+         "baseline_runs": [
+          13956.1,
+          13903.2,
+          13855.9
+         ]
+        },
+        "prefill_2k": {
+         "baseline": 14481.5,
+         "baseline_runs": [
+          14522.3,
+          14481.5,
+          14399.4
+         ]
+        },
+        "prefill_32k": {
+         "baseline": 6467.6,
+         "baseline_runs": [
+          6480.8,
+          6467.6,
+          6463.2
+         ]
+        },
+        "prefill_8k": {
+         "baseline": 12195.3,
+         "baseline_runs": [
+          12303.3,
+          12188.7,
+          12195.3
+         ]
+        },
+        "streams4": {
+         "baseline": 768.1,
+         "baseline_runs": [
+          767.4,
+          769.1,
+          768.1
+         ]
+        }
+       },
+       "programs_sha256": "c73056e50241496f4be781731da4b7d2d795789edf0696a9418d3d6d8781b0df",
+       "runs": {
+        "decode_prefill": 3,
+        "streams4": 3
+       },
+       "source": {
+        "device": {
+         "cpu": "AMD Ryzen 7 9800X3D 8-Core Processor",
+         "gpu": "AMD Radeon RX 9070 XT",
+         "os": "Ubuntu 26.04"
+        },
+        "hrx_loom": null,
+        "kind": "machine",
+        "run": null,
+        "url": null
+       }
+      }
+     }
+    },
+    {
+     "evidence": "loom-card-evidence/2",
+     "gpu": "gfx1201-16gb",
+     "roofline": {
+      "checkpoint": "Qwen3-1.7B-Q4_K_M.gguf",
+      "device": {
+       "bandwidth_bytes_per_s": 640000000000.0,
+       "name": "AMD Radeon RX 9070 XT (gfx1201, 16 GB)",
+       "peak_flops": 194600000000000.0
+      },
+      "drafting": null,
+      "metrics": {
+       "decode": {
+        "ceiling": 581.0,
+        "efficiency": 0.637
+       },
+       "decode_2k": {
+        "ceiling": 480.9,
+        "efficiency": 0.717
+       },
+       "decode_32k": {
+        "ceiling": 134.1,
+        "efficiency": 0.949
+       },
+       "prefill_16k": {
+        "ceiling": 41817.3,
+        "efficiency": 0.33
+       },
+       "prefill_1k": {
+        "ceiling": 66342.6,
+        "efficiency": 0.33
+       },
+       "prefill_2k": {
+        "ceiling": 63846.2,
+        "efficiency": 0.33
+       },
+       "prefill_32k": {
+        "ceiling": 29991.1,
+        "efficiency": 0.33
+       },
+       "prefill_8k": {
+        "ceiling": 52086.7,
+        "efficiency": 0.33
+       },
+       "streams4": {
+        "ceiling": 1859.5,
+        "efficiency": 0.7
+       }
+      },
+      "tool": {
+       "script": "skills/loom-roofline/roofline.py",
+       "sha256": "d2408190b0988ebfe5b9e6b4dbaf5d301f83775915ce405262a24b9ae8f1ae22",
+       "skills_commit": "89252053af2e437d94efe0f79a1b1a39399bcd49"
+      }
+     }
+    }
+   ]
   },
   "ggml-org-Qwen3-14B-loom": {
    "fits": true,
    "date": "2026-11-17",
    "max_context": 27648,
-   "native_context": 40960
+   "native_context": 40960,
+   "evidence": [
+    {
+     "evidence": "loom-card-evidence/2",
+     "gpu": "gfx1201-16gb",
+     "performance": {
+      "baseline": {
+       "args": "-ngl 99 -cram 0 -c 40960 -np 1",
+       "name": "llama.cpp",
+       "version": "llamacpp-rocm/b1375"
+      },
+      "session": {
+       "aggregate": "median",
+       "commands": [
+        "devlab_perf.sh (local, RX 9070 XT): perf:ws64:1 x2 + perf:ws64:1:long x2 ABBA, c4:ws64nd x2 (--preset=chat-16gb); llama@rocm.np1:3 (+:long), llamac4@rocm.nodraft (llama_kv_rocm 40960)"
+       ],
+       "date": "2026-11-17",
+       "metrics": {
+        "decode": {
+         "baseline": 58.0,
+         "baseline_runs": [
+          57.85,
+          57.98,
+          57.96
+         ],
+         "loom": 65.6,
+         "loom_runs": [
+          65.82,
+          65.46
+         ]
+        },
+        "decode_2k": {
+         "baseline": 55.3,
+         "baseline_runs": [
+          55.31,
+          55.31,
+          55.35
+         ],
+         "loom": 60.5,
+         "loom_runs": [
+          60.72,
+          60.38
+         ]
+        },
+        "decode_32k": {
+         "baseline": 36.0,
+         "baseline_runs": [
+          36.02,
+          36.02,
+          36.02
+         ],
+         "loom": null
+        },
+        "prefill_16k": {
+         "baseline": 1614.5,
+         "baseline_runs": [
+          1611.0,
+          1614.6,
+          1614.5
+         ],
+         "loom": 2656.7,
+         "loom_runs": [
+          2677.5,
+          2635.9
+         ]
+        },
+        "prefill_1k": {
+         "baseline": 2291.7,
+         "baseline_runs": [
+          2298.7,
+          2291.7,
+          2291.7
+         ],
+         "loom": 3143.4,
+         "loom_runs": [
+          3165.2,
+          3121.7
+         ]
+        },
+        "prefill_2k": {
+         "baseline": 2289.9,
+         "baseline_runs": [
+          2294.9,
+          2289.5,
+          2289.9
+         ],
+         "loom": 3351.9,
+         "loom_runs": [
+          3363.8,
+          3340.1
+         ]
+        },
+        "prefill_32k": {
+         "baseline": 1177.4,
+         "baseline_runs": [
+          1176.5,
+          1177.6,
+          1177.4
+         ],
+         "loom": null
+        },
+        "prefill_8k": {
+         "baseline": 1956.0,
+         "baseline_runs": [
+          1956.0,
+          1956.3,
+          1955.1
+         ],
+         "loom": 3094.2,
+         "loom_runs": [
+          3094.0,
+          3094.3
+         ]
+        },
+        "streams4": {
+         "baseline": 167.8,
+         "baseline_runs": [
+          167.8,
+          167.7,
+          167.8
+         ],
+         "loom": 245.7,
+         "loom_runs": [
+          246.3,
+          246.5,
+          246.9,
+          245.1,
+          244.8,
+          244.7
+         ]
+        }
+       },
+       "over_context": {
+        "decode_32k": 32450,
+        "prefill_32k": 32452
+       },
+       "programs_sha256": "bb5c577ea81d7ef5728f03c62e2fb70df401433d9bb523842ce3f9014d22dbe5",
+       "runs": {
+        "decode_prefill": 2,
+        "streams4": 6
+       },
+       "source": {
+        "device": {
+         "cpu": "AMD Ryzen 7 9800X3D 8-Core Processor",
+         "gpu": "AMD Radeon RX 9070 XT",
+         "os": "Ubuntu 26.04"
+        },
+        "hrx_loom": {
+         "artifact_id": null,
+         "branch": "v0.2.0",
+         "hrx_loom": "0.2.0",
+         "hrx_system_sha": "0cd370f2baaa0cfef47cc23007f1a109906f8a52",
+         "source": "pypi",
+         "wheel_sha256": "5148f9e3a264af400ec4bae38bd7b06bf551d28cc33b7a61d67f7bcefa590438"
+        },
+        "kind": "machine",
+        "run": null,
+        "url": null
+       }
+      }
+     }
+    },
+    {
+     "evidence": "loom-card-evidence/2",
+     "gpu": "gfx1201-16gb",
+     "performance": {
+      "backend": "vulkan",
+      "baseline": {
+       "args": "-ngl 99 -cram 0 -c 36864 -np 1",
+       "name": "llama.cpp",
+       "sha256": "9759acd293d3738f39d3ceed740bd3125d87dfb492ef8c4f00114d3393d37942",
+       "version": "llamacpp-vulkan/b12211"
+      },
+      "session": {
+       "aggregate": "median",
+       "date": "2026-11-17",
+       "metrics": {
+        "decode": {
+         "baseline": 63.6,
+         "baseline_runs": [
+          63.65,
+          63.56,
+          63.62
+         ]
+        },
+        "decode_2k": {
+         "baseline": 61.2,
+         "baseline_runs": [
+          61.24,
+          61.16,
+          61.31
+         ]
+        },
+        "decode_32k": {
+         "baseline": 41.0,
+         "baseline_runs": [
+          40.99,
+          41.17,
+          40.96
+         ]
+        },
+        "prefill_16k": {
+         "baseline": 1679.1,
+         "baseline_runs": [
+          1677.9,
+          1679.1,
+          1679.5
+         ]
+        },
+        "prefill_1k": {
+         "baseline": 2072.1,
+         "baseline_runs": [
+          2074.2,
+          2069.6,
+          2072.1
+         ]
+        },
+        "prefill_2k": {
+         "baseline": 2120.3,
+         "baseline_runs": [
+          2121.4,
+          2117.9,
+          2120.3
+         ]
+        },
+        "prefill_32k": {
+         "baseline": 1319.4,
+         "baseline_runs": [
+          1318.9,
+          1319.4,
+          1319.6
+         ]
+        },
+        "prefill_8k": {
+         "baseline": 1922.6,
+         "baseline_runs": [
+          1922.6,
+          1922.5,
+          1922.9
+         ]
+        }
+       },
+       "programs_sha256": "bb5c577ea81d7ef5728f03c62e2fb70df401433d9bb523842ce3f9014d22dbe5",
+       "runs": {
+        "decode_prefill": 3,
+        "streams4": null
+       },
+       "source": {
+        "device": {
+         "cpu": "AMD Ryzen 7 9800X3D 8-Core Processor",
+         "gpu": "AMD Radeon RX 9070 XT",
+         "os": "Ubuntu 26.04"
+        },
+        "hrx_loom": null,
+        "kind": "machine",
+        "run": null,
+        "url": null
+       }
+      }
+     }
+    },
+    {
+     "evidence": "loom-card-evidence/2",
+     "gpu": "gfx1201-16gb",
+     "roofline": {
+      "checkpoint": "Qwen3-14B-Q4_K_M.gguf",
+      "device": {
+       "bandwidth_bytes_per_s": 640000000000.0,
+       "name": "AMD Radeon RX 9070 XT (gfx1201, 16 GB)",
+       "peak_flops": 194600000000000.0
+      },
+      "drafting": null,
+      "metrics": {
+       "decode": {
+        "ceiling": 74.8,
+        "efficiency": 0.9
+       },
+       "decode_2k": {
+        "ceiling": 72.0,
+        "efficiency": 0.902
+       },
+       "prefill_16k": {
+        "ceiling": 5901.0,
+        "efficiency": 0.33
+       },
+       "prefill_1k": {
+        "ceiling": 7252.1,
+        "efficiency": 0.33
+       },
+       "prefill_2k": {
+        "ceiling": 7143.0,
+        "efficiency": 0.33
+       },
+       "prefill_8k": {
+        "ceiling": 6552.0,
+        "efficiency": 0.33
+       },
+       "streams4": {
+        "ceiling": 286.0,
+        "efficiency": 0.7
+       }
+      },
+      "tool": {
+       "script": "skills/loom-roofline/roofline.py",
+       "sha256": "d2408190b0988ebfe5b9e6b4dbaf5d301f83775915ce405262a24b9ae8f1ae22",
+       "skills_commit": "89252053af2e437d94efe0f79a1b1a39399bcd49"
+      }
+     }
+    },
+    {
+     "evidence": "loom-card-evidence/2",
+     "gates": [
+      {
+       "detail": null,
+       "level": "dev",
+       "name": "consistency",
+       "programs_sha256": "bb5c577ea81d7ef5728f03c62e2fb70df401433d9bb523842ce3f9014d22dbe5",
+       "source": {
+        "device": {
+         "cpu": "AMD Ryzen 7 9800X3D 8-Core Processor",
+         "gpu": "AMD Radeon RX 9070 XT",
+         "os": "Ubuntu 26.04"
+        },
+        "hrx_loom": {
+         "artifact_id": null,
+         "branch": "v0.2.0",
+         "hrx_loom": "0.2.0",
+         "hrx_system_sha": "0cd370f2baaa0cfef47cc23007f1a109906f8a52",
+         "source": "pypi",
+         "wheel_sha256": "5148f9e3a264af400ec4bae38bd7b06bf551d28cc33b7a61d67f7bcefa590438"
+        },
+        "kind": "machine",
+        "run": null,
+        "url": null
+       },
+       "status": "pass",
+       "time": "2026-11-17T17:25:27"
+      },
+      {
+       "detail": null,
+       "level": "dev",
+       "name": "agent",
+       "programs_sha256": "bb5c577ea81d7ef5728f03c62e2fb70df401433d9bb523842ce3f9014d22dbe5",
+       "source": {
+        "device": {
+         "cpu": "AMD Ryzen 7 9800X3D 8-Core Processor",
+         "gpu": "AMD Radeon RX 9070 XT",
+         "os": "Ubuntu 26.04"
+        },
+        "hrx_loom": {
+         "artifact_id": null,
+         "branch": "v0.2.0",
+         "hrx_loom": "0.2.0",
+         "hrx_system_sha": "0cd370f2baaa0cfef47cc23007f1a109906f8a52",
+         "source": "pypi",
+         "wheel_sha256": "5148f9e3a264af400ec4bae38bd7b06bf551d28cc33b7a61d67f7bcefa590438"
+        },
+        "kind": "machine",
+        "run": null,
+        "url": null
+       },
+       "status": "pass",
+       "time": "2026-11-17T17:25:27"
+      },
+      {
+       "detail": null,
+       "level": "dev",
+       "name": "agent_think_off",
+       "programs_sha256": "bb5c577ea81d7ef5728f03c62e2fb70df401433d9bb523842ce3f9014d22dbe5",
+       "source": {
+        "device": {
+         "cpu": "AMD Ryzen 7 9800X3D 8-Core Processor",
+         "gpu": "AMD Radeon RX 9070 XT",
+         "os": "Ubuntu 26.04"
+        },
+        "hrx_loom": {
+         "artifact_id": null,
+         "branch": "v0.2.0",
+         "hrx_loom": "0.2.0",
+         "hrx_system_sha": "0cd370f2baaa0cfef47cc23007f1a109906f8a52",
+         "source": "pypi",
+         "wheel_sha256": "5148f9e3a264af400ec4bae38bd7b06bf551d28cc33b7a61d67f7bcefa590438"
+        },
+        "kind": "machine",
+        "run": null,
+        "url": null
+       },
+       "status": "pass",
+       "time": "2026-11-17T17:25:27"
+      },
+      {
+       "detail": null,
+       "level": "dev",
+       "name": "golden",
+       "programs_sha256": "bb5c577ea81d7ef5728f03c62e2fb70df401433d9bb523842ce3f9014d22dbe5",
+       "source": {
+        "device": {
+         "cpu": "AMD Ryzen 7 9800X3D 8-Core Processor",
+         "gpu": "AMD Radeon RX 9070 XT",
+         "os": "Ubuntu 26.04"
+        },
+        "hrx_loom": {
+         "artifact_id": null,
+         "branch": "v0.2.0",
+         "hrx_loom": "0.2.0",
+         "hrx_system_sha": "0cd370f2baaa0cfef47cc23007f1a109906f8a52",
+         "source": "pypi",
+         "wheel_sha256": "5148f9e3a264af400ec4bae38bd7b06bf551d28cc33b7a61d67f7bcefa590438"
+        },
+        "kind": "machine",
+        "run": null,
+        "url": null
+       },
+       "status": "pass",
+       "time": "2026-11-17T17:25:27"
+      },
+      {
+       "detail": null,
+       "level": "dev",
+       "name": "compare",
+       "programs_sha256": "bb5c577ea81d7ef5728f03c62e2fb70df401433d9bb523842ce3f9014d22dbe5",
+       "source": {
+        "device": {
+         "cpu": "AMD Ryzen 7 9800X3D 8-Core Processor",
+         "gpu": "AMD Radeon RX 9070 XT",
+         "os": "Ubuntu 26.04"
+        },
+        "hrx_loom": {
+         "artifact_id": null,
+         "branch": "v0.2.0",
+         "hrx_loom": "0.2.0",
+         "hrx_system_sha": "0cd370f2baaa0cfef47cc23007f1a109906f8a52",
+         "source": "pypi",
+         "wheel_sha256": "5148f9e3a264af400ec4bae38bd7b06bf551d28cc33b7a61d67f7bcefa590438"
+        },
+        "kind": "machine",
+        "run": null,
+        "url": null
+       },
+       "status": "pass",
+       "time": "2026-11-17T17:25:27"
+      },
+      {
+       "detail": null,
+       "level": "dev",
+       "name": "sampling",
+       "programs_sha256": "bb5c577ea81d7ef5728f03c62e2fb70df401433d9bb523842ce3f9014d22dbe5",
+       "source": {
+        "device": {
+         "cpu": "AMD Ryzen 7 9800X3D 8-Core Processor",
+         "gpu": "AMD Radeon RX 9070 XT",
+         "os": "Ubuntu 26.04"
+        },
+        "hrx_loom": {
+         "artifact_id": null,
+         "branch": "v0.2.0",
+         "hrx_loom": "0.2.0",
+         "hrx_system_sha": "0cd370f2baaa0cfef47cc23007f1a109906f8a52",
+         "source": "pypi",
+         "wheel_sha256": "5148f9e3a264af400ec4bae38bd7b06bf551d28cc33b7a61d67f7bcefa590438"
+        },
+        "kind": "machine",
+        "run": null,
+        "url": null
+       },
+       "status": "pass",
+       "time": "2026-11-17T17:25:27"
+      }
+     ],
+     "gpu": "gfx1201-16gb"
+    }
+   ]
   },
   "ggml-org-Qwen3-4B-loom": {
    "fits": true,
    "date": "2026-11-17",
    "max_context": 40960,
-   "native_context": 40960
+   "native_context": 40960,
+   "evidence": [
+    {
+     "evidence": "loom-card-evidence/2",
+     "gpu": "gfx1201-16gb",
+     "performance": {
+      "baseline": {
+       "args": "-ngl 99 -cram 0 --spec-type draft-dflash --spec-draft-model card:parameter/Qwen3-4B-DFlash.Q8_0.gguf --spec-draft-n-max 15 -ngld 99 -c 65536 -np 1",
+       "name": "llama.cpp",
+       "version": "llamacpp-rocm/b1375"
+      },
+      "session": {
+       "aggregate": "median",
+       "commands": [
+        "devlab_perf.sh (local, RX 9070 XT): perf:ws64:1 x2 + perf:ws64:1:long x2 ABBA, c4:ws64nd x2 (--preset=chat-16gb); llama@rocm.np1:3 (+:long), llamac4@rocm.nodraft"
+       ],
+       "date": "2026-11-17",
+       "metrics": {
+        "decode": {
+         "acceptance": 0.306,
+         "baseline": 128.1,
+         "baseline_runs": [
+          127.85,
+          128.13,
+          128.19
+         ],
+         "loom": 233.5,
+         "loom_runs": [
+          235.28,
+          231.69
+         ]
+        },
+        "decode_2k": {
+         "acceptance": 0.362,
+         "baseline": 129.0,
+         "baseline_runs": [
+          129.02,
+          130.09,
+          124.61
+         ],
+         "loom": 175.7,
+         "loom_runs": [
+          166.12,
+          185.31
+         ]
+        },
+        "decode_32k": {
+         "acceptance": 0.0,
+         "baseline": 73.3,
+         "baseline_runs": [
+          73.32,
+          74.31,
+          72.23
+         ],
+         "loom": 71.3,
+         "loom_runs": [
+          71.39,
+          71.24
+         ]
+        },
+        "prefill_16k": {
+         "baseline": 4034.7,
+         "baseline_runs": [
+          4034.7,
+          4036.8,
+          4033.6
+         ],
+         "loom": 5908.4,
+         "loom_runs": [
+          5930.3,
+          5886.5
+         ]
+        },
+        "prefill_1k": {
+         "baseline": 6481.3,
+         "baseline_runs": [
+          6485.4,
+          6470.1,
+          6481.3
+         ],
+         "loom": 8342.3,
+         "loom_runs": [
+          8414.0,
+          8270.6
+         ]
+        },
+        "prefill_2k": {
+         "baseline": 6483.9,
+         "baseline_runs": [
+          6486.5,
+          6477.0,
+          6483.9
+         ],
+         "loom": 8838.5,
+         "loom_runs": [
+          8876.5,
+          8800.4
+         ]
+        },
+        "prefill_32k": {
+         "baseline": 2814.3,
+         "baseline_runs": [
+          2814.3,
+          2815.2,
+          2807.2
+         ],
+         "loom": 3410.2,
+         "loom_runs": [
+          3413.9,
+          3406.4
+         ]
+        },
+        "prefill_8k": {
+         "baseline": 5252.8,
+         "baseline_runs": [
+          5252.8,
+          5246.2,
+          5254.6
+         ],
+         "loom": 7698.4,
+         "loom_runs": [
+          7690.1,
+          7706.7
+         ]
+        },
+        "streams4": {
+         "baseline": 392.0,
+         "baseline_runs": [
+          392.0,
+          391.2,
+          394.0
+         ],
+         "loom": 616.8,
+         "loom_runs": [
+          614.2,
+          614.8,
+          616.2,
+          619.6,
+          618.9,
+          618.5
+         ]
+        }
+       },
+       "programs_sha256": "ee488de19d5f101b76d916e37128add62b987202ae7371ae8d590a7e051df023",
+       "runs": {
+        "decode_prefill": 2,
+        "streams4": 6
+       },
+       "source": {
+        "device": {
+         "cpu": "AMD Ryzen 7 9800X3D 8-Core Processor",
+         "gpu": "AMD Radeon RX 9070 XT",
+         "os": "Ubuntu 26.04"
+        },
+        "hrx_loom": {
+         "artifact_id": null,
+         "branch": "v0.2.0",
+         "hrx_loom": "0.2.0",
+         "hrx_system_sha": "0cd370f2baaa0cfef47cc23007f1a109906f8a52",
+         "source": "pypi",
+         "wheel_sha256": "5148f9e3a264af400ec4bae38bd7b06bf551d28cc33b7a61d67f7bcefa590438"
+        },
+        "kind": "machine",
+        "run": null,
+        "url": null
+       }
+      }
+     }
+    },
+    {
+     "evidence": "loom-card-evidence/2",
+     "gpu": "gfx1201-16gb",
+     "performance": {
+      "backend": "vulkan",
+      "baseline": {
+       "args": "-ngl 99 -cram 0 --spec-type draft-dflash --spec-draft-model card:parameter/Qwen3-4B-DFlash.Q8_0.gguf --spec-draft-n-max 15 -ngld 99 -c 36864 -np 1",
+       "name": "llama.cpp",
+       "sha256": "9759acd293d3738f39d3ceed740bd3125d87dfb492ef8c4f00114d3393d37942",
+       "version": "llamacpp-vulkan/b12211"
+      },
+      "session": {
+       "aggregate": "median",
+       "date": "2026-11-17",
+       "metrics": {
+        "decode": {
+         "baseline": 119.4,
+         "baseline_runs": [
+          118.19,
+          120.41,
+          119.43
+         ]
+        },
+        "decode_2k": {
+         "baseline": 121.4,
+         "baseline_runs": [
+          119.62,
+          121.43,
+          131.99
+         ]
+        },
+        "decode_32k": {
+         "baseline": 62.9,
+         "baseline_runs": [
+          62.9,
+          61.86,
+          62.98
+         ]
+        },
+        "prefill_16k": {
+         "baseline": 3888.0,
+         "baseline_runs": [
+          3885.6,
+          3888.0,
+          3891.6
+         ]
+        },
+        "prefill_1k": {
+         "baseline": 5898.1,
+         "baseline_runs": [
+          5898.1,
+          5906.7,
+          5890.2
+         ]
+        },
+        "prefill_2k": {
+         "baseline": 6049.8,
+         "baseline_runs": [
+          6055.9,
+          6048.6,
+          6049.8
+         ]
+        },
+        "prefill_32k": {
+         "baseline": 2669.7,
+         "baseline_runs": [
+          2662.2,
+          2669.7,
+          2670.2
+         ]
+        },
+        "prefill_8k": {
+         "baseline": 4990.8,
+         "baseline_runs": [
+          4988.2,
+          4990.8,
+          4995.9
+         ]
+        },
+        "streams4": {
+         "baseline": 408.2,
+         "baseline_runs": [
+          408.1,
+          408.3,
+          408.2
+         ]
+        }
+       },
+       "programs_sha256": "ee488de19d5f101b76d916e37128add62b987202ae7371ae8d590a7e051df023",
+       "runs": {
+        "decode_prefill": 3,
+        "streams4": 3
+       },
+       "source": {
+        "device": {
+         "cpu": "AMD Ryzen 7 9800X3D 8-Core Processor",
+         "gpu": "AMD Radeon RX 9070 XT",
+         "os": "Ubuntu 26.04"
+        },
+        "hrx_loom": null,
+        "kind": "machine",
+        "run": null,
+        "url": null
+       }
+      }
+     }
+    },
+    {
+     "evidence": "loom-card-evidence/2",
+     "gpu": "gfx1201-16gb",
+     "roofline": {
+      "checkpoint": "Qwen3-4B-Q4_K_M.gguf",
+      "device": {
+       "bandwidth_bytes_per_s": 640000000000.0,
+       "name": "AMD Radeon RX 9070 XT (gfx1201, 16 GB)",
+       "peak_flops": 194600000000000.0
+      },
+      "drafting": {
+       "acceptance": null,
+       "depth": 3,
+       "method": "dflash",
+       "tokens_per_pass": null
+      },
+      "metrics": {
+       "decode": {
+        "acceptance": 0.306,
+        "acceptance_from": "session",
+        "ceiling": 492.7,
+        "efficiency": 0.69,
+        "single_pass": 256.9,
+        "tokens_per_pass": 1.918
+       },
+       "decode_2k": {
+        "acceptance": 0.362,
+        "acceptance_from": "session",
+        "ceiling": 479.2,
+        "efficiency": 0.712,
+        "single_pass": 229.7,
+        "tokens_per_pass": 2.086
+       },
+       "decode_32k": {
+        "ceiling": 88.8,
+        "efficiency": 0.944
+       },
+       "prefill_16k": {
+        "ceiling": 16236.7,
+        "efficiency": 0.33
+       },
+       "prefill_1k": {
+        "ceiling": 25735.5,
+        "efficiency": 0.33
+       },
+       "prefill_2k": {
+        "ceiling": 24769.4,
+        "efficiency": 0.33
+       },
+       "prefill_32k": {
+        "ceiling": 11650.0,
+        "efficiency": 0.33
+       },
+       "prefill_8k": {
+        "ceiling": 20216.2,
+        "efficiency": 0.33
+       },
+       "streams4": {
+        "ceiling": 899.8,
+        "efficiency": 0.7
+       }
+      },
+      "tool": {
+       "script": "skills/loom-roofline/roofline.py",
+       "sha256": "d2408190b0988ebfe5b9e6b4dbaf5d301f83775915ce405262a24b9ae8f1ae22",
+       "skills_commit": "89252053af2e437d94efe0f79a1b1a39399bcd49"
+      }
+     }
+    },
+    {
+     "evidence": "loom-card-evidence/2",
+     "gates": [
+      {
+       "detail": null,
+       "level": "dev",
+       "name": "consistency",
+       "programs_sha256": "ee488de19d5f101b76d916e37128add62b987202ae7371ae8d590a7e051df023",
+       "source": {
+        "device": {
+         "cpu": "AMD Ryzen 7 9800X3D 8-Core Processor",
+         "gpu": "AMD Radeon RX 9070 XT",
+         "os": "Ubuntu 26.04"
+        },
+        "hrx_loom": {
+         "artifact_id": null,
+         "branch": "v0.2.0",
+         "hrx_loom": "0.2.0",
+         "hrx_system_sha": "0cd370f2baaa0cfef47cc23007f1a109906f8a52",
+         "source": "pypi",
+         "wheel_sha256": "5148f9e3a264af400ec4bae38bd7b06bf551d28cc33b7a61d67f7bcefa590438"
+        },
+        "kind": "machine",
+        "run": null,
+        "url": null
+       },
+       "status": "pass",
+       "time": "2026-11-17T17:42:18"
+      },
+      {
+       "detail": null,
+       "level": "dev",
+       "name": "spec",
+       "programs_sha256": "ee488de19d5f101b76d916e37128add62b987202ae7371ae8d590a7e051df023",
+       "source": {
+        "device": {
+         "cpu": "AMD Ryzen 7 9800X3D 8-Core Processor",
+         "gpu": "AMD Radeon RX 9070 XT",
+         "os": "Ubuntu 26.04"
+        },
+        "hrx_loom": {
+         "artifact_id": null,
+         "branch": "v0.2.0",
+         "hrx_loom": "0.2.0",
+         "hrx_system_sha": "0cd370f2baaa0cfef47cc23007f1a109906f8a52",
+         "source": "pypi",
+         "wheel_sha256": "5148f9e3a264af400ec4bae38bd7b06bf551d28cc33b7a61d67f7bcefa590438"
+        },
+        "kind": "machine",
+        "run": null,
+        "url": null
+       },
+       "status": "pass",
+       "time": "2026-11-17T17:42:18"
+      },
+      {
+       "detail": null,
+       "level": "dev",
+       "name": "agent",
+       "programs_sha256": "ee488de19d5f101b76d916e37128add62b987202ae7371ae8d590a7e051df023",
+       "source": {
+        "device": {
+         "cpu": "AMD Ryzen 7 9800X3D 8-Core Processor",
+         "gpu": "AMD Radeon RX 9070 XT",
+         "os": "Ubuntu 26.04"
+        },
+        "hrx_loom": {
+         "artifact_id": null,
+         "branch": "v0.2.0",
+         "hrx_loom": "0.2.0",
+         "hrx_system_sha": "0cd370f2baaa0cfef47cc23007f1a109906f8a52",
+         "source": "pypi",
+         "wheel_sha256": "5148f9e3a264af400ec4bae38bd7b06bf551d28cc33b7a61d67f7bcefa590438"
+        },
+        "kind": "machine",
+        "run": null,
+        "url": null
+       },
+       "status": "pass",
+       "time": "2026-11-17T17:42:18"
+      },
+      {
+       "detail": null,
+       "level": "dev",
+       "name": "agent_think_off",
+       "programs_sha256": "ee488de19d5f101b76d916e37128add62b987202ae7371ae8d590a7e051df023",
+       "source": {
+        "device": {
+         "cpu": "AMD Ryzen 7 9800X3D 8-Core Processor",
+         "gpu": "AMD Radeon RX 9070 XT",
+         "os": "Ubuntu 26.04"
+        },
+        "hrx_loom": {
+         "artifact_id": null,
+         "branch": "v0.2.0",
+         "hrx_loom": "0.2.0",
+         "hrx_system_sha": "0cd370f2baaa0cfef47cc23007f1a109906f8a52",
+         "source": "pypi",
+         "wheel_sha256": "5148f9e3a264af400ec4bae38bd7b06bf551d28cc33b7a61d67f7bcefa590438"
+        },
+        "kind": "machine",
+        "run": null,
+        "url": null
+       },
+       "status": "pass",
+       "time": "2026-11-17T17:42:18"
+      },
+      {
+       "detail": null,
+       "level": "dev",
+       "name": "golden",
+       "programs_sha256": "ee488de19d5f101b76d916e37128add62b987202ae7371ae8d590a7e051df023",
+       "source": {
+        "device": {
+         "cpu": "AMD Ryzen 7 9800X3D 8-Core Processor",
+         "gpu": "AMD Radeon RX 9070 XT",
+         "os": "Ubuntu 26.04"
+        },
+        "hrx_loom": {
+         "artifact_id": null,
+         "branch": "v0.2.0",
+         "hrx_loom": "0.2.0",
+         "hrx_system_sha": "0cd370f2baaa0cfef47cc23007f1a109906f8a52",
+         "source": "pypi",
+         "wheel_sha256": "5148f9e3a264af400ec4bae38bd7b06bf551d28cc33b7a61d67f7bcefa590438"
+        },
+        "kind": "machine",
+        "run": null,
+        "url": null
+       },
+       "status": "pass",
+       "time": "2026-11-17T17:42:18"
+      },
+      {
+       "detail": null,
+       "level": "dev",
+       "name": "compare",
+       "programs_sha256": "ee488de19d5f101b76d916e37128add62b987202ae7371ae8d590a7e051df023",
+       "source": {
+        "device": {
+         "cpu": "AMD Ryzen 7 9800X3D 8-Core Processor",
+         "gpu": "AMD Radeon RX 9070 XT",
+         "os": "Ubuntu 26.04"
+        },
+        "hrx_loom": {
+         "artifact_id": null,
+         "branch": "v0.2.0",
+         "hrx_loom": "0.2.0",
+         "hrx_system_sha": "0cd370f2baaa0cfef47cc23007f1a109906f8a52",
+         "source": "pypi",
+         "wheel_sha256": "5148f9e3a264af400ec4bae38bd7b06bf551d28cc33b7a61d67f7bcefa590438"
+        },
+        "kind": "machine",
+        "run": null,
+        "url": null
+       },
+       "status": "pass",
+       "time": "2026-11-17T17:42:18"
+      },
+      {
+       "detail": null,
+       "level": "dev",
+       "name": "sampling",
+       "programs_sha256": "ee488de19d5f101b76d916e37128add62b987202ae7371ae8d590a7e051df023",
+       "source": {
+        "device": {
+         "cpu": "AMD Ryzen 7 9800X3D 8-Core Processor",
+         "gpu": "AMD Radeon RX 9070 XT",
+         "os": "Ubuntu 26.04"
+        },
+        "hrx_loom": {
+         "artifact_id": null,
+         "branch": "v0.2.0",
+         "hrx_loom": "0.2.0",
+         "hrx_system_sha": "0cd370f2baaa0cfef47cc23007f1a109906f8a52",
+         "source": "pypi",
+         "wheel_sha256": "5148f9e3a264af400ec4bae38bd7b06bf551d28cc33b7a61d67f7bcefa590438"
+        },
+        "kind": "machine",
+        "run": null,
+        "url": null
+       },
+       "status": "pass",
+       "time": "2026-11-17T17:42:18"
+      }
+     ],
+     "gpu": "gfx1201-16gb",
+     "performance": {
+      "session": {
+       "commands": [],
+       "date": "2026-11-17",
+       "metrics": {
+        "spec_acceptance": {
+         "loom": 0.34
+        }
+       },
+       "programs_sha256": "ee488de19d5f101b76d916e37128add62b987202ae7371ae8d590a7e051df023",
+       "runs": {
+        "decode_prefill": null,
+        "streams4": null
+       },
+       "source": {
+        "device": {
+         "cpu": "AMD Ryzen 7 9800X3D 8-Core Processor",
+         "gpu": "AMD Radeon RX 9070 XT",
+         "os": "Ubuntu 26.04"
+        },
+        "hrx_loom": {
+         "artifact_id": null,
+         "branch": "v0.2.0",
+         "hrx_loom": "0.2.0",
+         "hrx_system_sha": "0cd370f2baaa0cfef47cc23007f1a109906f8a52",
+         "source": "pypi",
+         "wheel_sha256": "5148f9e3a264af400ec4bae38bd7b06bf551d28cc33b7a61d67f7bcefa590438"
+        },
+        "kind": "machine",
+        "run": null,
+        "url": null
+       }
+      }
+     }
+    }
+   ]
   },
   "ggml-org-Qwen3-Coder-30B-A3B-Instruct-loom": {
    "fits": false,
@@ -2393,7 +3982,400 @@
    "fits": true,
    "date": "2026-11-17",
    "max_context": 32768,
-   "native_context": 32768
+   "native_context": 32768,
+   "evidence": [
+    {
+     "evidence": "loom-card-evidence/2",
+     "gpu": "gfx1201-16gb",
+     "performance": {
+      "baseline": {
+       "args": "-ngl 99 -cram 0 -c 65536 -np 1",
+       "name": "llama.cpp",
+       "version": "llamacpp-rocm/b1375"
+      },
+      "session": {
+       "aggregate": "median",
+       "commands": [
+        "devlab_perf.sh (local, RX 9070 XT): perf:ws64:1 x2 + perf:ws64:1:long x2 ABBA, c4:ws64nd x2 (--preset=chat-16gb); llama@rocm.np1:3 (+:long), llamac4@rocm.nodraft"
+       ],
+       "date": "2026-11-17",
+       "metrics": {
+        "decode": {
+         "baseline": 211.0,
+         "baseline_runs": [
+          209.55,
+          211.09,
+          211.04
+         ],
+         "loom": 399.0,
+         "loom_runs": [
+          398.83,
+          399.14
+         ]
+        },
+        "decode_2k": {
+         "baseline": 205.1,
+         "baseline_runs": [
+          205.12,
+          205.14,
+          205.17
+         ],
+         "loom": 377.4,
+         "loom_runs": [
+          377.99,
+          376.72
+         ]
+        },
+        "prefill_16k": {
+         "baseline": 21205.6,
+         "baseline_runs": [
+          21205.6,
+          21170.9,
+          21218.5
+         ],
+         "loom": 31826.6,
+         "loom_runs": [
+          31919.9,
+          31733.3
+         ]
+        },
+        "prefill_1k": {
+         "baseline": 14760.8,
+         "baseline_runs": [
+          14664.9,
+          14846.6,
+          14760.8
+         ],
+         "loom": 28949.5,
+         "loom_runs": [
+          29214.7,
+          28684.2
+         ]
+        },
+        "prefill_2k": {
+         "baseline": 17825.1,
+         "baseline_runs": [
+          17808.7,
+          17934.9,
+          17825.1
+         ],
+         "loom": 32152.6,
+         "loom_runs": [
+          32167.0,
+          32138.2
+         ]
+        },
+        "prefill_8k": {
+         "baseline": 21571.0,
+         "baseline_runs": [
+          21574.8,
+          21571.0,
+          21517.9
+         ],
+         "loom": 32363.0,
+         "loom_runs": [
+          32538.0,
+          32188.0
+         ]
+        },
+        "streams4": {
+         "baseline": 749.0,
+         "baseline_runs": [
+          765.6,
+          746.8,
+          749.0
+         ],
+         "loom": 1397.3,
+         "loom_runs": [
+          1402.6,
+          1390.4,
+          1399.6,
+          1403.9,
+          1395.1,
+          1389.1
+         ]
+        }
+       },
+       "over_context": {
+        "decode_32k": 34966,
+        "prefill_32k": 34967
+       },
+       "programs_sha256": "fbf5b682b82d831ec2ef1faa12c6e2fecf13793731625d5b563e776673c92c2b",
+       "runs": {
+        "decode_prefill": 2,
+        "streams4": 6
+       },
+       "source": {
+        "device": {
+         "cpu": "AMD Ryzen 7 9800X3D 8-Core Processor",
+         "gpu": "AMD Radeon RX 9070 XT",
+         "os": "Ubuntu 26.04"
+        },
+        "hrx_loom": {
+         "artifact_id": null,
+         "branch": "v0.2.0",
+         "hrx_loom": "0.2.0",
+         "hrx_system_sha": "0cd370f2baaa0cfef47cc23007f1a109906f8a52",
+         "source": "pypi",
+         "wheel_sha256": "5148f9e3a264af400ec4bae38bd7b06bf551d28cc33b7a61d67f7bcefa590438"
+        },
+        "kind": "machine",
+        "run": null,
+        "url": null
+       }
+      }
+     }
+    },
+    {
+     "evidence": "loom-card-evidence/2",
+     "gpu": "gfx1201-16gb",
+     "performance": {
+      "backend": "vulkan",
+      "baseline": {
+       "args": "-ngl 99 -cram 0 -c 36864 -np 1",
+       "name": "llama.cpp",
+       "sha256": "9759acd293d3738f39d3ceed740bd3125d87dfb492ef8c4f00114d3393d37942",
+       "version": "llamacpp-vulkan/b12211"
+      },
+      "session": {
+       "aggregate": "median",
+       "date": "2026-11-17",
+       "metrics": {
+        "decode": {
+         "baseline": 331.0,
+         "baseline_runs": [
+          328.85,
+          330.99,
+          332.01
+         ]
+        },
+        "decode_2k": {
+         "baseline": 320.9,
+         "baseline_runs": [
+          318.15,
+          321.47,
+          320.93
+         ]
+        },
+        "prefill_16k": {
+         "baseline": 23836.7,
+         "baseline_runs": [
+          23838.5,
+          23811.0,
+          23836.7
+         ]
+        },
+        "prefill_1k": {
+         "baseline": 16306.5,
+         "baseline_runs": [
+          15685.5,
+          16306.5,
+          16513.8
+         ]
+        },
+        "prefill_2k": {
+         "baseline": 19615.6,
+         "baseline_runs": [
+          19265.4,
+          19902.9,
+          19615.6
+         ]
+        },
+        "prefill_8k": {
+         "baseline": 24284.5,
+         "baseline_runs": [
+          24155.0,
+          24284.5,
+          24375.7
+         ]
+        },
+        "streams4": {
+         "baseline": 886.7,
+         "baseline_runs": [
+          885.2,
+          886.7,
+          900.4
+         ]
+        }
+       },
+       "programs_sha256": "fbf5b682b82d831ec2ef1faa12c6e2fecf13793731625d5b563e776673c92c2b",
+       "runs": {
+        "decode_prefill": 3,
+        "streams4": 3
+       },
+       "source": {
+        "device": {
+         "cpu": "AMD Ryzen 7 9800X3D 8-Core Processor",
+         "gpu": "AMD Radeon RX 9070 XT",
+         "os": "Ubuntu 26.04"
+        },
+        "hrx_loom": null,
+        "kind": "machine",
+        "run": null,
+        "url": null
+       }
+      }
+     }
+    },
+    {
+     "evidence": "loom-card-evidence/2",
+     "gpu": "gfx1201-16gb",
+     "roofline": {
+      "checkpoint": "gemma-3-1b-it-Q4_K_M.gguf",
+      "device": {
+       "bandwidth_bytes_per_s": 640000000000.0,
+       "name": "AMD Radeon RX 9070 XT (gfx1201, 16 GB)",
+       "peak_flops": 194600000000000.0
+      },
+      "drafting": null,
+      "metrics": {
+       "decode": {
+        "ceiling": 800.5,
+        "efficiency": 0.579
+       },
+       "decode_2k": {
+        "ceiling": 781.2,
+        "efficiency": 0.59
+       },
+       "prefill_16k": {
+        "ceiling": 123733.7,
+        "efficiency": 0.33
+       },
+       "prefill_1k": {
+        "ceiling": 134320.7,
+        "efficiency": 0.33
+       },
+       "prefill_2k": {
+        "ceiling": 133466.4,
+        "efficiency": 0.33
+       },
+       "prefill_8k": {
+        "ceiling": 129113.9,
+        "efficiency": 0.33
+       },
+       "streams4": {
+        "ceiling": 2992.4,
+        "efficiency": 0.7
+       }
+      },
+      "tool": {
+       "script": "skills/loom-roofline/roofline.py",
+       "sha256": "d2408190b0988ebfe5b9e6b4dbaf5d301f83775915ce405262a24b9ae8f1ae22",
+       "skills_commit": "89252053af2e437d94efe0f79a1b1a39399bcd49"
+      }
+     }
+    },
+    {
+     "evidence": "loom-card-evidence/2",
+     "gates": [
+      {
+       "detail": null,
+       "level": "dev",
+       "name": "consistency",
+       "programs_sha256": "fbf5b682b82d831ec2ef1faa12c6e2fecf13793731625d5b563e776673c92c2b",
+       "source": {
+        "device": {
+         "cpu": "AMD Ryzen 7 9800X3D 8-Core Processor",
+         "gpu": "AMD Radeon RX 9070 XT",
+         "os": "Ubuntu 26.04"
+        },
+        "hrx_loom": {
+         "artifact_id": null,
+         "branch": "v0.2.0",
+         "hrx_loom": "0.2.0",
+         "hrx_system_sha": "0cd370f2baaa0cfef47cc23007f1a109906f8a52",
+         "source": "pypi",
+         "wheel_sha256": "5148f9e3a264af400ec4bae38bd7b06bf551d28cc33b7a61d67f7bcefa590438"
+        },
+        "kind": "machine",
+        "run": null,
+        "url": null
+       },
+       "status": "pass",
+       "time": "2026-11-17T17:50:17"
+      },
+      {
+       "detail": null,
+       "level": "dev",
+       "name": "golden",
+       "programs_sha256": "fbf5b682b82d831ec2ef1faa12c6e2fecf13793731625d5b563e776673c92c2b",
+       "source": {
+        "device": {
+         "cpu": "AMD Ryzen 7 9800X3D 8-Core Processor",
+         "gpu": "AMD Radeon RX 9070 XT",
+         "os": "Ubuntu 26.04"
+        },
+        "hrx_loom": {
+         "artifact_id": null,
+         "branch": "v0.2.0",
+         "hrx_loom": "0.2.0",
+         "hrx_system_sha": "0cd370f2baaa0cfef47cc23007f1a109906f8a52",
+         "source": "pypi",
+         "wheel_sha256": "5148f9e3a264af400ec4bae38bd7b06bf551d28cc33b7a61d67f7bcefa590438"
+        },
+        "kind": "machine",
+        "run": null,
+        "url": null
+       },
+       "status": "pass",
+       "time": "2026-11-17T17:50:17"
+      },
+      {
+       "detail": null,
+       "level": "dev",
+       "name": "compare",
+       "programs_sha256": "fbf5b682b82d831ec2ef1faa12c6e2fecf13793731625d5b563e776673c92c2b",
+       "source": {
+        "device": {
+         "cpu": "AMD Ryzen 7 9800X3D 8-Core Processor",
+         "gpu": "AMD Radeon RX 9070 XT",
+         "os": "Ubuntu 26.04"
+        },
+        "hrx_loom": {
+         "artifact_id": null,
+         "branch": "v0.2.0",
+         "hrx_loom": "0.2.0",
+         "hrx_system_sha": "0cd370f2baaa0cfef47cc23007f1a109906f8a52",
+         "source": "pypi",
+         "wheel_sha256": "5148f9e3a264af400ec4bae38bd7b06bf551d28cc33b7a61d67f7bcefa590438"
+        },
+        "kind": "machine",
+        "run": null,
+        "url": null
+       },
+       "status": "pass",
+       "time": "2026-11-17T17:50:17"
+      },
+      {
+       "detail": null,
+       "level": "dev",
+       "name": "sampling",
+       "programs_sha256": "fbf5b682b82d831ec2ef1faa12c6e2fecf13793731625d5b563e776673c92c2b",
+       "source": {
+        "device": {
+         "cpu": "AMD Ryzen 7 9800X3D 8-Core Processor",
+         "gpu": "AMD Radeon RX 9070 XT",
+         "os": "Ubuntu 26.04"
+        },
+        "hrx_loom": {
+         "artifact_id": null,
+         "branch": "v0.2.0",
+         "hrx_loom": "0.2.0",
+         "hrx_system_sha": "0cd370f2baaa0cfef47cc23007f1a109906f8a52",
+         "source": "pypi",
+         "wheel_sha256": "5148f9e3a264af400ec4bae38bd7b06bf551d28cc33b7a61d67f7bcefa590438"
+        },
+        "kind": "machine",
+        "run": null,
+        "url": null
+       },
+       "status": "pass",
+       "time": "2026-11-17T17:50:17"
+      }
+     ],
+     "gpu": "gfx1201-16gb"
+    }
+   ]
   },
   "lmstudio-community-Ornith-1.0-35B-loom": {
    "fits": false,
@@ -2409,7 +4391,604 @@
    "fits": true,
    "date": "2026-11-17",
    "max_context": 35840,
-   "native_context": 131072
+   "native_context": 131072,
+   "evidence": [
+    {
+     "evidence": "loom-card-evidence/2",
+     "gpu": "gfx1201-16gb",
+     "performance": {
+      "baseline": {
+       "args": "-ngl 99 -cram 0 --spec-type draft-dflash --spec-draft-model card:parameter/Nemotron-3.5-Bolt-E4B-DFlash-BF16.gguf --spec-draft-n-max 7 -ngld 99 -c 65536 -np 1",
+       "name": "llama.cpp",
+       "version": "llamacpp-rocm/b1375"
+      },
+      "session": {
+       "aggregate": "median",
+       "commands": [
+        "devlab_perf.sh (local, RX 9070 XT): perf:ws64:1 x2 + perf:ws64:1:long x2 ABBA, c4:ws64nd x2 (--preset=chat-16gb); llama@rocm.np1:3 (+:long), llamac4@rocm.nodraft"
+       ],
+       "date": "2026-11-17",
+       "metrics": {
+        "decode": {
+         "acceptance": 0.372,
+         "baseline": 101.1,
+         "baseline_runs": [
+          101.49,
+          100.99,
+          101.1
+         ],
+         "loom": 226.9,
+         "loom_runs": [
+          227.39,
+          226.36
+         ]
+        },
+        "decode_2k": {
+         "acceptance": 0.339,
+         "baseline": 97.4,
+         "baseline_runs": [
+          97.8,
+          97.24,
+          97.38
+         ],
+         "loom": 194.1,
+         "loom_runs": [
+          192.2,
+          195.94
+         ]
+        },
+        "decode_32k": {
+         "acceptance": 0.349,
+         "baseline": 80.8,
+         "baseline_runs": [
+          83.79,
+          80.84,
+          74.91
+         ],
+         "loom": 153.9,
+         "loom_runs": [
+          155.49,
+          152.39
+         ]
+        },
+        "prefill_16k": {
+         "baseline": 4210.2,
+         "baseline_runs": [
+          4200.2,
+          4210.2,
+          4216.0
+         ],
+         "loom": 7938.0,
+         "loom_runs": [
+          7974.3,
+          7901.6
+         ]
+        },
+        "prefill_1k": {
+         "baseline": 4875.8,
+         "baseline_runs": [
+          4540.0,
+          4875.8,
+          4876.7
+         ],
+         "loom": 7463.8,
+         "loom_runs": [
+          7563.8,
+          7363.7
+         ]
+        },
+        "prefill_2k": {
+         "baseline": 5161.8,
+         "baseline_runs": [
+          4966.8,
+          5161.8,
+          5176.7
+         ],
+         "loom": 8598.6,
+         "loom_runs": [
+          8783.9,
+          8413.3
+         ]
+        },
+        "prefill_32k": {
+         "baseline": 3260.9,
+         "baseline_runs": [
+          3252.7,
+          3260.9,
+          3261.7
+         ],
+         "loom": 5946.4,
+         "loom_runs": [
+          5976.8,
+          5916.0
+         ]
+        },
+        "prefill_8k": {
+         "baseline": 4891.5,
+         "baseline_runs": [
+          4873.7,
+          4891.5,
+          4896.5
+         ],
+         "loom": 8444.9,
+         "loom_runs": [
+          8504.5,
+          8385.2
+         ]
+        },
+        "streams4": {
+         "baseline": 310.6,
+         "baseline_runs": [
+          310.6,
+          311.2,
+          309.7
+         ],
+         "loom": 506.1,
+         "loom_runs": [
+          505.3,
+          504.4,
+          505.5,
+          506.8,
+          506.9,
+          506.8
+         ]
+        }
+       },
+       "programs_sha256": "0589ed23f19e15e67a53fbf869ba5c21ba49b4e50f4b4dec87ec2630f9dc3fca",
+       "runs": {
+        "decode_prefill": 2,
+        "streams4": 6
+       },
+       "source": {
+        "device": {
+         "cpu": "AMD Ryzen 7 9800X3D 8-Core Processor",
+         "gpu": "AMD Radeon RX 9070 XT",
+         "os": "Ubuntu 26.04"
+        },
+        "hrx_loom": {
+         "artifact_id": null,
+         "branch": "v0.2.0",
+         "hrx_loom": "0.2.0",
+         "hrx_system_sha": "0cd370f2baaa0cfef47cc23007f1a109906f8a52",
+         "source": "pypi",
+         "wheel_sha256": "5148f9e3a264af400ec4bae38bd7b06bf551d28cc33b7a61d67f7bcefa590438"
+        },
+        "kind": "machine",
+        "run": null,
+        "url": null
+       }
+      }
+     }
+    },
+    {
+     "evidence": "loom-card-evidence/2",
+     "gpu": "gfx1201-16gb",
+     "performance": {
+      "backend": "vulkan",
+      "baseline": {
+       "args": "-ngl 99 -cram 0 --spec-type draft-dflash --spec-draft-model card:parameter/Nemotron-3.5-Bolt-E4B-DFlash-BF16.gguf --spec-draft-n-max 7 -ngld 99 -c 36864 -np 1",
+       "name": "llama.cpp",
+       "sha256": "9759acd293d3738f39d3ceed740bd3125d87dfb492ef8c4f00114d3393d37942",
+       "version": "llamacpp-vulkan/b12211"
+      },
+      "session": {
+       "aggregate": "median",
+       "date": "2026-11-17",
+       "metrics": {
+        "decode": {
+         "baseline": 144.1,
+         "baseline_runs": [
+          144.41,
+          144.11,
+          144.13
+         ]
+        },
+        "decode_2k": {
+         "baseline": 128.0,
+         "baseline_runs": [
+          122.14,
+          127.98,
+          132.19
+         ]
+        },
+        "decode_32k": {
+         "baseline": 112.8,
+         "baseline_runs": [
+          112.78,
+          112.37,
+          114.52
+         ]
+        },
+        "prefill_16k": {
+         "baseline": 5069.8,
+         "baseline_runs": [
+          5059.8,
+          5071.6,
+          5069.8
+         ]
+        },
+        "prefill_1k": {
+         "baseline": 4421.7,
+         "baseline_runs": [
+          4441.4,
+          4421.7,
+          4421.0
+         ]
+        },
+        "prefill_2k": {
+         "baseline": 5128.5,
+         "baseline_runs": [
+          5143.6,
+          5128.5,
+          5127.8
+         ]
+        },
+        "prefill_32k": {
+         "baseline": 4423.5,
+         "baseline_runs": [
+          4410.8,
+          4423.5,
+          4424.8
+         ]
+        },
+        "prefill_8k": {
+         "baseline": 5375.8,
+         "baseline_runs": [
+          5369.1,
+          5375.8,
+          5387.3
+         ]
+        },
+        "streams4": {
+         "baseline": 374.9,
+         "baseline_runs": [
+          375.7,
+          374.8,
+          374.9
+         ]
+        }
+       },
+       "programs_sha256": "0589ed23f19e15e67a53fbf869ba5c21ba49b4e50f4b4dec87ec2630f9dc3fca",
+       "runs": {
+        "decode_prefill": 3,
+        "streams4": 3
+       },
+       "source": {
+        "device": {
+         "cpu": "AMD Ryzen 7 9800X3D 8-Core Processor",
+         "gpu": "AMD Radeon RX 9070 XT",
+         "os": "Ubuntu 26.04"
+        },
+        "hrx_loom": null,
+        "kind": "machine",
+        "run": null,
+        "url": null
+       }
+      }
+     }
+    },
+    {
+     "evidence": "loom-card-evidence/2",
+     "gpu": "gfx1201-16gb",
+     "roofline": {
+      "checkpoint": "Nemotron-3.5-Bolt-E4B-Q4_K_M.gguf",
+      "device": {
+       "bandwidth_bytes_per_s": 640000000000.0,
+       "name": "AMD Radeon RX 9070 XT (gfx1201, 16 GB)",
+       "peak_flops": 194600000000000.0
+      },
+      "drafting": {
+       "acceptance": null,
+       "depth": 3,
+       "method": "dflash",
+       "tokens_per_pass": null
+      },
+      "metrics": {
+       "decode": {
+        "acceptance": 0.372,
+        "acceptance_from": "session",
+        "ceiling": 427.2,
+        "efficiency": 0.69,
+        "single_pass": 201.9,
+        "tokens_per_pass": 2.116
+       },
+       "decode_2k": {
+        "acceptance": 0.339,
+        "acceptance_from": "session",
+        "ceiling": 395.5,
+        "efficiency": 0.696,
+        "single_pass": 196.1,
+        "tokens_per_pass": 2.017
+       },
+       "decode_32k": {
+        "acceptance": 0.349,
+        "acceptance_from": "session",
+        "ceiling": 317.7,
+        "efficiency": 0.739,
+        "single_pass": 155.2,
+        "tokens_per_pass": 2.047
+       },
+       "prefill_16k": {
+        "ceiling": 21337.7,
+        "efficiency": 0.33
+       },
+       "prefill_1k": {
+        "ceiling": 23569.6,
+        "efficiency": 0.33
+       },
+       "prefill_2k": {
+        "ceiling": 23397.4,
+        "efficiency": 0.33
+       },
+       "prefill_32k": {
+        "ceiling": 19387.3,
+        "efficiency": 0.33
+       },
+       "prefill_8k": {
+        "ceiling": 22467.9,
+        "efficiency": 0.33
+       },
+       "streams4": {
+        "ceiling": 756.2,
+        "efficiency": 0.7
+       }
+      },
+      "tool": {
+       "script": "skills/loom-roofline/roofline.py",
+       "sha256": "d2408190b0988ebfe5b9e6b4dbaf5d301f83775915ce405262a24b9ae8f1ae22",
+       "skills_commit": "89252053af2e437d94efe0f79a1b1a39399bcd49"
+      }
+     }
+    },
+    {
+     "evidence": "loom-card-evidence/2",
+     "gates": [
+      {
+       "detail": null,
+       "level": "dev",
+       "name": "consistency",
+       "programs_sha256": "0589ed23f19e15e67a53fbf869ba5c21ba49b4e50f4b4dec87ec2630f9dc3fca",
+       "source": {
+        "device": {
+         "cpu": "AMD Ryzen 7 9800X3D 8-Core Processor",
+         "gpu": "AMD Radeon RX 9070 XT",
+         "os": "Ubuntu 26.04"
+        },
+        "hrx_loom": {
+         "artifact_id": null,
+         "branch": "v0.2.0",
+         "hrx_loom": "0.2.0",
+         "hrx_system_sha": "0cd370f2baaa0cfef47cc23007f1a109906f8a52",
+         "source": "pypi",
+         "wheel_sha256": "5148f9e3a264af400ec4bae38bd7b06bf551d28cc33b7a61d67f7bcefa590438"
+        },
+        "kind": "machine",
+        "run": null,
+        "url": null
+       },
+       "status": "pass",
+       "time": "2026-11-17T17:58:43"
+      },
+      {
+       "detail": null,
+       "level": "dev",
+       "name": "spec",
+       "programs_sha256": "0589ed23f19e15e67a53fbf869ba5c21ba49b4e50f4b4dec87ec2630f9dc3fca",
+       "source": {
+        "device": {
+         "cpu": "AMD Ryzen 7 9800X3D 8-Core Processor",
+         "gpu": "AMD Radeon RX 9070 XT",
+         "os": "Ubuntu 26.04"
+        },
+        "hrx_loom": {
+         "artifact_id": null,
+         "branch": "v0.2.0",
+         "hrx_loom": "0.2.0",
+         "hrx_system_sha": "0cd370f2baaa0cfef47cc23007f1a109906f8a52",
+         "source": "pypi",
+         "wheel_sha256": "5148f9e3a264af400ec4bae38bd7b06bf551d28cc33b7a61d67f7bcefa590438"
+        },
+        "kind": "machine",
+        "run": null,
+        "url": null
+       },
+       "status": "pass",
+       "time": "2026-11-17T17:58:43"
+      },
+      {
+       "detail": null,
+       "level": "dev",
+       "name": "golden",
+       "programs_sha256": "0589ed23f19e15e67a53fbf869ba5c21ba49b4e50f4b4dec87ec2630f9dc3fca",
+       "source": {
+        "device": {
+         "cpu": "AMD Ryzen 7 9800X3D 8-Core Processor",
+         "gpu": "AMD Radeon RX 9070 XT",
+         "os": "Ubuntu 26.04"
+        },
+        "hrx_loom": {
+         "artifact_id": null,
+         "branch": "v0.2.0",
+         "hrx_loom": "0.2.0",
+         "hrx_system_sha": "0cd370f2baaa0cfef47cc23007f1a109906f8a52",
+         "source": "pypi",
+         "wheel_sha256": "5148f9e3a264af400ec4bae38bd7b06bf551d28cc33b7a61d67f7bcefa590438"
+        },
+        "kind": "machine",
+        "run": null,
+        "url": null
+       },
+       "status": "pass",
+       "time": "2026-11-17T17:58:43"
+      },
+      {
+       "detail": null,
+       "level": "dev",
+       "name": "compare",
+       "programs_sha256": "0589ed23f19e15e67a53fbf869ba5c21ba49b4e50f4b4dec87ec2630f9dc3fca",
+       "source": {
+        "device": {
+         "cpu": "AMD Ryzen 7 9800X3D 8-Core Processor",
+         "gpu": "AMD Radeon RX 9070 XT",
+         "os": "Ubuntu 26.04"
+        },
+        "hrx_loom": {
+         "artifact_id": null,
+         "branch": "v0.2.0",
+         "hrx_loom": "0.2.0",
+         "hrx_system_sha": "0cd370f2baaa0cfef47cc23007f1a109906f8a52",
+         "source": "pypi",
+         "wheel_sha256": "5148f9e3a264af400ec4bae38bd7b06bf551d28cc33b7a61d67f7bcefa590438"
+        },
+        "kind": "machine",
+        "run": null,
+        "url": null
+       },
+       "status": "pass",
+       "time": "2026-11-17T17:58:43"
+      },
+      {
+       "detail": null,
+       "level": "dev",
+       "name": "vision",
+       "programs_sha256": "0589ed23f19e15e67a53fbf869ba5c21ba49b4e50f4b4dec87ec2630f9dc3fca",
+       "source": {
+        "device": {
+         "cpu": "AMD Ryzen 7 9800X3D 8-Core Processor",
+         "gpu": "AMD Radeon RX 9070 XT",
+         "os": "Ubuntu 26.04"
+        },
+        "hrx_loom": {
+         "artifact_id": null,
+         "branch": "v0.2.0",
+         "hrx_loom": "0.2.0",
+         "hrx_system_sha": "0cd370f2baaa0cfef47cc23007f1a109906f8a52",
+         "source": "pypi",
+         "wheel_sha256": "5148f9e3a264af400ec4bae38bd7b06bf551d28cc33b7a61d67f7bcefa590438"
+        },
+        "kind": "machine",
+        "run": null,
+        "url": null
+       },
+       "status": "pass",
+       "time": "2026-11-17T17:58:43"
+      },
+      {
+       "detail": null,
+       "level": "dev",
+       "name": "sampling",
+       "programs_sha256": "0589ed23f19e15e67a53fbf869ba5c21ba49b4e50f4b4dec87ec2630f9dc3fca",
+       "source": {
+        "device": {
+         "cpu": "AMD Ryzen 7 9800X3D 8-Core Processor",
+         "gpu": "AMD Radeon RX 9070 XT",
+         "os": "Ubuntu 26.04"
+        },
+        "hrx_loom": {
+         "artifact_id": null,
+         "branch": "v0.2.0",
+         "hrx_loom": "0.2.0",
+         "hrx_system_sha": "0cd370f2baaa0cfef47cc23007f1a109906f8a52",
+         "source": "pypi",
+         "wheel_sha256": "5148f9e3a264af400ec4bae38bd7b06bf551d28cc33b7a61d67f7bcefa590438"
+        },
+        "kind": "machine",
+        "run": null,
+        "url": null
+       },
+       "status": "pass",
+       "time": "2026-11-17T17:58:43"
+      },
+      {
+       "detail": null,
+       "level": "dev",
+       "name": "agent",
+       "programs_sha256": "0589ed23f19e15e67a53fbf869ba5c21ba49b4e50f4b4dec87ec2630f9dc3fca",
+       "source": {
+        "device": {
+         "cpu": "AMD Ryzen 7 9800X3D 8-Core Processor",
+         "gpu": "AMD Radeon RX 9070 XT",
+         "os": "Ubuntu 26.04"
+        },
+        "hrx_loom": {
+         "artifact_id": null,
+         "branch": "v0.2.0",
+         "hrx_loom": "0.2.0",
+         "hrx_system_sha": "0cd370f2baaa0cfef47cc23007f1a109906f8a52",
+         "source": "pypi",
+         "wheel_sha256": "5148f9e3a264af400ec4bae38bd7b06bf551d28cc33b7a61d67f7bcefa590438"
+        },
+        "kind": "machine",
+        "run": null,
+        "url": null
+       },
+       "status": "fail",
+       "time": "2026-11-17T17:58:43"
+      },
+      {
+       "detail": null,
+       "level": "dev",
+       "name": "agent_think_off",
+       "programs_sha256": "0589ed23f19e15e67a53fbf869ba5c21ba49b4e50f4b4dec87ec2630f9dc3fca",
+       "source": {
+        "device": {
+         "cpu": "AMD Ryzen 7 9800X3D 8-Core Processor",
+         "gpu": "AMD Radeon RX 9070 XT",
+         "os": "Ubuntu 26.04"
+        },
+        "hrx_loom": {
+         "artifact_id": null,
+         "branch": "v0.2.0",
+         "hrx_loom": "0.2.0",
+         "hrx_system_sha": "0cd370f2baaa0cfef47cc23007f1a109906f8a52",
+         "source": "pypi",
+         "wheel_sha256": "5148f9e3a264af400ec4bae38bd7b06bf551d28cc33b7a61d67f7bcefa590438"
+        },
+        "kind": "machine",
+        "run": null,
+        "url": null
+       },
+       "status": "fail",
+       "time": "2026-11-17T17:58:43"
+      }
+     ],
+     "gpu": "gfx1201-16gb",
+     "performance": {
+      "session": {
+       "commands": [],
+       "date": "2026-11-17",
+       "metrics": {
+        "spec_acceptance": {
+         "loom": 0.63
+        }
+       },
+       "programs_sha256": "0589ed23f19e15e67a53fbf869ba5c21ba49b4e50f4b4dec87ec2630f9dc3fca",
+       "runs": {
+        "decode_prefill": null,
+        "streams4": null
+       },
+       "source": {
+        "device": {
+         "cpu": "AMD Ryzen 7 9800X3D 8-Core Processor",
+         "gpu": "AMD Radeon RX 9070 XT",
+         "os": "Ubuntu 26.04"
+        },
+        "hrx_loom": {
+         "artifact_id": null,
+         "branch": "v0.2.0",
+         "hrx_loom": "0.2.0",
+         "hrx_system_sha": "0cd370f2baaa0cfef47cc23007f1a109906f8a52",
+         "source": "pypi",
+         "wheel_sha256": "5148f9e3a264af400ec4bae38bd7b06bf551d28cc33b7a61d67f7bcefa590438"
+        },
+        "kind": "machine",
+        "run": null,
+        "url": null
+       }
+      }
+     }
+    }
+   ]
   },
   "rippertnt-HyperCLOVAX-SEED-Text-Instruct-1.5B-loom": {
    "fits": true,

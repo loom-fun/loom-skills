@@ -199,6 +199,7 @@ class Cards(unittest.TestCase):
             report = f.read()
         self.assertIn("## AMD Radeon RX 9070 XT (gfx1201, 16 GB)\n", report)
         self.assertNotIn("16 GB class (RX 9070 XT, RX 9070)", report)
+        self.assertIn("| gate | description | Strix Halo | Radeon AI PRO R9700 | Radeon RX 9070 XT |", readme)   # its gates column too
 
     def test_shared_without_a_host_section_is_own(self):   # the R9700 is not on the card: nothing to share
         _, info, readme = self.build({"gfx1201-16gb": fixture("gfx1201-16gb")}, gpus="strix-halo")
