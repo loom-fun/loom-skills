@@ -17,7 +17,7 @@
 
 Modes. sdk-ab: the SDK migration's A/B (ab_jobs.py --sdk-ab): per model and device ONE job, ABBA on one runner: variant "fun" = the published staging card
   (the staging repo's head at plan time) on its own SDK pin (hrx-loom 0.1.0), variant "staging" = the package built in the job from the job's branch on
-  hrx-loom 0.2.0rc1 (devlab_perf.sh per-variant SDK roots), plus the card job's gates and llama.cpp baselines. `collect` writes per model and device the
+  hrx-loom 0.2.0 (devlab_perf.sh per-variant SDK roots), plus the card job's gates and llama.cpp baselines. `collect` writes per model and device the
   % delta new vs old per metric (state: perf = {decode, prefill, longctx, 4stream}, positive = v0.2 faster); a metric more than 3 % slower
   triggers ONE confirming -r2 job, confirmed in both runs = needs_decision with the numbers; `ingest` builds the v0.2 card from the job (its own
   measurement; the delta goes into the publish message); `status --status-json` also writes models.<slug>.perf.<gpu>.
@@ -77,7 +77,7 @@ VARIANT = {"ab": ("staging", "stagingnd"), "card": ("card", "nodraft"), "logits"
 SDK_METRICS = {"decode": "decode", "prefill": "prefill_8k", "longctx": "decode_32k", "4stream": "streams4"}
 SDK_REGRESSION = 0.03
 # old side = "card": the pin of the published card (pin-less = 0.1.0; Flash-Next's card is pinned to a 0.2.0 dev build)
-SDK_OLD, SDK_NEW = "card", "0.2.0rc1"
+SDK_OLD, SDK_NEW = "card", "0.2.0"
 
 
 def now():

@@ -1,4 +1,4 @@
-"""The kit's migration to hrx-loom 0.2.0rc1: IR spellings, publish_epoch / vision ABI, the pool range, the SDK pin, and the fleet tools reading both
+"""The kit's migration to hrx-loom 0.2.0: IR spellings, publish_epoch / vision ABI, the pool range, the SDK pin, and the fleet tools reading both
 SDK spellings (base = v0.1 programs, head = v0.2)."""
 import importlib.util
 import json
@@ -129,8 +129,8 @@ class PinTests(unittest.TestCase):
         sys.path.insert(0, str(ROOT / "skills" / "loom-setup" / "scripts"))
         import sdk_pin
         pin = kit_source.SDK_PIN
-        self.assertEqual(pin["hrx_loom"], "0.2.0rc1")
-        self.assertEqual(pin["source"], "release")
+        self.assertEqual(pin["hrx_loom"], "0.2.0")
+        self.assertEqual(pin["source"], "pypi")   # the stable release is on PyPI; sdk_pin.py still reads source "release" (pre-releases)
         self.assertRegex(pin["wheel_sha256"], r"^[0-9a-f]{64}$")
         self.assertRegex(pin["hrx_system_sha"], r"^[0-9a-f]{40}$")
         self.assertLessEqual(set(pin), {"hrx_loom", "source", "artifact_id", "hrx_system_sha", "wheel_sha256"})

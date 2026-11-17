@@ -120,7 +120,7 @@ class LogitsFoldTests(unittest.TestCase):
         self.assertEqual(link_check.check(tool("loom-link"), str(pkg)), ([], []))
         saved = {n: (self.program / n).read_text() for n in ("storage.loom", "prepare.loom")}
         try:
-            for n, t in saved.items():   # a key declared as a function in one input (hrx-loom 0.1.0: a key defined in storage, prepare and llm.loom was a load-time failure; 0.2.0rc1 links duplicate defs)
+            for n, t in saved.items():   # a key declared as a function in one input (hrx-loom 0.1.0: a key defined in storage, prepare and llm.loom was a load-time failure; 0.2.0 links duplicate defs)
                 (self.program / n).write_text(t.replace("config.decl @llm.logits : i1", "func.decl @llm.logits(%x: i64) -> (i64)"))
             bad, _ = link_check.check(tool("loom-link"), str(pkg))
         finally:

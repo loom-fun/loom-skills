@@ -46,10 +46,10 @@
 #            config: generator-config overrides for a rebuild (e.g. {"layers": 12}: timing only)
 #            build: build.py with these env vars (and extra flags); ref: build with that commit's starter AND its knowledge base (skills/loom-kb:
 #            the choices the rebuild resolves; ab_jobs.py --base-ref/--head-ref --build writes fun/staging this way);
-# SDK per variant (SDK A/B, fleet/regen.py plan --mode sdk-ab): {"sdk": "0.1.0" | "0.2.0rc1" | "card"} on a variant = the hrx-loom the variant is
+# SDK per variant (SDK A/B, fleet/regen.py plan --mode sdk-ab): {"sdk": "0.1.0" | "0.2.0" | "card"} on a variant = the hrx-loom the variant is
 #            SERVED with. "card" (the default) = the pin of the package it serves (its llm_config.json "sdk", none = 0.1.0): ensure_sdk.sh gives
 #            every distinct SDK its own root ($WORK/loom-sdk-<version>, installed once per runner) and serve.sh runs with that root's VENV, so an
-#            old card on 0.1.0 and a package built from this checkout on 0.2.0rc1 are measured in ONE job, ABBA (the steps list the order:
+#            old card on 0.1.0 and a package built from this checkout on 0.2.0 are measured in ONE job, ABBA (the steps list the order:
 #            perf:fun:1 perf:staging:1 perf:staging:1 perf:fun:1 ...). out/sdk_<variant>.json = the root's loom-install.json, install_<variant>.log.
 #            Job (or experiment) "sdk": the SDK of the TOOLS (build.py, perf.py, install.log = the identity ingest reads): a package built here
 #            is built and stamped by it; without it the tools come from the job card's own pin. A card is always fetched with the SDK it pins.
@@ -160,7 +160,7 @@ step "Loom SDK"
 curl -fsSL --retry 3 "https://huggingface.co/$repo/resolve/$([[ $repo_ref == *@* ]] && echo "${repo_ref#*@}" || echo main)/llm_config.json" -o "$out/llm_config.json" || { echo "FAIL: no llm_config.json in $repo"; exit 1; }
 ROOT_BASE=${LOOM_ROOT:-$WORK/loom}
 root=$("$SV/ensure_sdk.sh" "$ROOT_BASE" "$out/llm_config.json" 2> "$out/install.log") || { tail "$out/install.log"; exit 1; }   # the job card's own SDK (loom-fetch of the card)
-# job "sdk": the tools' SDK differs from the card's pin (an old card on 0.1.0 next to a package built here on 0.2.0rc1): install.log is that SDK's
+# job "sdk": the tools' SDK differs from the card's pin (an old card on 0.1.0 next to a package built here on 0.2.0): install.log is that SDK's
 jsdk=$(q "print(j.get('sdk') or e.get('sdk') or 'card')"); troot=$root
 if [ "$jsdk" != card ]; then
   troot=$(LOOM_VERSION=$jsdk "$SV/ensure_sdk.sh" "$WORK/loom-sdk-$jsdk" "" 2> "$out/install.log") || { tail "$out/install.log"; echo "FAIL: SDK $jsdk"; exit 1; }

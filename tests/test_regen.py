@@ -334,7 +334,7 @@ class StatusTest(Base):
 
 
 class SdkAbTest(Base):
-    """--mode sdk-ab: the SDK migration's A/B (old = the manifest's staging card on 0.1.0, new = built on 0.2.0rc1): plan, ratchet, deltas, status."""
+    """--mode sdk-ab: the SDK migration's A/B (old = the manifest's staging card on 0.1.0, new = built on 0.2.0): plan, ratchet, deltas, status."""
 
     def plan_sdk(self, **kw):
         return self.plan("--mode", "sdk-ab", **kw)
@@ -383,7 +383,7 @@ class SdkAbTest(Base):
         for flag in ("--sdk-ab", "--baselines"):
             self.assertIn(flag, cmd)
         self.assertEqual(cmd[cmd.index("--old-sdk") + 1], "card")
-        self.assertEqual(cmd[cmd.index("--new-sdk") + 1], "0.2.0rc1")
+        self.assertEqual(cmd[cmd.index("--new-sdk") + 1], "0.2.0")
 
     def test_sdk_ab_takes_no_old_org(self):
         with self.assertRaises(SystemExit), mock.patch.object(regen, "sh", self.gen):
@@ -660,7 +660,7 @@ class PackageTest(Base):
         self.assertEqual(up[up.index("--org") + 1], "loom-fun-staging")
         self.assertEqual(up[up.index("--parent-commit") + 1], "h" * 40)   # the snapshot's revision
         self.assertNotIn("--card-only", up)
-        self.assertIn("hrx-loom 0.2.0rc1", up[up.index("--message") + 1])
+        self.assertIn("hrx-loom 0.2.0", up[up.index("--message") + 1])
         self.assertIn(self.want, out)
         self.assertNotIn("package", st.jobs[JOB])
 

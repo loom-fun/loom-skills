@@ -7,7 +7,7 @@ The runtime links model.json's program (the `inputs` files jointly, the `librari
 key defined in two of those files, or any other link rule broken by a change of the programs, fails only at load time on a GPU
 (`LINK/MATERIALIZE: exact link selection missed reachable source symbol`): no per-file tool (loom-opt, loom-compile) sees it. This tool
 runs `loom-link --mode=link` with every public function of the program as a root, the card config bound as the runtime binds it, and
-(for packages that declare llm.logits) once more with the capability on. Exit 1 on any failure. Needs loom-link of hrx-loom 0.2.0rc1 (LOOM_LINK, else PATH).
+(for packages that declare llm.logits) once more with the capability on. Exit 1 on any failure. Needs loom-link of hrx-loom 0.2.0 (LOOM_LINK, else PATH).
 """
 import argparse
 import concurrent.futures as cf
@@ -20,7 +20,7 @@ import sys
 
 # Known link failures that are not ours: slug -> reason. Printed as KNOWN (not a failure); a package that links again is reported too.
 KNOWN = {"unsloth-Qwen3.8-Flash-Next-loom": "SYMBOL/013: config key qwen38.packet_capacity vs a function of the same name; the pristine "
-         "hrx-loom-library v0.2.0rc1 program fails the same joint link (DevLab serve decides whether the runtime does too: notes/upstream.md)"}
+         "hrx-loom-library v0.2.0 program fails the same joint link (DevLab serve decides whether the runtime does too: notes/upstream.md)"}
 
 ROOTS = re.compile(r"^(?:func|command)\.def public @([\w.]+)", re.M)
 
@@ -29,7 +29,7 @@ def tool():
     for c in (os.environ.get("LOOM_LINK"), shutil.which("loom-link")):
         if c and os.path.exists(c):
             return c
-    sys.exit("loom-link not found (set LOOM_LINK or put the hrx-loom 0.2.0rc1 venv on PATH)")
+    sys.exit("loom-link not found (set LOOM_LINK or put the hrx-loom 0.2.0 venv on PATH)")
 
 
 def link(exe, pkg, prog, extra):

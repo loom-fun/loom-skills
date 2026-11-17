@@ -28,7 +28,7 @@ script on their own tree; a campaign uses the whole procedure.
 | The next release is out and there is no entry for the pair | Procedure step 1 (research), write the entry from `versions/TEMPLATE.md`, then continue |
 | A package fails with `unknown op`, `unknown model field`, a publish/prepare signature error on the new SDK | Find the symptom in the entry's "Gotchas" and "Breaking changes" |
 
-Entries: [versions/v0.1.0-to-v0.2.0.md](versions/v0.1.0-to-v0.2.0.md) (hrx-loom 0.1.0 to 0.2.0rc1). Template for the next:
+Entries: [versions/v0.1.0-to-v0.2.0.md](versions/v0.1.0-to-v0.2.0.md) (hrx-loom 0.1.0 to 0.2.0). Template for the next:
 [versions/TEMPLATE.md](versions/TEMPLATE.md).
 
 ## The procedure (any adjacent pair)
@@ -106,7 +106,7 @@ A new pair gets its own `rewrite_<from>_<to>.py` beside these and a row here; ke
 
 ## Rules that hold in every migration
 
-- Pin the exact SDK version everywhere (cards, CI, installers); a release candidate comes from the GitHub release asset with a sha256, not PyPI.
+- Pin the exact SDK version everywhere (cards, CI, installers); a stable release comes from PyPI (record the wheel sha256); a pre-release comes from the GitHub release asset, checked against the release's `SHA256SUMS`, because it is not on PyPI. When the stable release lands after a candidate, diff `candidate..stable` and re-run the offline proofs (sweep, link check) before re-pinning.
 - Baselines for the perf delta are the *published old card on the old SDK*, same job, same runner, ABBA; never numbers from another day.
 - Do not change a model's programs beyond the migration. A speedup found along the way is an opportunity issue.
 - Old published cards keep working on the old SDK: a package with no pin means the old version, explicitly.

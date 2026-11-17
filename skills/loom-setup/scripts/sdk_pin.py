@@ -2,11 +2,11 @@
 """A package's Loom SDK pin: the hrx-loom wheel it needs.
 
 A package carries
-  "sdk": {"hrx_loom": "0.2.0rc1", "source": "release", "branch": "v0.2.0rc1", "hrx_system_sha": "...", "wheel_sha256": "..."}
-in its llm_config.json (written by build/catalog.py from the kit's catalog.json, or by `stamp`). source is "release" (a
-ROCm/hrx-system GitHub release; no expiry), "pypi", or "ci" (a development artifact; expires after ~90 days, "expires").
+  "sdk": {"hrx_loom": "0.2.0", "source": "pypi", "hrx_system_sha": "...", "wheel_sha256": "..."}
+in its llm_config.json (written by build/catalog.py from the kit's catalog.json, or by `stamp`). source is "pypi" (0.2.0 and 0.1.0), "release" (a
+ROCm/hrx-system GitHub release, for pre-releases such as 0.2.0rc1; no expiry), or "ci" (a development artifact; expires after ~90 days, "expires").
 A package WITHOUT a pin was built before pins existed and means hrx-loom 0.1.0 (PyPI), explicitly: the published
-v0.1.0 cards keep running on 0.1.0 while the installer default is 0.2.0rc1.
+v0.1.0 cards keep running on 0.1.0 while the installer default is 0.2.0.
 
   sdk_pin.py show FILE          the install_loom.sh version argument: "release:VERSION", "ci:ARTIFACT_ID" or a PyPI version
                                 ("0.1.0" for a file without a pin)

@@ -1,7 +1,7 @@
 """Image component of a text package: the image service exports (text_image_*_v1), the encoder command
 program (vision_encode) specialized per processed image size, and the kernels it launches.
 
-Packet (host, v0.2.0rc1): header u32 [version, plane_count, output_rows, metadata_offset, metadata_length,
+Packet (host, v0.2.0): header u32 [version, plane_count, output_rows, metadata_offset, metadata_length,
 planes_offset, pixel_offset, packet_length]; 48-byte plane records [codec, width, height, display_w,
 display_h, orientation, pixel_offset, pixel_length, pixel_format (3 RGB8 | 4 RGBA8)]; our metadata is
 [processed width, processed height] (8 bytes, written by the chat program's vision_content).

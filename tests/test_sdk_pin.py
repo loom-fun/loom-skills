@@ -38,6 +38,18 @@ class SdkPinTests(unittest.TestCase):
         self.cfg.write_text("{}")   # no pin: the package predates pins and means 0.1.0
         self.assertEqual(run("show", str(self.cfg)).stdout.strip(), "0.1.0")
 
+    def test_pypi_pin_shows_the_bare_version_and_matches_by_wheel_hash(self):
+        pin = {"hrx_loom": "0.2.0", "source": "pypi", "wheel_sha256": "5f" * 32, "hrx_system_sha": "0" * 40}
+        self.cfg.write_text(json.dumps({"sdk": pin}))
+        self.assertEqual(run("show", str(self.cfg)).stdout.strip(), "0.2.0")   # install_loom.sh reads a bare version as PyPI
+        self.install(hrx_loom="0.2.0", source="pypi", wheel_sha256="5f" * 32)
+        self.assertEqual(run("matches", str(self.root), str(self.cfg)).returncode, 0)
+        self.install(hrx_loom="0.2.0", source="pypi", wheel_sha256="cd" * 32)
+        self.assertNotEqual(run("matches", str(self.root), str(self.cfg)).returncode, 0)
+        self.install(hrx_loom="0.2.0rc1", source="release", wheel_sha256="5f" * 32)   # a pre-release is not 0.2.0 (version+source compared when the pin has no hash)
+        self.cfg.write_text(json.dumps({"sdk": {"hrx_loom": "0.2.0", "source": "pypi"}}))
+        self.assertNotEqual(run("matches", str(self.root), str(self.cfg)).returncode, 0)
+
     def test_release_pin_matches(self):
         self.cfg.write_text(json.dumps({"sdk": RELEASE}))
         self.install(hrx_loom="0.2.0rc1", source="release", wheel_sha256="cd" * 32)

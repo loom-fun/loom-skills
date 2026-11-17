@@ -25,7 +25,7 @@ both sides read from one table. --build also rebuilds each variant's programs fr
 its skills/loom-kb), for a change that moves programs as well. Without --build neither side needs the card to carry a device preset
 (require_preset_* is dropped: both variants carry their execution explicitly).
 
---sdk-ab [--old-sdk 0.1.0 --new-sdk 0.2.0rc1]: the SDK A/B of the v0.1 -> v0.2 migration (fleet/regen.py plan --mode sdk-ab). Same jobs, steps and
+--sdk-ab [--old-sdk 0.1.0 --new-sdk 0.2.0]: the SDK A/B of the v0.1 -> v0.2 migration (fleet/regen.py plan --mode sdk-ab). Same jobs, steps and
 ABBA order, but the variants differ in the SDK too: `fun` / `funnd` = the published card (--refs "old"; the staging revision of fleet/manifest.json)
 served on --old-sdk (variant "sdk"); `staging` / `stagingnd` = the package BUILT in the job from this checkout (variant "build": {}, the job's
 branch) and served on --new-sdk, which is also the job's tools SDK (job "sdk"). The new variants take the old ones' device settings (served
@@ -313,7 +313,7 @@ def parser(device=None):
     ap.add_argument("--llama-reps", type=int, default=None, help="llama.cpp runs per 1-stream row (default: 2 on Strix Halo; on the R9700 the Loom session count, as r9700_jobs.py)")
     ap.add_argument("--sdk-ab", action="store_true", help="the SDK A/B of a migration: old = the published card on --old-sdk, new = the package built in the job on --new-sdk (see above)")
     ap.add_argument("--old-sdk", default="0.1.0")
-    ap.add_argument("--new-sdk", default="0.2.0rc1")
+    ap.add_argument("--new-sdk", default="0.2.0")
     ap.add_argument("--suffix", default="", help="appended to the job name (a confirming re-run: -r2)")
     ap.add_argument("--replicas", type=int, default=1, help="independent runs of the A/B per model, all in this one perf.json: replica 1 is the job as before, "
                     "replica R>1 the same job named ...-rR with its ABBA order rotated; a workflow run takes the jobs in parallel on different runners, "

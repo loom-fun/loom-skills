@@ -9,7 +9,7 @@ control.loom: control state grows to 2048 header bytes (sampling records move fr
   encode_epoch places speculative spans (anchor + placeholder slots) at packed cursors and marks them in the
   device plan copy (flags bit 4, credit in bits 8..15); publish_epoch reads verification results; epoch
   runs propose -> verify (or advance) -> warm.
-Native contract: hrx-system loom/src/loom/serve/service/text/{model,storage,epoch}.h (hrx-loom 0.2.0rc1).
+Native contract: hrx-system loom/src/loom/serve/service/text/{model,storage,epoch}.h (hrx-loom 0.2.0).
 """
 import os
 import re
