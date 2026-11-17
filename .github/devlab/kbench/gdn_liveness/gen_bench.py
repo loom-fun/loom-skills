@@ -36,7 +36,7 @@ for path in OUT.glob('tf_*.npy'):
         continue
     shutil.copyfile(path, OUT/path.name.replace('tf_', 'tf_shared_', 1))
 old_tests = re.sub(r'check\.expect\.close (actual\(.*\)) : (.*)$', r'check.expect.approximate \1 : \2, \2', old_tests, flags=re.M)
-new_tests = old_tests.replace('@gdn_fused_spans', '@gdn_shared_spans').replace('@g_gdn_fa_rdna4[', '@g_gdn_fa_rdna4_shared[')
+new_tests = old_tests.replace('@gdn_fused_spans', '@gdn_shared_spans').replace('@g_gdn_fa_rdna4[', '@g_gdn_fa_rdna4_shared[').replace('path("tf_', 'path("tf_shared_')
 t, ns = 293, 4
 AT, MT, OT, WT = B.types(t, ns)
 args = B.operands('tf', t, ns, AT, MT, OT, WT)

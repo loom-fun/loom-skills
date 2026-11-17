@@ -1,5 +1,7 @@
 """The shared LDS lifetimes are disjoint and preserve every arithmetic step."""
 import os
+import json
+import tempfile
 import re
 import sys
 import unittest
@@ -47,6 +49,34 @@ class SharedLifetimes(unittest.TestCase):
             return rows * cols * bits // 8
         self.assertLessEqual(view_bytes('bv_view'), view_bytes('q_view'))
         self.assertLessEqual(view_bytes('t_view'), view_bytes('a_view'))
+
+    def test_actual_rdna4_rule_activates_both_aliases(self):
+        kb = Path(__file__).resolve().parents[1] / 'skills/loom-kb'
+        sys.path.insert(0, str(kb))
+        import resolve
+        with tempfile.TemporaryDirectory() as tmp:
+            node = Path(tmp) / 'model' / 'gdn-activation-test'
+            node.mkdir(parents=True)
+            (node / 'scope.json').write_text(json.dumps({
+                'scope': 'model/gdn-activation-test',
+                'match': {'slug': 'gdn-activation-test'}, 'owner': 'test',
+                'choices': [{'when': {'devices': ['rdna4']},
+                             'set': {'prefill.gdn.share_lds': True},
+                             'evidence': 'test: actual device choice activation'}]}))
+            cfg = {'name': 'gdn-activation-test', 'arch': 'qwen3', 'hidden': 5120,
+                   'layers': 64, 'heads': 32, 'kv_heads': 8, 'head_dim': 128,
+                   'ffn': 17408, 'tensors': {}}
+            resolved = resolve.resolve_full(cfg, ('rdna3', 'rdna4'), tmp,
+                                            draft=None, slug='gdn-activation-test')
+        self.assertEqual(resolved['env'], {'GDN_FA_SHARE_LDS__RDNA4': '1'})
+        geometry = dict(HK=16, HV=48, DK=128, DV=128, C=10240, K=4, state_bytes=3145728)
+        with patch.dict(os.environ, resolved['env'], clear=True):
+            text = G.phase_a(geometry, 48, 3268608, 1e-6, True, 3)
+        self.assertIn('%bv_view = buffer.view %q_buf[', text)
+        self.assertIn('%t_view = buffer.view %a_buf[', text)
+        with patch.dict(os.environ, {'GDN_FA_SHARE_LDS': '1',
+                                     'GDN_FA_SHARE_LDS__RDNA4': ''}, clear=True):
+            self.assertFalse(L.enabled())
 
     def test_changed_solve_structure_fails_closed(self):
         malformed = original().replace('    %T31h = scalar.fptrunc', '    %changed = scalar.fptrunc')
