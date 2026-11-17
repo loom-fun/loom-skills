@@ -46,3 +46,9 @@ site must be matched on `apply<@selN_<kernel>` (a plain `g_gemm_` regex also hit
   (64-bit base + constant per fragment, rematerialised for every load: ~17 SALU per V^T load) and the loop-carried accumulator copies (~150 v_mov
   per block) remain; making the base a divergent value is rejected by the fragment-load lowering (`fragment_memory.dynamic_stride`).
 - **Prefill chunk with the stack:** 4096 vs 8192 vs 2048: 16.5k vs 16.4k vs 16.3k (1k), 18.1k vs 18.1k vs 17.6k (2k), 17.2k vs 16.8k vs 17.1k (8k).
+
+## KV-shared E2B/E4B/Bolt pruning
+
+`prefill.prune_shared` opts shared-KV Gemma4 models into the kit's `prune_shared_rows` pass. Only `@llm_advance` changes: after the first shared layer, a new token-info buffer marks every non-final live row of each span as padding, and attention lists are rebuilt from it. KV owners, verification and drafting stay unchanged. Epochs below 64 rows copy the metadata unchanged. `PRUNE_SHARED=0` builds the unpruned A/B variant.
+
+The pass requires the SDK 0.2 `command.def` spelling and fails if the expected advance prologue or first shared-layer marker disappears. Reusing a pass anchored to the old `command.program.def` spelling silently disabled the optimization after migration. Keep a generated-program assertion, not just a patch-application check.

@@ -10,5 +10,17 @@
  "facets": [
   "sliding-window"
  ],
- "choices": []
+ "choices": [
+  {
+   "when": {
+    "has": [
+     "kv_shared_from"
+    ]
+   },
+   "set": {
+    "prefill.prune_shared": true
+   },
+   "evidence": "Issue #554: shared-KV E2B/E4B/Bolt prefill pruning; opt-out PRUNE_SHARED=0."
+  }
+ ]
 }

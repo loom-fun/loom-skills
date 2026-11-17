@@ -31,7 +31,7 @@ ap.add_argument("--memory-gib", default="auto",
                      "benchmarks load one model at a time); 56 when RAM can't be read")
 ap.add_argument("--prefill", type=int, default=None,
                 help="prefill chunk (prefill_capacity), 1024-4096; default cfg['prefill_capacity'], else 4096 for MoE "
-                     "(fuller expert tiles: Flint 2k/8k/32k +22/+38/+28 %% vs 1024), else 1024")
+                     "(fuller expert tiles: Flint 2k/8k/32k +22/+38/+28 %% vs 1024), else 2048 for Gemma4 shared-KV, else 1024")
 ap.add_argument("--prefill-r9700", type=int, default=None, metavar="N",
                 help="prefill chunk of a second preset, `<preset>-r9700`: execution identical except prefill_capacity N (default: "
                      "cfg['prefill_capacity_r9700'], else none). The R9700 (gfx12, 64 CUs) fills its GEMM tiles at larger epochs than "
@@ -67,7 +67,7 @@ if (_cdir := catalog.find(HERE)):
     catalog.build(a, cfg, _cdir, a.tokenizer)
     sys.exit(0)
 if a.prefill is None:
-    a.prefill = cfg.get("prefill_capacity") or (4096 if cfg.get("moe") else 1024)
+    a.prefill = cfg.get("prefill_capacity") or (4096 if cfg.get("moe") else 2048 if cfg.get("arch") == "gemma4" and cfg.get("kv_shared_from") else 1024)
 chat = cfg.get("chat")
 if not chat:
     sys.exit("config has no 'chat' block: fill it from the model's chat template first (chat_probe.py)")
