@@ -1,47 +1,98 @@
 {
- "_comment": "R9700 per-model measurement (r9700_jobs.py): one job per model on one R9700 runner; loom-fun-staging card, llama.cpp ROCm b1375 + Vulkan b12211 with the matched drafting, reduced-context models served at served_context. Does not fit: none",
- "runner": "r9700",
- "memory_bytes": 34000000000,
+ "_comment": "Issue554 diagnostic only: same-job exact E2B base/candidate consistency without reference near-tie allowance, and genuinely long prefix miss/hit pairs on E2B/E4B. No repeated full gates or perf; assert real cached-token hits.",
+ "sdk": "0.2.0",
+ "runner": "strix",
+ "memory_bytes": 18000000000,
  "llama_spec": "matched",
  "jobs": [
   {
-   "name": "unsloth-qwen3-0-6b-loom",
-   "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
-   "kit": null,
+   "name": "exact-rab-unsloth-gemma-4-e2b-it-loom",
+   "runner": "r9700",
+   "repeat_rows": 3,
+   "card": "loom-fun/unsloth-gemma-4-E2B-it-loom@8e9e47b6783d57a325d7a47b54dce70999a90efb",
+   "memory_bytes_r9700": 18000000000,
+   "kit": "gemma4",
    "llamacpp": "b1375",
    "llamacpp_vulkan": "b12211",
-   "memory_bytes_r9700": 17000000000,
    "variants": [
     {
-     "name": "card",
-     "build": {}
+     "name": "fun",
+     "build": {},
+     "ref": "1c503ee32b00bb6e12387f3cb29f3758dd22175a",
+     "cap_pool": 588800,
+     "execution": {
+      "prefill_capacity": 4096
+     },
+     "build_args": [
+      "--memory-gib",
+      "4096",
+      "--prefill",
+      "1024"
+     ]
     },
     {
-     "name": "nodraft",
+     "name": "staging",
      "build": {},
+     "ref": "0fecb576",
+     "cap_pool": 588800,
      "execution": {
-      "draft_depth": 0
-     }
+      "prefill_capacity": 4096
+     },
+     "build_args": [
+      "--memory-gib",
+      "4096",
+      "--prefill",
+      "2048"
+     ]
     }
    ],
    "steps": [
-    "func:card",
-    "ktest:card",
-    "gates:card:dev",
-    "perf:card:3",
-    "perf:card:3:long",
-    "c4:nodraft",
-    "llama@rocm.np1:3",
-    "llama@rocm.np1:3:long",
-    "llamac4@rocm.nodraft",
-    "llama@vulkan.np1:3",
-    "llama@vulkan.np1:3:long",
-    "llamac4@vulkan.perslot.nodraft"
-   ]
+    "consistencyexact:fun:5",
+    "consistencyexact:staging:5",
+    "longpairs:fun",
+    "longpairs:staging"
+   ],
+   "sdk": "0.2.0"
+  },
+  {
+   "name": "exact-rab-unsloth-gemma-4-e4b-it-loom",
+   "runner": "r9700",
+   "card": "loom-fun/unsloth-gemma-4-E4B-it-loom@1d1f17f3438cdc9c3d0fc83255c9c8f9a68d38f7",
+   "memory_bytes_r9700": 34000000000,
+   "kit": "gemma4",
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "fun",
+     "build": {},
+     "ref": "1c503ee32b00bb6e12387f3cb29f3758dd22175a",
+     "cap_pool": 230400,
+     "build_args": [
+      "--memory-gib",
+      "4096",
+      "--prefill",
+      "1024"
+     ]
+    },
+    {
+     "name": "staging",
+     "build": {},
+     "ref": "0fecb576",
+     "cap_pool": 230400,
+     "build_args": [
+      "--memory-gib",
+      "4096",
+      "--prefill",
+      "2048"
+     ]
+    }
+   ],
+   "steps": [
+    "longpairs:fun",
+    "longpairs:staging"
+   ],
+   "sdk": "0.2.0"
   }
- ],
- "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
- "kit": null,
- "llamacpp": "b1375",
- "llamacpp_vulkan": "b12211"
+ ]
 }

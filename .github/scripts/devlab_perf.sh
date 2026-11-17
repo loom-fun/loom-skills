@@ -682,6 +682,20 @@ print('vllm', k, [x.get(k) for x in r if x.get(k)], 'median', round(st.median(v)
       llama_up || { res[$s]=ERROR; continue; }
       "$T" "$B/text_match.py" compare "$lurl" "$out/text_$p1.json" --tokenizer "$card/tokenizer.json" --thinking "$TH" | tee "$out/textmatch_$p1.log"
       res[$s]=$(grep TEXT_MATCH "$out/textmatch_$p1.log" | cut -c1-200);;
+    consistencyexact)   # Experiment-only base/candidate attribution of the issue's exact criterion.
+      serve_alone "$p1" || { res[$s]=ERROR; continue; }
+      np=0
+      for i in $(seq 1 "${p2:-5}"); do
+        "$T" "$B/consistency.py" "$url" --model "$cardid" --pkg "$D/$p1/pkg" > "$out/exact_${p1}_$i.log" 2>&1
+        grep -q '^PASS$' "$out/exact_${p1}_$i.log" && np=$((np + 1))
+        cat "$out/exact_${p1}_$i.log"
+      done
+      res[$s]="EXACT $np/${p2:-5}";;
+    longpairs)   # Experiment-only: assert actual prefix reuse beyond two prefill chunks.
+      serve_alone "$p1" || { res[$s]=ERROR; continue; }
+      "$T" "$here/.github/scripts/issue554_prefix_pairs.py" "$D/$p1/pkg" "$url" --out "$out/longpairs_$p1.json" > "$out/longpairs_$p1.log" 2>&1
+      rc=$?; cat "$out/longpairs_$p1.log"
+      res[$s]="$([ "$rc" = 0 ] && echo PASS || echo FAIL) real-prefix-cache-pairs";;
     consistency)
       serve_alone "$p1" || { res[$s]=ERROR; continue; }
       # as gates.sh runs it: --pkg and a llama.cpp reference (no drafting) to judge any divergence as a near-tie
