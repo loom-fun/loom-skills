@@ -5898,6 +5898,11 @@ if __name__ == "__main__":
     if os.environ.get("POST_ADD_ROW_SCALE", "1") != "0":   # after live_row_scale; =0 A/B it off
         program, _fused = fuse_post_add_row_scale(program)
         COMMON += _fused
+    if os.environ.get("POST_ADD_Q8", "0") != "0":
+        import gen_norm_q8
+        program, _q8_fused = gen_norm_q8.wire(program)
+        if _q8_fused:
+            COMMON += gen_norm_q8.kernel(NORMS, ICODES, H)
     if os.environ.get("VERIFY_FUSE", "") in ("swq", "swqn", "full") and spec_kernels and USED_MVQ:   # choice decode.verify.fuse (gen_pstep.py): fused layers for 2-4 token epochs
         import gen_pstep
         def _pz_src(name):

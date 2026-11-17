@@ -302,6 +302,8 @@ CHOICE("prefill.last_layer_rows", "bool", False, "LAST_OUT", rows=ROWS_PREFILL,
            "Qwen3.8-27B +1 %, Glimmer-30B -3.5 %. Off for MTP / assistant drafters.")
 CHOICE("prefill.row_scale_live", "bool", True, "ROW_SCALE_LIVE", kernels=["g_row_scale_f16*"], rows=ROWS_PREFILL,
        doc="Live row scale (padding rows scale 0).")
+CHOICE("decode.post_add_q8", "bool", False, "POST_ADD_Q8", kernels=["g_post_add_norm*", "g_quant_q8"], rows=ROWS_DECODE + ROWS_STREAMS,
+       experiment=True, doc="Publish Q8 activations from residual RMSNorm registers; opt-in pending device A/B.")
 CHOICE("prefill.post_add_row_scale", "bool", True, "POST_ADD_ROW_SCALE", kernels=["g_post_add_norm*"], rows=ROWS_PREFILL,
        doc="Fused post-add + row scale.")
 CHOICE("prefill.live_row_skip", "bool", True, "LIVE_ROW_SKIP", rows=ROWS_PREFILL,
