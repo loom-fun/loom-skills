@@ -16,7 +16,7 @@
     "runner": "Strix Halo",
     "tag": "strix-halo",
     "detect": {
-      "pattern": "strix|8060s|gfx1151",
+      "pattern": "strix(?! ?point)|8060s|gfx1151",
       "flags": "i"
     },
     "serve_args": []

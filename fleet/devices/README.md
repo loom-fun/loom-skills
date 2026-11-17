@@ -45,6 +45,14 @@ builds cards the same way): nothing here is measured by the renderer.
   is not measured yet.
 - `fits: false` or no entry for the model: the GPU does not appear on that card.
 
+## Host setup a GPU needs (printed in its Quick start block)
+
+A GPU's registry row may carry `card.host_setup` (`skills/loom-kb/device/<family>/<id>/device.json`): `text` (one sentence), `commands`
+(shell lines) and `note` (one line for services). It is a property of the GPU and its host, not of a model, so it lives in the registry, not in
+these files. gfx1150: stock Ubuntu's 8 MiB `RLIMIT_MEMLOCK` makes every weight load fail after registration reports ready, fixed by
+`echo '* - memlock unlimited' | sudo tee /etc/security/limits.d/90-loom.conf` and a new login. (The measuring session had no root and ran with
+an LD_PRELOAD that turns io_uring off; that is a diagnostic, not what users run.)
+
 ## Filling a file
 
     # on the named machine, after the measurements (the same perf.py / gates.sh logs a DevLab job produces):

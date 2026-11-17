@@ -223,6 +223,12 @@ Read it from there if it isn't in your skill list.
 - `loom-benchmark` hardware counters are UNIMPLEMENTED on this GPU. Profile by
   ablation (remove or double a kernel, measure end to end) instead.
 
+**Another GPU:** run `python3 "${LOOM_SKILL_DIR}/../loom-kb/kb.py" list` and route with `--device` (a key such as
+`gfx1150`, or an alias such as `strix-point`); never reuse the numbers above. On a **Strix Point** laptop (gfx1150, Radeon 890M)
+read `loom-kb/device/rdna3/gfx1150/README.md` before serving: `ulimit -l` must be unlimited (the 8 MiB Ubuntu default
+makes every weight load fail after registration reports ready), and `--memory_bytes` must fit the GTT
+(`mem_info_gtt_total`, half of RAM by default), not 60 % of RAM. Pass `roofline.py --device gfx1150`.
+
 ## Where things are documented upstream
 
 - The docs site is rocm.github.io/hrx-system/loom. The same docs are in the repo:

@@ -1,0 +1,611 @@
+{
+ "schema": "loom-device-results/1",
+ "device": "gfx1150",
+ "gpu": "AMD Radeon 890M (Strix Point, gfx1150, 16 CU, PCI 1002:150e) in an HP OmniBook Ultra 14: Ryzen AI 9 HX 375, 32 GB LPDDR5X-7500 (96 GB/s measured), GTT 15.08 GiB, 512 MiB carve-out",
+ "preset": {
+  "always": false
+ },
+ "sdk": {
+  "hrx_loom": "0.2.0",
+  "note": "PyPI wheel, hrx-system 0cd370f2baaa; the package is the published card rebuilt with the sdk020 kit (devlab_perf.sh variant build {}) at LOOM_MEMORY_CAP_GIB=14"
+ },
+ "tool": "max_context: build.py fit at a 14 GiB budget (63488), confirmed by one 62227-token request that completes (next size: HTTP 400, server healthy); performance and gates: .github/scripts/devlab_perf.sh run locally (steps func, gates dev, perf x2 + long x2, c4, llama.cpp ROCm b1374 and Vulkan b12211), 46 min",
+ "package": "loom-fun/unsloth-Qwen3.5-4B-loom@6e8e69042ec7, rebuilt for hrx-loom 0.2.0",
+ "serve": {
+  "device": "amdgpu://?completion_spin_ns=4294967295",
+  "memory": "elastic backing, --memory_bytes inside the GTT (half of RAM by default)",
+  "host": "RLIMIT_MEMLOCK raised (see skills/loom-kb/device/rdna3/gfx1150 card.host_setup); these runs had no root and used an LD_PRELOAD that turns io_uring off (host I/O only)"
+ },
+ "provenance": {
+  "kind": "machine",
+  "run": null,
+  "url": null,
+  "device": {
+   "cpu": "AMD Ryzen AI 9 HX 375 w/ Radeon 890M (HP OmniBook Ultra 14, 32 GB LPDDR5X-7500; local machine hp-omni-1, not a DevLab runner)",
+   "gpu": "AMD Radeon 890M Graphics (gfx1150)",
+   "os": "Ubuntu 26.04, Linux 7.0.0-43-generic"
+  },
+  "hrx_loom": {
+   "hrx_loom": "0.2.0",
+   "source": "pypi",
+   "hrx_system_sha": "0cd370f2baaa0cfef47cc23007f1a109906f8a52",
+   "artifact_id": null,
+   "branch": "v0.2.0",
+   "wheel_sha256": "5148f9e3a264af400ec4bae38bd7b06bf551d28cc33b7a61d67f7bcefa590438"
+  }
+ },
+ "models": {
+  "unsloth-Qwen3.5-4B-loom": {
+   "fits": true,
+   "date": "2026-11-16",
+   "max_context": 63488,
+   "native_context": 262144,
+   "serve_args": [
+    "--memory_bytes=14000000000"
+   ],
+   "note": "262144 is refused at registration under a GTT-sized budget on 0.2.0 (code 8, cannot address one model context); draft depth 3 and prefill 1024 measured best here (skills/loom-kb/device/rdna3/gfx1150/decode.md)",
+   "evidence": [
+    {
+     "evidence": "loom-card-evidence/2",
+     "gpu": "gfx1150",
+     "performance": {
+      "baseline": {
+       "args": "-ngl 99 -cram 0 --spec-type draft-dflash --spec-draft-model hf:AtomicChat/Qwen3.5-4B-DFlash-GGUF/Qwen3.5-4B-DFlash.Q8_0.gguf --spec-draft-n-max 7 -ngld 99 -c 65536 -np 1",
+       "name": "llama.cpp",
+       "version": "llamacpp-rocm/b1374"
+      },
+      "session": {
+       "aggregate": "median",
+       "commands": [],
+       "date": "2026-11-16",
+       "metrics": {
+        "decode": {
+         "acceptance": 0.327,
+         "baseline": 20.4,
+         "baseline_runs": [
+          19.93,
+          20.93
+         ],
+         "loom": 31.1,
+         "loom_runs": [
+          31.105
+         ]
+        },
+        "decode_2k": {
+         "acceptance": 0.422,
+         "baseline": 24.1,
+         "baseline_runs": [
+          23.34,
+          24.81
+         ],
+         "loom": 28.4,
+         "loom_runs": [
+          28.365000000000002
+         ]
+        },
+        "decode_32k": {
+         "acceptance": 0.383,
+         "baseline": 16.1,
+         "baseline_runs": [
+          15.41,
+          16.84
+         ],
+         "loom": 21.9,
+         "loom_runs": [
+          21.86
+         ]
+        },
+        "prefill_16k": {
+         "baseline": 510.0,
+         "baseline_runs": [
+          509.7,
+          510.3
+         ],
+         "loom": 1026.9,
+         "loom_runs": [
+          1026.9
+         ]
+        },
+        "prefill_1k": {
+         "baseline": 702.0,
+         "baseline_runs": [
+          700.9,
+          703.1
+         ],
+         "loom": 994.7,
+         "loom_runs": [
+          994.7
+         ]
+        },
+        "prefill_2k": {
+         "baseline": 705.8,
+         "baseline_runs": [
+          707.1,
+          704.5
+         ],
+         "loom": 1018.0,
+         "loom_runs": [
+          1018.0
+         ]
+        },
+        "prefill_32k": {
+         "baseline": 361.6,
+         "baseline_runs": [
+          361.4,
+          361.8
+         ],
+         "loom": 914.2,
+         "loom_runs": [
+          914.25
+         ]
+        },
+        "prefill_8k": {
+         "baseline": 636.0,
+         "baseline_runs": [
+          636.4,
+          635.7
+         ],
+         "loom": 1010.8,
+         "loom_runs": [
+          1010.75
+         ]
+        },
+        "streams4": {
+         "baseline": 71.4,
+         "baseline_runs": [
+          74.0,
+          71.4,
+          66.4
+         ],
+         "loom": 81.8,
+         "loom_runs": [
+          82.0,
+          81.8,
+          81.7
+         ]
+        }
+       },
+       "programs_sha256": "0d6ec6f997c814f22073a4b49bf433c10d98a87ab2efe9488c3f6b7f4e9fde99",
+       "runs": {
+        "decode_prefill": 1,
+        "samples": {
+         "decode": 2,
+         "decode_2k": 2,
+         "decode_32k": 2,
+         "prefill_16k": 2,
+         "prefill_1k": 2,
+         "prefill_2k": 2,
+         "prefill_32k": 2,
+         "prefill_8k": 2
+        },
+        "streams4": 3
+       },
+       "source": {
+        "device": {
+         "cpu": "AMD Ryzen AI 9 HX 375 w/ Radeon 890M (HP OmniBook Ultra 14, 32 GB LPDDR5X-7500; local machine hp-omni-1, not a DevLab runner)",
+         "gpu": "AMD Radeon 890M Graphics (gfx1150)",
+         "os": "Ubuntu 26.04, Linux 7.0.0-43-generic"
+        },
+        "hrx_loom": {
+         "artifact_id": null,
+         "branch": "v0.2.0",
+         "hrx_loom": "0.2.0",
+         "hrx_system_sha": "0cd370f2baaa0cfef47cc23007f1a109906f8a52",
+         "source": "pypi",
+         "wheel_sha256": "5148f9e3a264af400ec4bae38bd7b06bf551d28cc33b7a61d67f7bcefa590438"
+        },
+        "kind": "machine",
+        "run": null,
+        "url": null
+       }
+      }
+     }
+    },
+    {
+     "evidence": "loom-card-evidence/2",
+     "gpu": "gfx1150",
+     "performance": {
+      "backend": "vulkan",
+      "baseline": {
+       "args": "-ngl 99 -cram 0 --spec-type draft-dflash --spec-draft-model hf:AtomicChat/Qwen3.5-4B-DFlash-GGUF/Qwen3.5-4B-DFlash.Q8_0.gguf --spec-draft-n-max 7 -ngld 99 -c 36864 -np 1",
+       "name": "llama.cpp",
+       "sha256": "9759acd293d3738f39d3ceed740bd3125d87dfb492ef8c4f00114d3393d37942",
+       "version": "llamacpp-vulkan/b12211"
+      },
+      "session": {
+       "aggregate": "median",
+       "date": "2026-11-16",
+       "metrics": {
+        "decode": {
+         "baseline": 20.8,
+         "baseline_runs": [
+          20.13,
+          21.49
+         ]
+        },
+        "decode_2k": {
+         "baseline": 23.0,
+         "baseline_runs": [
+          22.65,
+          23.42
+         ]
+        },
+        "decode_32k": {
+         "baseline": 14.4,
+         "baseline_runs": [
+          14.39,
+          14.35
+         ]
+        },
+        "prefill_16k": {
+         "baseline": 584.0,
+         "baseline_runs": [
+          583.3,
+          584.8
+         ]
+        },
+        "prefill_1k": {
+         "baseline": 615.1,
+         "baseline_runs": [
+          608.0,
+          622.2
+         ]
+        },
+        "prefill_2k": {
+         "baseline": 644.0,
+         "baseline_runs": [
+          643.5,
+          644.4
+         ]
+        },
+        "prefill_32k": {
+         "baseline": 495.6,
+         "baseline_runs": [
+          494.8,
+          496.3
+         ]
+        },
+        "prefill_8k": {
+         "baseline": 633.8,
+         "baseline_runs": [
+          632.9,
+          634.6
+         ]
+        },
+        "streams4": {
+         "baseline": 68.9,
+         "baseline_runs": [
+          68.7,
+          69.0,
+          68.9
+         ]
+        }
+       },
+       "programs_sha256": "0d6ec6f997c814f22073a4b49bf433c10d98a87ab2efe9488c3f6b7f4e9fde99",
+       "runs": {
+        "decode_prefill": 2,
+        "streams4": 3
+       },
+       "source": {
+        "device": null,
+        "hrx_loom": null,
+        "kind": "machine",
+        "run": null,
+        "url": null
+       }
+      }
+     }
+    },
+    {
+     "evidence": "loom-card-evidence/2",
+     "gates": [
+      {
+       "detail": null,
+       "level": "dev",
+       "name": "consistency",
+       "programs_sha256": "0d6ec6f997c814f22073a4b49bf433c10d98a87ab2efe9488c3f6b7f4e9fde99",
+       "source": {
+        "device": {
+         "cpu": "AMD Ryzen AI 9 HX 375 w/ Radeon 890M (HP OmniBook Ultra 14, 32 GB LPDDR5X-7500; local machine hp-omni-1, not a DevLab runner)",
+         "gpu": "AMD Radeon 890M Graphics (gfx1150)",
+         "os": "Ubuntu 26.04, Linux 7.0.0-43-generic"
+        },
+        "hrx_loom": {
+         "artifact_id": null,
+         "branch": "v0.2.0",
+         "hrx_loom": "0.2.0",
+         "hrx_system_sha": "0cd370f2baaa0cfef47cc23007f1a109906f8a52",
+         "source": "pypi",
+         "wheel_sha256": "5148f9e3a264af400ec4bae38bd7b06bf551d28cc33b7a61d67f7bcefa590438"
+        },
+        "kind": "machine",
+        "run": null,
+        "url": null
+       },
+       "status": "pass",
+       "time": "2026-11-16T18:35:00Z"
+      },
+      {
+       "detail": null,
+       "level": "dev",
+       "name": "spec",
+       "programs_sha256": "0d6ec6f997c814f22073a4b49bf433c10d98a87ab2efe9488c3f6b7f4e9fde99",
+       "source": {
+        "device": {
+         "cpu": "AMD Ryzen AI 9 HX 375 w/ Radeon 890M (HP OmniBook Ultra 14, 32 GB LPDDR5X-7500; local machine hp-omni-1, not a DevLab runner)",
+         "gpu": "AMD Radeon 890M Graphics (gfx1150)",
+         "os": "Ubuntu 26.04, Linux 7.0.0-43-generic"
+        },
+        "hrx_loom": {
+         "artifact_id": null,
+         "branch": "v0.2.0",
+         "hrx_loom": "0.2.0",
+         "hrx_system_sha": "0cd370f2baaa0cfef47cc23007f1a109906f8a52",
+         "source": "pypi",
+         "wheel_sha256": "5148f9e3a264af400ec4bae38bd7b06bf551d28cc33b7a61d67f7bcefa590438"
+        },
+        "kind": "machine",
+        "run": null,
+        "url": null
+       },
+       "status": "pass",
+       "time": "2026-11-16T18:35:00Z"
+      },
+      {
+       "detail": null,
+       "level": "dev",
+       "name": "agent",
+       "programs_sha256": "0d6ec6f997c814f22073a4b49bf433c10d98a87ab2efe9488c3f6b7f4e9fde99",
+       "source": {
+        "device": {
+         "cpu": "AMD Ryzen AI 9 HX 375 w/ Radeon 890M (HP OmniBook Ultra 14, 32 GB LPDDR5X-7500; local machine hp-omni-1, not a DevLab runner)",
+         "gpu": "AMD Radeon 890M Graphics (gfx1150)",
+         "os": "Ubuntu 26.04, Linux 7.0.0-43-generic"
+        },
+        "hrx_loom": {
+         "artifact_id": null,
+         "branch": "v0.2.0",
+         "hrx_loom": "0.2.0",
+         "hrx_system_sha": "0cd370f2baaa0cfef47cc23007f1a109906f8a52",
+         "source": "pypi",
+         "wheel_sha256": "5148f9e3a264af400ec4bae38bd7b06bf551d28cc33b7a61d67f7bcefa590438"
+        },
+        "kind": "machine",
+        "run": null,
+        "url": null
+       },
+       "status": "pass",
+       "time": "2026-11-16T18:35:00Z"
+      },
+      {
+       "detail": null,
+       "level": "dev",
+       "name": "agent_think_off",
+       "programs_sha256": "0d6ec6f997c814f22073a4b49bf433c10d98a87ab2efe9488c3f6b7f4e9fde99",
+       "source": {
+        "device": {
+         "cpu": "AMD Ryzen AI 9 HX 375 w/ Radeon 890M (HP OmniBook Ultra 14, 32 GB LPDDR5X-7500; local machine hp-omni-1, not a DevLab runner)",
+         "gpu": "AMD Radeon 890M Graphics (gfx1150)",
+         "os": "Ubuntu 26.04, Linux 7.0.0-43-generic"
+        },
+        "hrx_loom": {
+         "artifact_id": null,
+         "branch": "v0.2.0",
+         "hrx_loom": "0.2.0",
+         "hrx_system_sha": "0cd370f2baaa0cfef47cc23007f1a109906f8a52",
+         "source": "pypi",
+         "wheel_sha256": "5148f9e3a264af400ec4bae38bd7b06bf551d28cc33b7a61d67f7bcefa590438"
+        },
+        "kind": "machine",
+        "run": null,
+        "url": null
+       },
+       "status": "pass",
+       "time": "2026-11-16T18:35:00Z"
+      },
+      {
+       "detail": null,
+       "level": "dev",
+       "name": "golden",
+       "programs_sha256": "0d6ec6f997c814f22073a4b49bf433c10d98a87ab2efe9488c3f6b7f4e9fde99",
+       "source": {
+        "device": {
+         "cpu": "AMD Ryzen AI 9 HX 375 w/ Radeon 890M (HP OmniBook Ultra 14, 32 GB LPDDR5X-7500; local machine hp-omni-1, not a DevLab runner)",
+         "gpu": "AMD Radeon 890M Graphics (gfx1150)",
+         "os": "Ubuntu 26.04, Linux 7.0.0-43-generic"
+        },
+        "hrx_loom": {
+         "artifact_id": null,
+         "branch": "v0.2.0",
+         "hrx_loom": "0.2.0",
+         "hrx_system_sha": "0cd370f2baaa0cfef47cc23007f1a109906f8a52",
+         "source": "pypi",
+         "wheel_sha256": "5148f9e3a264af400ec4bae38bd7b06bf551d28cc33b7a61d67f7bcefa590438"
+        },
+        "kind": "machine",
+        "run": null,
+        "url": null
+       },
+       "status": "pass",
+       "time": "2026-11-16T18:35:00Z"
+      },
+      {
+       "detail": null,
+       "level": "dev",
+       "name": "compare",
+       "programs_sha256": "0d6ec6f997c814f22073a4b49bf433c10d98a87ab2efe9488c3f6b7f4e9fde99",
+       "source": {
+        "device": {
+         "cpu": "AMD Ryzen AI 9 HX 375 w/ Radeon 890M (HP OmniBook Ultra 14, 32 GB LPDDR5X-7500; local machine hp-omni-1, not a DevLab runner)",
+         "gpu": "AMD Radeon 890M Graphics (gfx1150)",
+         "os": "Ubuntu 26.04, Linux 7.0.0-43-generic"
+        },
+        "hrx_loom": {
+         "artifact_id": null,
+         "branch": "v0.2.0",
+         "hrx_loom": "0.2.0",
+         "hrx_system_sha": "0cd370f2baaa0cfef47cc23007f1a109906f8a52",
+         "source": "pypi",
+         "wheel_sha256": "5148f9e3a264af400ec4bae38bd7b06bf551d28cc33b7a61d67f7bcefa590438"
+        },
+        "kind": "machine",
+        "run": null,
+        "url": null
+       },
+       "status": "pass",
+       "time": "2026-11-16T18:35:00Z"
+      },
+      {
+       "detail": null,
+       "level": "dev",
+       "name": "vision",
+       "programs_sha256": "0d6ec6f997c814f22073a4b49bf433c10d98a87ab2efe9488c3f6b7f4e9fde99",
+       "source": {
+        "device": {
+         "cpu": "AMD Ryzen AI 9 HX 375 w/ Radeon 890M (HP OmniBook Ultra 14, 32 GB LPDDR5X-7500; local machine hp-omni-1, not a DevLab runner)",
+         "gpu": "AMD Radeon 890M Graphics (gfx1150)",
+         "os": "Ubuntu 26.04, Linux 7.0.0-43-generic"
+        },
+        "hrx_loom": {
+         "artifact_id": null,
+         "branch": "v0.2.0",
+         "hrx_loom": "0.2.0",
+         "hrx_system_sha": "0cd370f2baaa0cfef47cc23007f1a109906f8a52",
+         "source": "pypi",
+         "wheel_sha256": "5148f9e3a264af400ec4bae38bd7b06bf551d28cc33b7a61d67f7bcefa590438"
+        },
+        "kind": "machine",
+        "run": null,
+        "url": null
+       },
+       "status": "pass",
+       "time": "2026-11-16T18:35:00Z"
+      },
+      {
+       "detail": null,
+       "level": "dev",
+       "name": "sampling",
+       "programs_sha256": "0d6ec6f997c814f22073a4b49bf433c10d98a87ab2efe9488c3f6b7f4e9fde99",
+       "source": {
+        "device": {
+         "cpu": "AMD Ryzen AI 9 HX 375 w/ Radeon 890M (HP OmniBook Ultra 14, 32 GB LPDDR5X-7500; local machine hp-omni-1, not a DevLab runner)",
+         "gpu": "AMD Radeon 890M Graphics (gfx1150)",
+         "os": "Ubuntu 26.04, Linux 7.0.0-43-generic"
+        },
+        "hrx_loom": {
+         "artifact_id": null,
+         "branch": "v0.2.0",
+         "hrx_loom": "0.2.0",
+         "hrx_system_sha": "0cd370f2baaa0cfef47cc23007f1a109906f8a52",
+         "source": "pypi",
+         "wheel_sha256": "5148f9e3a264af400ec4bae38bd7b06bf551d28cc33b7a61d67f7bcefa590438"
+        },
+        "kind": "machine",
+        "run": null,
+        "url": null
+       },
+       "status": "pass",
+       "time": "2026-11-16T18:35:00Z"
+      }
+     ],
+     "gpu": "gfx1150",
+     "performance": {
+      "session": {
+       "commands": [],
+       "date": "2026-11-16",
+       "metrics": {
+        "spec_acceptance": {
+         "loom": 0.53
+        }
+       },
+       "programs_sha256": "0d6ec6f997c814f22073a4b49bf433c10d98a87ab2efe9488c3f6b7f4e9fde99",
+       "runs": {
+        "decode_prefill": null,
+        "streams4": null
+       },
+       "source": {
+        "device": {
+         "cpu": "AMD Ryzen AI 9 HX 375 w/ Radeon 890M (HP OmniBook Ultra 14, 32 GB LPDDR5X-7500; local machine hp-omni-1, not a DevLab runner)",
+         "gpu": "AMD Radeon 890M Graphics (gfx1150)",
+         "os": "Ubuntu 26.04, Linux 7.0.0-43-generic"
+        },
+        "hrx_loom": {
+         "artifact_id": null,
+         "branch": "v0.2.0",
+         "hrx_loom": "0.2.0",
+         "hrx_system_sha": "0cd370f2baaa0cfef47cc23007f1a109906f8a52",
+         "source": "pypi",
+         "wheel_sha256": "5148f9e3a264af400ec4bae38bd7b06bf551d28cc33b7a61d67f7bcefa590438"
+        },
+        "kind": "machine",
+        "run": null,
+        "url": null
+       }
+      }
+     }
+    },
+    {
+     "evidence": "loom-card-evidence/2",
+     "gpu": "gfx1150",
+     "roofline": {
+      "checkpoint": "Qwen3.5-4B-Q4_K_M.gguf",
+      "device": {
+       "bandwidth_bytes_per_s": 96000000000.0,
+       "name": "AMD Radeon 890M (gfx1150)",
+       "peak_flops": 23800000000000.0
+      },
+      "drafting": {
+       "acceptance": null,
+       "depth": 3,
+       "method": "dflash",
+       "tokens_per_pass": null
+      },
+      "metrics": {
+       "decode": {
+        "ceiling": 35.2,
+        "efficiency": 0.9
+       },
+       "decode_2k": {
+        "ceiling": 34.3,
+        "efficiency": 0.902
+       },
+       "decode_32k": {
+        "ceiling": 25.4,
+        "efficiency": 0.918
+       },
+       "prefill_16k": {
+        "ceiling": 2906.6,
+        "efficiency": 0.33
+       },
+       "prefill_1k": {
+        "ceiling": 3303.1,
+        "efficiency": 0.33
+       },
+       "prefill_2k": {
+        "ceiling": 3273.4,
+        "efficiency": 0.33
+       },
+       "prefill_32k": {
+        "ceiling": 2576.6,
+        "efficiency": 0.33
+       },
+       "prefill_8k": {
+        "ceiling": 3105.4,
+        "efficiency": 0.33
+       },
+       "streams4": {
+        "ceiling": 136.7,
+        "efficiency": 0.7
+       }
+      },
+      "tool": {
+       "script": "skills/loom-roofline/roofline.py",
+       "sha256": "f0bb822790da2e463618a92c3e9b367b2bdb7794c5bb5312827542a3ae14796c",
+       "skills_commit": "823a380e3fa99aab073105521d58f96b8689280f"
+      }
+     }
+    }
+   ]
+  }
+ }
+}
