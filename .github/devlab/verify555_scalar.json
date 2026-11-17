@@ -3,12 +3,13 @@
   "repeats": 5,
   "suites": [
     {
-      "suite": "verify555_scalar",
+      "suite": "verify555_scalar_fullwaves",
       "runner": "strix",
       "dir": "verify555_scalar",
       "gen": "verify555_scalar/gen.py",
       "files": [
         "bench_baseline.loom",
+        "bench_nomt.loom",
         "bench_candidate.loom"
       ],
       "tests": [
@@ -18,7 +19,8 @@
         "--measure=dispatch_complete",
         "--batch-size=2",
         "--profile-final-batch=true"
-      ]
+      ],
+      "case_timing": true
     }
   ]
 }

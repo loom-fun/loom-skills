@@ -33,7 +33,11 @@ ns['ATTN_MT_FROM']=4095  # exact8-key partials only after shipped GQA handover
 exec(compile(source,'scalar2x2','exec'),ns)
 g.multi_token_split=ns['multi_token_split']
 cand=g.multi_token_split(raw,'g',8,4,None)
+sys.path.insert(0,str(Path(__file__).parent))
+from fullwaves import transform
+cand=transform(cand)
 (out/'candidate.loom').write_text(common+'\n'+cand)
+(out/'nomt.loom').write_text(common+'\n'+raw)
 
 # Reuse deterministic serving-shaped fixtures and explicit check.literal cases from the existing experiment.
 # Baseline kernels below are regenerated from current shipped scalar sources, never the archived WMMA control.
@@ -62,3 +66,20 @@ a=cases.index('check.case public @case_4');b=cases.index('check.case public @cas
 handover=cases[a:b].replace('@case_4','@handover').replace('info4.npy','handover_info.npy')
 c=kernels['candidate'];c=c[c.index('kernel.def export'):]
 (out/'test.loom').write_text(kernels['baseline']+c+cases+handover)
+
+# Attribution control: keep GQA unchanged while removing only old short-span wrapper.
+nomt=(out/'nomt.loom').read_text().replace('g_attention_split','k_nomt')
+bench=(out/'bench_baseline.loom').read_text();bench=bench[bench.index('check.case'):].replace('k_baseline','k_nomt')
+(out/'bench_nomt.loom').write_text(nomt+bench)
+# A fully active64split2044position case tests the short-context span tradeoff separately.
+info[:,1]=2044+np.arange(4);np.save(out/'short_info.npy',info)
+for v in ['baseline','nomt','candidate']:
+ p=out/f'bench_{v}.loom';text=p.read_text();case=text[text.index('check.case'):text.index('check.benchmark')]
+ short=case.replace('@case_4','@short_case').replace('info4.npy','short_info.npy')
+ p.write_text(text+short+'check.benchmark<@short_case> @short\n')
+base_test=(out/'test.loom').read_text()
+short_test=handover.replace('@handover','@short_context').replace('handover_info.npy','short_info.npy')
+nomt_cases=(cases+handover+short_test).replace('k_candidate','k_nomt')
+nomt_cases=nomt_cases.replace('public @','public @nomt_')
+nomt_k=nomt[nomt.index('kernel.def export'):]
+(out/'test.loom').write_text(base_test+short_test+nomt_k+nomt_cases)
