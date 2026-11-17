@@ -121,6 +121,9 @@ def parse_block(text):
         if not sep or k not in ("kind", "scopes", "kernels", "leak"):
             errs.append(f"loom-scope: cannot read line {raw.strip()!r} (keys: kind, scopes, kernels, leak)")
             continue
+        if k in d:
+            errs.append(f"loom-scope: duplicate {k!r} field")
+            continue
         d[k] = v.strip()
     kind = d.get("kind", "")
     if kind not in KINDS:
@@ -204,6 +207,48 @@ def parse_scope(entry):
 def scope_dir(entry):
     node, _ = parse_scope(entry)
     return f"skills/loom-kb/{node}"
+
+
+def declaration_errors(repo, text, own=None, tree=None):
+    """Check only the PR scope declaration, without diffing or building the fleet."""
+    block, errors = parse_block(text) if text.strip() else (None, ["no loom-scope block given"])
+    return validate_block(repo, block, errors, own=own, tree=tree)
+
+
+def validate_block(repo, block, errors=None, own=None, tree=None, matcher=None):
+    """Validate a parsed scope block against the selector and kernel registries."""
+    errors = list(errors or [])
+    if block is None or block["kind"] not in KINDS:
+        return errors
+
+    kind = block["kind"]
+    own = own or json.loads(Path(repo, "fleet", "ownership.json").read_text())
+    tree = tree or repo
+    matcher = matcher or Matcher(tree)
+    for scope in block["scopes"]:
+        node, facets = parse_scope(scope)
+        if (not node or "//" in node or node.startswith("/") or node.endswith("/")
+                or any(not part for part in node.split("/"))):
+            errors.append(f"scope {scope!r}: malformed selector path")
+        elif not os.path.isdir(os.path.join(matcher.kb, node)):
+            errors.append(f"scope {scope!r}: skills/loom-kb/{node} does not exist")
+        if "+" in scope and (scope.endswith("+") or "++" in scope):
+            errors.append(f"scope {scope!r}: malformed facet list")
+        for facet in facets:
+            if facet not in KNOWN_FACETS and not facet.startswith("draft-") and not os.path.isdir(os.path.join(matcher.kb, "facet", facet)):
+                errors.append(f"scope {scope!r}: unknown facet {facet!r}")
+    for kernel in block["kernels"]:
+        if kernel not in own["families"]:
+            errors.append(f"kernels: unknown family {kernel!r} (known: {', '.join(sorted(own['families']))})")
+    if kind == "targeted" and not block["scopes"]:
+        errors.append("kind targeted needs scopes: (the selector nodes the change is for)")
+    if kind == "horizontal" and not block["kernels"]:
+        errors.append("kind horizontal needs kernels: (the kernel families it may touch)")
+    if kind in ("targeted", "docs", "card", "tooling") and block["kernels"]:
+        errors.append(f"kernels: is only for horizontal PRs (kind is {kind})")
+    if block["leak"] and kind not in ("horizontal", "architecture"):
+        errors.append(f"leak: is only allowed with kind horizontal or architecture (kind is {kind}); split the PR instead")
+    return errors
 
 
 # --- choices.py ---------------------------------------------------------------------------------------------------------------
@@ -328,35 +373,18 @@ def lint(repo, base, head, block, errs_in, impact=None, kb_lint=True, own=None, 
     """Run the checks; returns a Result. OWN: the ownership data (default: the one next to this file in REPO, else beside the script)."""
     res = Result()
     tree = tree or repo
-    for e in errs_in:
-        res.err("scope-block", e)
-    if block is None or block["kind"] not in KINDS:
-        return res
-    kind = block["kind"]
     own = own or json.loads(Path(HERE, "ownership.json").read_text())
+    if block is None or block["kind"] not in KINDS:
+        for e in errs_in:
+            res.err("scope-block", e)
+        return res
+    matcher = Matcher(tree)
+    for e in validate_block(repo, block, errs_in, own=own, tree=tree, matcher=matcher):
+        res.err("scope-block", e)
+    kind = block["kind"]
     mb, files = changed_files(repo, base, head)
     paths = [p for _, p in files]
     res.info.update(kind=kind, base=mb, scopes=block["scopes"], kernels=block["kernels"], files=paths)
-    # declared scopes and kernels exist
-    matcher = Matcher(tree)
-    for s in block["scopes"]:
-        node, facets = parse_scope(s)
-        if not os.path.isdir(os.path.join(matcher.kb, node)):
-            res.err("scope-block", f"scope {s!r}: skills/loom-kb/{node} does not exist")
-        for f in facets:
-            if f not in KNOWN_FACETS and not f.startswith("draft-") and not os.path.isdir(os.path.join(matcher.kb, "facet", f)):
-                res.err("scope-block", f"scope {s!r}: unknown facet {f!r}")
-    for k in block["kernels"]:
-        if k not in own["families"]:
-            res.err("scope-block", f"kernels: unknown family {k!r} (known: {', '.join(sorted(own['families']))})")
-    if kind == "targeted" and not block["scopes"]:
-        res.err("scope-block", "kind targeted needs scopes: (the selector nodes the change is for)")
-    if kind == "horizontal" and not block["kernels"]:
-        res.err("scope-block", "kind horizontal needs kernels: (the kernel families it may touch)")
-    if kind in ("targeted", "docs", "card", "tooling") and block["kernels"]:
-        res.err("scope-block", f"kernels: is only for horizontal PRs (kind is {kind})")
-    if block["leak"] and kind not in ("horizontal", "architecture"):
-        res.err("scope-block", f"leak: is only allowed with kind horizontal or architecture (kind is {kind}); split the PR instead")
     # 1 + 3: files and protected files
     prot = own["protected"]
     choices_path = own["choices_file"]

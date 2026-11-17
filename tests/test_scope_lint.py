@@ -6,11 +6,13 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "fleet"))
 import scope_lint as SL  # noqa: E402
+import impact_plan as PLAN  # noqa: E402
 
 OWN = json.loads((ROOT / "fleet" / "ownership.json").read_text())
 CHOICES = '''import re
@@ -102,6 +104,36 @@ class T(unittest.TestCase):
         self.assertTrue(SL.parse_block("no fence")[1] == [] or True)
         self.assertTrue(SL.parse_block("```py\nx\n```")[1])
         self.assertTrue(SL.parse_block("```loom-scope\nkind: nope\n```")[1])
+
+    def test_declaration_preflight_uses_scope_and_kernel_registries(self):
+        valid = "kind: targeted\nscopes: arch/llm/moe/qwen35moe\n"
+        self.assertEqual(SL.declaration_errors(self.r.d, valid, own=OWN, tree=self.r.d), [])
+        invalid = valid + "kernels: no_such_family\n"
+        errors = SL.declaration_errors(self.r.d, invalid, own=OWN, tree=self.r.d)
+        self.assertTrue(any("unknown family 'no_such_family'" in error for error in errors))
+        self.assertTrue(any("only for horizontal" in error for error in errors))
+        self.assertTrue(any("malformed selector path" in error for error in SL.declaration_errors(
+            self.r.d, "kind: targeted\nscopes: arch//llm\n", own=OWN, tree=self.r.d)))
+        self.assertTrue(SL.parse_block("kind: docs\nkind: card\n")[1])
+
+    def test_invalid_declaration_stops_before_planning_matrix(self):
+        body = Path(self.r.d, "pr-body.md")
+        body.write_text("kind: unknown\n")
+        output = Path(self.r.d, "plan.json")
+        with mock.patch.object(PLAN, "make_plan", side_effect=AssertionError("matrix planning must not run")):
+            with self.assertRaisesRegex(SystemExit, "invalid loom-scope declaration"):
+                PLAN.main(["plan", "--repo", self.r.d, "--base", "base", "--pr-body", str(body), "--out", str(output)])
+        self.assertFalse(output.exists())
+
+    def test_valid_preflight_preserves_existing_plan(self):
+        self.r.write("fleet/manifest.json", json.dumps({"models": {}}))
+        self.r.commit()
+        expected = PLAN.make_plan(self.r.d, "base")
+        body = Path(self.r.d, "pr-body.md")
+        body.write_text("kind: architecture\n")
+        output = Path(self.r.d, "plan.json")
+        PLAN.main(["plan", "--repo", self.r.d, "--base", "base", "--pr-body", str(body), "--out", str(output)])
+        self.assertEqual(json.loads(output.read_text()), expected)
 
     def test_targeted_pass(self):
         self.r.write("skills/loom-kb/arch/llm/moe/qwen35moe/scope.json", json.dumps({"scope": "arch/llm/moe/qwen35moe", "match": {"arch": ["qwen35moe"]}, "choices": [1]}))
