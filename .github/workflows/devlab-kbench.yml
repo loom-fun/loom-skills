@@ -64,7 +64,7 @@ jobs:
       matrix: ${{ fromJSON(needs.suites.outputs.matrix) }}
     name: ${{ matrix.suite }}
     runs-on: ${{ fromJSON(matrix.labels) }}
-    timeout-minutes: 120
+    timeout-minutes: 15  # Isolated producer experiment only; omit from generic product PR.
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
