@@ -497,7 +497,12 @@ def gemm_mxfp4s_f8_m256(mode, prefix="g", order="pairs", a_direct=True, dbuf=Fal
                 A(f"  %vh{r}{c} = vector.fptrunc %v{r}{c} : vector<8xf32> to vector<8xf16>")
             A(f"  vector.fragment.store<result> %{'vh' if yf16 else 'v'}{r}{c}, %y_view[{row}, %oc{r}{c}] shape [%c16, %c16] : vector<8x{YT}>, view<{BM}x{TN}x{YT}, %y_layout>")
     A("  kernel.return\n}\n")
-    return "\n".join(L)
+    text = "\n".join(L)
+    from mxfp4s_atiled import enabled as atiled_enabled, gemm as atiled_gemm
+    if atiled_enabled():
+        assert a_direct and not (lv or a_pf or swp), "A-tiled requires the original K-order direct-load GEMM"
+        text = atiled_gemm(text)
+    return text
 
 
 def _bf8_decode_text(j, q, e, row, col, view, TW, PX, order, sfx, ind="    "):
@@ -934,7 +939,8 @@ def f8_producer(text):
       view.store %lv_zf, %lv_s8[{z.group(1)}, %lv_c0] : f32, view<[%{z.group(2)}]x2xf32>
       view.store %lv_zf, %lv_s8[{z.group(1)}, %lv_c1] : f32, view<[%{z.group(2)}]x2xf32>
 """, old)
-    return t
+    from mxfp4s_atiled import enabled as atiled_enabled, producer as atiled_producer
+    return atiled_producer(t, row_scale) if atiled_enabled() else t
 
 
 # -- the program pass ----------------------------------------------------------------------------------------------------

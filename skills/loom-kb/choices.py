@@ -288,6 +288,11 @@ CHOICE("prefill.gemm.mxfp4s_f8", "bool", False, "GEMM_MXFP4S_F8", kernels=["g_ge
        doc="gfx12: MXFP4 split-plane (mxfp4s) prefill GEMMs on fp8 WMMA (v_wmma_f32_16x16x16_fp8_bf8): the nibble and scale planes are read as stored, weights decoded to bf8 "
            "exactly in LDS, activations fp8 e4m3 with a per-row power-of-two scale written by the row-scale producers' _f8_rdna4 twins (lossy activations, gated against the "
            "golden reference). Opt-in per model; every block exponent of the checkpoint must be in 107..132 (scan_mxfp4s_exponents.py). The gfx11 programs are unchanged.")
+CHOICE("prefill.gemm.mxfp4s_a_tiled", "bool", False, "GEMM_MXFP4S_A_TILED", enc=("1", None),
+       kernels=["g_gemm_mxfp4s_*f8*", "g_ab_gemm_mxfp4s_*f8*", "g_row_scale_f16*f8*", "g_post_add_norm_rs*f8*"],
+       rows=ROWS_PREFILL, devices=["rdna4"], per_target=True,
+       doc="FP8 producer stores in WMMA-fragment order and coalesced direct A loads; preserves original ascending-K accumulation. "
+           "Requires the v1 MXFP4 FP8 GEMM; no weight requantization or arithmetic change.")
 CHOICE("prefill.gemm.mxfp4s_f8_kernel", "str", None, "GEMM_MXFP4S_F8_KERNEL", kernels=["g_gemm_mxfp4s_*_f8_*"], rows=ROWS_PREFILL, devices=["rdna4"], from_pr="mxfp4st-ogemm",
        doc="The design of prefill.gemm.mxfp4s_f8's GEMM kernels (gen_mxfp4s.F8_KERNELS; None = v1, the #879 kernel). lvs: the store GEMMs load their operands lane-vector "
            "(one 16-byte load per lane covers two K substeps: activations global_load_b128 with immediate offsets, weights ds_load_b128; both operands in the same permuted K "

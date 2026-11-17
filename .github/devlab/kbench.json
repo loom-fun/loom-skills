@@ -1,242 +1,39 @@
 {
-  "repeats": 3,
+  "repeats": 4,
   "suites": [
     {
-      "suite": "example",
-      "dir": "example",
-      "files": [
-        "bench.loom",
-        "bench_v4.loom"
-      ],
-      "config": [],
-      "args": [
-        "--measure=dispatch_complete",
-        "--batch-size=8",
-        "--profile-final-batch=true"
-      ]
-    },
-    {
-      "suite": "gemm_r9700",
+      "suite": "mxfp4_atiled",
       "runner": "r9700",
-      "dir": "gemm_r9700",
-      "gen": "gemm_r9700/gen_gemm_bench.py",
+      "dir": "mxfp4_atiled",
+      "gen": "mxfp4_atiled/gen_bench.py",
       "gen_variants": [
         "base",
-        "dq2",
-        "sb",
-        "sb_nodq"
+        "atiled"
       ],
       "files": [
         "bench.loom",
-        "bench_dq2.loom",
-        "bench_sb.loom",
-        "bench_sb_nodq.loom"
-      ],
-      "config": [],
-      "args": [
-        "--measure=dispatch_complete",
-        "--batch-size=8",
-        "--profile-final-batch=true"
-      ],
-      "repeats": 3
-    },
-    {
-      "suite": "e2b_small",
-      "runner": "r9700",
-      "dir": "e2b_small",
-      "files": [
-        "bench.loom"
-      ],
-      "config": [],
-      "args": [
-        "--measure=dispatch_complete",
-        "--batch-size=8",
-        "--profile-final-batch=true"
-      ],
-      "repeats": 3
-    },
-    {
-      "suite": "gemm_mxfp4s",
-      "runner": "r9700",
-      "dir": "gemm_mxfp4s",
-      "gen": "gemm_mxfp4s/gen_bench.py",
-      "gen_variants": [
-        "base",
-        "r1024"
-      ],
-      "files": [
-        "bench.loom",
-        "bench_r1024.loom"
+        "bench_atiled.loom"
       ],
       "tests": [
-        "test.loom"
+        "test.loom",
+        "producer.loom"
       ],
-      "config": [],
-      "args": [
-        "--measure=dispatch_complete",
-        "--batch-size=8",
-        "--profile-final-batch=true"
-      ],
-      "repeats": 3
-    },
-    {
-      "suite": "prof_counters_r9700",
-      "runner": "r9700",
-      "dir": "gemm_mxfp4s",
-      "gen": "gemm_mxfp4s/gen_bench.py",
-      "gen_variants": [
-        "base"
-      ],
-      "files": [
-        "bench.loom"
-      ],
-      "config": [],
-      "args": [
-        "--measure=dispatch_complete",
-        "--batch-size=8",
-        "--profile-final-batch=true"
-      ],
-      "repeats": 1,
-      "probes": [
+      "negative_tests": [
         {
-          "name": "compile_details",
-          "args": [
-            "--compile-report=details"
-          ]
-        },
-        {
-          "name": "counter_ranges_default",
-          "args": [
-            "--profile-data=counter-ranges"
-          ]
-        },
-        {
-          "name": "counters_default",
-          "args": [
-            "--profile-data=counters"
-          ]
-        },
-        {
-          "name": "counters_named",
-          "args": [
-            "--profile-data=counters",
-            "--profile-counter=SQ_WAVES"
-          ]
-        },
-        {
-          "name": "device_metrics",
-          "args": [
-            "--profile-data=device-metrics"
-          ]
-        },
-        {
-          "name": "executable_traces",
-          "args": [
-            "--profile-data=executable-traces"
+          "file": "negative.loom",
+          "xfail": [
+            "@check_store_5120_zero_output=EXPECT/003",
+            "@check_store_5120_wrong_layout=EXPECT/003"
           ]
         }
-      ]
-    },
-    {
-      "suite": "pstep_r9700",
-      "runner": "r9700",
-      "dir": "pstep_r9700",
-      "gen": "pstep_r9700/gen_bench.py",
-      "gen_variants": [
-        "base"
       ],
-      "files": [
-        "bench.loom"
-      ],
-      "tests": [
-        "test.loom"
-      ],
-      "case_timing": true,
-      "config": [],
       "args": [
         "--measure=dispatch_complete",
         "--batch-size=8",
         "--profile-final-batch=true"
       ],
-      "repeats": 3
-    },
-    {
-      "suite": "gdn_fused",
-      "runner": "r9700",
-      "dir": "gdn_fused",
-      "gen": "gdn_fused/gen_bench.py",
-      "gen_variants": [
-        "base",
-        "r2048"
-      ],
-      "files": [
-        "bench.loom",
-        "bench_r2048.loom"
-      ],
-      "tests": [
-        "test.loom"
-      ],
-      "config": [],
-      "args": [
-        "--measure=dispatch_complete",
-        "--batch-size=8",
-        "--profile-final-batch=true"
-      ],
-      "repeats": 3
-    },
-    {
-      "suite": "gdn_fold",
-      "runner": "r9700",
-      "dir": "gdn_fold",
-      "gen": "gdn_fold/gen_bench.py",
-      "gen_variants": [
-        "base",
-        "l12"
-      ],
-      "files": [
-        "bench.loom",
-        "bench_l12.loom"
-      ],
-      "tests": [
-        "test.loom"
-      ],
-      "config": [],
-      "args": [
-        "--measure=dispatch_complete",
-        "--batch-size=8",
-        "--profile-final-batch=true"
-      ],
-      "repeats": 3
-    },
-    {
-      "suite": "flash_r9700",
-      "runner": "r9700",
-      "dir": "flash_r9700",
-      "gen": "flash_r9700/gen_bench.py",
-      "gen_variants": [
-        "base",
-        "fmp",
-        "fmp+kv0",
-        "vtop2+e2",
-        "g6"
-      ],
-      "files": [
-        "bench.loom",
-        "bench_fmp.loom",
-        "bench_fmp+kv0.loom",
-        "bench_vtop2+e2.loom",
-        "bench_g6.loom"
-      ],
-      "tests": [
-        "test.loom"
-      ],
-      "config": [],
-      "args": [
-        "--measure=dispatch_complete",
-        "--batch-size=8",
-        "--profile-final-batch=true"
-      ],
-      "repeats": 3
+      "repeats": 4
     }
-  ]
+  ],
+  "sdk": "0.2.0"
 }
