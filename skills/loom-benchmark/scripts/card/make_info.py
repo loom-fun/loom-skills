@@ -428,7 +428,10 @@ def cmd_build(a):
             st = gpu_state(evidence_gpu(ev, perf["session"].get("source")))
         else:
             st = gpu_state(evidence_gpu(ev))
-        st["data"] = True
+        # Package feature/version metadata alone is not a device measurement.
+        # Gates and rooflines mark their own source GPU below.
+        if perf.get("session"):
+            st["data"] = True
         if ev.get("serve"):   # how this GPU serves the package: {"memory_bytes", "served_context"}
             st["meta"].update({k: v for k, v in ev["serve"].items() if v is not None})
         if perf.get("backend"):   # a further llama.cpp backend (make_info.py perf --backend): kept apart from the sessions
@@ -453,6 +456,7 @@ def cmd_build(a):
                 gst["gates"][g["name"]] = new
         if ev.get("remeasure"):   # make_info.py remeasure: a same-runner A/B of this package against the build the table shows
             mst = gpu_state(evidence_gpu(ev))
+            mst["data"] = True
             prev = mst["remeasure"]
             mst["remeasure"] = dict(ev["remeasure"], source=sources.add(ev["remeasure"]["source"]))
             if ev["remeasure"].get("first_source"):

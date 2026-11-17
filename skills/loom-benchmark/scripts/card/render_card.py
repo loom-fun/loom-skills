@@ -300,7 +300,9 @@ def drafting(spec):
 def feature_detail(key, f):
     st, v = f["status"], f["value"] or {}
     if st == "no":
-        return {"sampling": "greedy decoding only"}.get(key, "not supported by Loom (the upstream model has it)")
+        detail = {"sampling": "greedy decoding only"}.get(key, "not supported by Loom (the upstream model has it)")
+        reason = v.get("reason") if isinstance(v, dict) else None
+        return detail + (f"; {reason}" if reason else "")
     if st == "unknown":
         return "not determined"
     if st == "n/a":
