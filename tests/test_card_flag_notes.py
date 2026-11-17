@@ -34,7 +34,7 @@ class QuickstartFlagNotes(unittest.TestCase):
 
     def test_rendered_single_and_multi_gpu_blocks(self):
         for fixture in ['sdk02', 'r9700_two', 'gpus4']:
-            text = (CARD / 'test' / fixture / 'expected/README.md').read_text()
+            text = (CARD / 'test' / fixture / 'expected/README.md').read_text(encoding='utf-8')
             quick = text.split('## Quick start', 1)[1].split('\n## ', 1)[0]
             details = re.findall(r'<details>.*?<summary>.*?</summary>(.*?)</details>', quick, re.S)
             for block in details or [quick]:
