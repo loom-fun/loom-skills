@@ -21,7 +21,7 @@ One data file and one KB device node per memory class of the same die, not per p
 **Selection rule** (for Lemonade, Weaver and the site): arch `gfx1201` and VRAM >= 30 GiB -> the 32 GB class; 14 GiB <= VRAM < 30 GiB ->
 the 16 GB class; below that -> not supported yet. The same rule is in `skills/loom-kb/device/rdna4/README.md`. The 16 GB class's file is
 `gfx1201-16gb.json` (provenance names the Radeon RX 9070 XT machine that measured it). A file written before the rename
-(`rx9070xt.json`, `"device": "radeon-rx9070xt"`) is still read: `card_lib.LEGACY_DEVICE_IDS` maps that id to `gfx1201-16gb`.
+(`rx9070xt.json`, `"device": "radeon-rx9070xt"`) is still read: `card_lib.LEGACY_DEVICE_IDS` maps that id to `gfx1201-16gb`. Per-model `serve_args` in such a file are printed as they are, so drop them there: without them the class flags (registry + preload rule) apply.
 
 ## File
 
