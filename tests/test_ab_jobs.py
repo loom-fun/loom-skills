@@ -222,6 +222,12 @@ class DevlabPerfSdk(unittest.TestCase):
         self.assertIn("ensure 0.2.0 ", log)
         self.assertTrue(os.path.exists(os.path.join(w, "out", "sdk_fun.json")))
 
+    def test_ci_sdk_selector_is_preserved_but_venv_path_has_no_colon(self):
+        out, log, w = self.run_sdk([{"name": "old", "sdk": "ci:13628412621"}],
+                                   'sdk_root old >/dev/null; echo "$SDKR"')
+        self.assertEqual(out, [f"{w}/loom-sdk-ci-13628412621"])
+        self.assertIn(f"ensure ci:13628412621 {w}/loom-sdk-ci-13628412621 ", log)
+
     def test_card_variant_follows_the_pin_of_its_own_package(self):
         out, log, w = self.run_sdk([{"name": "old"}], 'sdk_root old >/dev/null; echo "$SDKR"')
         self.assertEqual(out, [f"{w}/loom"])
