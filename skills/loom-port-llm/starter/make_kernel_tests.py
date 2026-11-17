@@ -628,17 +628,22 @@ cases.append(f"""check.case public @attention_chain {{
 # 3b'. the same chain on a KV pool of more than 2^20 positions whose pages sit at the top of it (the SDK sizes the pool from --memory_bytes;
 # the kernels' `llm.pool` range is 16..2147483584): K and V written by g_qk_rope_store and read by g_attention_split at byte offsets past 2^31,
 # against the same numpy reference. A package whose KV per position is too large for a 2^31-element arena has no such case.
-_KD = KVH * D
-_big = max(1048576 + 4096, -(-1_300_000_000 // (2 * _KD)))
-_big = -(-_big // 64) * 64
-if 2 * _big * _KD < 2**31:
+# Every chain case gets one (the plain `@attention_chain`, and a kit with one chain per head dim, e.g. gemma4's `@attention_chain_d<D>`, which
+# also appends cases after its chains): found by name, its KV width read from its own arena.
+import re as _re
+for _c0 in [c for c in cases if _re.match(r"\s*check\.case public @attention_chain(?:_d\d+)? \{", c)]:
+    _kd = int(_re.search(r"%arena = check\.generate\.fill value\(0\.0\) : tensor<(\d+)xf16>", _c0)[1]) // (2 * ctx)   # K and V elements of one position
+    _big = max(1048576 + 4096, -(-1_300_000_000 // (2 * _kd)))
+    _big = -(-_big // 64) * 64
+    if 2 * _big * _kd >= 2**31:
+        continue
     _ob = orig.copy(); _ob[10:] = _big // 16 - blocks + np.arange(blocks)   # physical pages: the last `blocks` pages of the pool
-    save("a_orig_big", _ob)
-    _c = cases[-1].replace("@attention_chain", "@attention_bigpool", 1).replace(f"%pool = check.literal value({ctx})", f"%pool = check.literal value({_big})")
-    _c = _c.replace('path("a_orig.npy")', 'path("a_orig_big.npy")').replace(f"tensor<{2 * ctx * KVH * D}xf16>", f"tensor<{2 * _big * _KD}xf16>")
-    assert _c != cases[-1] and f"{2 * _big * _KD}xf16" in _c
+    save(f"a_orig_big{_big}", _ob)
+    _c = _c0.replace("@attention_chain", "@attention_bigpool", 1).replace(f"%pool = check.literal value({ctx})", f"%pool = check.literal value({_big})")
+    _c = _re.sub(r'path\("a_orig\d*\.npy"\)', f'path("a_orig_big{_big}.npy")', _c).replace(f"tensor<{2 * ctx * _kd}xf16>", f"tensor<{2 * _big * _kd}xf16>")
+    assert _c != _c0 and f"{2 * _big * _kd}xf16" in _c and f"a_orig_big{_big}.npy" in _c
     cases.append(_c)
-    print(f"attention_bigpool: pool {_big} positions ({2 * _big * _KD * 2 / 2**30:.1f} GiB arena), pages {_big // 16 - blocks}..{_big // 16 - 1}")
+    print(f"attention_bigpool: pool {_big} positions ({2 * _big * _kd * 2 / 2**30:.1f} GiB arena), pages {_big // 16 - blocks}..{_big // 16 - 1}")
 # 3c. prefill attention on a span that CONTINUES stored KV: history positions [0, p0) are written
 # by g_qk_rope_store, then a span at p0 (t tokens, the last `pad` rows not live) runs the prefill
 # path (g_attention_flash2 on the listed 16-token tiles + the listed split/combine fallback for the
