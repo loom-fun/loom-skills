@@ -594,7 +594,7 @@ def render(d):
     pin = required_sdk(facts, versions, sources)
 
     def fetch_for(g):   # the fetch command of a GPU: its preset (the R9700's own when the package has one)
-        pr = gpu_preset(facts, g)
+        pr = gpu_preset(facts, g) or (facts.get("presets") or [None])[0]   # always named: a preset added later must not break a published command
         if sdk02(pin):   # SDK 0.2: SOURCE is PROVIDER:OWNER/REPO[:PRESET]; the revision is resolved and pinned by loom-fetch
             return " ".join(["loom-fetch", f"huggingface:{info['repo']}" + (f":{pr}" if pr else ""), "--materialize=copy", f"--output={output}"])
         return " ".join(["loom-fetch", f"{HF}/{info['repo']}/resolve/main/model.json"] + ([f"--preset={pr}"] if pr else [])

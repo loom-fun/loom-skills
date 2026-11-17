@@ -37,6 +37,9 @@ tracking issue loom-fun/loom-skills#1172). SKILL.md has the per-step detail for 
 - [ ] Each GPU's serve flags and presets are data (`fleet/devices/*.json`, card presets), rendered as one self-contained Quick start
       block per GPU. Re-check every GPU's default memory mode on the new SDK (elastic vs fixed: speed, eager allocations such as
       `cache_target_bytes` under fixed backing).
+- [ ] Every rendered fetch line names its preset (`loom-fetch huggingface:REPO:PRESET ...`), single-preset cards included: adding a preset
+      later must never break a published command (0.1.0 and 0.2.0 refuse a multi-preset card fetched without one).
+      `tests/test_fetch_preset.py` enforces it on all goldens.
 - [ ] Run every GPU's Quick start on a STOCK Ubuntu host (default `ulimit -l`, no root). DevLab runners have raised memlock limits,
       so DevLab alone never proves this; any workaround flag goes on the serve line only where it fits (version entry has the details).
 - [ ] Windows: a stratified sample of cards (`fleet/sample_plan.py` strata) on DevLab Windows runners via each card's own Quick

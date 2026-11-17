@@ -20,7 +20,7 @@ from this repository and the GGUF from [LiquidAI/d1-2B-GGUF](https://huggingface
 
 ```bash
 pipx install "hrx-loom[hf]"
-loom-fetch https://huggingface.co/loom-fun/LiquidAI-d1-2B-loom/resolve/main/model.json --materialize=copy --output=d1-2B-GGUF
+loom-fetch https://huggingface.co/loom-fun/LiquidAI-d1-2B-loom/resolve/main/model.json --preset=decide --materialize=copy --output=d1-2B-GGUF
 loom-serve --model=d1-2B-GGUF/model.json --device=amdgpu
 ```
 

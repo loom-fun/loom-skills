@@ -16,7 +16,7 @@ A [Loom](https://github.com/ROCm/hrx-system) package (`.loom` programs and a `mo
 
 ```bash
 pipx install "hrx-loom[hf]"
-loom-fetch https://huggingface.co/loom-fun/LiquidAI-d1-2B-loom/resolve/main/model.json --materialize=copy --output=d1-2B-GGUF
+loom-fetch https://huggingface.co/loom-fun/LiquidAI-d1-2B-loom/resolve/main/model.json --preset=decide --materialize=copy --output=d1-2B-GGUF
 loom-serve --model=d1-2B-GGUF/model.json '--device=amdgpu://?completion_spin_ns=4294967295' --pool_backing=fixed --parameter_mode=preload
 ```
 
