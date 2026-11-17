@@ -101,9 +101,11 @@ class CommitTrailerPolicy(unittest.TestCase):
             self.assertNotRegex(text, r"own `?Co-Authored-By|own credit line", rel)
 
     def test_tools_write_no_model_name_in_commit_trailers(self):
-        for p in list((ROOT / "fleet").glob("*.py")) + list((ROOT / ".github" / "scripts").glob("*")):
+        files = [p for p in list((ROOT / "fleet").rglob("*.py")) + list((ROOT / ".github").rglob("*")) + list((ROOT / "skills").rglob("*"))
+                 if p.is_file() and p.suffix in (".py", ".sh", ".md", ".yml", ".yaml", ".json", "")]
+        for p in files:
             if p.is_file():
-                for m in re.finditer(r"Co-Authored-By: [^\n\"']*", p.read_text(errors="ignore")):
+                for m in re.finditer(r"Co-Authored-By: [^\n\"'`]*", p.read_text(errors="ignore"), re.I):
                     self.assertEqual(m.group(0).strip(), self.TRAILER, f"{p.relative_to(ROOT)}: {m.group(0)}")
 
 if __name__ == "__main__":

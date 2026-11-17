@@ -28,7 +28,7 @@ script on their own tree; a campaign uses the whole procedure.
 | The next release is out and there is no entry for the pair | Procedure step 1 (research), write the entry from `versions/TEMPLATE.md`, then continue |
 | A package fails with `unknown op`, `unknown model field`, a publish/prepare signature error on the new SDK | Find the symptom in the entry's "Gotchas" and "Breaking changes" |
 
-Entries: [versions/v0.1.0-to-v0.2.0.md](versions/v0.1.0-to-v0.2.0.md) (hrx-loom 0.1.0 to 0.2.0rc1). Template for the next:
+Entries: [versions/v0.1.0-to-v0.2.0.md](versions/v0.1.0-to-v0.2.0.md) (hrx-loom 0.1.0 to 0.2.0). Template for the next:
 [versions/TEMPLATE.md](versions/TEMPLATE.md).
 
 ## The procedure (any adjacent pair)
@@ -67,6 +67,9 @@ Order matters: each step's proof is the next step's precondition. Big outputs go
    ratchet: a regression over 3 % on a metric triggers one confirming rerun, then a decision with the numbers. Poll >= 120 s with one loop.
 6. **Publish to the staging org** (`loom-fleet` `reference/publish.md`): each card shows its own new-SDK measurement and the delta line
    against the old card; publish partial progress; verify the live card (session and programs hash). Never production.
+   **Before promoting the staging cards to the production org** (owner's go-ahead), tag every production repo's current head with the
+   OUTGOING SDK version (`scripts/tag_org.py --org loom-fun --tag v<old>`), so the old card stays addressable at
+   `.../resolve/v<old>/model.json`; after the promotion tag the new state with the new version.
 7. **Report the perf delta** per model and device: equal or better on a supermajority of metrics, and every regression over 3 % explained
    (an upstream issue, or here). A result without its explanation is not reported as "fine".
 8. **Simplification ledger** (`notes/simplifications.md`): what the new SDK lets us delete (a flag, a computation, a workaround). Land what
@@ -97,12 +100,13 @@ A change can sit in two classes (a pool-size change is card schema *and* program
 |---|---|
 | `"${LOOM_SKILL_DIR}/scripts/sweep.py" --sdk VENV FLEET_DIR [--json OUT] [--no-link]` | version-agnostic: `loom-opt` parse of every program file and `loom-link` link of every variant/service of every package (a fleet dir or one package), the first-error-class histogram, JSON out. Run it with the old venv as control and the new venv as the test |
 | `"${LOOM_SKILL_DIR}/scripts/rewrite_v010_v020.py" [--check] [--json OUT] [--no-widen-pool] [--py] PATH...` | the v0.1.0 to v0.2.0 source migration on a file, package or tree: `vector.constant` to `splati`/`splatf` by element type, `command.program.*` to `command.*`, the `publish_epoch` control-state argument, the weights-policy import key range, `pool_capacity` out of cards, the KV pool bounds, the one-token conv guard, the vision finite-batch ABI; idempotent; prints `manual: FILE:LINE: ... section N` for what needs a hand edit |
+| `"${LOOM_SKILL_DIR}/scripts/tag_org.py" --org ORG --tag vX.Y.Z [--message M] [--only REPO...] [--force] [--dry-run]` | tags the head of every `*-loom` repo of the org with the OUTGOING SDK version; skips a repo that has the tag; refuses a repo whose head is not on that SDK (its `llm_config.json` pin) unless `--force`; exit 1 if any repo failed, was refused, or has the tag on another commit; used before promotion |
 
 A new pair gets its own `rewrite_<from>_<to>.py` beside these and a row here; keep scripts standard-library only.
 
 ## Rules that hold in every migration
 
-- Pin the exact SDK version everywhere (cards, CI, installers); a release candidate comes from the GitHub release asset with a sha256, not PyPI.
+- Pin the exact SDK version everywhere (cards, CI, installers); a stable release comes from PyPI (record the wheel sha256); a pre-release comes from the GitHub release asset, checked against the release's `SHA256SUMS`, because it is not on PyPI. When the stable release lands after a candidate, diff `candidate..stable` and re-run the offline proofs (sweep, link check) before re-pinning.
 - Baselines for the perf delta are the *published old card on the old SDK*, same job, same runner, ABBA; never numbers from another day.
 - Do not change a model's programs beyond the migration. A speedup found along the way is an opportunity issue.
 - Old published cards keep working on the old SDK: a package with no pin means the old version, explicitly.

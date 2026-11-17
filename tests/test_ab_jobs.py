@@ -112,9 +112,9 @@ class SdkAb(unittest.TestCase):
     def test_strix_variants_name_their_sdk_and_the_new_one_is_built(self):
         j = self.jobs("strix-halo")
         v = {x["name"]: x for x in j["variants"]}
-        self.assertEqual(j["sdk"], "0.2.0rc1")
+        self.assertEqual(j["sdk"], "0.2.0")
         self.assertEqual((v["fun"]["sdk"], v["funnd"]["sdk"]), ("0.1.0", "0.1.0"))
-        self.assertEqual((v["staging"]["sdk"], v["stagingnd"]["sdk"]), ("0.2.0rc1", "0.2.0rc1"))
+        self.assertEqual((v["staging"]["sdk"], v["stagingnd"]["sdk"]), ("0.2.0", "0.2.0"))
         self.assertEqual(v["fun"]["card"], f"loom-fun-staging/{FAST}@abc")
         for n in ("staging", "stagingnd"):
             self.assertEqual(v[n]["build"], {})
@@ -185,14 +185,14 @@ class DevlabPerfSdk(unittest.TestCase):
         return r.stdout.strip().splitlines(), log, w
 
     def test_explicit_sdks_get_their_own_roots_and_the_built_card_variant_the_tools(self):
-        out, log, w = self.run_sdk([{"name": "fun", "sdk": "0.1.0"}, {"name": "staging", "sdk": "0.2.0rc1", "build": {}}, {"name": "tools", "build": {}}],
+        out, log, w = self.run_sdk([{"name": "fun", "sdk": "0.1.0"}, {"name": "staging", "sdk": "0.2.0", "build": {}}, {"name": "tools", "build": {}}],
                                    'for v in fun staging tools; do sdk_root $v >/dev/null; echo "$v $SDKR"; done')
         roots = dict(x.split(" ", 1) for x in out)
         self.assertEqual(roots["fun"], f"{w}/loom-sdk-0.1.0")
-        self.assertEqual(roots["staging"], f"{w}/loom-sdk-0.2.0rc1")
+        self.assertEqual(roots["staging"], f"{w}/loom-sdk-0.2.0")
         self.assertEqual(roots["tools"], f"{w}/tools")   # sdk "card" of a built variant = the job's tools SDK
         self.assertIn("ensure 0.1.0 ", log)
-        self.assertIn("ensure 0.2.0rc1 ", log)
+        self.assertIn("ensure 0.2.0 ", log)
         self.assertTrue(os.path.exists(os.path.join(w, "out", "sdk_fun.json")))
 
     def test_card_variant_follows_the_pin_of_its_own_package(self):

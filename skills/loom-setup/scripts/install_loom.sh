@@ -1,10 +1,10 @@
 #!/bin/bash
 # Install the Loom SDK (hrx-loom) + the matching model library, from scratch.
 # usage: [VENV_NAME=.venv] [PYTHON=python3] install_loom.sh [ROOT=~/loom] [VERSION|release:VERSION|pypi:VERSION|latest|ci-latest|ci:ARTIFACT_ID]
-#   0.2.0rc1 (default): hrx-loom from the ROCm/hrx-system GitHub release v0.2.0rc1 (a pre-release, not on PyPI): the
-#                     wheel asset, its sha256 verified against the release's SHA256SUMS. A bare pre-release VERSION
-#                     (0.2.0rc1, 0.3.0a1) or release:VERSION selects a release; no gh needed
-#   0.1.0, pypi:V:    hrx-loom from PyPI (0.1.0 is what packages without an SDK pin were built with)
+#   0.2.0 (default), 0.1.0, pypi:V: hrx-loom from PyPI (0.1.0 is what packages without an SDK pin were built with)
+#   release:V, or a bare pre-release VERSION (0.2.0rc1, 0.3.0a1): hrx-loom from the ROCm/hrx-system GitHub release vV (a
+#                     pre-release, not on PyPI): the wheel asset, its sha256 verified against the release's SHA256SUMS;
+#                     no gh needed
 #   latest:           newest hrx-loom on PyPI (the starter's templates may need updating for a new ABI)
 #   ci-latest:        newest "loom-sdk-wheel-linux-Release" artifact from ROCm/hrx-system main (development builds;
 #                     Windows: "loom-sdk-wheel-windows"); needs an authenticated gh
@@ -19,7 +19,7 @@
 # stamps it into each package's llm_config.json; the card scripts record it with each measurement.
 # Needs: python >= 3.12 with venv, git (and gh + unzip for ci-*). Windows: run from Git Bash (venvs use Scripts/).
 set -euo pipefail
-root=${1:-$HOME/loom}; which=${2:-0.2.0rc1}
+root=${1:-$HOME/loom}; which=${2:-0.2.0}
 # Which source a VERSION means: release:V and bare pre-release versions (0.2.0rc1) are GitHub releases; pypi:V and the rest PyPI.
 case "$which" in
   release:*) which=release:${which#release:};;
@@ -106,7 +106,7 @@ if [ -n "$catalog" ]; then
   if [[ $catalog =~ ^[0-9a-f]{40}$ ]]; then
     git -C library fetch -q origin "$catalog" 2>/dev/null || git -C library fetch -q origin
     git -C library checkout -q "$catalog"
-  else   # a tag (release SDKs: loom.json names @v0.2.0rc1)
+  else   # a tag (release SDKs: loom.json names @v0.2.0)
     git -C library fetch -q --force origin tag "$catalog" && git -C library checkout -q FETCH_HEAD
   fi
   echo "library at catalog revision ${catalog:0:12}"

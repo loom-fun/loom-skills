@@ -14,7 +14,7 @@ and in every new shell; it is not the working directory or SDK root. On Windows,
 paths for file tools; `/c/...` paths belong to Git Bash. Never run an unresolved placeholder. Run bundled commands by quoted absolute path; do not run `scripts/...` from the working directory
 or change into the installed skill tree. Install the complete Loom suite: sibling paths are required.
 
-Loom = AMD's JIT compiler + runtime + model server (`hrx-loom`, 0.2.0rc1 pinned by these skills: a GitHub release wheel, not on PyPI; source at
+Loom = AMD's JIT compiler + runtime + model server (`hrx-loom`, 0.2.0 pinned by these skills, from PyPI; source at
 github.com/ROCm/hrx-system, models at github.com/ROCm/hrx-loom-library). Models
 ship as **Loom IR source** (`.loom` kernels + command/control programs) plus a
 package card (`model.json`) that points at unmodified checkpoints (GGUF or
@@ -62,7 +62,7 @@ Windows 11 on Strix Halo. Run the scripts from **Git Bash**. Differences:
 - Venv executables are in `Scripts/`, not `bin/`. Read every `~/loom/.venv/bin/X`
   and `~/loom/.tools/bin/python` in these skills as `~/loom/.venv/Scripts/X` and
   `~/loom/.tools/Scripts/python`. The scripts detect this themselves.
-- The SDK is the same release (`hrx_loom-0.2.0rc1-py3-none-win_amd64.whl`); it needs the
+- The SDK is the same release (`hrx_loom-0.2.0-py3-none-win_amd64.whl`); it needs the
   Microsoft Visual C++ v14 x64 redistributable. `--device=amdgpu` reports `driver: amd,
   backend: libamdf` in `/v1/status`.
 - Python: `install_loom.sh` uses `py -3` (override with `PYTHON=`). On Python < 3.15,

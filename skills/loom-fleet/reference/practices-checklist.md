@@ -56,6 +56,7 @@ the repo root; `campaign.md`, `targeted-fix.md` and `architecture.md` are in `sk
 | # | Rule | Source | Where |
 |---|---|---|---|
 | 26 | Roles: PM, tech lead, engineers, dashboarder | brief | `campaign.md` "Roles" |
+| 26a | Tracker artifact: republish only on an important change, at most hourly, diff first, batch the rest | sdk020 (owner) | `campaign.md` "State files"; `templates/BRIEF.md` |
 | 27 | Mailbox files and one background waiter; no direct agent messaging, no remote-session tools (they prompt the owner) | brief; owner rule | `campaign.md` "Communication"; `scripts/campaign/waitmail.sh` |
 | 28 | Shared state: status.json (locked), log.md, TECHLEAD.md, DECISIONS.md; read TECHLEAD first after a restart | brief; owner rule | `campaign.md` "State files"; `scripts/campaign/status.py`, `new_campaign.sh` |
 | 29 | Only the owner's own decisions go to the owner; decide technical details yourself; finish before reporting | brief; owner rule | `campaign.md` "Communication", "Working style" |

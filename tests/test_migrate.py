@@ -285,7 +285,7 @@ class Wiring(unittest.TestCase):
         import re
         heads = lambda p: [re.sub(r"^\d+\. ", "", h) for h in re.findall(r"^## (.+)$", p.read_text(), re.M)]
         want = heads(self.SK / "versions/TEMPLATE.md")
-        self.assertEqual(len(want), 11)
+        self.assertEqual(len(want), 12)
         entries = sorted((self.SK / "versions").glob("v*-to-*.md"))
         self.assertTrue(entries)
         for e in entries:
@@ -312,6 +312,50 @@ class Wiring(unittest.TestCase):
         for pr in ("#979", "#980", "#981", "#986", "#987", "#990"):
             self.assertIn(pr, text)
 
+
+
+class TagOrg(unittest.TestCase):
+    """scripts/tag_org.py with a fake Hub: create, skip, refuse a migrated head, report a tag on another commit, survive one repo's error."""
+
+    def run_tag(self, repos, args=()):
+        import importlib.util, io, contextlib, json as _json, tempfile
+        from unittest import mock
+        spec = importlib.util.spec_from_file_location("tag_org", ROOT / "skills/loom-migrate/scripts/tag_org.py")
+        t = importlib.util.module_from_spec(spec); spec.loader.exec_module(t)
+        api = mock.Mock(); created = []
+        def info(repo, revision=None):
+            r = repos[repo]
+            if r.get("error"):
+                raise OSError("429")
+            return mock.Mock(sha=r["tags"].get(revision, r["head"]) if revision else r["head"])
+        api.model_info.side_effect = info
+        def refs(repo):
+            m = mock.Mock(); m.tags = []
+            for n in repos[repo]["tags"]:
+                x = mock.Mock(); x.name = n; m.tags.append(x)
+            return m
+        api.list_repo_refs.side_effect = refs
+        api.create_tag.side_effect = lambda repo, tag, revision, tag_message: created.append(repo)
+        d = tempfile.mkdtemp()
+        def dl(repo, name, revision):
+            p = os.path.join(d, repo.replace("/", "_") + ".json"); _json.dump({"sdk": {"hrx_loom": repos[repo]["pin"]}} if repos[repo]["pin"] else {}, open(p, "w")); return p
+        out = io.StringIO()
+        with mock.patch("huggingface_hub.hf_hub_download", dl), contextlib.redirect_stdout(out):
+            rc = t.main(["--org", "o", "--tag", "v0.1.0", "--only", *[k.split("/")[1] for k in repos], *args], api=api)
+        return rc, out.getvalue(), created
+
+    @unittest.skipUnless(__import__("importlib.util").util.find_spec("huggingface_hub"), "needs huggingface_hub")
+    def test_statuses_and_exit_code(self):
+        repos = {"o/a": {"head": "h1", "tags": {}, "pin": None}, "o/b": {"head": "h2", "tags": {"v0.1.0": "h2"}, "pin": None},
+                 "o/c": {"head": "h3", "tags": {}, "pin": "0.2.0"}, "o/d": {"head": "h4", "tags": {}, "pin": None, "error": True}}
+        rc, out, created = self.run_tag(repos)
+        self.assertEqual(created, ["o/a"])
+        self.assertIn("o/b: exists", out); self.assertIn("o/c: refused", out); self.assertIn("o/d: FAILED", out)
+        self.assertIn("summary:", out)
+        self.assertEqual(rc, 1)
+        rc, out, created = self.run_tag({"o/a": {"head": "h1", "tags": {}, "pin": "0.1.0"}}, ["--dry-run"])
+        self.assertEqual((rc, created), (0, []))
+        self.assertIn("would-create", out)
 
 if __name__ == "__main__":
     unittest.main()

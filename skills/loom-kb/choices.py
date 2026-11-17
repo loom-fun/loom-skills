@@ -173,7 +173,7 @@ EXEC("exec.prefill_capacity", "int", "Prefill chunk (tokens) of the device's pre
      "(r9700 fit: 4096 for hidden <= 2048, 1024 for the 27B hybrids).", rows=ROWS_PREFILL, from_pr="#609 #617 #619 #630")
 EXEC("exec.context_capacity", "int", "Context tokens one request holds in the device's preset (below the native context where the "
      "memory pool cannot hold the native KV).", rows=ROWS_ALL)
-EXEC("exec.pool_capacity", "int", "KV pool positions the device's preset commits (fixed state backing commits it eagerly). hrx-loom 0.2.0rc1 rejects the card field "
+EXEC("exec.pool_capacity", "int", "KV pool positions the device's preset commits (fixed state backing commits it eagerly). hrx-loom 0.2.0 rejects the card field "
      "(the pool is the --memory_bytes budget; --pool_backing=fixed makes it context_capacity): kept only so v0.1-era scope files stay valid, never written to a card.", rows=ROWS_ALL)
 EXEC("exec.rows", "int", "Concurrent rows (streams) of the device's preset.", rows=ROWS_STREAMS)
 EXEC("exec.draft_depth", "int", "Draft depth of the device's preset (0: undrafted).", rows=ROWS_DECODE)

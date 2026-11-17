@@ -4,6 +4,7 @@ The fixture job (tests/data/regen/job_e2b) is a downloaded R9700 job of this cam
 (perf_r9700_aa.json) is what ab_jobs.py wrote for it."""
 import contextlib
 import io
+import importlib.util
 import json
 import os
 import shutil
@@ -53,7 +54,7 @@ class Base(unittest.TestCase):
 
     def plan(self, *args, slugs=(SLUG,), device="radeon-r9700"):
         with mock.patch.object(regen, "sh", self.gen), mock.patch.object(regen, "hf_head", lambda repo: "f" * 40), \
-                contextlib.redirect_stdout(io.StringIO()):
+                mock.patch.object(regen, "old_sdk_revision", lambda repo: "e" * 40), contextlib.redirect_stdout(io.StringIO()):
             regen.main(["plan", "--base", "r9700", "--device", device, "--state", self.state, *args, *slugs])
         return regen.State(self.state)
 
@@ -333,7 +334,7 @@ class StatusTest(Base):
 
 
 class SdkAbTest(Base):
-    """--mode sdk-ab: the SDK migration's A/B (old = the manifest's staging card on 0.1.0, new = built on 0.2.0rc1): plan, ratchet, deltas, status."""
+    """--mode sdk-ab: the SDK migration's A/B (old = the manifest's staging card on 0.1.0, new = built on 0.2.0): plan, ratchet, deltas, status."""
 
     def plan_sdk(self, **kw):
         return self.plan("--mode", "sdk-ab", **kw)
@@ -375,14 +376,14 @@ class SdkAbTest(Base):
     def test_plan_pins_old_and_new_to_the_staging_head(self):
         st = self.plan_sdk()
         refs = json.load(open(os.path.join(st.work, "refs_radeon-r9700.json")))
-        rev = "f" * 40   # hf_head (mocked): the card as published at plan time, not the manifest's (possibly older) staging.revision
-        self.assertEqual(refs[SLUG], {"old": f"loom-fun-staging/{SLUG}@{rev}", "new": f"loom-fun-staging/{SLUG}@{rev}"})
+        # old = the newest old-SDK revision (mocked "e"), new = the head at plan time (mocked "f"), the same on every device
+        self.assertEqual(refs[SLUG], {"old": f"loom-fun-staging/{SLUG}@{'e' * 40}", "new": f"loom-fun-staging/{SLUG}@{'f' * 40}"})
         self.assertFalse(st.jobs[JOB]["aa"])   # same revision, but two SDKs: not a noise-only A/A
         cmd = self.calls[0]
         for flag in ("--sdk-ab", "--baselines"):
             self.assertIn(flag, cmd)
         self.assertEqual(cmd[cmd.index("--old-sdk") + 1], "card")
-        self.assertEqual(cmd[cmd.index("--new-sdk") + 1], "0.2.0rc1")
+        self.assertEqual(cmd[cmd.index("--new-sdk") + 1], "0.2.0")
 
     def test_sdk_ab_takes_no_old_org(self):
         with self.assertRaises(SystemExit), mock.patch.object(regen, "sh", self.gen):
@@ -398,6 +399,48 @@ class SdkAbTest(Base):
         self.assertEqual(regen.sdk_decide(st, JOB, e, p)[0], "promote")   # no decode_32k row on either side
         m = json.load(open(p)); m["metrics"]["decode_32k"] = {"old": 50.0, "new": None, "ratio": None}; json.dump(m, open(p, "w"))
         self.assertEqual(regen.sdk_decide(st, JOB, e, p)[0], "rerun")   # the old side served it, the new one did not
+        json.dump({"metrics": {}, "gate_failures": [], "text": {"status": "MATCH"}}, open(p, "w"))
+        self.assertEqual(regen.sdk_decide(st, JOB, e, p)[0], "rerun")   # nothing measured on either side (a failed perf step): never a promote
+        json.dump({"metrics": {"decode": {"old": 100.0, "new": 101.0, "ratio": 1.01}, "prefill_8k": {"old": 100.0, "new": 100.0, "ratio": 1.0},
+                               "streams4": {"old": 100.0, "new": 100.0, "ratio": 1.0}, "decode_32k": {"old": None, "new": 50.0, "ratio": None}},
+                   "gate_failures": [], "text": {"status": "MATCH"}}, open(p, "w"))
+        d, r, *_ = regen.sdk_decide(st, JOB, e, p)
+        self.assertEqual(d, "promote")
+        self.assertTrue(any("only on the new SDK" in x for x in r))
+
+    @unittest.skipUnless(importlib.util.find_spec("huggingface_hub"), "needs huggingface_hub")
+    def test_old_sdk_revision_walks_the_history(self):
+        from huggingface_hub.utils import EntryNotFoundError
+        commits = [mock.Mock(commit_id=c) for c in ("c3", "c2", "c1", "c0")]
+        pins = {"c3": {"sdk": {"hrx_loom": regen.SDK_NEW}}, "c2": {"sdk": {"hrx_loom": "0.1.0"}}, "c1": {}}
+        def dl(repo, name, revision):
+            if revision not in pins:
+                raise EntryNotFoundError("no llm_config.json")
+            p = os.path.join(self.tmp, f"{revision}.json"); json.dump(pins[revision], open(p, "w")); return p
+        api = mock.Mock(); api.list_repo_commits.return_value = commits
+        with mock.patch("huggingface_hub.HfApi", return_value=api), mock.patch("huggingface_hub.hf_hub_download", dl):
+            self.assertEqual(regen.old_sdk_revision("o/r"), "c2")
+            pins["c2"] = {"sdk": {"hrx_loom": regen.SDK_NEW}}; pins["c1"] = {"sdk": {"hrx_loom": regen.SDK_NEW}}
+            self.assertIsNone(regen.old_sdk_revision("o/r"))   # c0 has no llm_config.json: not a package
+        def boom(repo, name, revision):
+            raise OSError("429")
+        with mock.patch("huggingface_hub.HfApi", return_value=api), mock.patch("huggingface_hub.hf_hub_download", boom):
+            with self.assertRaises(OSError):   # a Hub failure is not "no package": plan dies with a clear message instead
+                regen.old_sdk_revision("o/r")
+
+    def test_round_two_with_nothing_measured_holds(self):
+        st = self.plan_sdk()
+        e = st.jobs[JOB]
+        e.update(round=2, prev=JOB)
+        e["perf"] = {"decode": 1.0, "prefill": 1.0, "longctx": 1.0, "4stream": 1.0}
+        p = os.path.join(self.tmp, "empty.json")
+        json.dump({"metrics": {}, "gate_failures": [], "text": {"status": "MATCH"}}, open(p, "w"))
+        self.assertEqual(regen.sdk_decide(st, JOB, e, p)[0], "hold")
+
+    def test_new_sdk_pins_are_the_target_and_its_candidates(self):
+        base = regen.SDK_NEW.split("rc")[0]
+        self.assertTrue(regen.new_sdk_pin(base) and regen.new_sdk_pin(base + "rc1"))
+        self.assertFalse(regen.new_sdk_pin(None) or regen.new_sdk_pin("0.1.0") or regen.new_sdk_pin(base + ".dev0"))
 
     def test_deltas_in_percent_positive_is_v02_faster(self):
         self.e(self.plan_sdk())
@@ -617,7 +660,7 @@ class PackageTest(Base):
         self.assertEqual(up[up.index("--org") + 1], "loom-fun-staging")
         self.assertEqual(up[up.index("--parent-commit") + 1], "h" * 40)   # the snapshot's revision
         self.assertNotIn("--card-only", up)
-        self.assertIn("hrx-loom 0.2.0rc1", up[up.index("--message") + 1])
+        self.assertIn("hrx-loom 0.2.0", up[up.index("--message") + 1])
         self.assertIn(self.want, out)
         self.assertNotIn("package", st.jobs[JOB])
 
