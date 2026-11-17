@@ -1,9 +1,9 @@
 # Task: <one line> (engineer "<name>")
 Read first: BRIEF.md, DECISIONS.md (sections ...), notes/ENG_CONTRACT.md, <the files and PRs this task builds on>.
-Tier: <ordinary | research | strongest>.
+Tier: <ordinary | strongest>.
 Reason: <why this tier fits; include any explicit owner preference>.
-Host model: <concrete model ID from the current host catalog, or inherited/unavailable>; reasoning: <control/value or unavailable>.
-Dispatch: <requested controls and actual dispatch-call/result; include fork mode when relevant>.
+Host model: <concrete model ID from the current host catalog, or inherited/unavailable>; selected reasoning control supported by host: <value or unavailable>.
+Dispatch: <requested supported controls and actual dispatch-call/result; include fork mode when relevant; state any unavailable control>.
 Verification: <host confirmation/evidence, or `unverified` and why; requested model is separate from runtime identity>.
 Branch @INTEGRATION@-<name>, PR -> @INTEGRATION@. Dependencies in flight: <engineer: files, so you code against their schema or an adapter>.
 

@@ -29,11 +29,11 @@ Narrow changes inside a campaign are [targeted fixes](targeted-fix.md).
 
 ## Model selection and dispatch
 
-Choose a tier from the work, then map it to controls the current host actually exposes. Ordinary bounded implementation, documentation, and
-routine review use the ordinary tier. Open-ended research or implementation use the research tier. Fused or persistent kernels, register/LDS
-budgets across fused stages, cross-workgroup synchronization, and open-ended optimization use the strongest available tier. A campaign owner's
-explicit model or reasoning preference takes precedence; record the preference and how it shaped the choice. These are task-fit tiers, not a
-claimed price or universal quality ranking.
+Use two task-fit tiers, mapped to controls the current host actually exposes. The ordinary tier is the default for bounded implementation,
+documentation, routine reviews, dashboard updates, and bounded read-only research. The strongest available tier is for tech leads and
+for design-heavy or open-ended work, including fused or persistent kernels, register/LDS budgets across fused stages, cross-workgroup
+synchronization, and open-ended optimization. A campaign owner's explicit model or reasoning preference takes precedence; record the
+preference and how it shaped the choice. Use catalog descriptions and available controls without guessing prices or a universal quality rank.
 
 At startup, resume, and before every delegation (including nested delegation), inspect the current host's model and reasoning controls and
 its current model catalog. Map the task tier to a concrete model the host lists, using the catalog's descriptions and applicable owner
@@ -41,7 +41,8 @@ preferences; do not reuse stale model IDs or infer a price/quality hierarchy. Re
 control/catalog evidence used. If a host exposes no model control, state that the model is inherited or otherwise unverified and why. Do not
 claim an override was applied when it was not.
 
-A delegator must pass the chosen model and reasoning control on the actual dispatch call. If an override requires a fresh/no-history fork,
+A delegator must pass the chosen model and any selected reasoning value the host supports on the actual dispatch call; do not invent
+unsupported arguments. If the host does not expose a needed control, disclose the fallback. If an override requires a fresh/no-history fork,
 provide that fork mode and a self-contained brief with the goal, scope, read-first files, constraints, and deliverables. Inherit the parent's
 selection only when its tier is recorded and matches the delegated task; otherwise select and pass a model explicitly. Capture the accepted
 agent ID and the dispatch result. Report the requested model separately from runtime identity: if the host does not expose runtime identity,
@@ -49,8 +50,9 @@ mark it unverified. A failed or unavailable override is a disclosed fallback, no
 current controls and catalog, retain a still-valid recorded choice when appropriate, and never interrupt useful in-flight agents solely to
 retier them.
 
-Every task brief includes `Tier`, `Reason`, `Host model`, `Dispatch`, and `Verification`. `Dispatch` records the requested controls and the
-actual call/result; `Verification` records what the host confirmed or explicitly says `unverified` with the limitation. Engineer briefs are
+Every task brief includes `Tier`, `Reason`, `Host model`, `Dispatch`, and `Verification`. `Dispatch` records the requested supported controls
+and the actual call/result, including unavailable controls; `Verification` records what the host confirmed or explicitly says `unverified`
+with the limitation. Engineer briefs are
 self-contained and point at the files to read; never assume the conversation. A parallel ordinary-tier variant of a design is fine only when
 the task makes that comparison useful and the lead can review it.
 
