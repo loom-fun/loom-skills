@@ -584,6 +584,314 @@ class SdkAbTest(Base):
         self.assertIn("package", e["reason"])
 
 
+class SdkLoomTest(Base):
+    """--mode sdk-loom: the Loom-only sweep. The job's Loom rows are compared with the OLD card's Loom rows (another job); a row outside +-3 % either way
+    gets ONE targeted ABBA job (the sdk-ab job without baselines) whose verdict decides; ingest takes the llama.cpp rows from the previous card."""
+    e = SdkAbTest.e
+    package_recorded = SdkAbTest.package_recorded
+
+    def plan_loom(self):
+        return self.plan("--mode", "sdk-loom")
+
+    def cmp_file(self, name, vs_card, gates=None):
+        """a strix_ab_compare.py result of a Loom-only job: new values and new / old-card ratios (no old side)"""
+        p = os.path.join(self.tmp, f"{name}.json")
+        json.dump({"job": name, "metrics": {k: {"old": None, "new": 100.0 * r if r and r != "nocard" else (100.0 if r else None), "ratio": None, "status": "MISSING",
+                                                "card": 100.0 if r != "nocard" else None, "new_vs_card": r if r != "nocard" else None}
+                                            for k, r in vs_card.items()}, "gate_failures": gates or [], "degraded_runner": {}}, open(p, "w"))
+        return p
+
+    def test_accept_regression_publishes_only_a_confirmed_slowdown(self):
+        st = self.plan_loom() if hasattr(self, "plan_loom") else self.plan("--mode", "sdk-loom")
+        e = st.jobs[JOB]
+        e.update(stage="needs_decision", reason="confirmed regression / failed gate / text difference: ABBA confirmation (job 1): slower than -3%: prefill -7.4 %",
+                 confirm_rows=["prefill"], perf={"decode": 1.0, "prefill": -6.0, "longctx": 0.0, "4stream": 0.0})
+        st.jobs["abba"] = {**{k: v for k, v in e.items() if k not in ("perf", "confirm_rows")}, "slug": SLUG, "prev": JOB, "perf_abba": {"decode": 0.5, "prefill": -7.4, "longctx": None, "4stream": 0.2}}
+        st.save()
+        with contextlib.redirect_stdout(io.StringIO()):
+            regen.main(["accept-regression", self.state, SLUG, "--note", "U1: SDK runtime on Strix (notes/upstream.md)"])
+        e = regen.State(self.state).jobs[JOB]
+        self.assertEqual((e["stage"], e["decision"]), ("collected", "promote"))
+        self.assertIn("U1", e["accepted_regression"])
+        self.assertEqual(e["perf"]["prefill"], -7.4)   # the ABBA number on the confirmed row
+        self.assertEqual(e["confirmed"], {"prefill": -7.4})
+        st = regen.State(self.state); st.jobs[JOB].update(stage="needs_decision", reason="gate failed: ktest:staging"); st.save()
+        with contextlib.redirect_stdout(io.StringIO()):
+            regen.main(["accept-regression", self.state, SLUG, "--note", "x"])
+        self.assertEqual(regen.State(self.state).jobs[JOB]["stage"], "needs_decision")   # a gate failure is never accepted
+
+    def test_accept_regression_sdk_ab_needs_both_runs_confirmed(self):
+        st = self.plan("--mode", "sdk-ab")
+        e = st.jobs[JOB]
+        e.update(stage="needs_decision", round=2, reason="confirmed regression / failed gate / text difference: still undecided after the confirming run: slower than -3%: decode -4.0 %")
+        st.save()
+        with contextlib.redirect_stdout(io.StringIO()):
+            regen.main(["accept-regression", self.state, SLUG, "--note", "x"])
+        self.assertEqual(regen.State(self.state).jobs[JOB]["stage"], "needs_decision")   # never confirmed
+        st = regen.State(self.state)
+        st.jobs[JOB].update(reason="confirmed regression / failed gate / text difference: confirmed regression > 3% in both runs: decode -4.0 % / -4.2 %")
+        st.save()
+        with contextlib.redirect_stdout(io.StringIO()):
+            regen.main(["accept-regression", self.state, SLUG, "--note", "SDK"])
+        self.assertEqual(regen.State(self.state).jobs[JOB]["stage"], "collected")
+
+    def _gate_job(self, e, fails, metrics, ktest="FAIL (67/68 passed; 2 skipped)", log="67/68 passed\n", tag="j"):
+        d = os.path.join(self.tmp, "gate_" + tag)
+        os.makedirs(d, exist_ok=True)
+        json.dump({"results": {"ktest:staging": ktest}}, open(os.path.join(d, "summary.json"), "w"))
+        if log is not None:
+            open(os.path.join(d, "ktest_staging.log"), "w").write(log)
+        cmp = os.path.join(d, "cmp.json")
+        json.dump({"gate_failures": fails, "metrics": metrics}, open(cmp, "w"))
+        e.update(dir=d, cmp=cmp)
+        return cmp
+
+    def _accept_gate(self):
+        with contextlib.redirect_stdout(io.StringIO()):
+            regen.main(["accept-gate-failure", self.state, SLUG, "--note", "same case failed on the 0.1.0 card"])
+        return regen.State(self.state)
+
+    def test_accept_gate_failure_only_kernel_tests_that_ran(self):
+        st = self.plan("--mode", "sdk-loom")
+        metrics = {r: {"new": 100.0, "card": 100.0, "new_vs_card": 1.0} for r in regen.SDK_METRICS.values()}
+        held = dict(stage="needs_decision", decision="hold", reason="confirmed regression / failed gate / text difference: gate failed: ktest:staging")
+        cmp = self._gate_job(st.jobs[JOB], ["ktest:staging"], metrics)
+        st.jobs[JOB].update(held); st.save()
+        e = self._accept_gate().jobs[JOB]
+        self.assertEqual((e["stage"], e["decision"]), ("collected", "promote"))
+        self.assertIn("ktest:staging failed, published as failed", e["accepted_gate_failure"])
+        self.assertEqual(json.load(open(cmp))["gate_failures"], ["ktest:staging"])   # the job's evidence is untouched: the card shows the failure
+        self.assertIn("published as failed", regen.card_message(e, "strix-halo", "9", True, True))
+        # refused: a func / serving gate; kernel tests that did not run to a result (ERROR, or no "N/M passed" failure in the log)
+        for fails, kt, log in ((["ktest:staging", "func:staging"], "FAIL (67/68 passed)", "67/68 passed\n"), (["ktest:staging"], "ERROR", None),
+                               (["ktest:staging"], "FAIL", "Traceback\n")):
+            st = regen.State(self.state)
+            self._gate_job(st.jobs[JOB], fails, metrics, kt, log, tag=kt[:4] + str(len(fails)))
+            st.jobs[JOB].update(held); st.save()
+            self.assertEqual(self._accept_gate().jobs[JOB]["stage"], "needs_decision", (fails, kt))
+        # perf rows outside the band still ask for the confirming job
+        st = regen.State(self.state)
+        self._gate_job(st.jobs[JOB], ["ktest:staging"], {**metrics, "prefill_8k": {"new": 90.0, "card": 100.0, "new_vs_card": 0.9}}, tag="slow")
+        st.jobs[JOB].update(held); st.save()
+        e = self._accept_gate().jobs[JOB]
+        self.assertEqual((e["stage"], e["decision"]), ("collected", "confirm"))
+
+    def test_accept_gate_failure_settles_a_held_abba_confirmation(self):
+        st = self.plan("--mode", "sdk-loom")
+        e = st.jobs[JOB]
+        e.update(stage="needs_decision", decision="confirm", confirm_rows=["prefill"], perf_cross={"decode": 0.0, "prefill": -5.0, "longctx": 0.0, "4stream": 0.0},
+                 reason="ABBA confirmation (job 7): gate failed: ktest:staging (ABBA prefill -1.0 %)")
+        abba = {k: v for k, v in e.items() if k not in ("confirm_rows", "perf_cross")}
+        abba.update(prev=JOB, round=2, run="7", stage="needs_decision", decision="hold")
+        ab = {r: {"old": 100.0, "new": 99.0, "ratio": 0.99} for r in regen.SDK_METRICS.values()}
+        self._gate_job(abba, ["ktest:staging"], ab, tag="abba")
+        st.jobs["abba"] = abba
+        st.save()
+        e = self._accept_gate().jobs[JOB]
+        self.assertEqual((e["stage"], e["decision"]), ("collected", "promote"))
+        self.assertEqual(e["confirmed"], {"prefill": -1.0})
+        self.assertIn("published as failed", e["accepted_gate_failure"])
+
+    def test_accept_gate_failure_sdk_ab_round2(self):
+        st = self.plan("--mode", "sdk-ab")
+        e = st.jobs[JOB]
+        ab = {r: {"old": 100.0, "new": 100.0, "ratio": 1.0} for r in regen.SDK_METRICS.values()}
+        self._gate_job(e, ["ktest:staging"], ab, tag="ab2")
+        e.update(stage="needs_decision", decision="hold", round=2, reason="confirmed regression / failed gate / text difference: gate failed: ktest:staging")
+        st.save()
+        e = self._accept_gate().jobs[JOB]
+        self.assertEqual((e["stage"], e["decision"]), ("collected", "promote"))
+        st = regen.State(self.state)
+        self._gate_job(st.jobs[JOB], ["ktest:staging"], {**ab, "decode": {"old": 100.0, "new": 90.0, "ratio": 0.9}}, tag="ab2s")
+        st.jobs[JOB].update(stage="needs_decision", decision="hold"); st.save()
+        e = self._accept_gate().jobs[JOB]
+        self.assertEqual(e["stage"], "needs_decision")   # round 2 slower than the band: a person decides, as collect does
+        self.assertTrue(e["reason"].startswith("still undecided after the confirming run: "))
+
+    def test_card_message_per_mode_and_accepted_note(self):
+        e = {"perf": {"decode": 1.0, "prefill": -7.4, "longctx": 0.0, "4stream": 0.2}, "confirmed": {"prefill": -7.4},
+             "accepted_regression": "U1: SDK runtime (notes) (was: ...)"}
+        m = regen.card_message(e, "strix-halo", "9", True, True)
+        self.assertIn("another job, same runner type", m)
+        self.assertNotIn("own SDK pin", m)
+        self.assertIn("confirmed slowdown published as measured: U1: SDK runtime (notes)", m)
+        m = regen.card_message({k: v for k, v in e.items() if k != "confirmed"}, "strix-halo", "9", False, True)
+        self.assertIn("own SDK pin (same job, ABBA): decode", m)
+        self.assertIn("confirmed slowdown published as measured", m)
+        self.assertNotIn("confirmed slowdown", regen.card_message({"perf": e["perf"]}, "strix-halo", "9", False, True))
+
+    def test_real_compare_marks_a_card_row_the_job_did_not_measure(self):
+        """through .github/scripts/strix_ab_compare.py: a Loom-only job without the 32k rows vs a card that has them -> longctx is confirmed, not n/a"""
+        d = os.path.join(self.tmp, "job")
+        shutil.copytree(os.path.join(DATA, "job_e2b"), d)
+        for f in os.listdir(d):
+            if "fun" in f:
+                os.remove(os.path.join(d, f))
+        p = os.path.join(d, "perf_staging.jsonl")   # drop the 32k rows: the job did not measure long context
+        strip = lambda o: {k: strip(v) for k, v in o.items() if "32k" not in k} if isinstance(o, dict) else o
+        open(p, "w").write("".join(json.dumps(strip(json.loads(l))) + "\n" for l in open(p) if l.strip()))
+        info = os.path.join(ROOT, "skills", "loom-benchmark", "scripts", "card", "test", "flint", "expected", "info.json")
+        out = os.path.join(self.tmp, "cmp.json")
+        subprocess.run([sys.executable, os.path.join(ROOT, ".github", "scripts", "strix_ab_compare.py"), d, "--json", out, "--fun-info", info,
+                        "--gpu", "strix-halo"], check=True, capture_output=True, text=True)
+        m = json.load(open(out))["metrics"]
+        self.assertIn("decode_32k", m)
+        self.assertIsNone(m["decode_32k"]["new"])
+        self.assertTrue(m["decode_32k"]["card"])
+        st = self.plan_loom() if hasattr(self, "plan_loom") else None
+        e = {"round": 1}
+        decision, reasons, *_ = regen.sdk_loom_decide(st, JOB, e, out)
+        self.assertEqual(decision, "confirm")
+        self.assertIn("longctx", e["confirm_rows"])
+
+    def collect_cmp(self, cmp, name=JOB):
+        def download(st, n, e):
+            d = regen.job_dir(st, n)
+            shutil.rmtree(d, ignore_errors=True)
+            shutil.copytree(os.path.join(DATA, "job_e2b"), d)
+            return d
+        with mock.patch.object(regen, "download", download), mock.patch.object(regen, "compare", lambda st, n, e, d: cmp), \
+                contextlib.redirect_stdout(io.StringIO()):
+            regen.main(["collect", self.state])
+        return regen.State(self.state)
+
+    def collect_loom(self, vs_card, name=JOB, **kw):
+        return self.collect_cmp(self.cmp_file(name, vs_card, **kw), name)
+
+    IN = {"decode": 1.02, "decode_2k": 1.05, "prefill_8k": 0.98, "decode_32k": 1.0, "streams4": 1.01}
+
+    def test_plan_makes_loom_only_jobs_and_remembers_the_old_card(self):
+        st = self.plan_loom()
+        cmd = next(c for c in self.calls if any(x.endswith("ab_jobs.py") for x in c))
+        for flag in ("--sdk-ab", "--loom-only"):
+            self.assertIn(flag, cmd)
+        self.assertNotIn("--baselines", cmd)
+        self.assertEqual(st.jobs[JOB]["old"], f"loom-fun-staging/{SLUG}@" + "e" * 40)
+        self.assertEqual(st.d["mode"], "sdk-loom")
+
+    def test_rows_inside_the_band_promote_with_cross_job_deltas(self):
+        self.e(self.plan_loom())
+        e = self.collect_loom(self.IN).jobs[JOB]
+        self.assertEqual((e["stage"], e["decision"]), ("collected", "promote"))
+        self.assertEqual(e["perf"], {"decode": 2.0, "prefill": -2.0, "longctx": 0.0, "4stream": 1.0})
+
+    def test_a_row_outside_the_band_either_way_asks_for_one_abba_job(self):
+        for row, r, text in (("prefill_8k", 0.96, "prefill -4.0 %"), ("decode", 1.05, "decode +5.0 %")):
+            self.setUp()
+            self.e(self.plan_loom())
+            e = self.collect_loom({**self.IN, row: r}).jobs[JOB]
+            self.assertEqual((e["stage"], e["decision"]), ("collected", "confirm"), row)
+            self.assertIn(text, e["reason"])
+            self.assertEqual(e["confirm_rows"], [{"decode": "decode", "prefill_8k": "prefill"}[row]])
+
+    def test_a_row_the_old_card_has_no_value_for_is_reported_not_confirmed(self):
+        self.e(self.plan_loom())
+        e = self.collect_loom({**self.IN, "streams4": "nocard"}).jobs[JOB]
+        self.assertEqual(e["decision"], "promote")
+        self.assertIn("4stream", e["reason"])
+        self.assertIsNone(e["perf"]["4stream"])
+
+    def test_a_row_the_old_card_has_that_the_job_did_not_measure_is_confirmed(self):
+        self.e(self.plan_loom())
+        e = self.collect_loom({**self.IN, "decode_32k": None}).jobs[JOB]
+        self.assertEqual((e["decision"], e["confirm_rows"]), ("confirm", ["longctx"]))
+        self.assertIn("longctx missing", e["reason"])
+
+    def test_a_failed_gate_holds_and_nothing_measured_holds(self):
+        self.e(self.plan_loom())
+        e = self.collect_loom(self.IN, gates=["ktest:staging"]).jobs[JOB]
+        self.assertEqual((e["stage"], e["decision"]), ("needs_decision", "hold"))
+        self.setUp()
+        self.e(self.plan_loom())
+        e = self.collect_loom({k: None for k in self.IN}).jobs[JOB]
+        self.assertEqual(e["decision"], "hold")
+
+    def abba(self, first, second):
+        """round 1 (cross-job) then its ABBA job; returns the state after both are collected"""
+        self.e(self.plan_loom())
+        self.collect_loom(first)
+        with mock.patch.object(regen, "sh", self.gen), contextlib.redirect_stdout(io.StringIO()):
+            regen.main(["rerun", self.state])
+        cmd = self.calls[-1]
+        self.assertIn("--suffix=-r2", cmd)
+        self.assertIn("--sdk-ab", cmd)
+        self.assertNotIn("--loom-only", cmd)   # the confirming job is the ABBA: old card on its pin against the new package
+        self.assertNotIn("--baselines", cmd)
+        st = regen.State(self.state)
+        r2 = next(n for n in st.jobs if n.endswith("-r2"))
+        self.assertEqual((st.jobs[r2]["prev"], st.jobs[r2]["old"]), (JOB, st.jobs[JOB]["old"]))
+        st.jobs[r2].update(stage="done", run="8", job_url="https://x/job/2", completed="2026-11-16T14:00:00Z")
+        st.save()
+        cmp = SdkAbTest.cmp_file(self, "abba", second)
+        return self.collect_cmp(cmp, r2), r2
+
+    def test_abba_job_decides_the_confirmed_rows_and_their_deltas_replace_the_cross_job_ones(self):
+        st, r2 = self.abba({**self.IN, "prefill_8k": 0.96, "decode": 1.06}, {"decode": 1.04, "prefill_8k": 0.985, "decode_32k": 1.0, "streams4": 1.0, "decode_2k": 1.0})
+        f = st.jobs[JOB]
+        self.assertEqual((f["stage"], f["decision"]), ("collected", "promote"))
+        self.assertEqual(f["confirmed"], {"decode": 4.0, "prefill": -1.5})
+        self.assertEqual(f["perf"], {"decode": 4.0, "prefill": -1.5, "longctx": 0.0, "4stream": 1.0})   # longctx and 4stream stay cross-job
+        self.assertEqual(f["perf_cross"]["decode"], 6.0)
+        self.assertNotIn("perf", st.jobs[r2])   # the confirming job reports through the first one
+        p = os.path.join(self.tmp, "status.json")
+        json.dump({"models": {}}, open(p, "w"))
+        with contextlib.redirect_stdout(io.StringIO()):
+            regen.main(["status", self.state, "--status-json", p])
+        m = json.load(open(p))["models"][SLUG]
+        self.assertEqual(m["perf"]["r9700"], f["perf"])
+        self.assertEqual(m["perf_confirmed"]["r9700"], ["decode", "prefill"])
+
+    def test_abba_job_slower_than_3_percent_stops_the_model_with_the_numbers(self):
+        st, r2 = self.abba({**self.IN, "prefill_8k": 0.96}, {"decode": 1.0, "prefill_8k": 0.95, "decode_32k": 1.0, "streams4": 1.0, "decode_2k": 1.0})
+        f = st.jobs[JOB]
+        self.assertEqual(f["stage"], "needs_decision")
+        self.assertIn("prefill -5.0 %", f["reason"])
+        self.assertEqual((st.jobs[r2]["stage"], st.jobs[r2]["decision"]), ("needs_decision", "hold"))
+
+    def test_ingest_takes_the_llama_rows_from_the_previous_card_and_names_the_confirmed_rows(self):
+        st, _ = self.abba({**self.IN, "prefill_8k": 0.96}, {"decode": 1.0, "prefill_8k": 0.99, "decode_32k": 1.0, "streams4": 1.0, "decode_2k": 1.0})
+        e = st.jobs[JOB]
+        open(os.path.join(e["dir"], "programs_sha256_staging.txt"), "w").write("b" * 64 + "\n")
+        self.package_recorded(e, "b" * 64)
+        calls = []
+
+        def hf_snapshot(repo, rev, out):
+            os.makedirs(os.path.join(out, "program"), exist_ok=True)
+            open(os.path.join(out, "program", "llm.loom"), "w").write("x")
+            json.dump({"card": {"memory_bytes": 1}, "devices": {}}, open(os.path.join(out, "info.json"), "w"))
+            open(os.path.join(out, "README.md"), "w").write("x")
+
+        def run_tool(args, cwd):
+            calls.append([str(a) for a in args])
+            if "build" in args and "-o" in args:
+                shutil.copy(os.path.join(cwd, "info_prev.json"), os.path.join(cwd, "info_new.json"))
+            return ""
+        with mock.patch.object(regen, "hf_snapshot", hf_snapshot), mock.patch.object(regen, "hf_head", lambda r: "h" * 40), \
+                mock.patch.object(regen.card_lib, "programs_sha256", lambda d: "b" * 64), \
+                mock.patch.object(regen, "run_tool", run_tool), contextlib.redirect_stdout(io.StringIO()):
+            regen.main(["ingest", self.state])
+        perf = next(c for c in calls if "perf" in c and "--loom-jsonl" in c)
+        self.assertIn("--baseline-from-info", perf)
+        self.assertNotIn("--llama-jsonl", perf)
+        self.assertFalse([c for c in calls if "--backend" in c])   # no Vulkan re-measure: its session stays as published
+        build = next(c for c in calls if "build" in c and "--evidence" in c)
+        self.assertIn("--reset-performance", build)
+        e = regen.State(self.state).jobs[JOB]
+        self.assertEqual(e["stage"], "ingested")
+        self.assertIn("another job", e["message"])
+        self.assertIn("confirmed by an ABBA job (same job): prefill -1.0 %", e["message"])
+
+    def test_package_and_ingest_use_the_first_job_only(self):
+        st, r2 = self.abba({**self.IN, "prefill_8k": 0.96}, {"decode": 1.0, "prefill_8k": 0.99, "decode_32k": 1.0, "streams4": 1.0, "decode_2k": 1.0})
+        self.assertEqual((st.jobs[r2]["stage"], st.jobs[r2]["decision"]), ("collected", "promote"))
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            regen.main(["ingest", self.state, "--slug", SLUG])   # no package recorded: the first job stops, the confirming job is not ingested
+        st = regen.State(self.state)
+        self.assertEqual(st.jobs[JOB]["stage"], "needs_decision")
+        self.assertEqual(st.jobs[r2]["stage"], "collected")
+
+
 def v01_model():
     """a published (v0.1.0 era) model.json: pool_capacity, origins, a parameter file origin, a per-GPU preset"""
     return {"schema_version": 1, "model": {"id": "a/b"}, "programs": {"source": {"inputs": ["program/control.loom"]}},
@@ -645,6 +953,7 @@ class PackageTest(Base):
 
         def snapshot(repo, rev, out):
             uploads.append(["snapshot", repo, rev])
+            shutil.rmtree(out, ignore_errors=True)   # as hf_snapshot_small does
             shutil.copytree(self.snap, out)
         out = io.StringIO()
         with mock.patch.object(regen, "sh", sh), mock.patch.object(regen, "hf_head", lambda r: next(heads)), \
@@ -689,12 +998,34 @@ class PackageTest(Base):
         self.assertFalse(calls)
         self.assertIn("already published", out)
 
-    def test_a_head_that_already_holds_the_programs_is_recorded_not_uploaded(self):
-        shutil.rmtree(os.path.join(self.snap, "program"))
-        shutil.copytree(os.path.join(self.canon, SLUG, "program"), os.path.join(self.snap, "program"))
+    def test_a_head_that_already_holds_the_package_is_recorded_not_uploaded(self):
+        st, calls, _ = self.run_package("--dry-run", "--slugs", SLUG)   # assembles the package into the state's work dir
+        pkg = os.path.join(st.work, "package", SLUG, "pkg")
+        shutil.rmtree(self.snap)
+        shutil.copytree(pkg, self.snap)   # the head now holds exactly that package
         st, calls, _ = self.run_package("--slugs", SLUG)
         self.assertFalse([c for c in calls if "upload" in c])
         self.assertEqual(st.jobs[JOB]["package"]["revision"], "h" * 40)
+
+    def test_a_card_steps_gpu_preset_on_the_head_is_kept_and_compares_equal(self):
+        st, calls, _ = self.run_package("--dry-run", "--slugs", SLUG)
+        pkg = os.path.join(st.work, "package", SLUG, "pkg")
+        m = json.load(open(os.path.join(pkg, "model.json")))
+        first = next(iter(m["presets"]))
+        m["presets"][first + "-r9700"] = dict(m["presets"][first], execution={**m["presets"][first].get("execution", {}), "context_capacity": 4096})
+        json.dump(m, open(os.path.join(pkg, "model.json"), "w"), indent=1)   # the R9700 card step added its preset to the head
+        shutil.rmtree(self.snap)
+        shutil.copytree(pkg, self.snap)
+        st, calls, _ = self.run_package("--dry-run", "--slugs", SLUG)
+        out = json.load(open(os.path.join(st.work, "package", SLUG, "pkg", "model.json")))
+        self.assertIn(first + "-r9700", out["presets"])   # carried over, not stripped by a re-upload
+
+    def test_same_programs_but_another_sdk_pin_is_uploaded(self):
+        # the head holds the canonical programs but an older llm_config.json pin (a package re-pinned from a pre-release): upload, not "already"
+        shutil.rmtree(os.path.join(self.snap, "program"))
+        shutil.copytree(os.path.join(self.canon, SLUG, "program"), os.path.join(self.snap, "program"))
+        st, calls, _ = self.run_package("--slugs", SLUG)
+        self.assertTrue([c for c in calls if "upload" in c])
 
     def test_default_selection_is_the_promoted_collected_jobs(self):
         st, calls, out = self.run_package("--dry-run")

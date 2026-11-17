@@ -142,6 +142,33 @@ class SdkAb(unittest.TestCase):
             self.assertEqual(v[new]["build_args"][-2:], ["--memory-gib", "4096"])   # built as build_fleet.py builds the published package
             self.assertNotIn("context", v[new])   # the served context is an execution override, never a build flag
 
+    def loom_only(self, device, *args):
+        d = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, d, True)
+        ref = f"loom-fun-staging/{FAST}@abc"
+        p = os.path.join(d, "refs.json")
+        json.dump({FAST: {"old": ref, "new": ref}}, open(p, "w"))
+        return json.loads(run_script("ab_jobs.py", ["--device", device, "--sdk-ab", "--loom-only", "--refs", p, *args, FAST]))["jobs"][0]
+
+    def test_loom_only_serves_the_new_package_alone(self):
+        for device in ("strix-halo", "radeon-r9700"):
+            j = self.loom_only(device)
+            self.assertEqual({v["name"] for v in j["variants"]}, {"staging", "stagingnd"})
+            self.assertEqual(j["sdk"], "0.2.0")
+            steps = j["steps"]
+            self.assertEqual([s for s in steps if s.startswith("perf:") and ":long" not in s], ["perf:staging:1"] * 6)   # the fast model's 6 sessions, as the ABBA job
+            self.assertEqual([s for s in steps if s.startswith("c4:")], ["c4:stagingnd"] * 4)
+            fields = [f for x in steps for f in x.split(":")]
+            for gone in ("fun", "funnd", "textmatch", "extend"):
+                self.assertNotIn(gone, fields, (device, steps))
+            self.assertFalse([x for x in steps if x.startswith("llama")], steps)
+            for need in ("func:staging", "ktest:staging", "gates:staging:dev"):
+                self.assertIn(need, steps)
+
+    def test_loom_only_is_a_form_of_sdk_ab(self):
+        with self.assertRaises(SystemExit):
+            run_script("ab_jobs.py", ["--device", "strix-halo", "--loom-only", FAST])
+
     def test_without_the_flag_nothing_changes(self):
         d = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, d, True)

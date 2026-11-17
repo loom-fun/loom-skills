@@ -167,6 +167,12 @@ def build(a, cfg, cdir, tokenizer):
     # the served model id is the port's (llm_config.json model_id): the gates and benchmarks request that name
     model_id = a.model_id or cfg.get("name", "llm").replace(" ", "-")
     card.setdefault("model", {})["id"] = model_id
+    # llm_config.json rides as program data so loom-fetch delivers it (a host that samples from the logits reads the chat dialect there), as
+    # build.py does for kit packages (#861): on the input that already carries data (prepare.loom)
+    for prog in (card.get("programs") or {}).values():
+        for inp in prog.get("inputs") or []:
+            if isinstance(inp, dict) and inp.get("data") is not None and inp.get("path", "").endswith("/prepare.loom") and "llm_config.json" not in inp["data"]:
+                inp["data"].append("llm_config.json")
     shutil.copyfile(tokenizer, os.path.join(pkg, "tokenizer.json"))   # as upstream has it: its origin's hash is in the lock
     json.dump(card, open(os.path.join(pkg, "model.json"), "w"), indent=1)
     if kind == "mtp":   # the draft-off twin of the same package (port.sh's spec check, tune.py)

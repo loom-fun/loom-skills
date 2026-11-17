@@ -50,6 +50,19 @@ plus the card job's func / ktest / gates and llama.cpp baselines. `collect` writ
 than 3 % slower queues ONE confirming `-r2` job (`rerun`); slower than 3 % in both runs = `needs_decision` with both numbers. `ingest` builds the v0.2
 card on the staging head and puts the delta line into the publish message. Order: `plan -> submit -> poll -> collect -> package -> ingest -> publish`.
 
+**Loom-only sweep (`--mode sdk-loom`)**: when the old card's llama.cpp rows and Loom rows are already measured and neither changed, re-measuring them is waste. Per model
+and device ONE job serves the package built in the job on the new SDK alone (variants `staging` + `stagingnd`, `ab_jobs.py --sdk-ab --loom-only`): Loom perf short and
+long at the card job's session count, c4, func, ktest, gates; no llama.cpp steps, no old-card variant. `collect` takes decode, prefill (8k), longctx (decode_32k) and
+4stream as the % delta of the job's Loom rows against the Loom rows of the OLD card's `info.json` for that device (the card at the old revision; another job on the
+same runner type). A gate failure holds. A metric more than 3 % off either way (or one the old card has and the job did not measure) makes the job's decision
+`confirm`; `rerun` then queues ONE targeted ABBA job for that model and device: the `sdk-ab` job without baselines (old card on its own pin against the new package, same
+job), and its verdict decides: slower than 3 % there = `needs_decision` with the numbers, else the first job promotes. State per job: `perf` (the cross-job deltas, with the ABBA
+ones on the confirmed rows), `perf_cross`, `confirmed` = {row: ABBA %}; `status --status-json` writes `models.<slug>.perf.<gpu>` and `models.<slug>.perf_confirmed.<gpu>`
+(the confirmed rows). `package` is unchanged; `ingest` builds the device's table from the first job's Loom rows (`make_info.py perf --baseline-from-info`) and the previous
+card's llama.cpp rows (ROCm: copied per row with its original run and date as `baseline_from`; Vulkan: the published session stays), never re-measured, and the card's
+methodology says "llama.cpp measured on D (run), Loom on D2 (run): same runner type, different jobs" instead of "same job" (`render_card.py`; a same-job card keeps its wording).
+Order: `plan -> submit -> poll -> collect -> (rerun -> submit -> poll -> collect) -> package -> ingest -> publish`.
+
 `regen.py package S.json [--dry-run] [--slugs S...] [--ref REF]` is the step between `collect` and `ingest` (`make_info.py` refuses programs other than the
 ones the job built, so the v0.2 package must be on staging before the card is made). It builds the base once, CPU only (`build_fleet.py --ref origin/<base>
 --with-gen`), snapshots each staging repo at its head (small files, never weights), and replaces `program/**`, the package-root `*.loom`, `gen/**`,

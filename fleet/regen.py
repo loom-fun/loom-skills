@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """One command per campaign step: regenerate the cards of many models on one or more devices, resumable, state in one JSON file.
 
-  regen.py plan    --base BRANCH --device D [--device D2] [--mode ab|card|sdk-ab] [--slugs S... | --all] [--old ORG|refs.json] [--batch N] --state S.json
+  regen.py plan    --base BRANCH --device D [--device D2] [--mode ab|card|sdk-ab|sdk-loom] [--slugs S... | --all] [--old ORG|refs.json] [--batch N] --state S.json
                    [--replicas 2] [--sequential] [--no-baselines] [--priority]   a narrow change: confirming run as a parallel replica, 2+2 -> 6+6, no llama.cpp
   regen.py submit  S.json [--dry-run] [--max-batches N] [--max-inflight N|auto]   experiment branch + perf.json + PR + label per batch (REST), priority
                    batches and R9700-class devices first; --max-inflight sends a sweep in waves (default: all at once)
@@ -13,6 +13,7 @@
   regen.py publish S.json [--dry-run]                      card-only upload to loom-fun-staging (never loom-fun/*)
   regen.py status  S.json [--status-json status.json]      table; with --status-json: models.<slug>.<gpu> = stage / verdict / run for the dashboard
   regen.py accept  S.json SLUG... --note TEXT              a person's call: greedy text differs only at a near-tie, decide again with that accepted
+  regen.py accept-regression S.json SLUG... --note TEXT   SDK modes: publish a CONFIRMED slowdown as measured (the note names its explanation)
   regen.py adopt   S.json --run RUN                        attach an already running / finished run to the state's jobs (by job name)
 
 Modes. sdk-ab: the SDK migration's A/B (ab_jobs.py --sdk-ab): per model and device ONE job, ABBA on one runner: variant "fun" = the published staging card
@@ -21,6 +22,13 @@ Modes. sdk-ab: the SDK migration's A/B (ab_jobs.py --sdk-ab): per model and devi
   % delta new vs old per metric (state: perf = {decode, prefill, longctx, 4stream}, positive = v0.2 faster); a metric more than 3 % slower
   triggers ONE confirming -r2 job, confirmed in both runs = needs_decision with the numbers; `ingest` builds the v0.2 card from the job (its own
   measurement; the delta goes into the publish message); `status --status-json` also writes models.<slug>.perf.<gpu>.
+  sdk-loom: the SDK migration's Loom-only sweep: per model and device ONE job that serves the package built in the job on the new SDK (variants staging +
+  stagingnd; Loom perf short and long at the card job's session count, c4, func, ktest, gates; NO llama.cpp steps, NO old-card variant). `collect` compares the
+  job's decode / prefill / longctx / 4stream rows with the Loom rows of the OLD card's info.json for that device (another job, the same runner type); a
+  metric outside +-3 % either way (or missing) = decision "confirm": `rerun` queues ONE targeted ABBA job (the sdk-ab job without baselines: old card on its
+  own pin vs the new package, same job) whose verdict decides (slower than 3 % there = needs_decision with the numbers, else promote). State per job:
+  perf = the cross-job deltas, the ABBA ones on the confirmed rows, confirmed = {row: ABBA %}. `ingest` builds the device's table from the job's Loom rows
+  plus the previous card's llama.cpp rows (copied with their own run and date, never re-measured); the card's methodology line says "different jobs".
   ab: regeneration of a device that already has a package to compare with (ab_jobs.py: old vs new in ABBA sessions, text match, func, ktest, gates,
   llama.cpp baselines where the card's table comes from the job). card: a NEW device, no old package: one card measurement per model (device_jobs.py: card +
   nodraft variants, func, ktest, gates, llama.cpp ROCm + Vulkan baselines), no A/B: about half the runner time of ab.
@@ -72,7 +80,9 @@ STATUS_STAGE = {"planned": "queued", "submitted": "queued", "queued": "queued", 
                 "skipped": "unsupported", "unsupported": "unsupported"}
 GPU_KEY = {"strix-halo": "strix", "radeon-r9700": "r9700"}   # status.json's per-GPU keys
 # the files a variant leaves in a job's output: ab = old "fun" and new "staging"; card = the single "card" (+ "nodraft")
-VARIANT = {"ab": ("staging", "stagingnd"), "card": ("card", "nodraft"), "logits": ("staging", "stagingnd"), "sdk-ab": ("staging", "stagingnd")}
+VARIANT = {"ab": ("staging", "stagingnd"), "card": ("card", "nodraft"), "logits": ("staging", "stagingnd"), "sdk-ab": ("staging", "stagingnd"),
+           "sdk-loom": ("staging", "stagingnd")}
+SDK_MODES = ("sdk-ab", "sdk-loom")   # sdk-loom: Loom only on the new SDK, deltas against the old card's Loom rows (cross-job), ABBA only where a row moves
 # sdk-ab: the metric of each reported delta (card_lib.METRIC_KEYS rows) and the ratchet: slower than this fraction on a metric = a confirming run
 SDK_METRICS = {"decode": "decode", "prefill": "prefill_8k", "longctx": "decode_32k", "4stream": "streams4"}
 SDK_REGRESSION = 0.03
@@ -210,10 +220,12 @@ def slug_of(job):
 
 def generator_cmd(st, device, slugs, suffix=""):
     d = st["opts"]
-    if st["mode"] in ("ab", "logits", "sdk-ab"):   # logits: ab_jobs.py's job of the pinned staging package, steps cut down in gen_jobs
+    if st["mode"] in ("ab", "logits", *SDK_MODES):   # logits: ab_jobs.py's job of the pinned staging package, steps cut down in gen_jobs
         cmd = [PY, os.path.join(SCRIPTS, "ab_jobs.py"), "--device", device, "--gates", d["gates"], "--new-org", d["new_org"], "--old-org", d["old_org"]]
         if st["mode"] == "sdk-ab":
             cmd += ["--sdk-ab", "--old-sdk", SDK_OLD, "--new-sdk", SDK_NEW, "--baselines"]   # the v0.2 card's own table needs the llama.cpp rows of the same job
+        elif st["mode"] == "sdk-loom":   # the new package alone; a confirming job (suffix -r2) is the sdk-ab ABBA of that model without baselines
+            cmd += ["--sdk-ab", "--old-sdk", SDK_OLD, "--new-sdk", SDK_NEW] + ([] if suffix else ["--loom-only"])
         if d.get("refs"):
             cmd += ["--refs", d["refs"]]
         if device != "strix-halo" and not d.get("no_baselines") and st["mode"] == "ab":
@@ -311,12 +323,12 @@ def cmd_plan(a):
         die(f"--new-org {a.new_org}: cards are measured and published on {STAGING_ORG} only")
     if a.mode == "logits" and a.old is None:
         old_org = a.new_org   # one package, checked: old == new in the pinned refs
-    if a.mode == "sdk-ab":
+    if a.mode in SDK_MODES:
         # old = the newest staging revision whose package is still on the OLD SDK (no pin or a 0.1.x pin in llm_config.json: the card as published
         # before the migration; fleet/manifest.json staging.revision can lag it, and once a v0.2 package is uploaded the head is not it any more);
         # new = the head at plan time (the job's card files and the revision the v0.2 package is published on top of)
         if a.old:
-            die("--mode sdk-ab finds its old package in the staging repo's history (no --old)")
+            die(f"--mode {a.mode} finds its old package in the staging repo's history (no --old)")
         refs = {}
         for s in slugs:
             repo = f"{a.new_org}/{s}"
@@ -349,7 +361,7 @@ def cmd_plan(a):
         # per-device refs file. Where the device has no published table to compare with (anything but Strix Halo, whose old package is the
         # published loom-fun card) and no old package was named, the old package is the new revision itself: an A/A, the runner's own noise.
         dref = {s: dict(e) for s, e in refs.items()} if refs else None
-        if dref and (dev != "strix-halo" or a.mode == "logits") and a.old is None and a.mode != "sdk-ab":
+        if dref and (dev != "strix-halo" or a.mode == "logits") and a.old is None and a.mode not in SDK_MODES:
             for e in dref.values():
                 e.setdefault("old", e["new"])
         if dref:
@@ -374,7 +386,8 @@ def cmd_plan(a):
                 rep_no = j.get("replica", 1)
                 st["jobs"][j["name"]] = {"slug": slug_of(j), "device": dev, "batch": bid, "round": rep_no, "stage": "planned",
                                          "card": j["card"], "steps": len(j["steps"]),
-                                         "aa": a.mode != "sdk-ab" and bool(e.get("old") and e.get("old") == e.get("new"))}   # old == new: the A/B shows noise only
+                                         "aa": a.mode not in SDK_MODES and bool(e.get("old") and e.get("old") == e.get("new")),   # old == new: the A/B shows noise only
+                                         **({"old": e["old"]} if a.mode == "sdk-loom" and e.get("old") else {})}   # the old card the cross-job deltas are taken against
                 if rep_no == 1:
                     first[slug_of(j)] = j["name"]
             for j in jobs:   # a replica is a confirming run submitted with the first: the same links `rerun` makes (prev, rerun_of_me)
@@ -547,14 +560,15 @@ def compare(st, name, e, d):
     cmp = os.path.join(st.work, "cmp", f"{name}.json")
     os.makedirs(os.path.dirname(cmp), exist_ok=True)
     cmd = [PY, os.path.join(SCRIPTS, "strix_ab_compare.py"), d, "--json", cmp]
-    if st.d["mode"] == "sdk-ab":   # the old side IS the staging card at its pinned (old-SDK) revision: the runner guard compares it with that card's value on this device
-        rev = e["card"].split("@")[-1] if "@" in e["card"] else None
-        cmd += ["--fun-info", hf_file(e["card"].split("@")[0], "info.json", rev), "--gpu", e["device"]]
+    if st.d["mode"] in SDK_MODES:   # the old side IS the staging card at its pinned (old-SDK) revision: the runner guard compares it with that card's value on this device
+        ref = e["card"] if st.d["mode"] == "sdk-ab" else (e.get("old") or e["card"])   # sdk-loom: the card's Loom rows are the old side of the cross-job delta
+        rev = ref.split("@")[-1] if "@" in ref else None
+        cmd += ["--fun-info", hf_file(ref.split("@")[0], "info.json", rev), "--gpu", e["device"]]
     elif e["device"] == "strix-halo" and st.d["opts"]["old_org"] == "loom-fun":
         cmd += ["--fun-info", hf_file(f"{st.d['opts']['old_org']}/{e['slug']}", "info.json")]   # new vs the published card value too
     elif e["device"] != "strix-halo":   # R9700: the old side IS the staging card; the runner guard compares it with that card's value
         cmd += ["--fun-info", hf_file(f"{st.d['opts']['old_org']}/{e['slug']}", "info.json"), "--gpu", e["device"]]
-    if prev_cmp(st, e):
+    if prev_cmp(st, e) and st.d["mode"] != "sdk-loom":   # sdk-loom: the confirming job is judged alone (its verdict decides), not against the first run
         cmd += ["--prev", prev_cmp(st, e)]
     sh(cmd)
     return cmp
@@ -593,15 +607,17 @@ def decide(st, name, e, cmp_paths):
     return decision, reasons, res
 
 
-def sdk_deltas(cmp):
-    """{decode, prefill, longctx, 4stream: % new vs old (positive = v0.2 faster)} of a compare, None where a row is missing; plus every row's %"""
+def sdk_deltas(cmp, cross=False):
+    """{decode, prefill, longctx, 4stream: % new vs old (positive = v0.2 faster)} of a compare, None where a row is missing; plus every row's %.
+    cross: the old side is the old card's published Loom value (another job), the compare's new_vs_card, not an ABBA ratio"""
     m = cmp.get("metrics") or {}
+    key = "new_vs_card" if cross else "ratio"
     pct = lambda r: round((r - 1) * 100, 1) if r else None
-    return ({k: pct((m.get(row) or {}).get("ratio")) for k, row in SDK_METRICS.items()},
-            {row: pct(x.get("ratio")) for row, x in m.items()})
+    return ({k: pct((m.get(row) or {}).get(key)) for k, row in SDK_METRICS.items()},
+            {row: pct(x.get(key)) for row, x in m.items()})
 
 
-def sdk_decide(st, name, e, cmp_path):
+def sdk_decide(st, name, e, cmp_path, use_prev=True):
     """The SDK A/B ratchet. Round 1: a gate failure holds; a metric more than 3 % slower (or missing) or a degraded runner asks for ONE confirming -r2 job;
     else promote. Round 2 (e["prev"]): a metric slower than 3 % in BOTH runs is a confirmed regression = hold with the numbers (needs_decision);
     otherwise promote. The reported perf of a confirmed pair is the mean of the two runs. Greedy text differences are reported, not held (v0.2 is another SDK).
@@ -623,7 +639,7 @@ def sdk_decide(st, name, e, cmp_path):
     newonly = [k for k, v in perf.items() if v is None and (m.get(SDK_METRICS[k]) or {}).get("old") is None and (m.get(SDK_METRICS[k]) or {}).get("new") is not None]
     if newonly:
         reasons.append(f"served only on the new SDK (no old value to compare): {', '.join(newonly)}")
-    prev = st.jobs[e["prev"]] if e.get("prev") else None
+    prev = st.jobs[e["prev"]] if e.get("prev") and use_prev else None
     if prev and prev.get("perf"):
         p1 = prev["perf"]
         both = {k: (p1[k], perf[k]) for k in perf if p1.get(k) is not None and perf[k] is not None and p1[k] < -SDK_REGRESSION * 100 and perf[k] < -SDK_REGRESSION * 100}
@@ -637,6 +653,32 @@ def sdk_decide(st, name, e, cmp_path):
     if slow or gone:
         return "rerun", ([f"slower than -{SDK_REGRESSION:.0%}: " + ", ".join(f"{k} {v:+.1f} %" for k, v in slow.items())] if slow else []) + \
             ([f"missing: {', '.join(gone)}"] if gone else []) + reasons, perf, rows
+    return "promote", reasons, perf, rows
+
+
+def sdk_loom_decide(st, name, e, cmp_path):
+    """Round 1 of --mode sdk-loom: the job measured the new package alone; each metric (SDK_METRICS rows) is compared with the Loom value of the OLD card's
+    info.json for this device (another job, the same runner type). A gate / func / ktest failure holds. A metric outside +-SDK_REGRESSION either way, or
+    one the old card has and the job did not measure, asks for ONE targeted ABBA job (decision "confirm", e["confirm_rows"]); else promote. A metric the old
+    card has no value for is reported, not confirmed (nothing to compare with). Returns (decision, reasons, perf, rows)."""
+    cmp = json.load(open(cmp_path))
+    perf, rows = sdk_deltas(cmp, cross=True)
+    if cmp.get("gate_failures"):
+        return "hold", ["gate failed: " + ", ".join(cmp["gate_failures"])], perf, rows
+    m = cmp.get("metrics") or {}
+    limit = SDK_REGRESSION * 100
+    gone = [k for k, v in perf.items() if v is None and (m.get(SDK_METRICS[k]) or {}).get("card") and not (m.get(SDK_METRICS[k]) or {}).get("new")]
+    nocard = [k for k, v in perf.items() if v is None and (m.get(SDK_METRICS[k]) or {}).get("new") and not (m.get(SDK_METRICS[k]) or {}).get("card")]
+    moved = {k: v for k, v in perf.items() if v is not None and abs(v) > limit}
+    if not any((m.get(r) or {}).get("new") for r in SDK_METRICS.values()):
+        return "hold", ["the job measured none of decode, prefill, longctx, 4stream"], perf, rows
+    reasons = []
+    if nocard:
+        reasons.append(f"no value on the old card to compare with: {', '.join(nocard)}")
+    e["confirm_rows"] = sorted(set(moved) | set(gone))
+    if e["confirm_rows"]:
+        return "confirm", [f"outside +-{SDK_REGRESSION:.0%} of the old card's Loom row (another job): "
+                           + ", ".join(f"{k} {moved[k]:+.1f} %" if k in moved else f"{k} missing" for k in e["confirm_rows"])] + reasons, perf, rows
     return "promote", reasons, perf, rows
 
 
@@ -663,6 +705,16 @@ def collect_one(st, name, e):
     if mode == "sdk-ab":
         e["cmp"] = compare(st, name, e, d)
         decision, reasons, e["perf"], e["rows_pct"] = sdk_decide(st, name, e, e["cmp"])
+    elif mode == "sdk-loom" and not e.get("prev"):   # the sweep job: cross-job deltas against the old card's Loom rows
+        e["cmp"] = compare(st, name, e, d)
+        decision, reasons, e["perf"], e["rows_pct"] = sdk_loom_decide(st, name, e, e["cmp"])
+        e["perf_cross"] = dict(e["perf"])
+    elif mode == "sdk-loom":   # the targeted ABBA job: old card on its pin vs the new package, same job; its verdict decides
+        e["cmp"] = compare(st, name, e, d)
+        decision, reasons, e["perf_abba"], e["rows_pct"] = sdk_decide(st, name, e, e["cmp"], use_prev=False)
+        if decision == "rerun":   # a confirming job is never asked to repeat: slower than the band, missing rows or a degraded runner stop the model
+            decision = "hold"
+        sdk_loom_settle(st, e, decision, reasons)
     elif mode == "ab":
         e["cmp"] = compare(st, name, e, d)
         paths = ([st.jobs[e["prev"]]["cmp"]] if prev_cmp(st, e) else []) + [e["cmp"]]
@@ -674,18 +726,34 @@ def collect_one(st, name, e):
     else:
         decision, reasons = card_mode_verdict(d, e)
     e["decision"], e["reason"] = decision, "; ".join(reasons)
-    if mode == "sdk-ab":
+    if mode in SDK_MODES and e.get("perf"):
         e["reason"] = e["reason"] or "perf " + " ".join(f"{k} {v:+.1f}%" for k, v in e["perf"].items() if v is not None)
     e["card_revision"] = read(os.path.join(d, "card_revision.txt"), "").split("\n")[0]
     if decision == "promote":
         e["stage"] = "collected"
-    elif decision in ("rerun", "improved-pending"):
+    elif decision in ("rerun", "improved-pending", "confirm"):
         e["stage"] = "needs_decision" if e["round"] > 1 else "collected"   # round 1: `rerun` queues the confirming job; round 2 undecided: a person decides
         if e["round"] > 1:
             e["reason"] = "still undecided after the confirming run: " + e["reason"]
     else:
         e["stage"] = "needs_decision"
         e["reason"] = "confirmed regression / failed gate / text difference: " + e["reason"]
+
+
+def sdk_loom_settle(st, e, decision, reasons):
+    """sdk-loom: the ABBA job e answers its first job's question. promote: the first job's rows that moved take the ABBA deltas (state: confirmed =
+    {row: ABBA %}, perf = the cross-job deltas with those rows replaced) and the first job promotes; hold: the first job stops with the ABBA numbers."""
+    f = st.jobs[e["prev"]]
+    abba = e.get("perf_abba") or {}
+    rows = f.get("confirm_rows") or []
+    if decision == "promote":
+        f["confirmed"] = {k: abba[k] for k in rows if abba.get(k) is not None}
+        f["perf"] = {k: (f["confirmed"][k] if k in f["confirmed"] else v) for k, v in (f.get("perf_cross") or f.get("perf") or {}).items()}
+        f.update(decision="promote", reason="confirmed by ABBA job " + e["run"] + ": " + ", ".join(f"{k} {v:+.1f} %" for k, v in f["confirmed"].items()))
+    else:
+        f.update(stage="needs_decision", reason="ABBA confirmation (job " + str(e.get("run")) + "): " + "; ".join(reasons)
+                 + " (ABBA " + ", ".join(f"{k} {abba[k]:+.1f} %" for k in rows if abba.get(k) is not None) + ")")
+    e.pop("perf", None)
 
 
 def cmd_collect(a):
@@ -710,7 +778,7 @@ def cmd_rerun(a):
     st = State(a.state)
     want = {}
     for name, e in st.jobs.items():
-        if e["stage"] == "collected" and e.get("decision") in ("rerun", "improved-pending") and e["round"] == 1 and not e.get("rerun_of_me"):
+        if e["stage"] == "collected" and e.get("decision") in ("rerun", "improved-pending", "confirm") and e["round"] == 1 and not e.get("rerun_of_me"):
             want.setdefault(e["device"], []).append((name, e))
     if not want:
         print("no confirming runs needed")
@@ -734,7 +802,8 @@ def cmd_rerun(a):
         for j in jobs:
             s = slug_of(j)
             st.jobs[j["name"]] = {"slug": s, "device": dev, "batch": bid, "round": 2, "stage": "planned", "card": j["card"], "steps": len(j["steps"]),
-                                  "prev": first[s], "aa": st.jobs[first[s]].get("aa", False)}
+                                  "prev": first[s], "aa": st.jobs[first[s]].get("aa", False),
+                                  **({"old": st.jobs[first[s]]["old"]} if st.jobs[first[s]].get("old") else {})}
             st.jobs[first[s]]["rerun_of_me"] = j["name"]
         st.log(f"confirming batch {bid} ({dev}): {', '.join(slugs)}")
     st.save()
@@ -760,12 +829,29 @@ def sdk_line(e):
     return ", ".join(f"{k} {v:+.1f} %" if v is not None else f"{k} n/a" for k, v in (e.get("perf") or {}).items())
 
 
+def card_message(e, dev, run, loom_only, sdk):
+    """the publish message of a card made from a job: where the numbers come from, the SDK delta line, an accepted slowdown's explanation"""
+    msg = f"{card_lib.GPUS[dev]['runner']} results measured on this package (run {run})"
+    if loom_only:
+        msg += (f"; hrx-loom {SDK_NEW} Loom rows vs the previous card's Loom rows (another job, same runner type): " + sdk_line(e)
+                + ("; confirmed by an ABBA job (same job): " + ", ".join(f"{k} {v:+.1f} %" for k, v in e["confirmed"].items()) if e.get("confirmed") else "")
+                + "; llama.cpp rows are the previous card's")
+    elif sdk:
+        msg += f"; hrx-loom {SDK_NEW} vs the previous card on its own SDK pin (same job, ABBA): " + sdk_line(e)
+    if e.get("accepted_regression"):   # a confirmed slowdown published as measured: the message names its explanation
+        msg += "; confirmed slowdown published as measured: " + e["accepted_regression"].split(" (was:")[0]
+    if e.get("accepted_gate_failure"):   # kernel tests that failed: the card's gate table shows them failed; the message says why it was published
+        msg += "; " + e["accepted_gate_failure"]
+    return msg
+
+
 def ingest_full(st, name, e, W):
     """The card's performance, gates and roofline of this device from the job (REGEN_RECIPE: ingest the NEW package)."""
     d, dev, slug = e["dir"], e["device"], e["slug"]
     V, ND = VARIANT[st.d["mode"]]
     S = CARD
-    sdk = st.d["mode"] == "sdk-ab"
+    sdk = st.d["mode"] in SDK_MODES
+    loom_only = st.d["mode"] == "sdk-loom"
     # sdk-ab: the job measured a package BUILT from the branch; the card is made on the staging head, which must hold exactly those programs (the
     # v0.2 package published before this card-only step): make_info.py refuses a different programs hash
     rev = hf_head(f"{st.d['opts']['new_org']}/{slug}") if sdk else e["card_revision"].split("@")[-1]
@@ -786,15 +872,20 @@ def ingest_full(st, name, e, W):
     run_tool([f"{S}/pull_devlab.py", "--identity", d, "--gpu", dev, "--device-out", "dev.json", "--hrx-out", "hrx.json"], W)
     llm, vk = g("perf_llamacpp-rocm.np1_n*.jsonl"), g("perf_llamacpp-vulkan.np1_n*.jsonl")
     c4l, c4v = g("c4_llamacpp-rocm.nodraft_n*.txt"), g("c4_llamacpp-vulkan.perslot.nodraft_n*.txt")
-    if not (llm and c4l):
-        raise RuntimeError("the job has no llama.cpp ROCm files (a job without --baselines cannot make this device's table)")
-    baseline = card_lib.registry.methodology()["baselines"][dev]
-    run_tool([f"{S}/make_info.py", "perf", "--gpu", dev, "--loom-jsonl", f"{d}/perf_{V}.jsonl", "--llama-jsonl", *llm, "--c4-loom", f"{d}/c4_{ND}.txt",
-              "--c4-llama", c4l[0], "--package", out, *src, "--device", "dev.json", "--hrx-loom", "hrx.json",
-              "--baseline-version", "llamacpp-rocm/" + baseline["rocm"]["build"], "--baseline-args", rd("llamacpp_args-rocm.np1.txt"),
-              "--fetched-programs", rd("programs_sha256_staging.txt" if sdk else "programs_sha256.txt"), "-o", "ev_perf.json"], W)
+    if loom_only:   # the job measured Loom alone: the llama.cpp rows (ROCm and Vulkan) are the previous card's, with their own run and date
+        run_tool([f"{S}/make_info.py", "perf", "--gpu", dev, "--loom-jsonl", f"{d}/perf_{V}.jsonl", "--c4-loom", f"{d}/c4_{ND}.txt",
+                  "--baseline-from-info", "info_prev.json", "--package", out, *src, "--device", "dev.json", "--hrx-loom", "hrx.json",
+                  "--fetched-programs", rd("programs_sha256_staging.txt"), "-o", "ev_perf.json"], W)
+    else:
+        if not (llm and c4l):
+            raise RuntimeError("the job has no llama.cpp ROCm files (a job without --baselines cannot make this device's table)")
+        baseline = card_lib.registry.methodology()["baselines"][dev]
+        run_tool([f"{S}/make_info.py", "perf", "--gpu", dev, "--loom-jsonl", f"{d}/perf_{V}.jsonl", "--llama-jsonl", *llm, "--c4-loom", f"{d}/c4_{ND}.txt",
+                  "--c4-llama", c4l[0], "--package", out, *src, "--device", "dev.json", "--hrx-loom", "hrx.json",
+                  "--baseline-version", "llamacpp-rocm/" + baseline["rocm"]["build"], "--baseline-args", rd("llamacpp_args-rocm.np1.txt"),
+                  "--fetched-programs", rd("programs_sha256_staging.txt" if sdk else "programs_sha256.txt"), "-o", "ev_perf.json"], W)
     ev = ["ev_perf.json"]
-    if vk and c4v:
+    if vk and c4v and not loom_only:
         run_tool([f"{S}/make_info.py", "perf", "--gpu", dev, "--backend", "vulkan", "--llama-jsonl", *vk, "--c4-llama", c4v[0],
                   "--baseline-version", baseline["vulkan"]["build"], "--baseline-args", rd("llamacpp_args-vulkan.np1.txt"),
                   "--baseline-sha256", rd("llamacpp_release-vulkan.np1.sha256"), "--fetched-programs", rd("programs_sha256_staging.txt" if sdk else "programs_sha256.txt"), "--package", out,
@@ -818,11 +909,12 @@ def ingest_full(st, name, e, W):
     keep = [f"{g}=info_prev.json" for g, x in (prev.get("devices") or {}).items() if g != dev and (x or {}).get("performance")]
     for spec in keep:
         build += ["--perf-from", spec]
-    run_tool(build + ["--memory-bytes", str(mem), "--from-info", "info_prev.json", "--evidence", *ev, "-o", "info_new.json"], W)
+    # sdk-loom: the previous card's Loom sessions are the v0.1 rows this table replaces (its llama.cpp rows were copied into the new session above;
+    # the Vulkan baselines stay as published)
+    run_tool(build + ["--memory-bytes", str(mem), "--from-info", "info_prev.json", *(["--reset-performance"] if loom_only else []), "--evidence", *ev,
+                      "-o", "info_new.json"], W)
     shutil.copy(os.path.join(W, "info_new.json"), os.path.join(out, "info.json"))
-    msg = f"{card_lib.GPUS[dev]['runner']} results measured on this package (run {run})"
-    if sdk:
-        msg += f"; hrx-loom {SDK_NEW} vs the previous card on its own SDK pin (same job, ABBA): " + sdk_line(e)
+    msg = card_message(e, dev, run, loom_only, sdk)
     return out, hf_head(f"{st.d['opts']['new_org']}/{slug}"), msg
 
 
@@ -869,17 +961,20 @@ def cmd_ingest(a):
         die("a logits-mode state has no performance to ingest: fleet/final_pass.py card builds the final cards from it")
     todo = [(n, e) for n, e in st.jobs.items() if e["stage"] == "collected" and e.get("decision") == "promote"]
     # a model with a round-2 job: the second run ingests, the first is superseded
-    todo = [(n, e) for n, e in todo if not e.get("rerun_of_me")]
+    if st.d["mode"] == "sdk-loom":   # the sweep job's rows go on the card (its ABBA confirmation settled the first job's decision)
+        todo = [(n, e) for n, e in todo if not e.get("prev")]
+    else:
+        todo = [(n, e) for n, e in todo if not e.get("rerun_of_me")]
     if a.slug:
         todo = [(n, e) for n, e in todo if e["slug"] in a.slug]
-    if st.d["mode"] == "sdk-ab":
+    if st.d["mode"] in SDK_MODES:
         todo = [(n, e) for n, e in todo if sdk_ingest_ready(st, n, e)]
     for name, e in todo:
         W = os.path.join(st.work, "cards", f"{e['slug']}.{e['device']}")
         shutil.rmtree(W, ignore_errors=True)
         os.makedirs(W)
         try:
-            full = st.d["mode"] in ("card", "sdk-ab") or bool(glob.glob(os.path.join(e["dir"], "perf_llamacpp-rocm.np1_n*.jsonl")))
+            full = st.d["mode"] in ("card", *SDK_MODES) or bool(glob.glob(os.path.join(e["dir"], "perf_llamacpp-rocm.np1_n*.jsonl")))
             out, parent, msg = (ingest_full if full else ingest_strix)(st, name, e, W)
             run_tool([f"{CARD}/render_card.py", out], W) if full else None
             for f in (".loom-fetch.lock",):
@@ -937,13 +1032,13 @@ def package_one(st, slug, canon, sha, dry, env):
     rev = hf_head(repo)
     snap, out = os.path.join(W, "snap"), os.path.join(W, "pkg")
     hf_snapshot_small(repo, rev, snap)
-    if card_lib.programs_sha256(snap) == want:   # a crashed run uploaded already, or the package was published by hand: nothing to do
-        return {"revision": rev, "programs_sha256": want, "base": sha, "already": True}
     alts = {card_lib.gpu_preset_name(sdk_package.load(os.path.join(snap, "model.json")), g) for g in card_lib.GPUS if card_lib.GPUS[g].get("preset_suffix")}
     changes = sdk_package.assemble(snap, os.path.join(canon, slug), out, alts)
     got = card_lib.programs_sha256(out)
     if got != want:
         raise RuntimeError(f"assembled package programs {str(got)[:12]} differ from the canonical build's {want[:12]}")
+    if sdk_package.same_files(snap, out):   # the head already holds exactly this package (programs AND llm_config pin, model.json, ...)
+        return {"revision": rev, "programs_sha256": want, "base": sha, "already": True}
     msg = f"Loom package rebuilt for hrx-loom {SDK_NEW} from loom-skills {sha[:10]} (card files unchanged until the card step)"
     r = sh([PY, f"{CARD}/publish_package.py", "upload", out, "--repo", slug, "--org", org, "--parent-commit", rev, "--message", msg]
            + (["--dry-run"] if dry else []), check=False, env=env)
@@ -955,8 +1050,8 @@ def package_one(st, slug, canon, sha, dry, env):
 
 def cmd_package(a):
     st = State(a.state)
-    if st.d["mode"] != "sdk-ab":
-        die("package is the sdk-ab step (other modes publish no package)")
+    if st.d["mode"] not in SDK_MODES:
+        die("package is the sdk-ab / sdk-loom step (other modes publish no package)")
     org = st.d["opts"]["new_org"]
     if org != STAGING_ORG or "/" in org.strip("/"):
         die(f"package writes {STAGING_ORG} only")
@@ -1037,7 +1132,8 @@ def cmd_status(a):
     for n, e in sorted(st.jobs.items(), key=lambda kv: (kv[1]["device"], kv[1]["slug"])):
         print(f"  {e['slug'][:46]:46s} {e['device']:13s} r{e['round']} {e['stage']:14s} {e.get('decision') or '':16s} {(e.get('reason') or '')[:70]}")
         if e.get("perf"):
-            print(f"  {'':46s} {'':13s} {'':2s} perf v0.2 vs v0.1: {sdk_line(e)}")
+            print(f"  {'':46s} {'':13s} {'':2s} perf v0.2 vs v0.1: {sdk_line(e)}"
+                  + (f"  (ABBA-confirmed: {', '.join(sorted(e['confirmed']))})" if e.get("confirmed") else ""))
     if a.status_json:
         write_status(st, a.status_json)
 
@@ -1055,6 +1151,8 @@ def write_status(st, path):
             m[GPU_KEY.get(e["device"], e["device"])] = {"stage": STATUS_STAGE.get(e["stage"], "queued"), "verdict": verdict, "run": e.get("run")}
             if e.get("perf"):   # sdk-ab: % delta v0.2 vs v0.1 per metric (positive = v0.2 faster), mean of the two runs of a confirmed pair
                 m.setdefault("perf", {})[GPU_KEY.get(e["device"], e["device"])] = dict(e["perf"])
+                if e.get("confirmed"):   # sdk-loom: the rows whose delta is the ABBA job's (same job), the others are cross-job against the old card
+                    m.setdefault("perf_confirmed", {})[GPU_KEY.get(e["device"], e["device"])] = sorted(e["confirmed"])
             if e["stage"] == "needs_decision":
                 m["note"] = f"{e['device']}: needs decision: {e.get('reason', '')[:200]}"
         json.dump(d, open(path, "w"), indent=1)
@@ -1081,6 +1179,110 @@ def cmd_accept(a):
     st.save()
 
 
+def cmd_accept_regression(a):
+    """sdk-ab / sdk-loom: publish a model whose slowdown was CONFIRMED (ABBA) with its own numbers, the regression explained (a note naming the
+    upstream write-up or the cause): the card shows the new SDK's measurement as it is (publish partial progress); the delta line keeps the
+    negative numbers. Only a confirmed perf regression is accepted: gate / func / ktest failures, degraded runners and package stops are not."""
+    st = State(a.state)
+    if st.d["mode"] not in SDK_MODES:
+        die("accept-regression is for the SDK modes (sdk-ab, sdk-loom)")
+    done = []
+    for name, e in st.jobs.items():
+        if e["slug"] not in a.slug or e["stage"] != "needs_decision":
+            continue
+        # the job whose rows go on the card: sdk-loom = the sweep job (not its ABBA confirmation); sdk-ab = the confirming round-2 job
+        if (e.get("prev") if st.d["mode"] == "sdk-loom" else e.get("rerun_of_me")):
+            continue
+        why = e.get("reason") or ""
+        # the hold reasons that mean "a slowdown was CONFIRMED": sdk-loom = its ABBA confirmation was slower; sdk-ab = both runs were slower
+        confirmed = ("ABBA confirmation" in why and "slower than" in why) if st.d["mode"] == "sdk-loom" else ("confirmed regression > " in why)
+        if not confirmed or any(x in why for x in ("gate failed", "degraded runner", "package:", "missing", "undecided")):
+            print(f"{e['slug']} {e['device']}: not a confirmed perf regression, not accepted ({why[:120]})")
+            continue
+        if st.d["mode"] == "sdk-loom":   # the confirmed rows report the ABBA numbers (same job), as a promoted confirmation does
+            abba = next((j for j in st.jobs.values() if j.get("prev") == name and j.get("perf_abba")), None)
+            if abba:
+                rows = e.get("confirm_rows") or []
+                e["confirmed"] = {k: abba["perf_abba"][k] for k in rows if abba["perf_abba"].get(k) is not None}
+                e["perf"] = {**(e.get("perf") or {}), **e["confirmed"]}
+        e.update(stage="collected", decision="promote", accepted_regression=f"{a.note} (was: {why[:300]})")
+        st.log(f"{e['slug']} {e['device']}: confirmed regression accepted for publishing: {a.note}")
+        done.append(f"{e['slug']} {e['device']}")
+    st.save()
+    print("accepted: " + (", ".join(done) or "nothing"))
+
+
+def _ktest_fail_only(e):
+    """the job's gate failures when they are kernel tests that RAN and failed some cases (summary FAIL + a "N/M passed" log with N < M), else (None, why)"""
+    fails = json.load(open(e["cmp"])).get("gate_failures") or [] if e.get("cmp") else []
+    if not fails or not all(f.startswith("ktest:") for f in fails):
+        return None, "not held by kernel tests alone (" + (", ".join(fails) or (e.get("reason") or "")[:120]) + ")"
+    s = json.load(open(os.path.join(e["dir"], "summary.json"))).get("results", {}) if e.get("dir") else {}
+    for f in fails:
+        log = os.path.join(e.get("dir") or "", f"ktest_{f.split(':', 1)[1]}.log")
+        m = re.findall(r"(\d+)/(\d+) passed", read(log, "")) if os.path.exists(log) else []
+        if not str(s.get(f, "")).startswith("FAIL") or not m or int(m[-1][0]) >= int(m[-1][1]):
+            return None, f"{f} did not run to a result (summary {str(s.get(f, ''))[:60]!r}, no 'N/M passed' failure in its log): the card could not show it"
+    return fails, ""
+
+
+def _decide_without(st, name, e, sdk_loom_first):
+    """the perf verdict of job e with its kernel-test hold removed (a temp copy of its cmp; the job's evidence is untouched)"""
+    tmp = e["cmp"] + ".accepted.json"
+    try:
+        json.dump(dict(json.load(open(e["cmp"])), gate_failures=[]), open(tmp, "w"))
+        if sdk_loom_first:
+            return sdk_loom_decide(st, name, e, tmp)
+        return sdk_decide(st, name, e, tmp, use_prev=st.d["mode"] == "sdk-ab")
+    finally:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+
+
+def cmd_accept_gate_failure(a):
+    """sdk-ab / sdk-loom: publish a model held ONLY by kernel tests that ran and failed some cases, which a person read and explained (e.g. the same case
+    failed on the previous SDK's card): the card is built from the job as it is, so its gate table shows the kernel tests as failed (no gate is loosened).
+    func and serving gates (func:*, gates:*) and kernel tests that did not run to a result are refused. The perf rows still get the usual verdict: a row
+    outside the band is confirmed first. sdk-loom: when the targeted ABBA job is the one held by the kernel tests, its verdict is settled the same way."""
+    st = State(a.state)
+    if st.d["mode"] not in SDK_MODES:
+        die("accept-gate-failure is for the SDK modes (sdk-ab, sdk-loom)")
+    done = []
+    for name, e in list(st.jobs.items()):
+        if e["slug"] not in a.slug or e["stage"] != "needs_decision" or (st.d["mode"] == "sdk-loom" and e.get("prev")):
+            continue
+        abba = next((x for x in st.jobs.values() if x.get("prev") == name), None) if st.d["mode"] == "sdk-loom" else None
+        held_by_abba = bool(abba) and "ABBA confirmation" in (e.get("reason") or "") and "gate failed" in (e.get("reason") or "")
+        job = abba if held_by_abba else e
+        fails, why = _ktest_fail_only(job)
+        if not fails:
+            print(f"{e['slug']} {e['device']}: {why}, not accepted")
+            continue
+        note = f"{', '.join(fails)} failed, published as failed: {a.note}"
+        e["accepted_gate_failure"] = note   # the first job is the one ingested: its card message names it
+        if held_by_abba:
+            decision, reasons, job["perf_abba"], job["rows_pct"] = _decide_without(st, [k for k, v in st.jobs.items() if v is abba][0], abba, False)
+            decision = "hold" if decision == "rerun" else decision
+            e.update(stage="collected")
+            sdk_loom_settle(st, abba, decision, reasons)
+        else:
+            decision, reasons, perf, rows = _decide_without(st, name, e, st.d["mode"] == "sdk-loom")
+            e["perf"], e["rows_pct"] = perf, rows
+            if st.d["mode"] == "sdk-loom":
+                e["perf_cross"] = dict(perf)
+            e["decision"], e["reason"] = decision, "; ".join(reasons)
+            if decision == "promote" or (decision in ("rerun", "confirm") and e["round"] == 1):
+                e["stage"] = "collected"
+            else:
+                e["stage"] = "needs_decision"
+                e["reason"] = ("still undecided after the confirming run: " if decision != "hold" else
+                               "confirmed regression / failed gate / text difference: ") + e["reason"]
+        st.log(f"{e['slug']} {e['device']}: kernel-test failure accepted ({', '.join(fails)}): {a.note} -> {e['stage']} ({e.get('decision')})")
+        done.append(f"{e['slug']} {e['device']} ({e.get('decision')})")
+    st.save()
+    print("accepted: " + (", ".join(done) or "nothing"))
+
+
 def cmd_adopt(a):
     st = State(a.state)
     jobs = gh_json(["run", "view", a.run, "-R", REPO, "--json", "jobs"])["jobs"]
@@ -1102,8 +1304,8 @@ def main(argv=None):
     p = sub.add_parser("plan")
     p.add_argument("slugs", nargs="*")
     p.add_argument("--device", action="append", required=True)
-    p.add_argument("--mode", choices=("ab", "card", "logits", "sdk-ab"), default="ab",
-                   help="sdk-ab: the SDK migration's A/B per model and device (old = the newest old-SDK revision of the staging card on its own SDK pin, 0.1.0 when pin-less; new = built from --base on the new SDK; deltas per metric); logits: the final pass's functional job of a staging package (func, ktest, logits:staging), no performance")
+    p.add_argument("--mode", choices=("ab", "card", "logits", "sdk-ab", "sdk-loom"), default="ab",
+                   help="sdk-loom: the SDK migration's Loom-only sweep (one job per model and device: the new package on the new SDK, no llama.cpp, no old-card variant; deltas against the old card's Loom rows; a row outside +-3 percent gets ONE targeted sdk-ab ABBA job); sdk-ab: the SDK migration's A/B per model and device (old = the newest old-SDK revision of the staging card on its own SDK pin, 0.1.0 when pin-less; new = built from --base on the new SDK; deltas per metric); logits: the final pass's functional job of a staging package (func, ktest, logits:staging), no performance")
     p.add_argument("--bundle", nargs=2, metavar=("URL", "SHA256"), help="logits mode: the Gufo bundle tarball the job fetches (devlab_perf.sh gufo_bundle)")
     p.add_argument("--bundle-run", help="logits mode: reuse the `gufo-bundle` artifact of this devlab-perf run (the run that built it: no build in this one)")
     p.add_argument("--bundle-build", nargs=2, metavar=("EXT_REV", "GUFO_REV"), help="logits mode: the devlab-perf run BUILDS the Gufo bundle "
@@ -1127,7 +1329,8 @@ def main(argv=None):
     p.add_argument("--priority", action="store_true", help="the batches of this plan go to the head of the next submit wave and ignore --max-inflight (a targeted job, not a sweep)")
     p.set_defaults(fn=cmd_plan)
     for name, fn in (("submit", cmd_submit), ("poll", cmd_poll), ("collect", cmd_collect), ("rerun", cmd_rerun), ("ingest", cmd_ingest),
-                     ("publish", cmd_publish), ("package", cmd_package), ("status", cmd_status), ("adopt", cmd_adopt), ("accept", cmd_accept)):
+                     ("publish", cmd_publish), ("package", cmd_package), ("status", cmd_status), ("adopt", cmd_adopt), ("accept", cmd_accept),
+                     ("accept-regression", cmd_accept_regression), ("accept-gate-failure", cmd_accept_gate_failure)):
         q = sub.add_parser(name)
         q.add_argument("state")
         q.set_defaults(fn=fn)
@@ -1139,7 +1342,7 @@ def main(argv=None):
                            "waves (call submit again as jobs finish), so a priority job queued meanwhile waits at most one wave. Default: no cap")
         if name == "status":
             q.add_argument("--status-json")
-        if name == "accept":
+        if name in ("accept", "accept-regression", "accept-gate-failure"):
             q.add_argument("slug", nargs="+")
             q.add_argument("--note", required=True, help="what was read: e.g. 'hyphen vs space, log-prob gap < band'")
         if name == "adopt":

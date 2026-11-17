@@ -98,6 +98,10 @@ def assemble(snap, canon, out, alt_presets=()):
     if bad:
         raise ValueError("model.json differs from the published one beyond the migration: " + ", ".join(f"{k} {p}" for k, p in bad))
     model = carry_over(pub, new)
+    for k in alt_presets:   # the per-GPU presets the card step wrote (make_info.py build --fit / device files) stay: they are the card's, not the build's
+        if k in (pub.get("presets") or {}) and k not in (model.get("presets") or {}):
+            model.setdefault("presets", {})[k] = copy.deepcopy(pub["presets"][k])
+            (model["presets"][k].get("execution") or {}).pop("pool_capacity", None)
     shutil.rmtree(out, ignore_errors=True)
     shutil.copytree(snap, out, ignore=shutil.ignore_patterns(".cache"))
     for d in PROGRAM_FILES:
@@ -115,3 +119,21 @@ def assemble(snap, canon, out, alt_presets=()):
         json.dump(model, f, indent=1)
         f.write("\n")
     return changes
+
+
+def same_files(a, b, skip=("README.md", "info.json", "REPORT.md", ".gitattributes")):
+    """True when the two package dirs hold the same files with the same bytes, card files aside: an equal programs hash is not enough (a package
+    re-pinned to another SDK changes llm_config.json only)"""
+    def files(d):
+        out = {}
+        for root, dirs, fs in os.walk(d):
+            dirs[:] = [x for x in dirs if x != ".cache"]
+            for f in fs:
+                rel = os.path.relpath(os.path.join(root, f), d).replace(os.sep, "/")
+                if rel not in skip:
+                    out[rel] = os.path.join(root, f)
+        return out
+    fa, fb = files(a), files(b)
+    if set(fa) != set(fb):
+        return False
+    return all(open(fa[k], "rb").read() == open(fb[k], "rb").read() for k in fa)
