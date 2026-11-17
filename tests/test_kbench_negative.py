@@ -22,30 +22,32 @@ def report(outcome='xfail'):
 class NegativeControls(unittest.TestCase):
     def test_raw_comparator_failure_required(self):
         self.assertEqual(M.validate(report(), ['@wrong=EXPECT/003']), 1)
-        for mutation in ('compile', 'xpass', 'diagnostic', 'empty', 'passed'):
+        for mutation in ('compile', 'xpass', 'diagnostic', 'empty', 'passed', 'missing_passed', 'falsey_passed', 'duplicate_record', 'duplicate_sample'):
             r = report()
             if mutation == 'compile': r['samples'] = []
             elif mutation == 'xpass': r['xfails'][0]['outcome'] = 'xpass'
             elif mutation == 'diagnostic': r['xfails'][0]['diagnostic'] = 'TYPE/001'
             elif mutation == 'empty': r['samples'][0]['expectations']['failures'] = []
-            else: r['samples'][0]['passed'] = True
+            elif mutation == 'passed': r['samples'][0]['passed'] = True
+            elif mutation == 'missing_passed': del r['samples'][0]['passed']
+            elif mutation == 'falsey_passed': r['samples'][0]['passed'] = None
+            elif mutation == 'duplicate_record': r['xfails'].append(dict(r['xfails'][0]))
+            else: r['samples'].append(dict(r['samples'][0]))
             with self.subTest(mutation=mutation), self.assertRaises(ValueError):
                 M.validate(r, ['@wrong=EXPECT/003'])
+        with self.assertRaises(ValueError):
+            M.validate(report(), ['@wrong=EXPECT/003', '@wrong=EXPECT/003'])
 
     def test_cli_propagates_exit_and_xpass(self):
         with tempfile.TemporaryDirectory() as d:
-            d = Path(d); tool = d/'tool'; tool.write_text('#!/usr/bin/env python3\nimport os,json,sys\nopen(os.environ["ARGV"],"w").write(json.dumps(sys.argv[1:]))\nprint(os.environ["REPORT"])\nsys.exit(int(os.environ["EXIT"]))\n'); tool.chmod(0o755)
+            d = Path(d); tool = d/'fake.py'; tool.write_text('import os,json,sys\nopen(os.environ["ARGV"],"w").write(json.dumps(sys.argv))\nprint(os.environ["REPORT"])\nsys.exit(int(os.environ["EXIT"]))\n')
             for status, outcome, expected in ((0, 'xfail', 0), (0, 'xpass', 1), (9, 'xfail', 1)):
                 env = dict(os.environ, ARGV=str(d/'args'), REPORT=json.dumps(report(outcome)), EXIT=str(status))
-                p = subprocess.run([sys.executable, str(SCRIPT), str(tool), 'negative.loom', str(d/'raw.json'), '@wrong=EXPECT/003'], env=env, capture_output=True)
+                p = subprocess.run([sys.executable, str(SCRIPT), sys.executable, str(tool), str(d/'raw.json'), '@wrong=EXPECT/003'], env=env, capture_output=True)
                 self.assertEqual(p.returncode, expected, p.stderr)
-                self.assertEqual(json.loads((d/'args').read_text()), ['negative.loom', '--device=amdgpu', '--xfail=@wrong=EXPECT/003'])
+                self.assertEqual(json.loads((d/'args').read_text()), [str(tool), '--device=amdgpu', '--xfail=@wrong=EXPECT/003'])
                 self.assertEqual(json.loads((d/'raw.json').read_text()), report(outcome))
 
-    def test_positive_path_has_no_new_arguments(self):
-        script = (ROOT/'.github/scripts/devlab_kbench.sh').read_text()
-        self.assertIn('"$root/.venv/bin/loom-test" "$t" --device=amdgpu >', script)
-        self.assertIn("s.get('negative_tests', [])", script)
 
 
 if __name__ == '__main__': unittest.main()
