@@ -511,7 +511,28 @@ alt = c.with_gpu_preset(m, c.gpu_preset_execution({'r9700_execution': {'prefill_
 assert alt['context_capacity'] == 20480 and 'pool_capacity' not in alt, alt
 assert c.EXEC_KEYS == ('prefill_capacity', 'context_capacity', 'rows', 'draft_depth')" "$C" "$R/pkg" \
   && echo "OK   r9700 preset: no pool_capacity on SDK 0.2" || { echo "FAIL r9700 preset: pool_capacity written"; bad=1; }
-for n in flint d1 ratchet r9700_two r9700_none r9700_staging r9700_preset r9700_exec sdk02 sdk02_presets; do
+# a Loom-only card (regen.py --mode sdk-loom): Loom rows from a later job on the same runner type, the llama.cpp rows copied from the previous card
+# with their own date and run (metric baseline_from); the methodology says "different jobs", never "the same job". flint is the previous card.
+mkdir -p "$tmp/loomonly"; cp -r "$F/pkg/." "$tmp/loomonly/"
+py "$C/make_info.py" perf --gpu strix-halo --loom-jsonl "$F/evidence/loom.jsonl" --c4-loom "$F/evidence/c4_loom_runs.txt" --baseline-from-info "$tmp/flint/info.json" \
+  --date 2026-11-16 "${SRC[@]}" --run 3004 -o "$tmp/lo_perf.json" 2>/dev/null
+py "$C/make_info.py" build "$tmp/loomonly" --repo loom-fun/ggml-org-Flint-loom --generator-commit $GEN --memory-bytes 67000000000 --output flint --report generated \
+  --from-info "$tmp/flint/info.json" --reset-performance --evidence "$tmp/lo_perf.json" -o "$tmp/loomonly/info.json" 2>/dev/null
+py -c "import sys; sys.path.insert(0, sys.argv[1]); import card_lib as c
+o, p = c.load_json(sys.argv[2]), c.load_json(sys.argv[3])
+assert c.validate(o) == [], c.validate(o)
+od, pd = (c.normalize(x)['devices']['strix-halo']['performance'] for x in (o, p))
+assert len(od['sessions']) == 1 and od['sessions'][0]['date'] == '2026-11-16', 'the previous Loom sessions must go'
+want = {k: m['baseline'] for k, (m, _) in c.card_metrics({'performance': pd}).items() if m.get('baseline') is not None}
+got = {k: m['baseline'] for k, m in od['sessions'][0]['metrics'].items() if m.get('baseline') is not None}
+assert got and got == {k: want[k] for k in got}, 'the llama.cpp values are the previous card\'s'
+assert all(m['baseline_from']['date'] in ('2026-11-06', '2026-11-07') and m['baseline_from']['source'] in o['sources'] for m in od['sessions'][0]['metrics'].values() if m.get('baseline') is not None)
+assert od['baseline'] == pd['baseline'], 'the baseline block (build, arguments) is the previous card\'s'" "$C" "$tmp/loomonly/info.json" "$tmp/flint/info.json" \
+  && echo "OK   loomonly: Loom rows of the new job, llama.cpp rows and their provenance of the previous card" \
+  || { echo "FAIL loomonly: the Loom-only card does not carry the previous card's llama.cpp rows"; bad=1; }
+! py "$C/make_info.py" perf --gpu radeon-r9700 --loom-jsonl "$F/evidence/loom.jsonl" --baseline-from-info "$tmp/flint/info.json" "${SRC[@]}" --run 3005 -o "$tmp/lo_none.json" 2>/dev/null \
+  && echo "OK   loomonly: a device the previous card has no table for stops" || { echo "FAIL loomonly: perf --baseline-from-info accepted a device without a table"; bad=1; }
+for n in flint d1 ratchet r9700_two r9700_none r9700_staging r9700_preset r9700_exec sdk02 sdk02_presets loomonly; do
   files="info.json README.md REPORT.md"; [ "$n" = flint ] && files="$files flags.json roofline_rows.json"
   py "$C/render_card.py" "$tmp/$n" 2>/dev/null
   py "$C/render_card.py" "$tmp/$n" -o "$tmp/${n}_README2.md" 2>/dev/null

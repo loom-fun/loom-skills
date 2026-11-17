@@ -44,6 +44,9 @@ byte-identical files.
       some rows). --package records which programs were measured (card_lib.programs_sha256). Rows that carry the
       drafted-token acceptance of their decode requests (perf.py "acceptance", c4_steady.py JSON lines) give each
       drafted metric its session's "acceptance" (median over the sessions).
+      --baseline-from-info OLD.json (instead of --llama-jsonl): a Loom-only job. Each row's llama.cpp value (and its runs) is the one OLD.json's card shows for
+      --gpu, and the row records where it was measured (metric "baseline_from": the old session's date and source, which build puts into sources): the card
+      says Loom and llama.cpp come from different jobs on the same runner type, never "same job".
 
   make_info.py gates [--gpu GPU] FILE [FILE ...] [--time YYYY-MM-DDTHH:MM:SS] [--level L] [--spec-log F] [--package PKG]
                      [SOURCE] -o gates_evidence.json
@@ -374,6 +377,8 @@ def cmd_build(a):
             if perf.get("session"):
                 s = dict(perf["session"])
                 s["source"] = sources.add(s["source"])
+                s["metrics"] = {k: (dict(m, baseline_from=dict(m["baseline_from"], source=sources.add(m["baseline_from"]["source"])))
+                                    if m.get("baseline_from") else m) for k, m in s["metrics"].items()}
                 st["sessions"].append({k: v for k, v in s.items() if v is not None or k in ("date",)})
         for g in ev.get("gates") or []:
             if g["name"] in RETIRED_GATES:   # evidence from before the needle gates were removed
@@ -517,6 +522,8 @@ def cmd_build(a):
     if a.next_steps:
         info["next_steps"] = a.next_steps
     used = {s["source"] for d in devices.values() for s in (d.get("performance") or {}).get("sessions", [])}
+    used |= {m["baseline_from"]["source"] for d in devices.values() for s in (d.get("performance") or {}).get("sessions", [])
+             for m in s["metrics"].values() if m.get("baseline_from")}
     used |= {b["session"]["source"] for d in devices.values() for b in ((d.get("performance") or {}).get("baselines") or {}).values()}
     used |= {g["source"] for d in devices.values() for g in (d.get("gates") or {}).values()}
     for d in devices.values():
@@ -730,6 +737,29 @@ def runs_of(key, sessions, c4_path):
     return c4_samples(c4_path) if key == "streams4" and c4_path else sessions[key]
 
 
+def copy_baselines(metrics, old, gpu):
+    """Sets each metric's llama.cpp value (baseline, baseline_runs) from the card OLD's value of GPU (card_metrics: the last session that measured the row)
+    and records where that value was measured: baseline_from = {"date", "source": the source block}, the original provenance of the value (a value that
+    OLD itself took from another job keeps its own). Rows OLD has no llama.cpp value for keep none. Stops when nothing could be copied."""
+    require_valid(old)
+    view = gpu_view(old, gpu)
+    sessions = (view.get("performance") or {}).get("sessions") or []
+    shown = card_metrics(view)
+    n = 0
+    for k, m in metrics.items():
+        row, i = shown.get(k, (None, None))
+        if not row or row.get("baseline") is None:
+            continue
+        m["baseline"] = row["baseline"]
+        if row.get("baseline_runs"):
+            m["baseline_runs"] = row["baseline_runs"]
+        bf = row.get("baseline_from") or {"date": sessions[i]["date"], "source": sessions[i]["source"]}
+        m["baseline_from"] = {"date": bf["date"], "source": old["sources"][bf["source"]]}
+        n += 1
+    if not n:
+        sys.exit(f"{old.get('repo')}: no llama.cpp value on {gpu} to copy: a Loom-only job needs the previous card's table")
+
+
 def cmd_perf(a):
     if a.source_kind not in PERF_SOURCE_KINDS:
         sys.exit(f"perf --source-kind {a.source_kind}: card performance comes only from AMD DevLab Dispatch "
@@ -757,6 +787,12 @@ def cmd_perf(a):
             m["baseline_runs"] = runs_of(k, bs, a.c4_llama)
         metrics[k] = m
     with_acceptance(metrics, lacc)
+    if a.baseline_from_info:
+        if extra or llama_rows:
+            sys.exit("--baseline-from-info replaces the llama.cpp logs: give a Loom-only job's files")
+        if not a.gpu:
+            sys.exit("--baseline-from-info needs --gpu (whose table's llama.cpp rows are copied)")
+        copy_baselines(metrics, load_info(a.baseline_from_info), a.gpu)
     if extra:
         ls, lcount = bs, bcount   # the runs counted are the baseline engine's
     dp = [len(ls[k]) for k in keep if k in ls and k != "streams4"]
@@ -1126,6 +1162,7 @@ def main(argv=None):
     p.add_argument("--llama-jsonl")
     p.add_argument("--c4-loom")
     p.add_argument("--c4-llama")
+    p.add_argument("--baseline-from-info", help="a Loom-only job: the llama.cpp rows are the ones this published info.json shows for --gpu (see the module docstring)")
     p.add_argument("--baseline-name", default="llama.cpp")
     p.add_argument("--baseline-version", help="the baseline build, e.g. llamacpp-rocm/b1355 (a bare bNNNN tag is expanded)")
     p.add_argument("--backend", default="rocm", help="the llama.cpp backend measured: rocm (the card's baseline, with Loom) "

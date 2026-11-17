@@ -162,9 +162,11 @@ def llama_draft(args):
     return (LLAMA_METHOD.get(m.group(1), m.group(1)) if m else None), (int(n.group(1)) if n else None)
 
 
-def methodology(base, extra, spec, drafter, values, runs_c4):
+def methodology(base, extra, spec, drafter, values, runs_c4, cross=None):
     """The card's methodology: the same short template on every card, filled from the card's own data (baseline server
-    arguments, drafting setting, runs). Anything that differs between the engines is stated as it is, not smoothed over."""
+    arguments, drafting setting, runs). Anything that differs between the engines is stated as it is, not smoothed over.
+    cross: {"llama": [(date, source)], "loom": (date, source)} when the llama.cpp rows were measured in another job than the Loom rows (a Loom-only
+    job; the row's baseline_from): the card says so instead of "the same job"."""
     vk = next((x["baseline"] for b, x in extra.items() if b == "vulkan"), None)
     engines = [(base["name"] + " ROCm", base)] + ([(base["name"] + " Vulkan", vk)] if vk else [])
     ver = ", ".join(f"{n} `{b['version']}`" if b.get("version") else f"{n} (build not recorded)" for n, b in engines)
@@ -183,7 +185,8 @@ def methodology(base, extra, spec, drafter, values, runs_c4):
                  + "; ".join(f"{n} " + (f"{m}" + (f" n-max {k}" if k else "") if m else "no drafting") for n, m, k in ll)
                  + " (NOT the same choice on both engines)")
         depth = ""
-    out = [f"- Compared: Loom against {ver}; the same GGUF, the same DevLab runner and job, the same prompts; Loom served with "
+    where = "the same DevLab runner type, different jobs" if cross else "the same DevLab runner and job"
+    out = [f"- Compared: Loom against {ver}; the same GGUF, {where}, the same prompts; Loom served with "
            f"the active wait. {values} (4 streams: median of {runs_c4}); Loom is timed by the client, "
            "llama.cpp by its server.",
            "- Out of the box on both engines: Loom serves the preset shipped in this package; llama.cpp runs its build defaults "
@@ -195,6 +198,10 @@ def methodology(base, extra, spec, drafter, values, runs_c4):
            "- Rows: decode = short-context decode; decode_2k / decode_32k = decode after a ~2k / ~32k-token context; "
            "prefill_Nk = prompt processing of an N k-token prompt; streams4 = 4-stream aggregate decode. A margin within "
            f"+-{round(TIE_BAND * 100)} % (the measured same-runner noise) is a tie."]
+    if cross:
+        when = lambda ds: "; ".join(f"{text(d)} ({src_text(s)})" for d, s in ds)
+        out.insert(1, f"- {base['name']} measured on {when(cross['llama'])}, Loom on {when([cross['loom']])}: same runner type, different jobs "
+                      f"({base['name']} was not re-measured for this package).")
     for n, b in engines:
         out.append(f"- {n} server arguments: " + (f"`{b['args']}`." if b.get("args") else "not recorded."))
     ns = [u if u.startswith("Loom:") else f"{n}: {u}" for n, b in engines for u in (b.get("differs") or [])]
@@ -494,7 +501,10 @@ def perf_section(L, info, facts, feats, d, g, here, ctx):
     drafter = None
     if facts["drafter"]:
         drafter = f"{facts['drafter']['repo']} / {facts['drafter']['file']}"
-    L += ["", "**Methodology**", "", *methodology(base, extra, facts["spec"], drafter, values_of(tps_keys), runs_of(["streams4"], True)),
+    bfs = sorted({(m["baseline_from"]["date"] or "", m["baseline_from"]["source"]) for m, _ in rows.values() if m.get("baseline_from")})
+    cross = {"llama": [(d or None, sources[sid]) for d, sid in bfs],
+             "loom": (sessions[primary]["date"], sources[sessions[primary]["source"]])} if bfs and primary is not None else None
+    L += ["", "**Methodology**", "", *methodology(base, extra, facts["spec"], drafter, values_of(tps_keys), runs_of(["streams4"], True), cross),
           f"- Measured on AMD DevLab Dispatch {GPUS[g]['runner']} runners (`devlab-perf` jobs); runners differ between sessions."]
     if psrc:
         L.append(f"- Measured {text(sessions[primary]['date'])}; device {device_text(psrc['device'])}; "

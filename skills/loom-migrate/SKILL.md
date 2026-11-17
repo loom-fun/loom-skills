@@ -65,6 +65,9 @@ Order matters: each step's proof is the next step's precondition. Big outputs go
    Then the SDK A/B: `fleet/regen.py plan --mode sdk-ab`: per model one job in which the *published old card on the old SDK* and the
    *new package on the new SDK* run ABBA on the same runner, metrics decode / prefill / long-context / 4-stream, same gates. The
    ratchet: a regression over 3 % on a metric triggers one confirming rerun, then a decision with the numbers. Poll >= 120 s with one loop.
+   When the old card and llama.cpp are already measured and unchanged, `--mode sdk-loom` is the cheaper sweep: Loom only on the new SDK, deltas
+   against the old card's Loom rows, ONE targeted ABBA job only for a row outside +-3 % (`fleet/README.md` "SDK A/B"); the card then says
+   Loom and llama.cpp come from different jobs on the same runner type.
 6. **Publish to the staging org** (`loom-fleet` `reference/publish.md`): each card shows its own new-SDK measurement and the delta line
    against the old card; publish partial progress; verify the live card (session and programs hash). Never production.
    **Before promoting the staging cards to the production org** (owner's go-ahead), tag every production repo's current head with the

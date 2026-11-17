@@ -32,6 +32,11 @@ branch) and served on --new-sdk, which is also the job's tools SDK (job "sdk"). 
 context, preset execution, cap_pool) because a rebuilt package carries no device preset. Needs devlab_perf.sh's per-variant SDK roots; the
 variant names stay fun / staging so strix_ab_compare.py and make_info.py read the job unchanged.
 
+--loom-only (with --sdk-ab): the Loom-only sweep job (fleet/regen.py plan --mode sdk-loom): the old variants (fun, funnd) and every step that serves or compares
+them (the fun half of perf / c4, textmatch) are dropped, so the job serves the package built in the job on --new-sdk alone: perf short and long (the
+card job's session count), c4 on stagingnd, func, ktest and gates. No llama.cpp steps (run without --baselines). The deltas against the old card are taken
+from the card's published Loom rows by the caller; a targeted ABBA confirmation is this tool's normal --sdk-ab job.
+
 An A/A run (a package against itself, e.g. old = staging@REV, new = staging at main) measures the runner's own noise.
 
 --device strix-halo: the Strix Halo runner (strix_ab_jobs.py is a wrapper with these defaults), the old card's --memory_bytes.
@@ -312,6 +317,7 @@ def parser(device=None):
     ap.add_argument("--baselines", action="store_true", help="also run the llama.cpp ROCm + Vulkan rows (off: the A/B compares Loom with Loom; no llama.cpp re-measure)")
     ap.add_argument("--llama-reps", type=int, default=None, help="llama.cpp runs per 1-stream row (default: 2 on Strix Halo; on the R9700 the Loom session count, as r9700_jobs.py)")
     ap.add_argument("--sdk-ab", action="store_true", help="the SDK A/B of a migration: old = the published card on --old-sdk, new = the package built in the job on --new-sdk (see above)")
+    ap.add_argument("--loom-only", action="store_true", help="with --sdk-ab: only the new package on --new-sdk (no old-card variant, no llama.cpp, no textmatch); see above")
     ap.add_argument("--old-sdk", default="0.1.0")
     ap.add_argument("--new-sdk", default="0.2.0")
     ap.add_argument("--suffix", default="", help="appended to the job name (a confirming re-run: -r2)")
@@ -351,6 +357,19 @@ def sdk_ab(doc, old_sdk, new_sdk, key):
     return doc
 
 
+def loom_only(doc):
+    """The Loom-only form of an --sdk-ab document: the old variants and the steps that need them are removed, the new ones stay (their order is the ABBA's
+    staging half). Step kinds: perf:V / c4:V name their variant; textmatch compares two packages; extend extends an A/B's sessions; llama* are baselines."""
+    gone = {"fun", "funnd"}
+    for j in doc["jobs"]:
+        j["variants"] = [v for v in j["variants"] if v["name"] not in gone]
+        j["steps"] = [x for x in j["steps"] if x.split(":")[0] not in ("textmatch", "extend") and not x.startswith("llama")
+                      and not (x.split(":")[0] in ("perf", "c4") and x.split(":")[1] in gone)]
+    if doc.get("_comment"):
+        doc["_comment"] += " Loom only (--loom-only): the new package alone, no old-card variant, no llama.cpp."
+    return doc
+
+
 def build_replicas(a):
     """build(a) for replica 1 alone (--replicas 1: the document as before, byte for byte); more replicas append the other replicas' jobs
     (same runner, perf.json order: all replica 1 jobs, then replica 2, ...) to the one document."""
@@ -361,6 +380,10 @@ def build_replicas(a):
         doc["jobs"] += build(a)["jobs"]
     if a.sdk_ab:
         sdk_ab(doc, a.old_sdk, a.new_sdk, card_lib.registry.device(a.device)["runner"]["key"])
+        if a.loom_only:
+            loom_only(doc)
+    elif a.loom_only:
+        sys.exit("--loom-only is a form of --sdk-ab")
     if a.replicas > 1:
         doc["_comment"] += f" {a.replicas} replicas per model (jobs ...-r2 ...): independent runs on different runners (the ratchet's confirming run)."
     return doc

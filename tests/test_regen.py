@@ -584,6 +584,171 @@ class SdkAbTest(Base):
         self.assertIn("package", e["reason"])
 
 
+class SdkLoomTest(Base):
+    """--mode sdk-loom: the Loom-only sweep. The job's Loom rows are compared with the OLD card's Loom rows (another job); a row outside +-3 % either way
+    gets ONE targeted ABBA job (the sdk-ab job without baselines) whose verdict decides; ingest takes the llama.cpp rows from the previous card."""
+    e = SdkAbTest.e
+    package_recorded = SdkAbTest.package_recorded
+
+    def plan_loom(self):
+        return self.plan("--mode", "sdk-loom")
+
+    def cmp_file(self, name, vs_card, gates=None):
+        """a strix_ab_compare.py result of a Loom-only job: new values and new / old-card ratios (no old side)"""
+        p = os.path.join(self.tmp, f"{name}.json")
+        json.dump({"job": name, "metrics": {k: {"old": None, "new": 100.0 * r if r and r != "nocard" else (100.0 if r else None), "ratio": None, "status": "MISSING",
+                                                "card": 100.0 if r != "nocard" else None, "new_vs_card": r if r != "nocard" else None}
+                                            for k, r in vs_card.items()}, "gate_failures": gates or [], "degraded_runner": {}}, open(p, "w"))
+        return p
+
+    def collect_cmp(self, cmp, name=JOB):
+        def download(st, n, e):
+            d = regen.job_dir(st, n)
+            shutil.rmtree(d, ignore_errors=True)
+            shutil.copytree(os.path.join(DATA, "job_e2b"), d)
+            return d
+        with mock.patch.object(regen, "download", download), mock.patch.object(regen, "compare", lambda st, n, e, d: cmp), \
+                contextlib.redirect_stdout(io.StringIO()):
+            regen.main(["collect", self.state])
+        return regen.State(self.state)
+
+    def collect_loom(self, vs_card, name=JOB, **kw):
+        return self.collect_cmp(self.cmp_file(name, vs_card, **kw), name)
+
+    IN = {"decode": 1.02, "decode_2k": 1.05, "prefill_8k": 0.98, "decode_32k": 1.0, "streams4": 1.01}
+
+    def test_plan_makes_loom_only_jobs_and_remembers_the_old_card(self):
+        st = self.plan_loom()
+        cmd = next(c for c in self.calls if any(x.endswith("ab_jobs.py") for x in c))
+        for flag in ("--sdk-ab", "--loom-only"):
+            self.assertIn(flag, cmd)
+        self.assertNotIn("--baselines", cmd)
+        self.assertEqual(st.jobs[JOB]["old"], f"loom-fun-staging/{SLUG}@" + "e" * 40)
+        self.assertEqual(st.d["mode"], "sdk-loom")
+
+    def test_rows_inside_the_band_promote_with_cross_job_deltas(self):
+        self.e(self.plan_loom())
+        e = self.collect_loom(self.IN).jobs[JOB]
+        self.assertEqual((e["stage"], e["decision"]), ("collected", "promote"))
+        self.assertEqual(e["perf"], {"decode": 2.0, "prefill": -2.0, "longctx": 0.0, "4stream": 1.0})
+
+    def test_a_row_outside_the_band_either_way_asks_for_one_abba_job(self):
+        for row, r, text in (("prefill_8k", 0.96, "prefill -4.0 %"), ("decode", 1.05, "decode +5.0 %")):
+            self.setUp()
+            self.e(self.plan_loom())
+            e = self.collect_loom({**self.IN, row: r}).jobs[JOB]
+            self.assertEqual((e["stage"], e["decision"]), ("collected", "confirm"), row)
+            self.assertIn(text, e["reason"])
+            self.assertEqual(e["confirm_rows"], [{"decode": "decode", "prefill_8k": "prefill"}[row]])
+
+    def test_a_row_the_old_card_has_no_value_for_is_reported_not_confirmed(self):
+        self.e(self.plan_loom())
+        e = self.collect_loom({**self.IN, "streams4": "nocard"}).jobs[JOB]
+        self.assertEqual(e["decision"], "promote")
+        self.assertIn("4stream", e["reason"])
+        self.assertIsNone(e["perf"]["4stream"])
+
+    def test_a_row_the_old_card_has_that_the_job_did_not_measure_is_confirmed(self):
+        self.e(self.plan_loom())
+        e = self.collect_loom({**self.IN, "decode_32k": None}).jobs[JOB]
+        self.assertEqual((e["decision"], e["confirm_rows"]), ("confirm", ["longctx"]))
+        self.assertIn("longctx missing", e["reason"])
+
+    def test_a_failed_gate_holds_and_nothing_measured_holds(self):
+        self.e(self.plan_loom())
+        e = self.collect_loom(self.IN, gates=["ktest:staging"]).jobs[JOB]
+        self.assertEqual((e["stage"], e["decision"]), ("needs_decision", "hold"))
+        self.setUp()
+        self.e(self.plan_loom())
+        e = self.collect_loom({k: None for k in self.IN}).jobs[JOB]
+        self.assertEqual(e["decision"], "hold")
+
+    def abba(self, first, second):
+        """round 1 (cross-job) then its ABBA job; returns the state after both are collected"""
+        self.e(self.plan_loom())
+        self.collect_loom(first)
+        with mock.patch.object(regen, "sh", self.gen), contextlib.redirect_stdout(io.StringIO()):
+            regen.main(["rerun", self.state])
+        cmd = self.calls[-1]
+        self.assertIn("--suffix=-r2", cmd)
+        self.assertIn("--sdk-ab", cmd)
+        self.assertNotIn("--loom-only", cmd)   # the confirming job is the ABBA: old card on its pin against the new package
+        self.assertNotIn("--baselines", cmd)
+        st = regen.State(self.state)
+        r2 = next(n for n in st.jobs if n.endswith("-r2"))
+        self.assertEqual((st.jobs[r2]["prev"], st.jobs[r2]["old"]), (JOB, st.jobs[JOB]["old"]))
+        st.jobs[r2].update(stage="done", run="8", job_url="https://x/job/2", completed="2026-11-16T14:00:00Z")
+        st.save()
+        cmp = SdkAbTest.cmp_file(self, "abba", second)
+        return self.collect_cmp(cmp, r2), r2
+
+    def test_abba_job_decides_the_confirmed_rows_and_their_deltas_replace_the_cross_job_ones(self):
+        st, r2 = self.abba({**self.IN, "prefill_8k": 0.96, "decode": 1.06}, {"decode": 1.04, "prefill_8k": 0.985, "decode_32k": 1.0, "streams4": 1.0, "decode_2k": 1.0})
+        f = st.jobs[JOB]
+        self.assertEqual((f["stage"], f["decision"]), ("collected", "promote"))
+        self.assertEqual(f["confirmed"], {"decode": 4.0, "prefill": -1.5})
+        self.assertEqual(f["perf"], {"decode": 4.0, "prefill": -1.5, "longctx": 0.0, "4stream": 1.0})   # longctx and 4stream stay cross-job
+        self.assertEqual(f["perf_cross"]["decode"], 6.0)
+        self.assertNotIn("perf", st.jobs[r2])   # the confirming job reports through the first one
+        p = os.path.join(self.tmp, "status.json")
+        json.dump({"models": {}}, open(p, "w"))
+        with contextlib.redirect_stdout(io.StringIO()):
+            regen.main(["status", self.state, "--status-json", p])
+        m = json.load(open(p))["models"][SLUG]
+        self.assertEqual(m["perf"]["r9700"], f["perf"])
+        self.assertEqual(m["perf_confirmed"]["r9700"], ["decode", "prefill"])
+
+    def test_abba_job_slower_than_3_percent_stops_the_model_with_the_numbers(self):
+        st, r2 = self.abba({**self.IN, "prefill_8k": 0.96}, {"decode": 1.0, "prefill_8k": 0.95, "decode_32k": 1.0, "streams4": 1.0, "decode_2k": 1.0})
+        f = st.jobs[JOB]
+        self.assertEqual(f["stage"], "needs_decision")
+        self.assertIn("prefill -5.0 %", f["reason"])
+        self.assertEqual((st.jobs[r2]["stage"], st.jobs[r2]["decision"]), ("needs_decision", "hold"))
+
+    def test_ingest_takes_the_llama_rows_from_the_previous_card_and_names_the_confirmed_rows(self):
+        st, _ = self.abba({**self.IN, "prefill_8k": 0.96}, {"decode": 1.0, "prefill_8k": 0.99, "decode_32k": 1.0, "streams4": 1.0, "decode_2k": 1.0})
+        e = st.jobs[JOB]
+        open(os.path.join(e["dir"], "programs_sha256_staging.txt"), "w").write("b" * 64 + "\n")
+        self.package_recorded(e, "b" * 64)
+        calls = []
+
+        def hf_snapshot(repo, rev, out):
+            os.makedirs(os.path.join(out, "program"), exist_ok=True)
+            open(os.path.join(out, "program", "llm.loom"), "w").write("x")
+            json.dump({"card": {"memory_bytes": 1}, "devices": {}}, open(os.path.join(out, "info.json"), "w"))
+            open(os.path.join(out, "README.md"), "w").write("x")
+
+        def run_tool(args, cwd):
+            calls.append([str(a) for a in args])
+            if "build" in args and "-o" in args:
+                shutil.copy(os.path.join(cwd, "info_prev.json"), os.path.join(cwd, "info_new.json"))
+            return ""
+        with mock.patch.object(regen, "hf_snapshot", hf_snapshot), mock.patch.object(regen, "hf_head", lambda r: "h" * 40), \
+                mock.patch.object(regen.card_lib, "programs_sha256", lambda d: "b" * 64), \
+                mock.patch.object(regen, "run_tool", run_tool), contextlib.redirect_stdout(io.StringIO()):
+            regen.main(["ingest", self.state])
+        perf = next(c for c in calls if "perf" in c and "--loom-jsonl" in c)
+        self.assertIn("--baseline-from-info", perf)
+        self.assertNotIn("--llama-jsonl", perf)
+        self.assertFalse([c for c in calls if "--backend" in c])   # no Vulkan re-measure: its session stays as published
+        build = next(c for c in calls if "build" in c and "--evidence" in c)
+        self.assertIn("--reset-performance", build)
+        e = regen.State(self.state).jobs[JOB]
+        self.assertEqual(e["stage"], "ingested")
+        self.assertIn("another job", e["message"])
+        self.assertIn("confirmed by an ABBA job (same job): prefill -1.0 %", e["message"])
+
+    def test_package_and_ingest_use_the_first_job_only(self):
+        st, r2 = self.abba({**self.IN, "prefill_8k": 0.96}, {"decode": 1.0, "prefill_8k": 0.99, "decode_32k": 1.0, "streams4": 1.0, "decode_2k": 1.0})
+        self.assertEqual((st.jobs[r2]["stage"], st.jobs[r2]["decision"]), ("collected", "promote"))
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            regen.main(["ingest", self.state, "--slug", SLUG])   # no package recorded: the first job stops, the confirming job is not ingested
+        st = regen.State(self.state)
+        self.assertEqual(st.jobs[JOB]["stage"], "needs_decision")
+        self.assertEqual(st.jobs[r2]["stage"], "collected")
+
+
 def v01_model():
     """a published (v0.1.0 era) model.json: pool_capacity, origins, a parameter file origin, a per-GPU preset"""
     return {"schema_version": 1, "model": {"id": "a/b"}, "programs": {"source": {"inputs": ["program/control.loom"]}},
