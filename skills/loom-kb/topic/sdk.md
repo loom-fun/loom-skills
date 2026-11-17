@@ -6,11 +6,27 @@ version changes, re-check the entries (delete the ones that are fixed, with the 
 version. Write-ups for the SDK team are built from this file.
 
 ## Contents
+- hrx-loom 0.2.0: rewritten chat history
 - hrx-loom 0.1.0: tools (compile, test, profile)
 - hrx-loom 0.1.0: language and lowering
 - hrx-loom 0.1.0: runtime (load-time preparation, scratch, first load)
 - hrx-loom 0.1.0: grid-wide synchronization (persistent kernels)
 - Verified to work (not limits)
+
+## hrx-loom 0.2.0: rewritten chat history
+
+- **Generated prefixes are not automatically checkpointed.** Bolt thinking-on tool turns still re-prefill the whole history
+  ([issue #40](https://github.com/loom-fun/loom-skills/issues/40),
+  [current-SDK reproduction](https://github.com/loom-fun/loom-skills/actions/runs/44165222659/job/134329462508)).
+  The model writes bare `<channel|>`; the unchanged template inserts a preceding newline in the next prompt. The first mismatches
+  are tokens 197, 386 and 442 (token 101 becomes token 107, then 101), after 92.5%, 92.8% and 94.4% of the previous totals.
+  All six thinking-on replies match the reference, but all three follow-ups report cached=0. Thinking off reuses over 99%.
+  In shipped runtime `0cd370f2`, `service/text/service.c:loom_serve_text_capture_prefix` captures only prefill frontiers;
+  `prefix_cache_capacity` cannot capture generated reasoning. Explicit checkpoints pin idle completed histories, and canonical-history
+  validation still requires exact extension; increasing cache capacity does not add a rewind operation. The current safe behavior is
+  to replay rewritten history. Unlock: generated-token prefix checkpoints or a correct common-prefix restore/replay path, preserving
+  the model's output and the template. A passing agent gate excuses verified template rewrites and does **not** mean this performance
+  target was achieved. Issue #40 remains open; do not replace generated tokens or change the template merely to obtain a cache hit.
 
 ## hrx-loom 0.1.0: tools (compile, test, profile)
 
