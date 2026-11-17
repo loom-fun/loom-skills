@@ -27,6 +27,14 @@ loom-fetch https://huggingface.co/loom-fun-staging/unsloth-Qwen3-0.6B-loom/resol
 loom-serve --model=Qwen3-0.6B/model.json '--device=amdgpu://?completion_spin_ns=4294967295' --pool_backing=fixed --parameter_mode=preload
 ```
 
+In another terminal, send a request (optional thinking is turned off):
+
+```bash
+curl http://127.0.0.1:8080/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{"model": "Qwen/Qwen3-0.6B", "messages": [{"role": "user", "content": "Hello"}], "chat_template_kwargs": {"enable_thinking": false}}'
+```
+
 </details>
 
 <details>
@@ -39,6 +47,14 @@ loom-serve --model=Qwen3-0.6B/model.json '--device=amdgpu://?completion_spin_ns=
 ```
 
 On this GPU, the package's preset sizes the memory pool (`--pool_backing=fixed` commits it up front): this package serves up to 20,480 tokens per request (its native context is 40,960).
+
+In another terminal, send a request (optional thinking is turned off):
+
+```bash
+curl http://127.0.0.1:8080/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{"model": "Qwen/Qwen3-0.6B", "messages": [{"role": "user", "content": "Hello"}], "chat_template_kwargs": {"enable_thinking": false}}'
+```
 
 </details>
 
@@ -53,6 +69,14 @@ loom-serve --model=Qwen3-0.6B/model.json '--device=amdgpu://?completion_spin_ns=
 
 On this GPU, `--memory_bytes=15000000000` bounds the memory pool: this package serves up to 18,432 tokens per request (its native context is 40,960).
 
+In another terminal, send a request (optional thinking is turned off):
+
+```bash
+curl http://127.0.0.1:8080/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{"model": "Qwen/Qwen3-0.6B", "messages": [{"role": "user", "content": "Hello"}], "chat_template_kwargs": {"enable_thinking": false}}'
+```
+
 </details>
 
 <details>
@@ -65,6 +89,14 @@ loom-serve --model=Qwen3-0.6B/model.json '--device=amdgpu://?completion_spin_ns=
 ```
 
 On this GPU, `--memory_bytes=17000000000` bounds the memory pool: this package serves up to 16,384 tokens per request (its native context is 40,960).
+
+In another terminal, send a request (optional thinking is turned off):
+
+```bash
+curl http://127.0.0.1:8080/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{"model": "Qwen/Qwen3-0.6B", "messages": [{"role": "user", "content": "Hello"}], "chat_template_kwargs": {"enable_thinking": false}}'
+```
 
 </details>
 
