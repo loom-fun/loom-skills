@@ -67,6 +67,7 @@ import card_lib  # noqa: E402
 import promote_check  # noqa: E402
 import sample_lib  # noqa: E402
 import sdk_package  # noqa: E402
+from publish_package import parse_upload_receipt  # noqa: E402
 
 try:
     import fcntl
@@ -1066,8 +1067,10 @@ def package_one(st, slug, canon, sha, dry, env, prefill_changes=None):
            + (["--dry-run"] if dry else []), check=False, env=env)
     if r.returncode:
         raise RuntimeError(f"upload: {(r.stdout + r.stderr)[-400:]}")
+    receipt = None if dry else parse_upload_receipt(r.stdout, repo, rev, (env or {}).get("HF_ENDPOINT"))
     print(f"{slug}: {r.stdout.strip().splitlines()[-1][:300]}\n   programs_sha256 {got}; model.json changes: {', '.join(k + ' ' + p for k, p in changes) or 'nothing'}")
-    return {"revision": None if dry else hf_head(repo), "programs_sha256": got, "base": sha}
+    return {"revision": None if dry else receipt["commit"], "programs_sha256": got, "base": sha,
+            **({"receipt": receipt} if receipt else {})}
 
 
 def cmd_package(a):
