@@ -1,47 +1,53 @@
 {
- "_comment": "R9700 per-model measurement (r9700_jobs.py): one job per model on one R9700 runner; loom-fun-staging card, llama.cpp ROCm b1375 + Vulkan b12211 with the matched drafting, reduced-context models served at served_context. Does not fit: none",
- "runner": "r9700",
- "memory_bytes": 34000000000,
- "llama_spec": "matched",
- "jobs": [
-  {
-   "name": "unsloth-qwen3-0-6b-loom",
-   "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
-   "kit": null,
-   "llamacpp": "b1375",
-   "llamacpp_vulkan": "b12211",
-   "memory_bytes_r9700": 17000000000,
-   "variants": [
+  "runner": "r9700",
+  "sdk": "0.2.0",
+  "memory_bytes": 34000000000,
+  "card": "loom-fun-staging/amd-Qwen3.8-27B-Quark-AWQ-MXFP4-loom@01bbfe132163df667ebeb6f614dda0e28336e086",
+  "kit": null,
+  "jobs": [
     {
-     "name": "card",
-     "build": {}
-    },
-    {
-     "name": "nodraft",
-     "build": {},
-     "execution": {
-      "draft_depth": 0
-     }
+      "name": "mxfp4-context-proof",
+      "card": "loom-fun-staging/amd-Qwen3.8-27B-Quark-AWQ-MXFP4-loom@01bbfe132163df667ebeb6f614dda0e28336e086",
+      "sdk": "0.2.0",
+      "kit": null,
+      "memory_bytes_r9700": 34000000000,
+      "variants": [
+        {
+          "name": "base110592",
+          "serve_args": [
+            "--print_device_statistics"
+          ]
+        },
+        {
+          "name": "fixed131072",
+          "execution": {
+            "context_capacity": 131072
+          },
+          "serve_args": [
+            "--print_device_statistics"
+          ]
+        },
+        {
+          "name": "elastic131072",
+          "execution": {
+            "context_capacity": 131072
+          },
+          "elastic": true,
+          "memory_bytes": 34000000000,
+          "serve_args": [
+            "--pool_backing=elastic",
+            "--parameter_mode=preload",
+            "--parameter_idle_ms=1",
+            "--print_device_statistics"
+          ]
+        }
+      ],
+      "steps": [
+        "contextproof:base110592:110592:image-c4",
+        "contextproof:fixed131072:131072:text",
+        "contextproof:elastic131072:131072:pinned-image-c4"
+      ],
+      "contextproof_programs_sha256": "c9530f9f4cec5937eaf53022da6335d241be8bd539bf9dbc687d3a13a7235499"
     }
-   ],
-   "steps": [
-    "func:card",
-    "ktest:card",
-    "gates:card:dev",
-    "perf:card:3",
-    "perf:card:3:long",
-    "c4:nodraft",
-    "llama@rocm.np1:3",
-    "llama@rocm.np1:3:long",
-    "llamac4@rocm.nodraft",
-    "llama@vulkan.np1:3",
-    "llama@vulkan.np1:3:long",
-    "llamac4@vulkan.perslot.nodraft"
-   ]
-  }
- ],
- "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
- "kit": null,
- "llamacpp": "b1375",
- "llamacpp_vulkan": "b12211"
+  ]
 }

@@ -453,6 +453,9 @@ serve_alone() { # serve_alone VARIANT
   step "serve $1 (SDK root $vroot)"; LOOM_MEMNEED=$memneed LOOM_ACTIVE_WAIT=$aw "$SV/serve.sh" "perf-$1" "$PORT" amdgpu "$vmem" "$D/$1/pkg/model.json" ${sa:+-- $sa} > "$out/serve_$1.out" 2>&1; tail -2 "$out/serve_$1.out"
   grep -q '^FAILED' "$out/serve_$1.out" && { echo "REGISTRATION FAILED on $RUNNER for variant $1 (fast fail, see serve_$1.out):"; grep -m6 -E 'AMDGPU|error|ERROR' "$out/serve_$1.out" | cut -c1-300; return 1; }
   curl -sf "$url/v1/models" >/dev/null || return 1
+  # Only contextproof sends its near-cap request as the first successful generation.
+  # Ordinary steps retain the existing first-load wait and failure evidence.
+  [ "${CONTEXT_PROOF_COLD:-0}" = 1 ] && return 0
   # "ready" is the compiled registration; the weights load on the FIRST request, and until then every request is refused. Wait for that
   # first answer before any step sends its own (a cold runner lost the first server of a job to it: func, gates, consistency failed
   # for a reason that is not theirs). A model that does not load in 5 minutes FAILS the step (no restart that would make it pass): the
@@ -791,6 +794,39 @@ PY
       step "context admission $p1 ${p2:-}"
       (cd "$out" && "$T" "$B/ctx_admit.py" "$D/$p1/pkg" "$url" ${p2:+--tokens "$p2"} 2>&1 | tee "admit_${p1}${p2:+_$p2}.txt" | tail -3)
       res[$s]=$(tail -1 "$out/admit_${p1}${p2:+_$p2}.txt" | cut -c1-200);;
+    contextproof)  # contextproof:V:CAP:MODE; MODE text/image/image-c4/pinned-image-c4
+      [[ "${p2:-}" =~ ^[0-9]+$ ]] && [ "$p2" -ge 4096 ] || { res[$s]="ERROR: contextproof needs numeric context >=4096"; continue; }
+      ctx_args=(); case "${p3:-text}" in
+        text) ;;
+        image) ctx_args+=(--image) ;;
+        image-c4) ctx_args+=(--image --concurrent) ;;
+        pinned-image-c4) ctx_args+=(--image --concurrent --pin-primary) ;;
+        *) res[$s]="ERROR: unknown contextproof mode"; continue ;;
+      esac
+      ctx_programs=$(q "print(j.get('contextproof_programs_sha256') or '')")
+      ctx_have=$(cat "$out/programs_sha256_$p1.txt" 2>/dev/null)
+      [ -n "$ctx_programs" ] && [ "$ctx_have" = "$ctx_programs" ] || { res[$s]="ERROR: unexpected contextproof programs"; continue; }
+      sdk_root "$p1" || { res[$s]="ERROR: contextproof SDK selection"; continue; }
+      "$T" "$here/.github/scripts/context_completion_probe.py" --check-sdk "$SDKR" "$D/$p1/pkg" > "$out/contextproof_${p1}_server_sdk.json" || { res[$s]="ERROR: contextproof server wheel pin"; continue; }
+      "$T" "$here/.github/scripts/context_completion_probe.py" --check-sdk "$troot" "$D/$p1/pkg" > "$out/contextproof_${p1}_tools_sdk.json" || { res[$s]="ERROR: contextproof tools wheel pin"; continue; }
+      # Exclude the previous variant's resident allocations from this timeline.
+      for f in "$LOOM_SERVE_STATE"/*.pid; do [ -f "$f" ] && "$SV/stop.sh" "$(basename "$f" .pid)" >/dev/null 2>&1; done
+      "$B/wait_vram.sh" "contextproof baseline $p1" 1024 180 "$out/vram_log.txt" || { res[$s]="ERROR: previous VRAM still retained"; continue; }
+      mkdir -p "$out/contextproof_$p1"
+      "$T" "$here/.github/scripts/context_completion_probe.py" --monitor-vram "$out/contextproof_$p1/startup-vram.jsonl" & ctx_monitor_pid=$!
+      if ! CONTEXT_PROOF_COLD=1 serve_alone "$p1"; then
+        kill "$ctx_monitor_pid" 2>/dev/null; wait "$ctx_monitor_pid" 2>/dev/null
+        cp "$LOOM_SERVE_STATE/perf-$p1.log" "$out/contextproof_$p1/server.log" 2>/dev/null
+        res[$s]="ERROR: contextproof registration"; continue
+      fi
+      step "completed-context proof $p1 $p2 ${p3:-text}"
+      "$T" "$here/.github/scripts/context_completion_probe.py" "$D/$p1/pkg" "$url" "$out/contextproof_$p1" --scripts "$B" --context "$p2" --cold-first "${ctx_args[@]}" > "$out/contextproof_$p1.log" 2>&1
+      ctx_rc=$?
+      "$SV/stop.sh" "perf-$p1" >/dev/null 2>&1
+      cp "$LOOM_SERVE_STATE/perf-$p1.log" "$out/contextproof_$p1/server.log" 2>/dev/null
+      kill "$ctx_monitor_pid" 2>/dev/null; wait "$ctx_monitor_pid" 2>/dev/null
+      tail -2 "$out/contextproof_$p1.log"
+      if [ "$ctx_rc" = 0 ]; then res[$s]="PASS completed-context, cache, quality and memory proof"; else res[$s]="FAIL contextproof ($ctx_rc); raw responses and memory retained"; fi;;
     fullctx)   # fullctx:V[:TOKENS]: one request of ~the served context that must finish (ctx_admit.py --complete): the card's context is a measured one
       serve_alone "$p1" || { res[$s]=ERROR; continue; }
       step "full-context request $p1 ${p2:-}"
