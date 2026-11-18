@@ -51,7 +51,7 @@ class ChatRequestTests(unittest.TestCase):
             self.assertEqual(set(body), {"model", "messages"})
 
     def test_single_and_multi_gpu_render_real_source_blocks(self):
-        for fixture, package, requests in (("flint", "flint/pkg", 1), ("r9700_two", "r9700/pkg", 2), ("d1", "d1/repo", 0)):
+        for fixture, package, gpus, requests in (("flint", "flint/pkg", 1, 1), ("r9700_two", "r9700/pkg", 2, 1), ("d1", "d1/repo", 1, 0)):
             with self.subTest(fixture=fixture), tempfile.TemporaryDirectory() as temp:
                 dest = Path(temp)
                 shutil.copytree(CARD / "test" / package, dest, dirs_exist_ok=True)
@@ -62,13 +62,17 @@ class ChatRequestTests(unittest.TestCase):
                     text = renderer.render(str(dest))
                 blocks = re.findall(r"```bash\n(curl .*?)```", text, re.S)
                 self.assertEqual(len(blocks), requests)
+                self.assertEqual(text.count("## Send a request"), requests)
+                quickstart = text.split("## Quick start", 1)[1].split("\n## ", 1)[0]
+                self.assertEqual(quickstart.count("loom-fetch "), gpus)
+                self.assertEqual(quickstart.count("loom-serve "), gpus)
                 if requests:
                     self.assertIn("--model=my-output-folder", text)
                     model = json.loads((dest / "model.json").read_text())["model"]["id"]
-                    for block in blocks:
-                        self.assertEqual(request_body(["```bash", block, "```"])["model"], model)
-                    if requests == 2:
-                        self.assertEqual(len(re.findall(r"<details>.*?curl .*?</details>", text, re.S)), 2)
+                    self.assertEqual(request_body(["```bash", blocks[0], "```"])["model"], model)
+                    heading = text.index("## Send a request")
+                    self.assertGreater(heading, text.rfind("</details>", 0, heading))
+                    self.assertNotIn("The server listens on", text)
 
 
 if __name__ == "__main__":
