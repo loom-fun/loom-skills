@@ -88,6 +88,11 @@ Recorded by the mxfp4st campaign, 2026-11-15/16 (hrx-loom 0.1.0 from PyPI, DevLa
 - **Large test modules fail to verify.** A module of about 65,000 lines fails with `ENCODING/004 view type references encoding value
   '%blocks' ... which is not defined at this point`, naming values of other kernels; every kernel compiles alone. Cause: 16-bit SSA
   encoding ids (section above). Workaround: about 60 check cases per test file (`gen_bench` TESTED).
+- **Some kernels cannot be a loom-test case root as generated** (0.2.0). An indirect dispatch (`X_listed`: the workgroup count
+  read from a buffer) fails `launch-config artifact still depends on non-scalar workload argument`; SwiGLU `g_silu_mul` proves
+  its vector bound only for the program's constant width (`SUBRANGE/010` with a dynamic width). Workaround: make_kernel_tests
+  tests a `kt_` copy (scalar count; the program's constant width), `ktest_variants.py`. Unlock: indirect dispatch in check
+  cases, and specializing a case's literal arguments before the bounds proof.
 - **Test-API drift between builds.** 0.1.0 has no `check.expect.close` (use `check.expect.approximate actual() expected() : T, T`); a newer
   dev build (0.0.0.dev0) rejects `vector.fragment.load` origins it cannot prove in bounds (`origin + 16 <= rows`: add
   `index.assume lt(row, rows - 15)`). Kernels and tests must compile on both.
