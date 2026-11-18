@@ -1,0 +1,23 @@
+{
+ "scope": "model/unsloth-Qwen3.5-9B-loom",
+ "match": {
+  "slug": [
+   "unsloth-Qwen3.5-9B-loom"
+  ]
+ },
+ "owner": "kb",
+ "choices": [
+  {
+   "when": {
+    "devices": [
+     "gfx1150"
+    ]
+   },
+   "set": {
+    "exec.context_capacity": 40960,
+    "exec.context_cap": 40960
+   },
+   "evidence": "gfx1150 laptop (HX 375, 32 GB, GTT 15.08 GiB), hrx-loom 0.2.0, 2026-11-18: the native 262144 is refused at registration under --memory_bytes=14e9 (code 8, cannot address one model context); test_9070xt.py --memory-bytes 14000000000 --state-slab-bytes none (preload): 40960 registers, completes a 40832-token request on a fresh server and then answers correctly; 41984 completes but the next answer is garbled, 43008 and 45056 drop the connection (the qwen35 over-budget failure of device/rdna4/gfx1201-16gb/long-context.md). Measurements: fleet/devices/gfx1150.json"
+  }
+ ]
+}

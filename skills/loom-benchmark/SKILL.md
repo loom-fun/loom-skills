@@ -217,6 +217,8 @@ $T "$S/sampling_check.py" $P http://127.0.0.1:8160 --llama http://127.0.0.1:8130
   for a package whose prefill workspace does not fit) through a deployment document, finds the largest `context_capacity` that registers,
   then the largest at which a fresh server completes one request of that full length and answers a sanity prompt correctly after it
   (a wrong answer's text is recorded). The fleet's results: `fleet/devices/gfx1201-16gb.json` (`make_info.py devices fleet/devices` validates).
+  The same search on gfx1150 (Strix Point): `--memory-bytes 14000000000 --state-slab-bytes none` (the GTT budget, no slab flag, as the
+  card serves there); results in `fleet/devices/gfx1150.json`.
 
 ## 2. Performance
 
