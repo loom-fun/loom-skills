@@ -170,7 +170,7 @@ PROFILE_FLAGS = ["--device_profiling_mode=dispatch-events,executable-metadata", 
 
 def serve_args(variant):
     args = list(BASE_ARGS)
-    if variant.startswith("nospin"):
+    if variant.startswith("nospin"):  # card_cpuload keeps the spin URI
         args = [re.sub(r"^--device=amdgpu://\?completion_spin_ns=\d+$", "--device=amdgpu", x) for x in args]
     return args
 
@@ -404,31 +404,37 @@ for v in [x for x in a.variants.split(",") if x]:
     step(f"perf_{v}", p.returncode == 0 and bool(o), perf=R["variants"][v]["perf"])
 
 # -- profiles: per-kernel device time ----------------------------------------------------------------------------------
-for sc in [x for x in a.profile.split(",") if x]:
-    srv = Server(serve_args("card") + PROFILE_FLAGS, os.path.join(OUT, f"profile_{sc}.serve.log"))
+for spec_ in [x for x in a.profile.split(",") if x]:
+    sc, _, pv = spec_.partition("@")
+    pv = pv or "card"
+    key = sc if pv == "card" else f"{sc}_{pv}"
+    srv = Server(serve_args(pv) + PROFILE_FLAGS, os.path.join(OUT, f"profile_{key}.serve.log"))
     mid = srv.ready()
     if not mid:
-        step(f"profile_{sc}", False, tail=tail(srv.log, 30))
+        step(f"profile_{key}", False, tail=tail(srv.log, 30))
         srv.stop()
         continue
-    tel = Telemetry(srv.p.pid, os.path.join(OUT, f"telemetry_profile_{sc}.jsonl"))
+    load = cpuload_proc() if pv.endswith("cpuload") else None
+    tel = Telemetry(srv.p.pid, os.path.join(OUT, f"telemetry_profile_{key}.jsonl"))
     t0 = time.time()
-    req = os.path.join(OUT, f"profile_{sc}.req.json")
+    req = os.path.join(OUT, f"profile_{key}.req.json")
     with open(req, "w") as f:
         p = subprocess.run([VPY, os.path.join(SCRIPTS, "profile_requests.py"), URL, mid, sc], cwd=SCRIPTS, env=env,
                            stdout=f, stderr=subprocess.PIPE, text=True, timeout=3600)
     t1 = time.time()
     tsum = tel.finish([(t0, t1, "requests")])
+    if load:
+        load.kill()
     how = srv.stop()
     stats_present = any("dispatch" in l and "count=" in l for l in tail(srv.log, 100000))
     ps = subprocess.run([VPY, os.path.join(SCRIPTS, "profile_stats.py"), srv.log, req, "--families",
-                         os.path.join(SCRIPTS, "profile_families.json"), "--md", os.path.join(OUT, f"profile_{sc}.md"),
-                         "--json", os.path.join(OUT, f"profile_{sc}.json")], cwd=SCRIPTS, env=env,
+                         os.path.join(SCRIPTS, "profile_families.json"), "--md", os.path.join(OUT, f"profile_{key}.md"),
+                         "--json", os.path.join(OUT, f"profile_{key}.json")], cwd=SCRIPTS, env=env,
                         capture_output=True, text=True)
-    R["profiles"][sc] = {"requests_rc": p.returncode, "requests_err": p.stderr[-800:], "wall_s": round(t1 - t0, 2),
+    R["profiles"][key] = {"requests_rc": p.returncode, "requests_err": p.stderr[-800:], "wall_s": round(t1 - t0, 2),
                          "stopped": how, "stats_present": stats_present, "stats_rc": ps.returncode,
                          "stats_err": ps.stderr[-800:], "telemetry": tsum}
-    step(f"profile_{sc}", p.returncode == 0 and stats_present, stopped=how)
+    step(f"profile_{key}", p.returncode == 0 and stats_present, stopped=how)
 
 R["finished"] = time.strftime("%Y-%m-%d %H:%M:%S")
 save()

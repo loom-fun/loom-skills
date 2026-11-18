@@ -27,7 +27,7 @@ jobs:
           python3 - >> "$GITHUB_OUTPUT" <<'PY'
           import json
           t = json.load(open('.github/gapprof/targets.json'))
-          print('matrix=' + json.dumps({'repo': t['models'], 'os': t['os']}))
+          print('matrix=' + json.dumps({'repo': t['models'], 'os': t['os'], 'rep': list(range(1, t.get('reps', 1) + 1))}))
           print('variants=' + t.get('variants', 'card'))
           print('profile=' + t.get('profile', ''))
           PY
@@ -39,7 +39,8 @@ jobs:
       fail-fast: false
       matrix:
         repo: ${{ fromJSON(needs.plan.outputs.matrix).repo }}
-    name: win ${{ matrix.repo }}
+        rep: ${{ fromJSON(needs.plan.outputs.matrix).rep }}
+    name: win ${{ matrix.repo }} r${{ matrix.rep }}
     runs-on: [windows, strix-halo, devlab-dispatch]
     timeout-minutes: 300
     env:
@@ -66,7 +67,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: gapprof-windows-${{ env.SLUG }}
+          name: gapprof-windows-${{ env.SLUG }}-r${{ matrix.rep }}
           path: ${{ runner.temp }}/gapprof-out
           retention-days: 30
       - name: clean up
@@ -80,7 +81,8 @@ jobs:
       fail-fast: false
       matrix:
         repo: ${{ fromJSON(needs.plan.outputs.matrix).repo }}
-    name: linux ${{ matrix.repo }}
+        rep: ${{ fromJSON(needs.plan.outputs.matrix).rep }}
+    name: linux ${{ matrix.repo }} r${{ matrix.rep }}
     runs-on: [strix-halo, devlab-dispatch, Linux, self-hosted]
     timeout-minutes: 300
     env:
@@ -105,7 +107,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: gapprof-linux-${{ env.SLUG }}
+          name: gapprof-linux-${{ env.SLUG }}-r${{ matrix.rep }}
           path: ${{ runner.temp }}/gapprof-out
           retention-days: 30
       - name: clean up
