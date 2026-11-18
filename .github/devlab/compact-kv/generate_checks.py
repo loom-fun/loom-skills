@@ -100,6 +100,43 @@ def extract(text, names, namespace, bad=""):
     return "\n\n".join(output), records
 
 
+def project_listed_launch(text, namespace, records):
+    """Bridge known fixture counts to the SDK's scalar-only host artifact ABI."""
+    blocks = {name: body for kind, name, _, body in split_blocks(text) if kind == 'kernel.def'}
+    load = ('  %origin_c = index.constant 0 : offset\n'
+            '  %counts = buffer.view %count_buffer[%origin_c] : buffer -> view<1xi32>\n'
+            '  %word = view.load %counts[0] : view<1xi32> -> i32\n')
+    projections = {}
+    for dim in (256, 512):
+        for part in ('split', 'combine'):
+            name = f'g16d{dim}_attention_{part}_listed'
+            original = blocks[namespace + name]
+            host, separator, device = original.partition('} launch(')
+            if not separator or host.count('(%count_buffer: buffer)') != 1 or host.count(load) != 1:
+                raise ValueError('unexpected listed launch configuration: ' + name)
+            projected_host = host.replace('(%count_buffer: buffer)', '(%count_buffer: buffer, %word: i32)', 1).replace(load, '', 1)
+            if projected_host.count('%count_buffer') != 1 or 'view.load' in projected_host or 'buffer.view' in projected_host:
+                raise ValueError('listed host configuration still depends on a buffer: ' + name)
+            projected = projected_host + separator + device
+            if text.count(original) != 1 or digest(original.encode()) != records[name]['emitted_sha256']:
+                raise ValueError('listed projection does not match extracted source: ' + name)
+            text = text.replace(original, projected, 1)
+            projections[name] = dict(original_host_sha256=digest(host.encode()),
+                projected_host_sha256=digest(projected_host.encode()),
+                device_sha256=digest(device.encode()), device_byte_identical=True)
+            records[name]['extracted_sha256'] = records[name]['emitted_sha256']
+            records[name]['emitted_sha256'] = digest(projected.encode())
+    return text, projections
+
+
+def listed_scalar_count(buffer_value, tokens):
+    # These two listed fixtures cover every token in a reversed list. Reject
+    # any host/buffer disagreement instead of silently changing launch coverage.
+    if type(buffer_value) is not int or type(tokens) is not int or buffer_value != tokens or not 1 <= tokens <= 8192:
+        raise ValueError('listed scalar count must equal the original full-list buffer count')
+    return buffer_value
+
+
 def addresses(case, positions, pages, compact, capacity=RING, writer=WRITER):
     """Independent explicit physical packing; does not import compact_kv.py."""
     result = np.empty((len(positions), 2), np.int64)
@@ -346,9 +383,11 @@ def check_case(case, arrays, old_bytes, new_bytes, namespace="compact__"):
                 launch, launch_type, arg, arg_type = '%t', 'index', '', ''
                 if variant == 'listed':
                     kn += '_listed'; combine += '_listed'
+                    scalar_count = listed_scalar_count(case.tokens, t)
                     lines += [f"  %{tag}_list = check.generate.iota offset({t - 1}) step(-1) : tensor<{t}xi32>",
-                              f"  %{tag}_count = check.generate.fill value({t}) : tensor<1xi32>"]
-                    launch, launch_type = f'%{tag}_count', 'tensor<1xi32>'
+                              f"  %{tag}_count = check.generate.fill value({t}) : tensor<1xi32>",
+                              f"  %{tag}_scalar = check.literal value({scalar_count}) : i32"]
+                    launch, launch_type = f'%{tag}_count, %{tag}_scalar', 'tensor<1xi32>, i32'
                     arg, arg_type = f'%{tag}_list, ', f'tensor<{t}xi32>, '
                 lines += [f"  %{tag}_acc = check.generate.fill value(0.0) : {acc}", f"  %{tag}_ml = check.generate.fill value(0.0) : {ml}",
                           f"  kernel.launch @{prefix}{kn}[{launch}](%t, {arg}%{arm}_layer, %sliding, %ctx, %pool, %{arm}_q, %info, %{arm}_origin, %{arm}_arena, %{tag}_acc, %{tag}_ml) : [{launch_type}](index, {arg_type}index, i32, index, index, {qtype}, {info}, {orig}, {ar}, {acc}, {ml})",
@@ -383,8 +422,13 @@ def generate(legacy, candidate, out):
     for arm, records_ in [('legacy', old_records), ('compact', new_records)]:
         if {name: r['original_sha256'] for name, r in records_.items()} != pins[arm]:
             raise ValueError(f'{arm}: actual generated kernel/dependency differs from reviewed freeze')
+    # Validate original full-source pins before the check-only host projection.
+    # Keep the negative library byte-identical; it never launches listed kernels.
+    negative_old_lib = old_lib
+    old_lib, old_projection = project_listed_launch(old_lib, 'legacy__', old_records)
+    new_lib, new_projection = project_listed_launch(new_lib, 'compact__', new_records)
     common = '\n'.join(transfer(d, g) for d in (256,512) for g in (False,True)) + BITS
-    sources = {'positive.loom': [old_lib,new_lib,common], 'negative.loom':[old_lib,common]}
+    sources = {'positive.loom': [old_lib,new_lib,common], 'negative.loom':[negative_old_lib,common]}
     records = {'legacy':old_records,'compact':new_records}
     for bad in ('ring512','ring1024','v_stride','fork_copy'):
         library, rec = extract(new, kernel_names(256)[1:5], bad + '__', bad)
@@ -407,9 +451,11 @@ def generate(legacy, candidate, out):
                     kernel_pins_sha256=digest(pins_path.read_bytes()),
                     numpy_version=np.__version__, python_version=sys.version,
                     cases=cases,kernels=records,files=hashes,positive_cases=[c.name for c in positive_cases],
+                    listed_launch_projections={'legacy': old_projection, 'compact': new_projection},
                     positive_expectations={c.name: 3 * len(variants(c)) + 3 * int(c.store) for c in positive_cases},
                     negative_specs=['@'+c.name+'=EXPECT/006' for c in NEGATIVES],GPU_executed=False,
                     limitations=['Synthetic norms/QKV only; model A/B must use pinned actual checkpoint',
+                                 'Listed device bodies are exact; fixture count uses a scalar host ABI bridge, not the dynamic count-buffer host read',
                                  'No numerical gate or tolerance has been widened from maintained attention checks'])
     (out/'manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
     return manifest

@@ -12,8 +12,14 @@ unit suite includes these guards and the real no-helper-kernel audit regression.
 
 `generate_checks.py` extracts actual emitted legacy and compact kernels plus all
 called helpers. `kernel_pins.json` rejects any changed numerical source before a
-GPU launch. Symbols/exports alone are renamed; negative variants alter only the
-explicit address recipes. F64 attention over F16 history uses independent owner
+GPU launch. After validating those original pins, the positive check library
+projects only the eight listed kernels' host launch configurations: it retains
+the original count buffer, adds its known fixture count as an i32 scalar, and
+removes the host buffer load. Actual device regions remain byte-identical, with
+separate original/extracted/projected and device-region hashes. The model source
+and its dynamic count-buffer path are unchanged. The negative check program is
+unchanged; its variants alter only the explicit address recipes.
+F64 attention over F16 history uses independent owner
 lists/page maps and all 8 Q / 2 KV heads. Q rounding is modeled separately for flash.
 Synthetic producer checks include local/full and global/cut-frequency Neox RoPE,
 RMS normalization, F16 stores, live-variant stores and shared store-disabled use.
@@ -88,6 +94,16 @@ Expected address-storage change only: 6 GiB uniform KV to 1 GiB global + 80 MiB 
 rings (1.078125 GiB), a 4.921875 GiB allocation reduction before workspace, weights and
 runtime overhead. Workspace is not reduced or hidden by restricting SDK shapes.
 Actual committed and physical allocations remain to be measured.
+
+The first compact pilot stopped before model execution because the SDK check
+runner requires scalar-only host launch artifacts. The check-only projection
+was qualified through installed `libloomc` with
+`LOOMC_COMPILE_ARTIFACT_FLAG_LAUNCH_CONFIG`: the original reproduces the exact
+non-scalar error; all eight projected kernels emit/load host artifacts and return
+the expected geometry for counts 0, 1, 32, 511, 1024 and 8192, without a HAL device.
+This qualifies host launch configuration and preserves listed device coverage;
+it does not certify the model's dynamic count-buffer path or GPU numerics.
+Any further GPU pilot needs a separate lead decision.
 
 Local CPU verification uses SDK 0.2.0 Python with OPENBLAS_NUM_THREADS=2 and
 OMP_NUM_THREADS=2, focused `test_compact_adapter.py`/`test_compact_kv.py`, native

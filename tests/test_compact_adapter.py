@@ -119,4 +119,49 @@ class AdapterTests(unittest.TestCase):
         self.assertEqual(s.count('check.expect.'),6)
 
 
+    @unittest.skipIf(np is None, 'numpy not installed (numeric qualification uses the SDK tools environment)')
+    def test_listed_scalar_binding_preserves_count_buffer_and_list(self):
+        for count in (1, 32, 8192):
+            self.assertEqual(g.listed_scalar_count(count, count), count)
+        for count, tokens in ((31,32), (33,32), (0,0), (8193,8193), (-1,1), (True,1), (1.0,1)):
+            with self.subTest(count=count,tokens=tokens),self.assertRaises(ValueError):
+                g.listed_scalar_count(count,tokens)
+        c=g.Case('edge512',512,1);a,ob,nb=g.fixture(c);s=g.check_case(c,a,ob,nb)
+        for arm in ('old','new'):
+            self.assertIn(f'%{arm}_listed_count = check.generate.fill value(1) : tensor<1xi32>',s)
+            self.assertIn(f'%{arm}_listed_list = check.generate.iota offset(0) step(-1) : tensor<1xi32>',s)
+            self.assertEqual(s.count(f'[%{arm}_listed_count, %{arm}_listed_scalar]'),2)
+        self.assertEqual(s.count('check.expect.'),9)
+
+    @unittest.skipIf(np is None, 'numpy not installed (numeric qualification uses the SDK tools environment)')
+    def test_listed_projection_preserves_device_and_rejects_source_drift(self):
+        # Use the maintained listed-kernel constructor, without importing its
+        # model-building module or reading a checkpoint.
+        source=(ROOT/'skills/loom-port-llm/starter/gen_llm.py').read_text()
+        node=next(n for n in ast.parse(source).body if isinstance(n,ast.FunctionDef) and n.name=='listed')
+        scope={};exec(compile(ast.Module(body=[node],type_ignores=[]),'<listed-constructor>','exec'),scope)
+        blocks=[]
+        for dim in (256,512):
+            for part in ('split','combine'):
+                name=f'g16d{dim}_attention_{part}'
+                plain=f'''kernel.def export("{name}") @{name}(%tokens: index) {{
+}} launch(%tokens_arg: index, %out: buffer) {{
+  %tokens = index.assume %tokens_arg [range(%tokens_arg, 1, 8192)] : index
+  %token_id = kernel.workgroup.id<x> : index
+  %token = index.assume %token_id [lt(%token_id, %tokens)] : index
+  kernel.return
+}}
+'''
+                blocks.append(scope['listed'](plain,name,'  %c1 = index.constant 1 : index\n  kernel.launch.config workgroups(%count, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index'))
+        text,records=g.extract('\n'.join(blocks),[f'g16d{d}_attention_{p}_listed' for d in (256,512) for p in ('split','combine')],'legacy__')
+        emitted,proof=g.project_listed_launch(text,'legacy__',copy.deepcopy(records))
+        before={n:b.partition('} launch(')[2] for _,n,_,b in g.split_blocks(text)}
+        after={n:b.partition('} launch(')[2] for _,n,_,b in g.split_blocks(emitted)}
+        self.assertEqual(before,after);self.assertEqual(len(proof),4)
+        with self.assertRaises(ValueError):
+            g.project_listed_launch(text.replace('view<1xi32> -> i32','view<2xi32> -> i32',1),'legacy__',copy.deepcopy(records))
+        bad=copy.deepcopy(records);bad['g16d256_attention_split_listed']['emitted_sha256']='0'*64
+        with self.assertRaises(ValueError):g.project_listed_launch(text,'legacy__',bad)
+
+
 if __name__=='__main__':unittest.main()
