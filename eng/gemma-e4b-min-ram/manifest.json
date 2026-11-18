@@ -6,8 +6,8 @@
     "revision": "bfc15c382204943c3a8fff0c750b94ae2364d7a3",
     "file": "gemma-4-E4B-it-Q4_K_M.gguf",
     "bytes": 4977171584,
-    "sha256": "36c0282999c77e97bca7354f5a7aa8cd43b0f4167e1f4febfa755073428d1b41",
-    "sha256_source": "existing exact #554 staged Q4_K_M file; dedicated DevLab runner must verify after cache reuse/fetch"
+    "sha256": "85a896a047553e842f25297ee5b031d64ff30147d9c4af17b1e4b394cd1fab87",
+    "sha256_source": "immutable Hugging Face LFS oid from the pinned repository tree metadata at revision bfc15c382204943c3a8fff0c750b94ae2364d7a3; the prior #554 staged file had a different SHA despite matching byte size"
   },
   "tokenizer": {
     "origin": "exact maintained E4B package tokenizer previously used by card source",
@@ -166,7 +166,7 @@
   "runner_scripts": {
     "run_job.sh": "721108082719fd81d552238ae127239e219f6921ebc95f23e04de0f72fbe4add",
     "run_frontier.sh": "f045d7729577a4158a6c077c39b41b11272d4943814d363a88163710b13adf0b",
-    "prepare_packages.sh": "02d9307e3d4dbb8783eb809837b6d4d5770b1c50060908c71dd7d4d40baf4d1a",
+    "prepare_packages.sh": "85bf088bc2378839289bf32f39e6aa7d14094ea3d2a5ce244282272f3d7ff840",
     "cold_capacity_targeted.py": "d80a28c82487e4b5087c2657f9695ad8e94fef8db3d9831dd9b914e35b14c624",
     "test_frontier.py": "66f9dbb1745974e47177b12c56f7ccc4cc6fd45156b3bb7d83905099783bef9a",
     "compare_arms.py": "fbfcdb1f99b004b097f5c0d6b17121e7b5c3fed8303edd9d5895e4cdb6ffa089",
@@ -174,16 +174,26 @@
     "target_build_config.json": "30f607b7e0ed58dbcde90df0518395639c61c6970c1ad2a6e80ddc0390e63345",
     "target_text_llm_config.json": "9320e0b11be38e812c9524d456a571d3361d6f27090c4a1a1f0dd44eb9cd28c7",
     "sdk_pin.py": "27b2270276db1699c86c431bd00630db2c99bb7bfe49556d9cd3df2f76c808f4",
-    "runner/hf_download.py": "be0c85e07ae00f3f5630ff43be8c79f507ff579ff3937f5c6e5b21f98d803b42"
+    "runner/hf_download.py": "be0c85e07ae00f3f5630ff43be8c79f507ff579ff3937f5c6e5b21f98d803b42",
+    "checkpoint_hub_pin.json": "245ed763f246c28ed470e367680d9eb25de7657bebe83a6f1fdf74047520fc01"
   },
   "isolated_source_form": "clean isolated branch/worktree from origin/main bacdd3ed241eb62f9578b909ef63eaa0751f3c49; official gemma4 example kit freshly generated from that source",
   "checkpoint_sha_local_read_note": "One actual SHA256 scan of the pre-existing staged #554 GGUF was performed locally before the latest DevLab-only guard. No download/copy/cache reset; possible page-cache warming is disclosed in REPORT.md. Future full scan is guarded for designated DevLab.",
+  "checkpoint_hub_metadata": {
+    "source_url": "https://huggingface.co/api/models/unsloth/gemma-4-E4B-it-GGUF/tree/bfc15c382204943c3a8fff0c750b94ae2364d7a3?recursive=false&expand=true",
+    "revision": "bfc15c382204943c3a8fff0c750b94ae2364d7a3",
+    "file": "gemma-4-E4B-it-Q4_K_M.gguf",
+    "size": 4977171584,
+    "lfs_oid_sha256": "85a896a047553e842f25297ee5b031d64ff30147d9c4af17b1e4b394cd1fab87",
+    "receipt": "eng/gemma-e4b-min-ram/checkpoint_hub_pin.json"
+  },
   "preparation_helper": {
     "path": "eng/gemma-e4b-min-ram/prepare_packages.sh",
-    "sha256": "02d9307e3d4dbb8783eb809837b6d4d5770b1c50060908c71dd7d4d40baf4d1a",
-    "actual_checkpoint_hash": "computed once by sha256sum on designated DevLab, bound to device/inode/size/mtime; no user digest accepted",
+    "sha256": "85bf088bc2378839289bf32f39e6aa7d14094ea3d2a5ce244282272f3d7ff840",
+    "actual_checkpoint_hash": "computed by sha256sum on designated DevLab and bound to device/inode/size/mtime; checked against official pinned Hub LFS oid; mismatch logs expected and actual; no user digest accepted",
     "host_meminfo_pre_post_hash": "recorded as MemTotal/MemFree/MemAvailable/Cached/SReclaimable/Shmem",
-    "fetch_policy": "official pinned Hugging Face cache; if absent one immutable fetch; cache-hit status, full-file-size estimate and fetch elapsed time recorded; actual resumable network bytes may be unavailable from hf_hub_download"
+    "fetch_policy": "official pinned Hugging Face cache; if absent one immutable fetch; cache-hit status, full-file-size estimate and fetch elapsed time recorded; actual resumable network bytes may be unavailable from hf_hub_download",
+    "checkpoint_mismatch_diagnostic": "on hash mismatch, print both trusted expected Hub LFS oid and actual sha256 to stderr before failing"
   },
   "artifact_inventory": {
     "frozen_kit": "fresh official clean-main Gemma4 kit; hash e40fd8d3d77174bf809860ae91f6db2214a9e207dad341b663dc3af22f0127fd; no generated package output or weights committed",

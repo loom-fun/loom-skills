@@ -1,0 +1,10 @@
+{
+  "source_url": "https://huggingface.co/api/models/unsloth/gemma-4-E4B-it-GGUF/tree/bfc15c382204943c3a8fff0c750b94ae2364d7a3?recursive=false&expand=true",
+  "repo": "unsloth/gemma-4-E4B-it-GGUF",
+  "revision": "bfc15c382204943c3a8fff0c750b94ae2364d7a3",
+  "file": "gemma-4-E4B-it-Q4_K_M.gguf",
+  "size_bytes": 4977171584,
+  "lfs_oid_sha256": "85a896a047553e842f25297ee5b031d64ff30147d9c4af17b1e4b394cd1fab87",
+  "hub_tree_oid": "14883a6b60cbc0037228a9769ce57d59ae892fa9",
+  "last_commit": "bfc15c382204943c3a8fff0c750b94ae2364d7a3"
+}

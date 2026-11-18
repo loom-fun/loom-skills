@@ -13,7 +13,7 @@ BUILD_PY=${GEMMA_E4B_BUILD_PYTHON:-python3}
 EXPECTED_KIT=e40fd8d3d77174bf809860ae91f6db2214a9e207dad341b663dc3af22f0127fd
 EXPECTED_BUILDER=faeb722cee49d011cd3422d79832dfb9533710845f7f9e8041b841ff9d363db4
 EXPECTED_TOKENIZER=fad8ef1277f412fd6276f1fef8169f1c4b36dc3e1b784888c58ae458470900fd
-EXPECTED_CHECKPOINT=36c0282999c77e97bca7354f5a7aa8cd43b0f4167e1f4febfa755073428d1b41
+EXPECTED_CHECKPOINT=85a896a047553e842f25297ee5b031d64ff30147d9c4af17b1e4b394cd1fab87
 EXPECTED_BUILD_CONFIG=30f607b7e0ed58dbcde90df0518395639c61c6970c1ad2a6e80ddc0390e63345
 
 test "$(sha256sum "$HERE/kit/build.py" | cut -d' ' -f1)" = "$EXPECTED_BUILDER" || { echo 'builder hash mismatch' >&2; exit 21; }
@@ -48,7 +48,10 @@ actual_checkpoint=$(sha256sum "$GGUF" | cut -d' ' -f1)
 hash_end=$(date +%s.%N)
 after=$(stat -Lc '%d:%i:%s:%Y' "$GGUF")
 test "$before" = "$after" || { echo 'checkpoint identity changed while hashing' >&2; exit 23; }
-test "$actual_checkpoint" = "$EXPECTED_CHECKPOINT" || { echo 'actual checkpoint SHA256 mismatch' >&2; exit 23; }
+if [ "$actual_checkpoint" != "$EXPECTED_CHECKPOINT" ]; then
+  printf 'actual checkpoint SHA256 mismatch expected=%s actual=%s\n' "$EXPECTED_CHECKPOINT" "$actual_checkpoint" >&2
+  exit 23
+fi
 "$BUILD_PY" - "$OUT/meminfo_after_hash.json" <<'PY'
 import json,sys
 keys={'MemTotal','MemFree','MemAvailable','Cached','SReclaimable','Shmem'}
