@@ -2579,6 +2579,42 @@ def allreduce(vals, p, outs):
 ATTN_MT_DIMS = {int(x) for x in os.environ.get("ATTN_MT_DIMS", "").replace(",", " ").split()}
 
 
+# Choice decode.attn.tokens_per_wg: "D:T[,D:T]" (kits with per-head-dim decode kernels gd<D>_*): the decode split kernel of head dim D
+# runs T consecutive epoch tokens in one workgroup (T x G waves, wave = (token, query head)), each wave the unchanged per-token code,
+# so the T tokens of a verify span read each key's K/V through the same CU's caches at about the same time instead of from DRAM
+# T times (the per-token kernel re-read the whole KV per verify token: 31B QAT at 32k, a 4-token global layer 5.7 ms vs 1.25 ms
+# for one token). Bit-identical to T = 1 (same per-wave code; a wave past the epoch's tokens is not live). Empty: one token per workgroup.
+ATTN_TPW = {int(d): int(t) for d, t in (x.split(":") for x in os.environ.get("ATTN_TPW", "").replace(",", " ").split())}
+
+
+def tokens_per_wg(text, P, T, G):
+    """`P`_attention_split with T tokens per workgroup (see ATTN_TPW)."""
+    a = text.index(f'kernel.def export("{P}_attention_split")')
+    b = text.index("  kernel.return\n}\n", a)
+    k = text[a:b]
+    reps = [
+        (f"  %clanes = index.constant {G * 32} : index\n  kernel.launch.config workgroups(%tokens, %ckvh, %cS)",
+         f"  %clanes = index.constant {T * G * 32} : index\n  %ctpw = index.constant {T} : index\n  %ctpw_less = index.constant {T - 1} : index\n"
+         f"  %tpw_pad = index.add %tokens, %ctpw_less : index\n  %tpw_groups = index.div %tpw_pad, %ctpw : index\n"
+         f"  kernel.launch.config workgroups(%tpw_groups, %ckvh, %cS)"),
+        ("  %token_id = kernel.workgroup.id<x> : index\n  %token = index.assume %token_id [lt(%token_id, %tokens)] : index\n",
+         f"  %tpw_group = kernel.workgroup.id<x> : index\n  %tpw_wave_id = kernel.subgroup.id : index\n"
+         f"  %tpw_wave = index.assume %tpw_wave_id [range(%tpw_wave_id, 0, {T * G - 1})] : index\n  %tpw_g = index.constant {G} : index\n"
+         f"  %tpw_t = index.constant {T} : index\n  %tpw_sub = index.div %tpw_wave, %tpw_g : index\n  %tpw_base = index.mul %tpw_group, %tpw_t : index\n"
+         f"  %tpw_tok = index.add %tpw_base, %tpw_sub : index\n  %tpw_in = index.cmp ult, %tpw_tok, %tokens : index\n"
+         f"  %tpw_one = index.constant 1 : index\n  %tpw_last = index.sub %tokens, %tpw_one : index\n  %tpw_tc = index.min %tpw_tok, %tpw_last : index\n"
+         f"  %token = index.assume %tpw_tc [lt(%tpw_tc, %tokens)] : index\n"),
+        (f"  %wave_id = kernel.subgroup.id : index\n  %wave = index.assume %wave_id [range(%wave_id, 0, {G - 1})] : index\n",
+         f"  %wave_r = index.rem %tpw_wave, %tpw_g : index\n  %wave = index.assume %wave_r [range(%wave_r, 0, {G - 1})] : index\n"),
+        ("  %needed = scalar.constant true : i1\n", "  %needed = scalar.andi %tpw_in, %tpw_in : i1\n"),
+    ]
+    for old, new in reps:
+        assert k.count(old) == 1, f"tokens_per_wg {P}: anchor {old[:60]!r}"
+        k = k.replace(old, new)
+    assert "barrier" not in k and "workgroup.reduce" not in k and "alloca<workgroup>" not in k, f"tokens_per_wg {P}: workgroup-level ops"
+    return text[:a] + k + text[b:]
+
+
 def multi_token_split(text, P, U, T, until=None):
     """`P`_attention_split with a multi-token path: when the T epoch tokens of this token's aligned group are live,
     of one row and at consecutive positions (a verify span), the group's first workgroup computes all T (one K/V
@@ -3187,6 +3223,8 @@ kernel.def export("{P}_attention_combine") @{P}_attention_combine(%tokens: index
     gqa_on = P == "g" and attn_rules.gqa(gen_draft.enabled(), seg_tokens(), D, twin) and attn_rules.paged(U) and attn_rules.butterfly(U)
     if gqa_on:
         text = gqa_split(text, P, S)
+    if P.startswith("gd") and P[2:].isdigit() and ATTN_TPW.get(int(P[2:]), 1) > 1:
+        text = tokens_per_wg(text, P, ATTN_TPW[int(P[2:])], G)
     span_p = P == "g" or (P.startswith("gd") and P[2:].isdigit() and int(P[2:]) in ATTN_MT_DIMS and gen_draft.enabled())
     if span_p and attn_rules.multi_token(U, KVH) and (not gqa_on or gen_draft.enabled()):   # nodraft + K/V-once body: no spans
         text = multi_token_split(text, P, U, ATTN_MT, attn_rules.ATTN_GQA_FROM - 1 if gqa_on else None)   # gqa body from visible = ATTN_GQA_FROM, i.e. position FROM - 1

@@ -219,6 +219,11 @@ CHOICE("decode.attn.span.head_dims", "str", "", "ATTN_MT_DIMS", rows=["decode_32
        doc="Kits with mixed head dims (Gemma 4: gd256 sliding / gd512 global decode kernels): head dims, a comma list, whose per-dim "
            "decode split kernel takes the verify-span path of decode.attn.span.* in drafting packages (one K/V load per key for the span's "
            "tokens; every token's own split range and block order, so bit-identical). Empty: only the plain g_attention_split may.")
+CHOICE("decode.attn.tokens_per_wg", "str", "", "ATTN_TPW", rows=["decode", "decode_2k", "decode_32k"], kits=["gemma4"],
+       kernels=["gd*_attention_split"], from_pr="gemma-verify-attn",
+       doc="Kits with per-head-dim decode kernels (Gemma 4 gd256 / gd512): \"D:T[,D:T]\" = the split kernel of head dim D runs T "
+           "consecutive epoch tokens per workgroup (T x G waves, each the unchanged per-token code), so a verify span's tokens read each "
+           "key's K/V through one CU's caches instead of from DRAM once per token. Bit-identical to one token per workgroup.")
 CHOICE("decode.attn.segment", "bool", True, "SEG_ATTN", rows=["decode_32k"], kernels=["g_attention_split", "g_attention_combine"],
        doc="Drafting builds with <= 2 KV heads and head_dim 64/128 decode long spans in segments (False: split kernel everywhere).")
 CHOICE("decode.attn.segment.min_ctx", "int", 8192, "SEG_MIN", rows=["decode_32k"], kernels=["g_attention_split"],
