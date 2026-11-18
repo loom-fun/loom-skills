@@ -320,12 +320,35 @@ class Result:
         self.errors.append({"rule": rule, "message": msg})
 
 
+# ggml tensor type ids (gguf.GGMLQuantizationType) -> the lower-case names inspect_gguf.py writes into cfg["tensors"]
+GGML_TYPES = {0: "f32", 1: "f16", 2: "q4_0", 3: "q4_1", 6: "q5_0", 7: "q5_1", 8: "q8_0", 9: "q8_1", 10: "q2_k", 11: "q3_k",
+              12: "q4_k", 13: "q5_k", 14: "q6_k", 15: "q8_k", 16: "iq2_xxs", 17: "iq2_xs", 18: "iq3_xxs", 19: "iq1_s",
+              20: "iq4_nl", 21: "iq3_s", 22: "iq2_s", 23: "iq4_xs", 24: "i8", 25: "i16", 26: "i32", 27: "i64", 28: "f64",
+              29: "iq1_m", 30: "bf16", 34: "tq1_0", 35: "tq2_0", 39: "mxfp4", 40: "nvfp4", 41: "q1_0"}
+
+
 def load_cfg(tree, slug):
+    """The fleet config of SLUG. The published configs omit `tensors` (an output of a build); the tensor types are taken from the
+    fleet's GGUF header dumps so a `quant` match (quant/<fmt> nodes) sees what the build's resolver sees."""
     p = os.path.join(tree, "fleet", slug, "llm_config.json")
     if not os.path.isfile(p):
         return None
     with open(p, encoding="utf-8") as fh:
-        return json.load(fh)
+        cfg = json.load(fh)
+    gdir = os.path.join(tree, "fleet", slug, "gguf")
+    if not cfg.get("tensors") and os.path.isdir(gdir):
+        import gzip
+        tensors = {}
+        import re as _re
+        stem = _re.sub(r"(-\d{5}-of-\d{5})?\.gguf$", "", cfg.get("gguf") or "")
+        for fn in sorted(os.listdir(gdir)):   # the target checkpoint's file(s) only, not a drafter's
+            if stem and fn.endswith(".json.gz") and _re.fullmatch(_re.escape(stem) + r"(-\d{5}-of-\d{5})?\.gguf\.json\.gz", fn):
+                with gzip.open(os.path.join(gdir, fn), "rt", encoding="utf-8") as fh:
+                    for t in json.load(fh).get("tensors") or []:
+                        tensors[t[0]] = {"type": GGML_TYPES.get(t[2], str(t[2]))}
+        if tensors:
+            cfg["tensors"] = tensors
+    return cfg
 
 
 def exec_changes(repo, mb, tree, matcher):

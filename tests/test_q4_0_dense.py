@@ -75,5 +75,17 @@ class Q40Dense(unittest.TestCase):
             self.assertIs(off[key], False, key)
 
 
+class LintSeesTensorTypes(unittest.TestCase):
+    def test_load_cfg_overlays_target_tensor_types(self):
+        sys.path.insert(0, str(ROOT / 'fleet'))
+        import scope_lint
+        qat = scope_lint.load_cfg(str(ROOT), 'unsloth-gemma-4-31B-it-qat-loom')
+        self.assertEqual(sorted({t['type'] for t in qat['tensors'].values()}), ['f32', 'q4_0'])
+        # the target file only: the DFlash drafter's GGUF dump sits in the same directory
+        plain = scope_lint.load_cfg(str(ROOT), 'unsloth-gemma-4-31B-it-loom')
+        self.assertNotIn('q4_0', {t['type'] for t in plain['tensors'].values()})
+        self.assertNotIn('dflash', ''.join(plain['tensors']).lower())
+
+
 if __name__ == '__main__':
     unittest.main()
