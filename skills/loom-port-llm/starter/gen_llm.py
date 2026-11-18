@@ -1063,6 +1063,10 @@ def bfly_setup(TG):
 # projections keep plain slots: the permuted activation loads are uncoalesced, and that cost more than the selects
 # (down 19968x6656 t16 +9 %). MV_BFLY_PERM=0 turns it off.
 BFLY_PERM = os.environ.get("MV_BFLY_PERM", "1") == "1"
+# Choice decode.mv.q8_live_slots: an int8 matvec of 8+ tokens launched for fewer tokens (a depth-4 verify: 5 tokens on the 8-token
+# kernel) skips the dot products of the token slots past the epoch's tokens (a wave-uniform branch; those slots are never stored, so
+# every stored value is unchanged). Off: every slot computes (zero activations).
+MV_Q8_LIVE = os.environ.get("MV_Q8_LIVE", "0") == "1"
 
 
 def bfly_slot(j, TG, base, name, perm):
@@ -1249,6 +1253,10 @@ kernel.def export("{name}") @{name}(%n: index, %tokens: index) {{
             # integer codes once per row; per token one dot4 contraction against the int8 activations
             L.append(iq_decode(fmt, wi, w, "%ok", "%o", "%within"))
             for j in range(CHK):
+                if MV_Q8_LIVE and CHK >= 8 and j > 0:   # choice decode.mv.q8_live_slots: a token slot past the epoch's tokens skips its dot
+                    L.append(f"    %pa{wi}_{j} = scf.if %live{j} -> (f32) {{\n" + iq_dot(fmt, wi, j, f"%pl{wi}_{j}")
+                             + f"\n      scf.yield %pl{wi}_{j} : f32\n    }} else {{\n      scf.yield %zero_f : f32\n    }}")
+                    continue
                 L.append(iq_dot(fmt, wi, j, f"%pa{wi}_{j}"))
             L.append(bfly_store([f"%pa{wi}_{j}" for j in range(CHK)], f"b{wi}",
                                 lambda v: f"view.store {v}, %pv[{wi}, %wave, %rb, %bt_store] : f32, view<{nw}x{waves}x{R}x{TG}xf32>", presorted=PERM))

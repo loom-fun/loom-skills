@@ -243,6 +243,10 @@ CHOICE("decode.mv.wg4", "int", 128, "MV_WG4", doc="Workgroup target of 4-token m
        "differ (consistency.py fails): record it in the report.", **_MV)
 CHOICE("decode.mv.wg_long", "int", 640, "MV_WG_LONG", doc="Workgroup target of 1-token matvecs with K >= 8192.", **_MV)
 CHOICE("decode.mv.q8_r16", "bool", True, "MV_Q8_R16", doc="Int8 multi-token matvecs with 16 rows when n % 16 == 0.", **_MV)
+CHOICE("decode.mv.q8_live_slots", "bool", False, "MV_Q8_LIVE", kernels=["g_mv_*_t8_q8*", "g_mv_*_t16_q8*"], rows=ROWS_DECODE + ROWS_STREAMS,
+       from_pr="gemma-verify-attn",
+       doc="Int8 matvecs of 8+ tokens skip the dot products of token slots past the epoch's tokens (a depth-4 verify runs 5 tokens on the "
+           "8-token kernel); those slots are never stored, so every output is unchanged.")
 CHOICE("decode.mv.q8_r32", "bool", True, "MV_Q8_R32", doc="Int8 16-token matvecs with 32 rows (pair kernels / K >= 8192).", **_MV)
 CHOICE("decode.spec.gdn_copy_split", "int", 1, "GDN_COPY_SPLIT", kernels=["g_gdn_capture*", "g_gdn_restore*"], rows=ROWS_DECODE, devices=["rdna4"], per_target=True,
        doc="Workgroups per token of the gated delta-net capture / restore copies of a drafted step (gfx12 twin; 1 = the one-workgroup-per-token "
