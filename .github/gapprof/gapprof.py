@@ -104,6 +104,7 @@ if WIN:
     E["timer"] = pwsh("w32tm /query /status 2>$null | Select-Object -First 3 | Out-String")
     E["boot_time"] = pwsh("(Get-CimInstance Win32_OperatingSystem).LastBootUpTime.ToString('s')")
     E["dimm_speed"] = pwsh("(Get-CimInstance Win32_PhysicalMemory | % { $_.Speed.ToString() + '/' + $_.ConfiguredClockSpeed }) -join ','")
+    E["adl_once"] = sh([sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "adl_sampler.py"), "--once"])[:4000]
     E["power_processor"] = sh("powercfg /query SCHEME_CURRENT SUB_PROCESSOR")[:6000]
 else:
     E["kernel"] = sh("uname -r")
@@ -290,6 +291,11 @@ class Telemetry:
                         r"\Thermal Zone Information(*)\Throttle Reasons"]
             self.tp = subprocess.Popen(["typeperf"] + counters + ["-si", "1", "-f", "CSV", "-o", self.tpcsv, "-y"],
                                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self.adl = None
+        if WIN:
+            self.adlout = path.replace(".jsonl", "_adl.jsonl")
+            self.adl = subprocess.Popen([sys.executable, os.path.join(HERE, "adl_sampler.py"), self.adlout, "100"],
+                                        stdout=subprocess.DEVNULL, stderr=open(path.replace(".jsonl", "_adl.err"), "w"))
         self.snap0, self.snap_t0 = proc_snapshot(), time.time()
         self.th = threading.Thread(target=self.run, daemon=True)
         self.th.start()
@@ -344,9 +350,35 @@ class Telemetry:
                 if v:
                     d[k] = {"median": round(statistics.median(v), 1), "min": min(v), "max": max(v)}
             s[label] = d
+        if self.adl:
+            self.adl.kill()
+            s["adl"] = summarize_adl(self.adlout, marks)
         if WIN and os.path.exists(self.tpcsv):
             s["typeperf"] = summarize_typeperf(self.tpcsv, marks)
         return s
+
+
+def summarize_adl(path, marks):
+    rows = []
+    try:
+        for l in open(path):
+            try:
+                rows.append(json.loads(l))
+            except ValueError:
+                pass
+    except OSError as e:
+        return {"error": str(e)}
+    out = {"n": len(rows)}
+    for t0, t1, label in marks:
+        sel = [r for r in rows if t0 <= r["t"] <= t1]
+        d = {}
+        for r in sel:
+            for ad, vals in r["a"].items():
+                for k, v in vals.items():
+                    d.setdefault(f"{ad}/{k}", []).append(v)
+        out[label] = {k: {"median": statistics.median(v), "min": min(v), "max": max(v), "p10": sorted(v)[len(v) // 10],
+                          "p90": sorted(v)[9 * len(v) // 10]} for k, v in d.items()}
+    return out
 
 
 def summarize_typeperf(path, marks):
@@ -467,11 +499,16 @@ for v in [x for x in a.variants.split(",") if x]:
 # -- profiles: per-kernel device time ----------------------------------------------------------------------------------
 for spec_ in [x for x in a.profile.split(",") if x]:
     trace = spec_.startswith("trace:")   # trace:SC[@V]: same requests, no HAL timestamps, per-chunk arrival times
+    pmode = {"q:": "dispatch-events,executable-metadata,queue-events,host-execution,device-queue-events",
+             "m:": "dispatch-events,executable-metadata,device-metrics"}.get(spec_[:2])
+    pfx = spec_[:2].replace(":", "") + "_" if pmode else ""
+    spec_ = spec_[2:] if pmode else spec_
     sc, _, pv = spec_.removeprefix("trace:").partition("@")
     pv = pv or "card"
-    key = ("trace_" if trace else "") + (sc if pv == "card" else f"{sc}_{pv}").replace("#", "_")
+    key = pfx + ("trace_" if trace else "") + (sc if pv == "card" else f"{sc}_{pv}").replace("#", "_")
     pv = pv.split("#")[0]   # V#n: the n-th repeat serve of variant V
-    srv = Server(serve_args(pv) + ([] if trace else PROFILE_FLAGS), os.path.join(OUT, f"profile_{key}.serve.log"))
+    flags = [] if trace else ([f"--device_profiling_mode={pmode}"] + PROFILE_FLAGS[1:] if pmode else PROFILE_FLAGS)
+    srv = Server(serve_args(pv) + flags, os.path.join(OUT, f"profile_{key}.serve.log"))
     mid = srv.ready()
     if not mid:
         step(f"profile_{key}", False, tail=tail(srv.log, 30))
