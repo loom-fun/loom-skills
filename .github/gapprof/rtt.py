@@ -24,7 +24,7 @@ def loom(n, path):
 
 
 files = {"rtt": loom(4096, os.path.join(OUT, "rtt.loom")), "bw": loom(4194304, os.path.join(OUT, "bw.loom"))}
-LONG = ["--min-time-ms=4000", "--warmup-time-ms=1000", "--max-batches=10000000"]
+LONG = ["--min-time-ms=3000", "--warmup-time-ms=500", "--max-batches=200000"]
 args = {"rtt": ["--batch-size=1", "--input-ring-count=1"] + LONG, "bw": ["--batch-size=64"] + LONG,
         "bw1": ["--batch-size=1", "--input-ring-count=1"] + LONG}   # bw1: one 48 MiB kernel per submit+wait
 files["bw1"] = files["bw"]
@@ -42,9 +42,12 @@ for load in (0, 1, 4):
                                         os.path.join(OUT, f"adl_{tag}.jsonl"), "50"])
             out = os.path.join(OUT, f"lb_{tag}.json")
             t0 = time.time()
-            p = subprocess.run([LB, files[kind], f"--device={dev}", "--benchmark=@swiglu_bm", "--measure=dispatch_complete",
-                                "--profile-final-batch=true", f"--output={out}"] + args[kind],
-                               capture_output=True, text=True, timeout=900)
+            try:
+                p = subprocess.run([LB, files[kind], f"--device={dev}", "--benchmark=@swiglu_bm", "--measure=dispatch_complete",
+                                "--profile-final-batch=false", f"--output={out}"] + args[kind],
+                               capture_output=True, text=True, timeout=120)
+            except subprocess.TimeoutExpired:
+                p = subprocess.CompletedProcess([], -9, "", "timeout 120 s")
             if adl:
                 adl.kill()
             row = {"tag": tag, "kind": kind, "spin": dk, "load": load, "rc": p.returncode, "secs": round(time.time() - t0, 1),
