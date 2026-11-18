@@ -666,38 +666,34 @@
  },
  "loom-fun/unsloth-gemma-4-31B-it-qat-loom": {
   "card": "loom-fun/unsloth-gemma-4-31B-it-qat-loom",
-  "live_kind": "none",
-  "live_depth": 0,
-  "choice": "none",
-  "available": [
-   "assist"
-  ],
+  "live_kind": "assist",
+  "live_depth": 1,
+  "choice": "assist",
   "provenance": [
    "https://huggingface.co/unsloth/gemma-4-31B-it-qat-GGUF/blob/43cc1aeb31adf47ec06a854507ce552cd9862e6f/MTP/README.md",
-   "https://huggingface.co/z-lab/gemma-4-31B-it-DFlash/blob/eabd648301ce28583cc14757912e5e0f84e152e1/README.md"
+   "https://huggingface.co/google/gemma-4-31B-it-qat-q4_0-unquantized-assistant"
   ],
-  "evidence": "Target-only text release: an exact-QAT assistant is published, but this package does not implement it. The existing DFlash release declares the original non-QAT target; its QAT compatibility remains unqualified.",
-  "note": "The owner scoped new QAT assistant and vision support as separate follow-ups. Target-only baseline on both engines; assess existing DFlash independently before any adoption. This is not a claim that no QAT assistant is available.",
-  "llama_spec": "",
-  "llama_n_max": null,
-  "nmax_src": "target-only release"
+  "evidence": "drafter published for this exact model by its maker (Google's QAT assistant); GGUF = Unsloth's conversion of that release, shipped in the target's own repo (mtp-*.gguf)",
+  "note": "The Anbeeld DFlash drafters are trained for the non-QAT target (another model, rule 1): measured for comparison only, never the card's choice.",
+  "drafter_file": "mtp-gemma-4-31B-it.gguf",
+  "llama_n_max": 4,
+  "nmax_src": "unsloth/gemma-4-31B-it-qat-GGUF MTP/README.md (--spec-draft-n-max 4)",
+  "llama_spec": "--spec-type draft-mtp --spec-draft-model {drafter} --spec-draft-n-max 4 -ngld 99"
  },
  "loom-fun/unsloth-gemma-4-26B-A4B-it-qat-loom": {
   "card": "loom-fun/unsloth-gemma-4-26B-A4B-it-qat-loom",
-  "live_kind": "none",
-  "live_depth": 0,
-  "choice": "none",
-  "available": [
-   "assist"
-  ],
+  "live_kind": "assist",
+  "live_depth": 1,
+  "choice": "assist",
   "provenance": [
    "https://huggingface.co/unsloth/gemma-4-26B-A4B-it-qat-GGUF/blob/7b92b5b28818151e8669af2e45e88d6086f490dd/MTP/README.md",
-   "https://huggingface.co/z-lab/gemma-4-26B-A4B-it-DFlash/blob/77d4202772dfe50b2396ec7bac9cfffc7b9e7057/README.md"
+   "https://huggingface.co/google/gemma-4-26B-A4B-it-qat-q4_0-unquantized-assistant"
   ],
-  "evidence": "Target-only text release: an exact-QAT assistant is published, but this package does not implement it. The existing DFlash release declares the original non-QAT target; its QAT compatibility remains unqualified.",
-  "note": "The owner scoped new QAT assistant and vision support as separate follow-ups. Target-only baseline on both engines; assess existing DFlash independently before any adoption. This is not a claim that no QAT assistant is available.",
-  "llama_spec": "",
-  "llama_n_max": null,
-  "nmax_src": "target-only release"
+  "evidence": "drafter published for this exact model by its maker (Google's QAT assistant); GGUF = Unsloth's conversion of that release, shipped in the target's own repo (mtp-*.gguf)",
+  "note": "The Anbeeld DFlash drafters are trained for the non-QAT target (another model, rule 1): measured for comparison only, never the card's choice.",
+  "drafter_file": "mtp-gemma-4-26B-A4B-it.gguf",
+  "llama_n_max": 4,
+  "nmax_src": "unsloth/gemma-4-26B-A4B-it-qat-GGUF MTP/README.md (--spec-draft-n-max 4)",
+  "llama_spec": "--spec-type draft-mtp --spec-draft-model {drafter} --spec-draft-n-max 4 -ngld 99"
  }
 }
