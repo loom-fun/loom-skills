@@ -205,6 +205,11 @@ def specialize(text, cfg):
     blocks = re.split(r"(?=^(?:kernel|func|command)\.def)", text, flags=re.M)
     local_count = global_count = 0
     for i, block in enumerate(blocks):
+        # Audit cache users independently of the legacy helper. A new direct
+        # recipe must not escape specialization just by removing its last call.
+        # The selected E4B program has no non-cache views of this arena.
+        if "buffer.view %arena[" in block and "func.call @g_kv_offset(" not in block:
+            raise ValueError(f"compact E4B KV: unaudited arena user {block.splitlines()[0]}")
         if "func.call @g_kv_offset" not in block:
             continue
         header = block.splitlines()[0]

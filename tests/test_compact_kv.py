@@ -162,6 +162,15 @@ class CompactTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "unrecognized arena address recipe"):
             compact._validate_local_addresses(renamed)
 
+    def test_arena_user_without_helper_is_rejected(self):
+        source = """kernel.def export("gd256_attention_split") @gd256_attention_split() {
+  %kb_off = index.constant 0 : offset
+  %cache = buffer.view %arena[%kb_off] : buffer -> view<2x256xf16>
+}
+"""
+        with self.assertRaisesRegex(ValueError, "unaudited arena user"):
+            compact.specialize(source, fixture())
+
     def test_local_flash2s_v_plane_and_decode_offsets(self):
         sample = """%pos_bytes = index.constant 2048 : offset
 %v_plane_delta = index.scale %plane_bytes_i, %pos_bytes : index, offset -> offset
@@ -178,6 +187,20 @@ class CompactTests(unittest.TestCase):
 
 def prove_generated(legacy, candidate):
     old, new = Path(legacy).read_text(), Path(candidate).read_text()
+    # Review regression: remove the sole helper call from the REAL generated
+    # decode kernel. Its direct V/kd offsets must not bypass the block audit.
+    real_kernel = next(b for b in re.split(r"(?=^(?:kernel|func|command)\.def)", old, flags=re.M)
+                       if re.match(r'kernel.def export\("gd256_attention_split"\)', b))
+    mutated, count = re.subn(r"func.call @g_kv_offset\([^\n]+", "index.constant 0 : offset", real_kernel)
+    assert count == 1
+    with patch.dict(os.environ, {"GEMMA4_COMPACT_KV": "1", "LOOM_RDNA4": "0", "LLM_DRAFT": "null"}):
+        assert compact.specialize(old, fixture()) == new, "defensive audit changed generated program"
+        try:
+            compact.specialize(old.replace(real_kernel, mutated), fixture())
+        except ValueError as error:
+            assert "unaudited arena user" in str(error)
+        else:
+            raise AssertionError("real no-helper cache kernel escaped specialization")
     local = address_function(new, "g_compact_local")
     global_ = address_function(new, "g_compact_global")
     legacy_fn = address_function(old, "g_kv_offset")
@@ -288,7 +311,9 @@ def prove_generated(legacy, candidate):
     other, _, _ = origins(writer=writer + 90 * 2**20)
     negatives["missing_fork_history_copy"] = interpret(local, [0, 0, 2047, 4096, 44, 65536], other) != k
     assert all(negatives.values())
-    return dict(status="PASS", address_cases=checks, layer_owner_and_store_checks=42,
+    return dict(status="PASS", real_no_helper_mutation_rejected=True,
+                defensive_audit_generated_bytes_unchanged=True,
+                address_cases=checks, layer_owner_and_store_checks=42,
                 numerical_and_launch_source_identical=True, local_kernel_audit=audit, query_identity_checks=query_checks,
                 f64_attention_cases=numerical, negative_controls=negatives,
                 limitation="CPU emitted-address and synthetic F16/f64 oracle only; no GPU kernel or model execution")
