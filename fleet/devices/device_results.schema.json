@@ -52,7 +52,7 @@
     "execution": {
      "type": "object", "additionalProperties": false,
      "description": "Preset overrides over the base preset's execution (SDK 0.2 keys). Written into the GPU's preset together with context_capacity = max_context",
-     "properties": {"prefill_capacity": {"type": "integer"}, "context_capacity": {"type": "integer"}, "rows": {"type": "integer"}, "draft_depth": {"type": "integer"}}
+     "properties": {"prefill_capacity": {"type": "integer"}, "context_capacity": {"type": "integer"}, "rows": {"type": "integer"}, "draft_depth": {"type": "integer"}, "cache_target_bytes": {"type": "integer"}}
     },
     "note": {"type": "string", "description": "One factual line for readers of the file (not shown on the card)"},
     "evidence": {
