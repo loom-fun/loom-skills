@@ -1,0 +1,47 @@
+// Streaming read: 1024 MiB, 4 x 16 B per thread, one f32 written per thread (bytes counted: read + write).
+kernel.def @k_read() {
+  %c1 = index.constant 1 : index
+  %groups = index.constant 65536 : index
+  %threads = index.constant 256 : index
+  kernel.launch.config workgroups(%groups, %c1, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%in_arg: buffer, %out_arg: buffer) {
+  %in, %out = buffer.assume.noalias %in_arg, %out_arg : buffer, buffer
+  %c0 = index.constant 0 : index
+  %c256 = index.constant 256 : index
+  %stride = index.constant 16777216 : index
+  %origin = index.constant 0 : offset
+  %iv = buffer.view %in[%origin] : buffer -> view<67108864x4xf32>
+  %ov = buffer.view %out[%origin] : buffer -> view<16777216xf32>
+  %group = kernel.workgroup.id<x> : index
+  %thread = kernel.workitem.id<x> : index
+  %flat = index.madd %group, %c256, %thread : index
+  %i0 = index.assume %flat [range(%flat, 0, 16777215)] : index
+  %i1 = index.add %i0, %stride : index
+  %i2 = index.add %i1, %stride : index
+  %i3 = index.add %i2, %stride : index
+  %a = vector.load %iv[%i0, %c0] : view<67108864x4xf32> -> vector<4xf32>
+  %b = vector.load %iv[%i1, %c0] : view<67108864x4xf32> -> vector<4xf32>
+  %c = vector.load %iv[%i2, %c0] : view<67108864x4xf32> -> vector<4xf32>
+  %d = vector.load %iv[%i3, %c0] : view<67108864x4xf32> -> vector<4xf32>
+  %ab = vector.addf %a, %b : vector<4xf32>
+  %cd = vector.addf %c, %d : vector<4xf32>
+  %s = vector.addf %ab, %cd : vector<4xf32>
+  %s0 = vector.extract %s[0] : vector<4xf32> -> f32
+  %s1 = vector.extract %s[1] : vector<4xf32> -> f32
+  %s2 = vector.extract %s[2] : vector<4xf32> -> f32
+  %s3 = vector.extract %s[3] : vector<4xf32> -> f32
+  %t0 = scalar.addf %s0, %s1 : f32
+  %t1 = scalar.addf %s2, %s3 : f32
+  %t = scalar.addf %t0, %t1 : f32
+  view.store %t, %ov[%i0] : f32, view<16777216xf32>
+  kernel.return
+}
+
+check.case public @read {
+  %in = check.generate.fill value(1.0) : tensor<268435456xf32>
+  %out = check.generate.fill value(0.0) : tensor<16777216xf32>
+  kernel.launch @k_read(%in, %out) : (tensor<268435456xf32>, tensor<16777216xf32>)
+  check.return
+}
+
+check.benchmark<@read> @read_bm

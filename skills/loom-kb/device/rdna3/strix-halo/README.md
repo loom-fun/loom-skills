@@ -1,6 +1,6 @@
 # Strix Halo (gfx1151)
 
-Ryzen AI Max+ 395, 40 CUs, LPDDR5X-8000 on a 256-bit bus: 256 GB/s peak, 216 GB/s measured streaming read; 59 TFLOP/s dense f16.
+Ryzen AI Max+ 395, 40 CUs, LPDDR5X-8000 on a 256-bit bus: 256 GB/s peak, 228 GB/s measured streaming read (Loom 1 GiB read kernel on a DevLab runner, with and without the active wait, run 44388427539); 59 TFLOP/s dense f16.
 GPU memory is system RAM (`memory_bytes: null` here: there is no device pool to clamp to). DevLab runners:
 `[strix-halo, devlab-dispatch, Linux, self-hosted]` - always include `Linux`, or a job can land on a Windows runner. The card's
 default preset (`<first>`) is tuned here; no fit table (every package fits).

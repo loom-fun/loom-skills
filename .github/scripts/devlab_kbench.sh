@@ -9,6 +9,7 @@
 #               "suites": [{"suite": name, "dir": "<dir under .github/devlab/kbench>", "files": ["a.loom", ...],
 #                           "config": ["k=v", ...] (--config=), "args": ["--measure=...", ...] (loom-benchmark flags),
 #                           "repeats": N (optional), "runner": "strix" (default) | "r9700" (workflow runs-on),
+#                           "device": loom-benchmark --device URI (default amdgpu; e.g. amdgpu://?completion_spin_ns=4294967295, the active wait),
 #                           "probes": [{"name": N, "args": [...]}] (optional): after the timing runs, the FIRST file once more per probe with these extra
 #                           loom-benchmark flags (JSONL rows, raw profile bundles) -> probe_N.jsonl/.log, probe_N_artifacts/: hardware counters,
 #                           executable traces, compile report details; a probe that fails is recorded, never fails the suite,
@@ -104,13 +105,14 @@ while IFS= read -r neg; do
 done <<< "$negative_plan"
 files=$(q "print(' '.join(s['files']))"); reps=$(q "print(s.get('repeats') or json.load(open('$kb')).get('repeats', 5))")
 cfgs=$(q "print(' '.join('--config='+c for c in s.get('config', [])))"); args=$(q "print(' '.join(s.get('args', [])))")
+dev=$(q "print(s.get('device', 'amdgpu'))")   # "device": the loom-benchmark device URI, e.g. amdgpu://?completion_spin_ns=4294967295 (the active wait cards are measured with)
 vname() { local v=${1%.loom}; v=${v#bench_}; [ "$v" = bench ] && v=base; echo "$v"; }
 echo "suite $suite: files=[$files] repeats=$reps"
 rc=0
 for i in $(seq 1 "$reps"); do
   for f in $files; do
     v=$(vname "$f"); step "$v run $i/$reps"
-    "$LB" "$f" --device=amdgpu $cfgs $args --compile-report=summary --file-output-root="$D/run/fo_${v}_$i" \
+    "$LB" "$f" "--device=$dev" $cfgs $args --compile-report=summary --file-output-root="$D/run/fo_${v}_$i" \
       --output="$out/r_${v}_$i.json" > "$out/r_${v}_$i.json.log" 2>&1 || { echo "FAIL $v $i"; tail -5 "$out/r_${v}_$i.json.log"; rc=1; }
     rm -rf "$D/run/fo_${v}_$i"
   done
@@ -121,7 +123,7 @@ nprobe=$(q "print(len(s.get('probes', [])))")
 for pi in $(seq 0 $((nprobe - 1))); do
   pn=$(q "print(s['probes'][$pi]['name'])"); pa=$(q "print(' '.join(s['probes'][$pi].get('args', [])))"); f0=${files%% *}
   step "probe $pn: $f0 $pa"; mkdir -p "$out/probe_${pn}_artifacts"
-  "$LB" "$f0" --device=amdgpu $cfgs $args --compile-report=summary $pa --output-format=jsonl --profile-artifacts-dir="$out/probe_${pn}_artifacts" \
+  "$LB" "$f0" "--device=$dev" $cfgs $args --compile-report=summary $pa --output-format=jsonl --profile-artifacts-dir="$out/probe_${pn}_artifacts" \
     --file-output-root="$D/run/fo_probe_$pn" --output="$out/probe_$pn.jsonl" > "$out/probe_$pn.log" 2>&1; echo "probe $pn rc=$?" | tee -a "$out/probes.txt"
   tail -3 "$out/probe_$pn.log" | cut -c1-300; rm -rf "$D/run/fo_probe_$pn"
   du -sh "$out/probe_${pn}_artifacts" 2>/dev/null | tee -a "$out/probes.txt"
@@ -138,7 +140,7 @@ for v in variants:
         except Exception: continue
         by = {}
         for w in d.get("work_items", []):
-            if w.get("state") not in (None, "completed", "succeeded", "passed") and not w.get("profile_replay"):
+            if w.get("state") not in (None, "ok", "completed", "succeeded", "passed") and not w.get("profile_replay"):
                 fails.setdefault(v, {})[w.get("benchmark")] = (w.get("failure") or {}).get("message", w.get("state"))
             if os.environ.get("CASE_TIMING") == "1" and w.get("benchmark"):   # suite option "case_timing": the whole case (all its launches) per logical operation, host wall
                 try: by.setdefault("k_case_" + w["benchmark"], []).append(w["measurement"]["operation_timing_ns"]["p50"] / 1e6)

@@ -237,6 +237,57 @@
         "--profile-final-batch=true"
       ],
       "repeats": 3
+    },
+    {
+      "suite": "bw_strix",
+      "runner": "strix",
+      "dir": "bw",
+      "files": [
+        "bw_read.loom",
+        "bw_copy.loom"
+      ],
+      "config": [],
+      "args": [
+        "--measure=dispatch_complete",
+        "--batch-size=8"
+      ],
+      "device": "amdgpu://?completion_spin_ns=4294967295",
+      "repeats": 5,
+      "case_timing": true
+    },
+    {
+      "suite": "bw_strix_nospin",
+      "runner": "strix",
+      "dir": "bw",
+      "files": [
+        "bw_read.loom",
+        "bw_copy.loom"
+      ],
+      "config": [],
+      "args": [
+        "--measure=dispatch_complete",
+        "--batch-size=8"
+      ],
+      "device": "amdgpu",
+      "repeats": 5,
+      "case_timing": true
+    },
+    {
+      "suite": "bw_r9700",
+      "runner": "r9700",
+      "dir": "bw",
+      "files": [
+        "bw_read.loom",
+        "bw_copy.loom"
+      ],
+      "config": [],
+      "args": [
+        "--measure=dispatch_complete",
+        "--batch-size=8"
+      ],
+      "device": "amdgpu://?completion_spin_ns=4294967295",
+      "repeats": 5,
+      "case_timing": true
     }
   ]
 }
