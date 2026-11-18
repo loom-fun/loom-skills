@@ -102,6 +102,8 @@ if WIN:
         "% { $_.DriverDesc + ': ' + [math]::Round($_.'HardwareInformation.qwMemorySize'/1GB,1) + ' GB' }")
     E["hags"] = pwsh("(Get-ItemProperty 'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\GraphicsDrivers' -ErrorAction SilentlyContinue).HwSchMode")
     E["timer"] = pwsh("w32tm /query /status 2>$null | Select-Object -First 3 | Out-String")
+    E["boot_time"] = pwsh("(Get-CimInstance Win32_OperatingSystem).LastBootUpTime.ToString('s')")
+    E["dimm_speed"] = pwsh("(Get-CimInstance Win32_PhysicalMemory | % { $_.Speed.ToString() + '/' + $_.ConfiguredClockSpeed }) -join ','")
     E["power_processor"] = sh("powercfg /query SCHEME_CURRENT SUB_PROCESSOR")[:6000]
 else:
     E["kernel"] = sh("uname -r")
@@ -111,6 +113,7 @@ else:
     E["board"] = sh("cat /sys/class/dmi/id/board_vendor /sys/class/dmi/id/board_name 2>/dev/null")
     E["governor"] = sh("cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor /sys/devices/system/cpu/cpu0/cpufreq/energy_performance_preference 2>/dev/null")
     E["platform_profile"] = sh("cat /sys/firmware/acpi/platform_profile 2>/dev/null")
+    E["boot_time"] = sh("uptime -s")
     E["smu_fw"] = sh("cat /sys/kernel/debug/dri/*/amdgpu_firmware_info 2>/dev/null | grep -i smc | head -2")
 E["disk_free_gb"] = round(shutil.disk_usage(WORK).free / 1e9, 1)
 save()
@@ -145,7 +148,7 @@ BIN = os.path.join(venv, "Scripts" if WIN else "bin")
 VPY = os.path.join(BIN, "python.exe" if WIN else "python")
 env = dict(os.environ, PATH=BIN + os.pathsep + os.environ["PATH"], VIRTUAL_ENV=venv, PYTHONUTF8="1")
 t = time.time()
-p = subprocess.run([VPY, "-m", "pip", "install", "-q", spec, "requests", "jinja2", "psutil"], env=env,
+p = subprocess.run([VPY, "-m", "pip", "install", "-q", spec, "requests", "jinja2", "psutil", "numpy"], env=env,
                    capture_output=True, text=True)
 step("pip", p.returncode == 0, spec=spec, seconds=round(time.time() - t), tail=(p.stdout + p.stderr)[-1500:])
 if p.returncode:
@@ -410,6 +413,19 @@ E["baseline_cpu_total"] = psutil.cpu_percent(None)
 E["baseline_top_procs"] = top_procs(_s0, proc_snapshot(), time.time() - _t0)
 save()
 
+
+def membw(label):
+    o = subprocess.run([VPY, os.path.join(HERE, "membw.py")], capture_output=True, text=True, timeout=600)
+    try:
+        R.setdefault("membw", {})[label] = json.loads(o.stdout.strip().splitlines()[-1])
+    except Exception:
+        R.setdefault("membw", {})[label] = {"error": (o.stdout + o.stderr)[-400:]}
+    print("== membw", label, R["membw"][label], flush=True)
+    save()
+
+
+membw("baseline")
+
 # -- variants: perf.py under telemetry -------------------------------------------------------------------------------
 for v in [x for x in a.variants.split(",") if x]:
     srv = Server(serve_args(v), os.path.join(OUT, f"serve_{v}.log"))
@@ -476,6 +492,7 @@ for spec_ in [x for x in a.profile.split(",") if x]:
                          "stats_err": ps.stderr[-800:], "telemetry": tsum}
     step(f"profile_{key}", p.returncode == 0 and stats_present, stopped=how)
 
+membw("end")
 R["finished"] = time.strftime("%Y-%m-%d %H:%M:%S")
 save()
 print(json.dumps({k: v["perf"] for k, v in R["variants"].items()}, indent=1))

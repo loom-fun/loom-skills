@@ -7,6 +7,6 @@
   "linux"
  ],
  "variants": "",
- "profile": "dec@card#1,dec@card#2,dec@card#3,dec@card#4,dec@elastic#1,dec@elastic#2,dec@elastic#3",
- "reps": 6
+ "profile": "dec,dec@card#2",
+ "reps": 8
 }
