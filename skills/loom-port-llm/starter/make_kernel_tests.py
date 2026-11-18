@@ -573,16 +573,23 @@ if cfg.get("sliding_layers") and (cfg.get("head_dim_swa") or D) == D and ((RD_SW
 t = 3
 head_name = "output.weight" if "output.weight" in T else "token_embd.weight"
 Wh = deq(head_name).astype(np.float64)
+_PKG_TEXT = []
+
+
 def _pkg_llm_text():
     """The generated llm.loom of the package under test (next to the config, or in a build dir beside it), or None."""
+    if _PKG_TEXT:
+        return _PKG_TEXT[0]
     import glob
     d = os.path.dirname(os.path.abspath(sys.argv[1]))
     cands = [os.path.join(d, g) for g in ("pkg/program/llm.loom", "*/pkg/program/llm.loom")] \
         + [os.path.join(os.path.dirname(d), g) for g in ("pkg/program/llm.loom", "*/pkg/program/llm.loom")]
+    text = None
     for c in cands:
         for f in glob.glob(c) if c else []:
-            return open(f, errors="replace").read()
-    return None
+            text = text or open(f, errors="replace").read()
+    _PKG_TEXT.append(text)
+    return text
 
 
 import re as _re_hp  # noqa: E402
@@ -3010,6 +3017,8 @@ if cfg.get("moe") and os.environ.get("MOE_TESTS", "1") == "1":
         done.add((fd, gun))
         MQ = (ACT_Q8 and os.environ.get("MOE_Q8", "1") == "1" and fg == fu and fg in IQ_FMTS and fd in IQ_FMTS
               and H // 32 <= 1024 and FE // 32 <= 1024 and not EB)   # gen_llm.moe_iq
+        # gen_llm.moe_iq also needs the router input as the experts' input (gemma4's experts read %h2): the package says which it built
+        MQ = MQ and (_pkg_llm_text() is None or f'"g_moe_gu_{gun}_q8_k{H}_' in _pkg_llm_text())
         Wr, wr_raw = f32w(b + "ffn_gate_inp.weight"); Wr = Wr.reshape(E_, H)
         bias = (np.asarray(T[b + "exp_probs_b.bias"].data, np.float32) if M["probs_bias"] else
                 np.asarray(T[b + "ffn_gate_inp.bias"].data, np.float32) if M.get("router_bias") else np.zeros(E_, np.float32))
@@ -3410,6 +3419,217 @@ for _pk in sorted(set(re.findall(r'^kernel\.def export\("(g_pmv_mxfp4s_[^"]+)"\)
 {"".join(chk)}  check.return
 }}
 """)
+# 8. Coverage: every matvec the package launches gets a case, not only the variant of the first tensor of each (format, K) above.
+# The launched kernels come from the package's llm.loom (commands, templates, funcs); a g_mv_* kernel no case launches yet gets
+# one on a tensor of its format and K (trunk or MTP block) whose output width the generator's rows-per-workgroup rule maps to
+# the kernel's _r suffix (gen_llm.mv_name / mv_rows), against numpy (f32 activations, or llama.cpp's Q8_1 rounding for _q8).
+MV_NAME = re.compile(r"^g_mv_(?P<fmt>[a-z0-9]+(?:_[a-z0-9]+)??)_k(?P<K>\d+)(?P<kind>_swiglu|_pair)?(?:_t(?P<tg>\d+))?(?P<q8>_q8)?(?:_r(?P<R>\d+))?$")
+
+
+def pkg_launched():
+    """The kernels the package's programs launch (a K / K_rdna4 pair once, as K), or an empty set without a package."""
+    t = _pkg_llm_text()
+    if not t:
+        return set()
+    names = set()
+    for d in re.split(r"(?m)^(?=\S+\.(?:def|decl) )", t):
+        if d.startswith(("command.def", "template.def", "func.def")):
+            names |= set(re.findall(r"kernel\.launch @([\w.]+)", d))
+    return {k[:-6] if k.endswith("_rdna4") and k[:-6] in names else k for k in names}
+
+
+def cases_launched():
+    """The kernels launched by cases whose every kernel the package defines (ktest_select skips the others)."""
+    t = _pkg_llm_text() or ""
+    defined = set(re.findall(r'^kernel\.def\b[^\n]*?\s@([\w.]+)\(', t, re.M)) | set(re.findall(r'^kernel\.def\b[^\n]*?\bexport\("([^"]+)"\)', t, re.M))
+    defined |= set(re.findall(r'^kernel\.def\b[^\n]*?\s@([\w.]+)\(', "\n".join(cases), re.M))   # test helper kernels (kt_ copies)
+    got = set()
+    for c in cases:
+        used = set(re.findall(r"kernel\.launch @([\w.]+)", c))
+        if not t or used <= defined:
+            got |= {k[3:] if k.startswith("kt_") else k for k in used}   # a kt_ copy's case tests the kernel it copies
+    return got
+
+
+_COVER_SRC = []
+
+
+def cover_sources():
+    """(tensor source, layers) the coverage matvecs look in: the model (trunk + MTP block), then a drafter GGUF of the package (DFlash,
+    the Gemma 4 assistant: cfg drafter / draft / assistant "gguf", as given or next to the config) with every layer."""
+    if not _COVER_SRC:
+        _COVER_SRC.append(({"T": T, "raw": raw, "deq": deq, "split": split_w}, KT_LAYERS))
+        for key in ("drafter", "draft", "assistant"):
+            g = (cfg.get(key) or {}).get("gguf") if isinstance(cfg.get(key), dict) else None
+            if not g:
+                continue
+            g = g if os.path.exists(g) else os.path.join(os.path.dirname(os.path.abspath(sys.argv[1])), g)
+            if not os.path.exists(g):
+                continue
+            DTT = {t_.name: t_ for t_ in GGUFReader(g).tensors}
+            _COVER_SRC.append(({"T": DTT, "raw": lambda nm, D=DTT: np.asarray(D[nm].data).view(np.int8).reshape(-1),
+                                "deq": lambda nm, D=DTT: dequantize(np.asarray(D[nm].data), D[nm].tensor_type).reshape(int(D[nm].shape[1]), int(D[nm].shape[0])),
+                                "split": lambda nm, tag, key="w": ("", "", "")},
+                               sorted({int(n_.split(".")[1]) for n_ in DTT if n_.startswith("blk.")})))
+            break
+    return _COVER_SRC
+
+
+def mv_cover_case(kern, m, crng):
+    """A case for matvec KERN (MV_NAME match M) on a model tensor whose shape the rows rule maps to it, or None."""
+    fmt, K, kind, q8 = m["fmt"], int(m["K"]), m["kind"] or "", bool(m["q8"])
+    tg = int(m["tg"] or 1)
+    R = int(m["R"] or 16)
+    sw = {"": 0, "_swiglu": 1, "_pair": 2}[kind]
+
+    def rule(n):
+        return iq_r(n, K, tg, sw) if q8 else pick_r(n, K, tg)
+    pairs = {"_swiglu": (("ffn_gate", "ffn_up"),), "_pair": (("attn_q", "attn_gate"), ("attn_k", "attn_v"))}
+    pick = fallback = None
+    for src, layers in cover_sources():
+        TT = src["T"]
+        cands = []
+        for li in layers:
+            pre = f"blk.{li}."
+            if sw:
+                for a_, b_ in pairs[kind]:
+                    an, bn = pre + a_ + ".weight", pre + b_ + ".weight"
+                    if an in TT and bn in TT and TT[an].tensor_type == TT[bn].tensor_type and tuple(TT[an].shape) == tuple(TT[bn].shape):
+                        cands.append((an, bn))
+            else:
+                cands += [(nm, None) for nm in TT if nm.startswith(pre) and nm.endswith(".weight")]
+        if not sw:
+            cands += [(nm, None) for nm in TT if nm.endswith(".weight") and not nm.startswith("blk.")]
+        for an, bn in cands:
+            t_ = TT[an]
+            if t_.tensor_type.name.lower() != fmt or len(t_.shape) != 2 or int(t_.shape[0]) != K:
+                continue
+            n = int(t_.shape[1])
+            if rule(n) == R:
+                pick = (src, an, bn, n)
+                break
+            fallback = fallback or (src, an, bn, n)
+        if pick:
+            break
+    pick = pick or fallback   # a launch whose width is symbolic (gen_llm NVAL, e.g. the GDN heads) keeps the default rows
+    if pick is None:
+        return None
+    src, an, bn, n = pick
+    sraw, sdeq, ssplit = src["raw"], src["deq"], src["split"]
+    tag = f"cov_{kern}"
+    xs = crng.standard_normal((tg, K)).astype(np.float32)
+    xa = q8_ref(xs).astype(np.float64) if q8 else xs.astype(np.float64)
+    Wa = sdeq(an).astype(np.float64)
+    save(tag + "_x", xs); save(tag + "_wa", sraw(an))
+    wt = ty(sraw(an)); sd, sa, st = ssplit(an, tag, "wa")
+    decl = f'  %wa = check.file.read.npy path("{tag}_wa.npy") : {wt}\n' + sd
+    wargs, wtys = "%wa" + sa, wt + st
+    if sw == 1:
+        Wb = sdeq(bn).astype(np.float64)
+        ys = [ffn_act(xa @ Wa.T) * (xa @ Wb.T)]
+    elif sw == 2:
+        Wb = sdeq(bn).astype(np.float64)
+        ys = [xa @ Wa.T, xa @ Wb.T]
+    else:
+        ys = [xa @ Wa.T]
+    if sw:
+        save(tag + "_wb", sraw(bn)); bt = ty(sraw(bn)); sd2, sa2, st2 = ssplit(bn, tag, "wb")
+        decl += f'  %wb = check.file.read.npy path("{tag}_wb.npy") : {bt}\n' + sd2
+        wargs += ", %wb" + sa2; wtys += ", " + bt + st2
+    yt = f"tensor<{tg}x{n}xf32>"
+    outs = []
+    for i, y in enumerate(ys):
+        save(f"{tag}_e{i}", y.astype(np.float32))
+        decl += f'  %e{i} = check.file.read.npy path("{tag}_e{i}.npy") : {yt}\n  %y{i} = check.generate.fill value(0.0) : {yt}\n'
+        outs.append(f"%y{i}")
+    xt = f"tensor<{tg}x{2 * K}xi8>" if q8 else f"tensor<{tg}x{K}xf32>"
+    quant = (f"  %xq = check.generate.fill value(0) : {xt}\n"
+             f"  kernel.launch @g_quant_q8[%t, %k](%t, %k, %x, %xq) : [index, index](index, index, tensor<{tg}x{K}xf32>, {xt})\n") if q8 else ""
+    xv = "%xq" if q8 else "%x"
+    tol = "atol(3.0e-3) rtol(3.0e-3)" if sw == 1 else "atol(2.0e-3) rtol(2.0e-3)"
+    checks = "".join(f"  check.expect.close actual(%y{i}) expected(%e{i}) {tol} nan(different) : {yt}\n" for i in range(len(ys)))
+    return f"""check.case public @{tag} {{
+  %n = check.literal value({n}) : index
+  %t = check.literal value({tg}) : index
+  %k = check.literal value({K}) : index
+  %acc = check.literal value(0) : i32
+  %x = check.file.read.npy path("{tag}_x.npy") : tensor<{tg}x{K}xf32>
+{decl}{quant}  kernel.launch @{kern}[%n, %t](%n, %t, %acc, {xv}, {wargs}, {", ".join(outs)}) : [index, index](index, index, i32, {xt}, {wtys}, {", ".join([yt] * len(ys))})
+{checks}  check.return
+}}
+"""
+
+
+if True:   # coverage: a case for every kernel the package launches
+    _crng = np.random.default_rng(11)
+    for _k in sorted(pkg_launched() - cases_launched()):
+        _m = MV_NAME.match(_k)
+        if not _m or (_m["q8"] and _m["fmt"] not in IQ_FMTS):
+            continue
+        _c = mv_cover_case(_k, _m, _crng)
+        if _c:
+            cases.append(_c)
+        else:
+            print(f"coverage: no {_m['fmt']} tensor with K={_m['K']} maps to {_k}")
+    import ktest_spec  # noqa: E402  speculative-decoding bookkeeping (token info, spec rows / acceptance, the MTP drafter's kernels)
+    cases += ktest_spec.cases(_pkg_llm_text(), save, np.random.default_rng(13), KS)
+    _todo = pkg_launched() - cases_launched()
+    _brng = np.random.default_rng(17)
+    import ktest_more  # noqa: E402  norms, MoE router / combine / inputs, the Gemma 4 assistant's kernels, read off the package's kernels
+    cases += ktest_more.cases(_pkg_llm_text(), save, np.random.default_rng(19), KS)
+    if "g_row_scale_f16_live" in _todo or "g_row_scale_f16_live_lv" in _todo:
+        # g_row_scale_f16_live: g_row_scale_f16 (the GEMM A operand) whose padding rows (info word 2 = 0) get scale 0 and a zero f16 row
+        _rk = cfg["ffn"] if isinstance(cfg.get("ffn"), int) else H
+        _rx = (_brng.standard_normal((4, _rk)) * np.array([[1e-3], [1.0], [3e5], [2.0]])).astype(np.float32)
+        for _sfx, _live in (("", np.array([1, 0, 1, 1], np.int32)), ("_all", np.ones(4, np.int32))):   # _all: the K_lv clone's reference
+            _ri = np.zeros((4, 4), np.int32); _ri[:, 2] = _live
+            _re = np.clip(np.frexp(np.abs(_rx).max(1))[1] - 1 - 13, 0, 100)
+            _rs = (np.stack([2.0 ** -_re, 2.0 ** _re], 1) * _live[:, None]).astype(np.float32)
+            for _n, _a in [("rsl_x", _rx), (f"rsl_i{_sfx}", _ri), (f"rsl_s{_sfx}", _rs), (f"rsl_h{_sfx}", (_rx * _rs[:, :1]).astype(np.float16))]:
+                save(_n, _a)
+            cases.append(f"""check.case public @row_scale_f16_live{_sfx} {{
+  %rows = check.literal value(4) : index
+  %k = check.literal value({_rk}) : index
+  %info = check.file.read.npy path("rsl_i{_sfx}{KS}.npy") : tensor<4x4xi32>
+  %x = check.file.read.npy path("rsl_x{KS}.npy") : tensor<4x{_rk}xf32>
+  %es = check.file.read.npy path("rsl_s{_sfx}{KS}.npy") : tensor<4x2xf32>
+  %eh = check.file.read.npy path("rsl_h{_sfx}{KS}.npy") : tensor<4x{_rk}xf16>
+  %s = check.generate.fill value(0.0) : tensor<4x2xf32>
+  %h = check.generate.fill value(0.0) : tensor<4x{_rk}xf16>
+  kernel.launch @g_row_scale_f16_live[%rows](%rows, %info, %k, %x, %s, %h) : [index](index, tensor<4x4xi32>, index, tensor<4x{_rk}xf32>, tensor<4x2xf32>, tensor<4x{_rk}xf16>)
+  check.expect.close actual(%s) expected(%es) atol(0.0) rtol(0.0) nan(different) : tensor<4x2xf32>
+  check.expect.close actual(%h) expected(%eh) atol(0.0) rtol(1.0e-3) nan(different) : tensor<4x{_rk}xf16>
+  check.return
+}}
+""")
+    import ktest_variants  # noqa: E402  K_lv variants from their direct kernels' cases; kt_ copies of kernels a case root cannot run
+    _lib = _pkg_llm_text() or ""
+    _todo = pkg_launched() - cases_launched()
+    _helpers = ""
+    if ("g_silu_mul" in _todo or "g_silu_mul_lv" in _todo) and _lib:
+        # SwiGLU g_silu_mul (f = silu(f) * u in place) proves its vector bound only for the program's constant width: a kt_ copy with it
+        _FW = max(cfg["ffn"]) if isinstance(cfg["ffn"], list) else cfg["ffn"]
+        _copies = [ktest_variants.width_copy(_lib, k, _FW) for k in ("g_silu_mul", "g_silu_mul_lv") if k in _todo]
+        if all(_copies) and "g_silu_mul" in _todo:
+            _helpers = "".join(_copies)
+            cases += _copies
+            _f = (2 * _brng.standard_normal((3, _FW))).astype(np.float32); _u = _brng.standard_normal((3, _FW)).astype(np.float32)
+            save("smc_f", _f); save("smc_u", _u); save("smc_y", (ffn_act(_f.astype(np.float64)) * _u).astype(np.float32))
+            cases.append(f"""check.case public @silu_mul_const {{
+  %t = check.literal value(3) : index
+  %n = check.literal value({_FW}) : index
+  %f = check.file.read.npy path("smc_f{KS}.npy") : tensor<3x{_FW}xf32>
+  %u = check.file.read.npy path("smc_u{KS}.npy") : tensor<3x{_FW}xf32>
+  %e = check.file.read.npy path("smc_y{KS}.npy") : tensor<3x{_FW}xf32>
+  kernel.launch @kt_g_silu_mul[%t](%t, %n, %f, %u) : [index](index, index, tensor<3x{_FW}xf32>, tensor<3x{_FW}xf32>)
+  check.expect.close actual(%f) expected(%e) atol(1.0e-3) rtol(1.0e-3) nan(different) : tensor<3x{_FW}xf32>
+  check.return
+}}
+""")
+    cases += ktest_variants.listed_cases(cases, _lib, pkg_launched() - cases_launched(), save, KS)
+    cases += ktest_variants.clones(cases, _lib + _helpers, pkg_launched() - cases_launched(), save, KS, lambda f: np.load(os.path.join(out, f)))
+    for _k in sorted(pkg_launched() - cases_launched()):
+        print(f"coverage: no case launches {_k}")
 if flash2_deep_from(cfg):   # gen_llm.py launches the deep pairs' kernel after every one-tile prefill flash launch
     cases = [re.sub(r"^( *)kernel\.launch @g_attention_flash2\[(.*)$", r"\g<0>\n\1kernel.launch @g_attention_flash2_deep[\2", c,
                     flags=re.M) for c in cases] + DEEP_CASES   # these launch the two kernels as they test them

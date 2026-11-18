@@ -1957,7 +1957,7 @@
  # 3a. output head (argmax over the vocabulary) for one selected span of 3 tokens
  t = 3
  head_name = "output.weight" if "output.weight" in T else "token_embd.weight"
-@@ -705,76 +675,90 @@
+@@ -712,76 +682,90 @@
  """ + (VQ_PREP.replace("{hwt}", hwt) if VHEAD else "") + hl("g_head_mv_q8", "1") + "".join(hl(k, tag) for k, tag in variants) + "".join(
              f"  check.expect.close actual(%l{tag}) expected(%l1) atol(0.0) rtol(0.0) nan(different) : tensor<{S * CH * 128}xf32>\n"
              f"  check.expect.equal actual(%p{tag}) expected(%p1) : tensor<{S * CH * 2}xi32>\n" for _, tag in variants) + "  check.return\n}\n")
@@ -2117,7 +2117,7 @@
    check.return
  }}
  """)
-@@ -2542,7 +2526,15 @@
+@@ -2549,7 +2533,15 @@
      t, ctx = 64, 1024
      P0 = ctx - t; blocks = ctx // 16; pool = ctx
      kk = rng.standard_normal((ctx, KVH, D)).astype(np.float16); vv = rng.standard_normal((ctx, KVH, D)).astype(np.float16)
@@ -2134,7 +2134,7 @@
      qq = (rng.standard_normal((t, QH, D)) * 2.5).astype(np.float32); gg = rng.standard_normal((t, QH, D)).astype(np.float32)
      orig = np.zeros(10 + blocks, np.int32); orig[8] = 40; orig[10:] = np.arange(blocks)
      info = np.zeros((t, 4), np.int32); info[:, 1] = P0 + np.arange(t); info[:, 2] = 1
-@@ -2561,7 +2553,10 @@
+@@ -2568,7 +2560,10 @@
      # 960-1008 of row 0 (tokens 48-111), whichever tiles share its workgroups (gen_flash2.py TS), and leave the
      # heads (tokens 0-7, 40-47: the listed fallback's) untouched.
      tm = 112; k2 = rng.standard_normal((2, ctx, KVH, D)).astype(np.float16)
@@ -2146,7 +2146,7 @@
      orig_m = np.zeros(20 + 2 * blocks, np.int32); orig_m[8] = 80; orig_m[18] = 80 + 4 * blocks
      orig_m[20:] = np.arange(2 * blocks)
      row = (np.arange(tm) < 40).astype(np.int32)
-@@ -2580,6 +2575,11 @@
+@@ -2587,6 +2582,11 @@
      if ow is not None:
          cases.append(cases[-1].replace(f"@flash_prefill{tag} {{", f"@flash_prefill_window{tag} {{").replace("%sliding = check.literal value(0)", "%sliding = check.literal value(1)")
                       .replace(f'path("f_o{tag}.npy")', f'path("f_ow{tag}.npy")'))
@@ -2158,7 +2158,7 @@
  
  
  DEEP_CASES = []
-@@ -2931,6 +2931,12 @@
+@@ -2938,6 +2938,12 @@
                              ("g_attention_flash2", "g_attention_flash2_partial")).replace("f_arena_a.npy", "f_arena_nan.npy"))
      cases += [invariance_case(s, st) for s in ((0, 1) if WIN else (0,)) for st in (5, 0, 'zero')]
      cases += [order_case(s) for s in ((0, 1) if WIN else (0,))]
@@ -2171,7 +2171,7 @@
  
  # 6. MoE (gen_moe.py) on real tensors, one layer per expert-down format: the decode chain (router -> top-k ->
  # gate/up -> down -> combine, plus the prefill router with padding tokens) and the prefill chain (prefill router ->
-@@ -3200,6 +3206,43 @@
+@@ -3209,6 +3215,43 @@
    check.return
  }}
  """)
