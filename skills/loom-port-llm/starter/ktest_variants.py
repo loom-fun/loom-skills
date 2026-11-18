@@ -40,7 +40,21 @@ def _types(s):
     return [t.strip() for t in re.split(r",\s*(?![^<]*>)", s)]
 
 
-def lv_clone(case, bases, lib, save, ks):
+def _all_live(case, var, load):
+    """Whether the info tensor VAR of CASE marks every row live (word 2 nonzero): a K_lv that reads K's own info skips the dead rows
+    K still computes, so only a case whose rows are all live is a clone's reference."""
+    m = re.search(r"^\s*" + re.escape(var) + r' = check\.file\.read\.npy path\("([^"]+)"\)', case, re.M)
+    if m:
+        try:
+            a = load(m.group(1))
+        except (OSError, ValueError, TypeError):
+            return False
+        return a.ndim == 2 and a.shape[1] >= 3 and bool((a[:, 2] != 0).all())
+    m = re.search(r"^\s*" + re.escape(var) + r" = check\.generate\.fill value\((-?\d+)\)", case, re.M)
+    return bool(m) and int(m.group(1)) != 0
+
+
+def lv_clone(case, bases, lib, save, ks, load=None):
     """CASE with every launch of a kernel in BASES on its _lv variant (all rows live), or None."""
     extras = {}
     for base in bases:
@@ -65,6 +79,12 @@ def lv_clone(case, bases, lib, save, ks):
                 decls[n] = f'  %lvinfo{n} = check.file.read.npy path("lvinfo_{n}{ks}.npy") : tensor<{n}x4xi32>\n'
             args += f", %lvinfo{n}"
             types += f", tensor<{n}x4xi32>"
+        else:
+            bp = _params(lib, m["k"])
+            idx = next((i for i, p_ in enumerate(bp) if "info" in p_), None)
+            av = [a_.strip() for a_ in args.split(",")]
+            if idx is None or idx >= len(av) or load is None or not _all_live(case, av[idx], load):
+                raise ValueError("rows not all live")
         return f"{m['ind']}kernel.launch @{m['k']}_lv[{m['grid']}]({args}) : [{m['gt']}]({types})"
     try:
         out = LAUNCH.sub(sub, case)
@@ -73,7 +93,7 @@ def lv_clone(case, bases, lib, save, ks):
     return _rename_case(out, "_lv").replace("{\n", "{\n" + "".join(decls.values()), 1)
 
 
-def clones(cases, lib, untested, save, ks=""):
+def clones(cases, lib, untested, save, ks="", load=None):
     """K_lv clones; a case that launches kt_K (a specialized copy) is cloned onto kt_K_lv when that copy is in LIB."""
     out = []
     todo = {k[:-3] for k in untested if k.endswith("_lv")}
@@ -83,7 +103,7 @@ def clones(cases, lib, untested, save, ks=""):
             break
         bases = {k for k in set(re.findall(r"kernel\.launch @([\w.]+)\[", c)) if k in todo}
         if bases:
-            cl = lv_clone(c, bases, lib, save, ks)
+            cl = lv_clone(c, bases, lib, save, ks, load)
             if cl:
                 out.append(cl)
                 todo -= bases | {b[3:] if b.startswith("kt_") else "kt_" + b for b in bases}
