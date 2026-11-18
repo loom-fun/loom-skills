@@ -1067,6 +1067,11 @@ BFLY_PERM = os.environ.get("MV_BFLY_PERM", "1") == "1"
 # kernel) skips the dot products of the token slots past the epoch's tokens (a wave-uniform branch; those slots are never stored, so
 # every stored value is unchanged). Off: every slot computes (zero activations).
 MV_Q8_LIVE = os.environ.get("MV_Q8_LIVE", "0") == "1"
+# Choice decode.mv.q8_t4_upto: epochs of up to N tokens (N in 4..8) run the 4-token int8 matvecs and head (ceil(t / 4) token groups per
+# row group: a depth-4 verify's 5th token in a second workgroup that re-reads the rows through the cache) instead of the 8-token
+# kernels, whose 8 token slots cost ~5 ms per 31B step on Strix Halo. Every variant rounds a token as the 1-token kernel does: exact.
+MV_Q8_T4_UPTO = int(os.environ.get("MV_Q8_T4_UPTO", "4"))
+assert 4 <= MV_Q8_T4_UPTO <= 8, "MV_Q8_T4_UPTO: 4..8"
 
 
 def bfly_slot(j, TG, base, name, perm):
@@ -4115,7 +4120,7 @@ def mv_wide_tokens(fmt, kval, sw, n, mv_args):
     exactly as the 1-token kernel does."""
     _LIN[0] += 1
     k = _LIN[0]
-    return (f"""%c4_l{k} = index.constant 4 : index
+    return (f"""%c4_l{k} = index.constant {MV_Q8_T4_UPTO} : index
         %le4_l{k} = index.cmp ule, %t, %c4_l{k} : index
         %c8_l{k} = index.constant 8 : index
         %le8_l{k} = index.cmp ule, %t, %c8_l{k} : index
@@ -4615,7 +4620,7 @@ def head_wiring(program):
         return (f"{i}%hq{k}_b = index.constant {2 * H} : offset\n{i}%hq{k}_s = index.scale {t}, %hq{k}_b : index, offset -> offset\n"
                 f"{i}%hq{k} = buffer.alloca<global> align(256) %hq{k}_s : buffer\n{i}%hq{k}_w = index.constant {H} : index\n"
                 f"{i}kernel.launch @g_quant_q8[{t}, %hq{k}_w]({t}, %hq{k}_w, {h}, %hq{k}) : [index, index](index, index, buffer, buffer)\n"
-                f"{i}{m.group('c')} = index.cmp eq, {sp}, %c1 : index\n{i}%hq{k}_c4 = index.constant 4 : index\n"
+                f"{i}{m.group('c')} = index.cmp eq, {sp}, %c1 : index\n{i}%hq{k}_c4 = index.constant {MV_Q8_T4_UPTO} : index\n"
                 f"{i}%hq{k}_le4 = index.cmp ule, {sp}, %hq{k}_c4 : index\n"
                 f"{i}scf.if {m.group('c')} {{\n{launch('g_head_mv_q8', i + '  ')}\n{i}}} else {{\n"
                 f"{i}  scf.if %hq{k}_le4 {{\n{launch('g_head_mv_t4_q8', i + '    ')}\n{i}  }} else {{\n"
@@ -4698,7 +4703,7 @@ def lin2(fmt, x, s, wa, wb, wsize, ya, yb, k, n, kval, width=None):
       {gemm(wa, ya)}
       {gemm(wb, yb)}
     }} else {{
-      %c4_p{c} = index.constant 4 : index
+      %c4_p{c} = index.constant {MV_Q8_T4_UPTO} : index
       %le4_p{c} = index.cmp ule, %t, %c4_p{c} : index
       scf.if %le4_p{c} {{
         scf.if %single {{

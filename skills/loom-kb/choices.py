@@ -247,6 +247,11 @@ CHOICE("decode.mv.q8_live_slots", "bool", False, "MV_Q8_LIVE", kernels=["g_mv_*_
        from_pr="gemma-verify-attn",
        doc="Int8 matvecs of 8+ tokens skip the dot products of token slots past the epoch's tokens (a depth-4 verify runs 5 tokens on the "
            "8-token kernel); those slots are never stored, so every output is unchanged.")
+CHOICE("decode.mv.q8_t4_upto", "int", 4, "MV_Q8_T4_UPTO", kernels=["g_mv_*_q8*", "g_head_mv*_q8*"], rows=ROWS_DECODE + ROWS_STREAMS,
+       from_pr="gemma-verify-attn",
+       doc="Epochs of up to N tokens (4..8) run the 4-token int8 matvecs and head (ceil(t / 4) token groups per row group, the second "
+           "re-reading the rows through the cache) instead of the 8-token kernels. Exact (every variant rounds a token as the 1-token "
+           "kernel does). 31B QAT Strix, depth 4 (5-token verify): the 8-token kernels cost ~5 ms per step over the 4-token ones.")
 CHOICE("decode.mv.q8_r32", "bool", True, "MV_Q8_R32", doc="Int8 16-token matvecs with 32 rows (pair kernels / K >= 8192).", **_MV)
 CHOICE("decode.spec.gdn_copy_split", "int", 1, "GDN_COPY_SPLIT", kernels=["g_gdn_capture*", "g_gdn_restore*"], rows=ROWS_DECODE, devices=["rdna4"], per_target=True,
        doc="Workgroups per token of the gated delta-net capture / restore copies of a drafted step (gfx12 twin; 1 = the one-workgroup-per-token "
