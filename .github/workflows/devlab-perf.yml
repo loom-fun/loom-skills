@@ -159,6 +159,7 @@ jobs:
           rm -rf "$WORK/_gufo-bundle-dl"
           echo "GUFO_BUNDLE=$d" >> "$GITHUB_ENV"
       - name: "experiment: ${{ matrix.job }}"
+        timeout-minutes: 210
         run: bash .github/scripts/devlab_perf.sh .github/devlab/perf.json "${{ matrix.job }}"
       - name: upload results
         if: always()
