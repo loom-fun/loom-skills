@@ -552,6 +552,7 @@
    "kit": "gemma4",
    "llamacpp": "b1375",
    "features": [
+    "draft",
     "thinking-toggle"
    ]
   },
@@ -562,6 +563,7 @@
    "kit": "gemma4",
    "llamacpp": "b1375",
    "features": [
+    "draft",
     "thinking-toggle"
    ]
   }
