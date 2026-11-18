@@ -61,7 +61,7 @@ jobs:
         run: |
           $slug = "${{ matrix.repo }}".Split("/")[1]
           "SLUG=$slug" >> $env:GITHUB_ENV
-          python .github/gapprof/gapprof.py "${{ matrix.repo }}" "$env:RUNNER_TEMP\gapprof-out" --variants "${{ needs.plan.outputs.variants }}" --profile "${{ needs.plan.outputs.profile }}"
+          python .github/gapprof/gapprof.py "${{ matrix.repo }}" "$env:RUNNER_TEMP\gapprof-out" "--variants=${{ needs.plan.outputs.variants }}" "--profile=${{ needs.plan.outputs.profile }}"
           if ($LASTEXITCODE -ne 0) { throw "gapprof exited $LASTEXITCODE" }
       - name: upload
         if: always()
@@ -102,7 +102,7 @@ jobs:
         run: |
           echo "SLUG=${REPO#*/}" >> "$GITHUB_ENV"
           export HF_HOME="$RUNNER_TEMP/hf"
-          python3 .github/gapprof/gapprof.py "$REPO" "$RUNNER_TEMP/gapprof-out" --variants "${{ needs.plan.outputs.variants }}" --profile "${{ needs.plan.outputs.profile }}"
+          python3 .github/gapprof/gapprof.py "$REPO" "$RUNNER_TEMP/gapprof-out" "--variants=${{ needs.plan.outputs.variants }}" "--profile=${{ needs.plan.outputs.profile }}"
       - name: upload
         if: always()
         uses: actions/upload-artifact@v4
