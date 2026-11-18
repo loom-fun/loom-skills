@@ -6,6 +6,8 @@ usage: profile_requests.py URL MODEL SCENARIO [--reps K] [--depth D] [--tokens N
   probe   one tiny request (is the statistics output there at all?)
   pf2k / pf8k   K fresh-nonce prompts of ~2000 / ~8000 tokens, max_tokens 2 (prefill only)
   dec     one essay request (short prompt), N (default 400) tokens: a drafted decode, the counters give its verify steps
+  dec2k / dec32k   a ~2000 / ~32000-token document, then N decoded tokens (the decode_2k / decode_32k shape; the table also
+          holds that prompt's prefill kernels)
 Prints one JSON line: scenario, requests (prompt/completion tokens, ttft, decode tok/s), draft counter deltas."""
 import argparse
 import json
@@ -18,7 +20,7 @@ from bench_common import doc, server_draft_counters, stream, thinking_extra
 ap = argparse.ArgumentParser()
 ap.add_argument("url")
 ap.add_argument("model")
-ap.add_argument("scenario", choices=["probe", "pf2k", "pf8k", "dec"])
+ap.add_argument("scenario", choices=["probe", "pf2k", "pf8k", "dec", "dec2k", "dec32k"])
 ap.add_argument("--reps", type=int, default=3)
 ap.add_argument("--tokens", type=int, default=int(os.environ.get("LOOM_PROFILE_TOKENS", "400")))
 ap.add_argument("--literal-decode", action="store_true", default=os.environ.get("LOOM_PROFILE_LITERAL_DECODE") == "1",
@@ -96,6 +98,10 @@ if a.scenario != "probe":
         n = 2000 if a.scenario == "pf2k" else 8000
         for i in range(a.reps):
             reqs.append(go(f"[{nonce} {i}] Summarize this documentation in one sentence.\n\n" + doc(n), 2))
+    elif a.scenario in ("dec2k", "dec32k"):
+        n = 2000 if a.scenario == "dec2k" else 32000
+        out["prompt_mode"] = "document"
+        reqs.append(go(f"[{nonce}] Write a detailed essay about the following documentation.\n\n" + doc(n), a.tokens))
     else:
         content = ESSAY if a.literal_decode else f"[{nonce}] {ESSAY}"
         out["prompt_mode"] = "literal-perf" if a.literal_decode else "nonce"
