@@ -1,22 +1,21 @@
 {
- "_comment": "Gemma 4 QAT 31B drafted (int8 Q4_0 programs) R9700: the 10240 context fits with prefill 512 (cold-capacity run 44366652644). Perf of 10240/512 at depth 0 and 3 (prefill cost of the smaller chunk vs 8192/1024 in the depth job). Experiment only.",
+ "_comment": "Gemma 4 QAT 31B drafted R9700 gates at the served preset: gates.sh sizes its long prompts from the FIRST preset's context (81920), so the R9700 run (chat-r9700, 10240) sent two over-context goldens (compare: 2 ERROR, every real divergence a near-tie). The execution override makes every preset the served one (10240 / prefill 512 / depth 3), as the target-only qualification did. Experiment only.",
  "jobs": [
   {
-   "name": "qat-31b-r9700-p512",
+   "name": "qat-31b-r9700-gates",
    "runner": "r9700",
-   "card": "loom-fun-staging/unsloth-gemma-4-31B-it-qat-loom@8496d48196eccbb8137f771834ea6c4458c66265",
+   "card": "loom-fun-staging/unsloth-gemma-4-31B-it-qat-loom@a3eb8e456ae37bf5f1f32377eb7cd8012c0a0926",
    "memory_bytes": 34000000000,
    "kit": "gemma4",
    "llamacpp": "b1375",
    "sdk": "0.2.0",
    "thinking": "off",
-   "llama_spec": "",
+   "llama_spec": "matched",
    "require_preset_r9700": true,
    "variants": [
-    {"name": "p5d0", "execution": {"context_capacity": 10240, "prefill_capacity": 512, "draft_depth": 0}, "serve_args": ["--parameter_mode=preload"]},
-    {"name": "p5d3", "execution": {"context_capacity": 10240, "prefill_capacity": 512, "draft_depth": 3}, "serve_args": ["--parameter_mode=preload"]}
+    {"name": "card", "execution": {"context_capacity": 10240, "prefill_capacity": 512, "draft_depth": 3}, "serve_args": ["--parameter_mode=preload"]}
    ],
-   "steps": ["perf:p5d0:1", "perf:p5d0:1:long", "perf:p5d3:1", "perf:p5d3:1:long"]
+   "steps": ["gates:card:full"]
   }
  ]
 }
