@@ -1,5 +1,5 @@
 {
- "_comment": "Gemma 4 QAT 26B-A4B drafted (assistant d1, int8 Q4_0 programs) R9700 capacity: the 36864 preset is RESOURCE_EXHAUSTED with drafting on. Cold-capacity probe at 32768 / 28672 / 24576 (execution override, same programs). Experiment only.",
+ "_comment": "Gemma 4 QAT 26B-A4B drafted (assistant d1, int8 Q4_0 programs) R9700 capacity: a 14.2 GB workspace allocation fails at every context with prefill 4096. Cold-capacity probe with prefill 2048 / 1024 (execution override, same programs). Experiment only.",
  "jobs": [
   {
    "name": "qat-26b-r9700-capacity",
@@ -13,11 +13,12 @@
    "llama_spec": "",
    "require_preset_r9700": true,
    "variants": [
-    {"name": "c32", "execution": {"context_capacity": 32768, "draft_depth": 1}, "serve_args": ["--parameter_mode=preload"]},
-    {"name": "c28", "execution": {"context_capacity": 28672, "draft_depth": 1}, "serve_args": ["--parameter_mode=preload"]},
-    {"name": "c24", "execution": {"context_capacity": 24576, "draft_depth": 1}, "serve_args": ["--parameter_mode=preload"]}
+    {"name": "c36p2", "execution": {"context_capacity": 36864, "prefill_capacity": 2048, "draft_depth": 1}, "serve_args": ["--parameter_mode=preload"]},
+    {"name": "c36p1", "execution": {"context_capacity": 36864, "prefill_capacity": 1024, "draft_depth": 1}, "serve_args": ["--parameter_mode=preload"]},
+    {"name": "c32p2", "execution": {"context_capacity": 32768, "prefill_capacity": 2048, "draft_depth": 1}, "serve_args": ["--parameter_mode=preload"]},
+    {"name": "c36p4d0", "execution": {"context_capacity": 36864, "prefill_capacity": 4096, "draft_depth": 0}, "serve_args": ["--parameter_mode=preload"]}
    ],
-   "steps": ["coldcapacity:c32", "coldcapacity:c28", "coldcapacity:c24"]
+   "steps": ["coldcapacity:c36p2", "coldcapacity:c36p1", "coldcapacity:c32p2", "coldcapacity:c36p4d0"]
   }
  ]
 }
