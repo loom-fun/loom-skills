@@ -35,12 +35,24 @@ def config(path):
         v = np.asarray([t for t in r.tensors if t.name == "rope_freqs.weight"][0].data)
         cut = int((v < 1e10).sum())          # pairs that rotate (llama.cpp freq factors 1e30 = no rotation)
     swa = list(A("attention.sliding_window_pattern"))
+    kv_heads, kv_heads_full = kv_per_kind(A("attention.head_count_kv"), swa)
     return {"gguf": path, "layers": A("block_count"), "E": A("embedding_length"), "H": A("embedding_length_out"),
-            "ffn": A("feed_forward_length"), "heads": A("attention.head_count"), "kv_heads": A("attention.head_count_kv"),
+            "ffn": A("feed_forward_length"), "heads": A("attention.head_count"), "kv_heads": kv_heads, "kv_heads_full": kv_heads_full,
             "D": A("attention.key_length"), "D_swa": A("attention.key_length_swa"), "swa": swa,
             "theta": A("rope.freq_base"), "theta_swa": A("rope.freq_base_swa"), "rd": A("rope.dimension_count"),
             "rd_swa": A("rope.dimension_count_swa"), "eps": A("attention.layer_norm_rms_epsilon", 1e-6), "cut": cut,
             "vocab": tensors["token_embd.weight"]["shape"][1], "tensors": tensors}
+
+
+def kv_per_kind(kv, swa):
+    """(sliding, full) KV-head counts of an assistant. head_count_kv is one number (E2B/E4B) or one per layer (the 26B-A4B /
+    31B assistants: the sliding layers read a target layer with more KV heads than the full one does, e.g. 16 vs 4)."""
+    kvl = list(kv) if isinstance(kv, (list, tuple)) else [kv] * len(swa)
+    assert len(kvl) == len(swa), f"head_count_kv {kvl}: one per layer expected ({len(swa)} layers)"
+    kinds = [sorted({int(kvl[i]) for i in range(len(swa)) if bool(swa[i]) == s}) for s in (True, False)]
+    assert all(len(k) <= 1 for k in kinds), f"per-layer KV heads {kvl} vary within a layer kind"
+    sw = (kinds[0] or kinds[1])[0]
+    return sw, (kinds[1] or kinds[0])[0]
 
 
 def target_attention(program, L, swa_layer, full_layer):
@@ -66,10 +78,16 @@ def _slot(a, GA, GT):
 
 def kernels(g):
     A = g["assist"]
-    E, H, QA, KVH = A["E"], g["H"], A["heads"], A["kv_heads"]
-    QT, GT = g["QH"], g["QH"] // g["KVH"]
-    GA = QA // KVH
-    assert KVH == g["KVH"] and QA % KVH == 0 and GA <= GT, "assistant KV heads must match the target's"
+    E, H, QA = A["E"], g["H"], A["heads"]
+    QT = g["QH"]
+    # Head grouping per layer kind (head_dim): the sliding layers read a target layer with KVH KV heads, the full ones one
+    # with KVH_G (the target's kv_heads_global; Gemma-4 26B-A4B / 31B give their global layers fewer).
+    groups = {}
+    for D, KVH, KVT in ((A["D_swa"], A["kv_heads"], g["KVH"]), (A["D"], A.get("kv_heads_full", A["kv_heads"]), g.get("KVH_G") or g["KVH"])):
+        assert KVH == KVT and QA % KVH == 0 and QA // KVH <= QT // KVT, \
+            f"assistant KV heads {KVH} (head_dim {D}) must match the target's {KVT}"
+        assert groups.get(D, (QA // KVH, QT // KVT)) == (QA // KVH, QT // KVT), f"head_dim {D}: sliding and full grouping differ"
+        groups[D] = (QA // KVH, QT // KVT)
     assert E % 32 == 0 and E <= 8192
     EPS = float(A["eps"])
     T = []
@@ -216,6 +234,7 @@ kernel.def export("g_as_visible") @g_as_visible(%tokens: index) {{
         HALF = D // 2
         pairs = min(HALF, cut) if cut else HALF
         LN = 2.0 * math.log(theta) / rd
+        GA, GT = groups[D]
         T.append(f"""
 // Assistant queries for head_dim {D}: per-head rmsnorm * q_norm, NeoX RoPE at the draft position (pairs < {pairs}
 // rotate), written into the target's {QT}-head layout (assistant head a -> slot (a / {GA}) * {GT} + a % {GA}).

@@ -180,6 +180,12 @@ all_gates() {
     [ -n "$MMPROJ" ] && [ -n "$L" ] && run vision "$T" "$S/vision_golden.py" "$pkg" --url "$url" --llama "$L" ${VISION_ARGS:-}
     return
   fi
+  # SPEC_ONLY=1: just the speculative-decoding equivalence gate at this level (a drafter/depth sweep on DevLab: every
+  # candidate checked without re-running the reference gates; the chosen package still runs the full level)
+  if [ -n "${SPEC_ONLY:-}" ]; then
+    [ -n "$drafting" ] && run spec spec_gate
+    return
+  fi
   [ "$level" = dev ] && { dev_gates; return; }
   if [ -n "$L" ]; then
     run golden "$T" "$S/golden.py" "$pkg" golden.json --llama "$L" --long "$long"
