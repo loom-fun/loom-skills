@@ -7,6 +7,7 @@ version. Write-ups for the SDK team are built from this file.
 
 ## Contents
 - hrx-loom 0.2.0: rewritten chat history
+- hrx-loom 0.2.0: at most 180 kernel.defs per program file
 - hrx-loom 0.2.0: development-build ABI and comparison pins
 - hrx-loom 0.1.0: tools (compile, test, profile)
 - hrx-loom 0.1.0: language and lowering
@@ -28,6 +29,15 @@ version. Write-ups for the SDK team are built from this file.
   to replay rewritten history. Unlock: generated-token prefix checkpoints or a correct common-prefix restore/replay path, preserving
   the model's output and the template. A passing agent gate excuses verified template rewrites and does **not** mean this performance
   target was achieved. Issue #40 remains open; do not replace generated tokens or change the template merely to obtain a cache hit.
+
+## hrx-loom 0.2.0: at most 180 kernel.defs per program file
+
+- **Registration fails above 180 kernel definitions in one program file** (a dual-target twin counts as its own definition):
+  `/v1/status` shows `registration: failed`, `source value %87 has no target remap` (code 5), compilation itself reports 0 errors.
+  Found with Qwen3.8-27B and the Q4_0 choices (its MTP block is Q4_0): 181 fails, removing any one of the never-launched kernels
+  (180) serves and answers, locally on gfx1151 and on the R9700 ([run](https://github.com/loom-fun/loom-skills/actions/runs/44312519207)).
+  The largest published file had 180 (Gemma-4-E2B). Workaround: `build.py` drops unreferenced kernels of a file above the limit and stops
+  the build when it is still above (`dual_target.limit_kernels`). Unlock: no fixed kernel count, or a load-time error naming the limit.
 
 ## hrx-loom 0.2.0: development-build ABI and comparison pins
 
