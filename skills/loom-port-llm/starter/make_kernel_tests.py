@@ -3581,19 +3581,19 @@ if True:   # coverage: a case for every kernel the package launches
         # g_row_scale_f16_live: g_row_scale_f16 (the GEMM A operand) whose padding rows (info word 2 = 0) get scale 0 and a zero f16 row
         _rk = cfg["ffn"] if isinstance(cfg.get("ffn"), int) else H
         _rx = (_brng.standard_normal((4, _rk)) * np.array([[1e-3], [1.0], [3e5], [2.0]])).astype(np.float32)
-        _live = np.array([1, 0, 1, 1], np.int32)
-        _ri = np.zeros((4, 4), np.int32); _ri[:, 2] = _live
-        _re = np.clip(np.frexp(np.abs(_rx).max(1))[1] - 1 - 13, 0, 100)
-        _rs = (np.stack([2.0 ** -_re, 2.0 ** _re], 1) * _live[:, None]).astype(np.float32)
-        for _n, _a in [("rsl_x", _rx), ("rsl_i", _ri), ("rsl_s", _rs), ("rsl_h", (_rx * _rs[:, :1]).astype(np.float16))]:
-            save(_n, _a)
-        cases.append(f"""check.case public @row_scale_f16_live {{
+        for _sfx, _live in (("", np.array([1, 0, 1, 1], np.int32)), ("_all", np.ones(4, np.int32))):   # _all: the K_lv clone's reference
+            _ri = np.zeros((4, 4), np.int32); _ri[:, 2] = _live
+            _re = np.clip(np.frexp(np.abs(_rx).max(1))[1] - 1 - 13, 0, 100)
+            _rs = (np.stack([2.0 ** -_re, 2.0 ** _re], 1) * _live[:, None]).astype(np.float32)
+            for _n, _a in [("rsl_x", _rx), (f"rsl_i{_sfx}", _ri), (f"rsl_s{_sfx}", _rs), (f"rsl_h{_sfx}", (_rx * _rs[:, :1]).astype(np.float16))]:
+                save(_n, _a)
+            cases.append(f"""check.case public @row_scale_f16_live{_sfx} {{
   %rows = check.literal value(4) : index
   %k = check.literal value({_rk}) : index
-  %info = check.file.read.npy path("rsl_i{KS}.npy") : tensor<4x4xi32>
+  %info = check.file.read.npy path("rsl_i{_sfx}{KS}.npy") : tensor<4x4xi32>
   %x = check.file.read.npy path("rsl_x{KS}.npy") : tensor<4x{_rk}xf32>
-  %es = check.file.read.npy path("rsl_s{KS}.npy") : tensor<4x2xf32>
-  %eh = check.file.read.npy path("rsl_h{KS}.npy") : tensor<4x{_rk}xf16>
+  %es = check.file.read.npy path("rsl_s{_sfx}{KS}.npy") : tensor<4x2xf32>
+  %eh = check.file.read.npy path("rsl_h{_sfx}{KS}.npy") : tensor<4x{_rk}xf16>
   %s = check.generate.fill value(0.0) : tensor<4x2xf32>
   %h = check.generate.fill value(0.0) : tensor<4x{_rk}xf16>
   kernel.launch @g_row_scale_f16_live[%rows](%rows, %info, %k, %x, %s, %h) : [index](index, tensor<4x4xi32>, index, tensor<4x{_rk}xf32>, tensor<4x2xf32>, tensor<4x{_rk}xf16>)
@@ -3627,7 +3627,7 @@ if True:   # coverage: a case for every kernel the package launches
 }}
 """)
     cases += ktest_variants.listed_cases(cases, _lib, pkg_launched() - cases_launched(), save, KS)
-    cases += ktest_variants.clones(cases, _lib + _helpers, pkg_launched() - cases_launched(), save, KS)
+    cases += ktest_variants.clones(cases, _lib + _helpers, pkg_launched() - cases_launched(), save, KS, lambda f: np.load(os.path.join(out, f)))
     for _k in sorted(pkg_launched() - cases_launched()):
         print(f"coverage: no case launches {_k}")
 if flash2_deep_from(cfg):   # gen_llm.py launches the deep pairs' kernel after every one-tile prefill flash launch
