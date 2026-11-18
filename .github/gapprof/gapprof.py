@@ -87,6 +87,8 @@ E = R["env"]
 E["platform"] = platform.platform()
 E["python"] = sys.version.split()[0]
 E["cpus"] = os.cpu_count()
+E["runner_name"] = os.environ.get("RUNNER_NAME")
+E["hostname"] = platform.node()
 if WIN:
     E["gpu"] = pwsh("(Get-CimInstance Win32_VideoController | % { $_.Name + ' / driver ' + $_.DriverVersion + ' / ' + $_.DriverDate }) -join '; '")
     E["cpu"] = pwsh("(Get-CimInstance Win32_Processor).Name")
@@ -256,7 +258,9 @@ class Telemetry:
             self.tpcsv = path.replace(".jsonl", "_typeperf.csv")
             counters = [r"\GPU Engine(*)\Utilization Percentage", r"\GPU Adapter Memory(*)\Dedicated Usage",
                         r"\GPU Adapter Memory(*)\Shared Usage", r"\Processor Information(_Total)\% Processor Performance",
-                        r"\Processor Information(_Total)\% Processor Utility", r"\Processor Information(_Total)\Processor Frequency"]
+                        r"\Processor Information(_Total)\% Processor Utility", r"\Processor Information(_Total)\Processor Frequency",
+                        r"\Thermal Zone Information(*)\Temperature", r"\Thermal Zone Information(*)\% Passive Limit",
+                        r"\Thermal Zone Information(*)\Throttle Reasons"]
             self.tp = subprocess.Popen(["typeperf"] + counters + ["-si", "1", "-f", "CSV", "-o", self.tpcsv, "-y"],
                                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         self.th = threading.Thread(target=self.run, daemon=True)
