@@ -1,47 +1,104 @@
 {
- "_comment": "R9700 per-model measurement (r9700_jobs.py): one job per model on one R9700 runner; loom-fun-staging card, llama.cpp ROCm b1375 + Vulkan b12211 with the matched drafting, reduced-context models served at served_context. Does not fit: none",
- "runner": "r9700",
- "memory_bytes": 34000000000,
- "llama_spec": "matched",
+ "_comment": "Gemma 4 QAT 31B Strix assistant sweep after the split-kernel layer fix. Experiment only.",
  "jobs": [
   {
-   "name": "unsloth-qwen3-0-6b-loom",
-   "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
-   "kit": null,
+   "name": "qat-31b-strix-assist",
+   "runner": "strix",
+   "card": "loom-fun/unsloth-gemma-4-31B-it-qat-loom@320701ea8ce656f87c612910a08beb192807da96",
+   "memory_bytes": 110000000000,
+   "kit": "gemma4",
    "llamacpp": "b1375",
-   "llamacpp_vulkan": "b12211",
-   "memory_bytes_r9700": 17000000000,
+   "sdk": "0.2.0",
+   "thinking": "off",
+   "llama_spec": "",
+   "env": {
+    "SPEC_ONLY": "1"
+   },
    "variants": [
     {
-     "name": "card",
-     "build": {}
-    },
-    {
-     "name": "nodraft",
-     "build": {},
+     "name": "base",
      "execution": {
       "draft_depth": 0
      }
+    },
+    {
+     "name": "as1",
+     "build": {},
+     "config": {
+      "assistant": {
+       "gguf": "{hf:unsloth/gemma-4-31B-it-qat-GGUF@43cc1aeb31adf47ec06a854507ce552cd9862e6f/mtp-gemma-4-31B-it.gguf#3a5e99fd8d0b23afb1fccd1ee0c9ebd1f571d00399c2dae2292d217feeec0f6b}"
+      }
+     },
+     "build_args": [
+      "--draft",
+      "assist",
+      "--draft-depth",
+      "1"
+     ]
+    },
+    {
+     "name": "as2",
+     "build": {},
+     "config": {
+      "assistant": {
+       "gguf": "{hf:unsloth/gemma-4-31B-it-qat-GGUF@43cc1aeb31adf47ec06a854507ce552cd9862e6f/mtp-gemma-4-31B-it.gguf#3a5e99fd8d0b23afb1fccd1ee0c9ebd1f571d00399c2dae2292d217feeec0f6b}"
+      }
+     },
+     "build_args": [
+      "--draft",
+      "assist",
+      "--draft-depth",
+      "2"
+     ]
+    },
+    {
+     "name": "as3",
+     "build": {},
+     "config": {
+      "assistant": {
+       "gguf": "{hf:unsloth/gemma-4-31B-it-qat-GGUF@43cc1aeb31adf47ec06a854507ce552cd9862e6f/mtp-gemma-4-31B-it.gguf#3a5e99fd8d0b23afb1fccd1ee0c9ebd1f571d00399c2dae2292d217feeec0f6b}"
+      }
+     },
+     "build_args": [
+      "--draft",
+      "assist",
+      "--draft-depth",
+      "3"
+     ]
+    },
+    {
+     "name": "as4",
+     "build": {},
+     "config": {
+      "assistant": {
+       "gguf": "{hf:unsloth/gemma-4-31B-it-qat-GGUF@43cc1aeb31adf47ec06a854507ce552cd9862e6f/mtp-gemma-4-31B-it.gguf#3a5e99fd8d0b23afb1fccd1ee0c9ebd1f571d00399c2dae2292d217feeec0f6b}"
+      }
+     },
+     "build_args": [
+      "--draft",
+      "assist",
+      "--draft-depth",
+      "4"
+     ]
     }
    ],
    "steps": [
-    "func:card",
-    "ktest:card",
-    "gates:card:dev",
-    "perf:card:3",
-    "perf:card:3:long",
-    "c4:nodraft",
-    "llama@rocm.np1:3",
-    "llama@rocm.np1:3:long",
-    "llamac4@rocm.nodraft",
-    "llama@vulkan.np1:3",
-    "llama@vulkan.np1:3:long",
-    "llamac4@vulkan.perslot.nodraft"
+    "perf:base:1",
+    "perf:base:1:long",
+    "perf:as1:1",
+    "perf:as1:1:long",
+    "gates:as1:quick",
+    "perf:as2:1",
+    "perf:as2:1:long",
+    "gates:as2:quick",
+    "perf:as3:1",
+    "perf:as3:1:long",
+    "gates:as3:quick",
+    "perf:as4:1",
+    "perf:as4:1:long",
+    "gates:as4:quick",
+    "profile:as1:dec"
    ]
   }
- ],
- "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
- "kit": null,
- "llamacpp": "b1375",
- "llamacpp_vulkan": "b12211"
+ ]
 }
