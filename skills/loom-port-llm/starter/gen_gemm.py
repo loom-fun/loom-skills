@@ -38,9 +38,17 @@ FMT = {
     "f32": dict(block_bytes=128, block_values=32),
 }
 HELPER = {"q4_0", "q5_0", "iq4_nl", "iq4_xs", "q3_k", "iq3_s", "f16", "mxfp4", "mxfp4s"}
+# GEMM_Q4_0_NATIVE (choice prefill.gemm.q4_0_native): Q4_0 decodes its 16-value half-block straight to F16 (moe_q4_0.dequant16,
+# the same values as @g_q4_0_values + fptrunc) and so gets the 128/256-row kernels instead of the 64-row tile only.
+Q4_0_NATIVE = os.environ.get("GEMM_Q4_0_NATIVE", "0").strip().lower() not in ("", "0", "false", "no", "off")
+if Q4_0_NATIVE:
+    HELPER = HELPER - {"q4_0"}
 
 def dequant16(fmt, w, view_name, out):
     """Loom snippet: dequantize 16 consecutive weights of row %w_row at column %w_col into F16 vector %{out}."""
+    if fmt == "q4_0" and Q4_0_NATIVE:
+        import moe_q4_0
+        return moe_q4_0.dequant16(w, out)
     if fmt in HELPER:   # 16 consecutive weights = one half of a 32-value group from the shared value helper
         bv = FMT[fmt]["block_values"]
         sc_setup = f"""      %{out}_sidx = index.madd %bounded_w_out_row, %blocks, %{out}_block : index

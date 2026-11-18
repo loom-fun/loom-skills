@@ -21,7 +21,11 @@ LOWBIT = {"q4_0", "iq4_nl", "iq4_xs", "q3_k", "iq3_s"}
 # Formats whose decode matvecs and head take int8 activations (ACT_Q8): gen_llm.py has their @g_<fmt>_icodes.
 import os as _os
 # MXFP4 split planes (choice decode.mxfp4s.act_q8, env MXFP4S_Q8): opt-in per model, gen_mxfp4s.mxfp4s_icodes.
-ICODES = frozenset({"q8_0", "q4_k", "q5_k", "q6_k", "q5_0"} | ({"mxfp4s"} if _os.environ.get("MXFP4S_Q8", "0").lower() not in ("", "0", "false", "no", "off") else set()))
+# Q4_0 (choice decode.q4_0.act_q8, env Q4_0_Q8): opt-in by scope; @g_q4_0_icodes (codes 0..15, minimum 8 d), as llama.cpp's
+# vec_dot_q4_0_q8_1. Dense matvecs, the head and the MoE expert matvecs (MOE_Q8) of Q4_0 weights take the int8 path.
+_OFF = ("", "0", "false", "no", "off")
+ICODES = frozenset({"q8_0", "q4_k", "q5_k", "q6_k", "q5_0"} | ({"mxfp4s"} if _os.environ.get("MXFP4S_Q8", "0").lower() not in _OFF else set())
+                   | ({"q4_0"} if _os.environ.get("Q4_0_Q8", "0").lower() not in _OFF else set()))
 # Formats stored as two tensors (weight plane + scale plane): a call site passes two views, the second named <weight>_sc.
 SPLIT = frozenset({"mxfp4s"})
 SCALE_DIV = {"mxfp4s": 16}   # nibble-plane bytes per scale-plane byte

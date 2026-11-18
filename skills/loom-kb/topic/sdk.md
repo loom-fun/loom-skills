@@ -7,6 +7,7 @@ version. Write-ups for the SDK team are built from this file.
 
 ## Contents
 - hrx-loom 0.2.0: rewritten chat history
+- hrx-loom 0.2.0: registration fails with "source value %N has no target remap"
 - hrx-loom 0.2.0: development-build ABI and comparison pins
 - hrx-loom 0.1.0: tools (compile, test, profile)
 - hrx-loom 0.1.0: language and lowering
@@ -28,6 +29,17 @@ version. Write-ups for the SDK team are built from this file.
   to replay rewritten history. Unlock: generated-token prefix checkpoints or a correct common-prefix restore/replay path, preserving
   the model's output and the template. A passing agent gate excuses verified template rewrites and does **not** mean this performance
   target was achieved. Issue #40 remains open; do not replace generated tokens or change the template merely to obtain a cache hit.
+
+## hrx-loom 0.2.0: registration fails with "source value %N has no target remap"
+
+- **A program that compiles with 0 errors can fail registration** (`/v1/status`: `registration: failed`, code 5, `source value %N
+  has no target remap`). Seen with Qwen3.8-27B and both `quant/q4_0` choices (its MTP block is Q4_0): each choice alone registers,
+  both together fail on the R9700 ([run 44312519207](https://github.com/loom-fun/loom-skills/actions/runs/44312519207)) and locally on
+  gfx1151 (181 kernel.defs in llm.loom). Locally, deleting any one never-launched kernel made it register (180 is also the largest
+  published file, Gemma-4-E2B), but on the R9700 dropping four unused kernels (177) still failed
+  ([run 44332419573](https://github.com/loom-fun/loom-skills/actions/runs/44332419573)): a plain kernel-count limit does not explain it.
+  Root cause open; the `quant/q4_0` rule skips MTP models. Repro: `fleet/build_fleet.py --tree . --slugs bartowski-Qwen3.8-27B-loom`
+  with `GEMM_Q4_0_NATIVE=1 Q4_0_Q8=1`, served with the cached GGUF. Unlock: an error naming the value's op and command program.
 
 ## hrx-loom 0.2.0: development-build ABI and comparison pins
 

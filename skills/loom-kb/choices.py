@@ -263,6 +263,10 @@ CHOICE("decode.mv.pair_proj", "str", "qg", "PAIR_PROJ", kernels=["g_mv*_pair"], 
 # ======================================================================================================================
 _PG = dict(kernels=["g_gemm_*"], rows=ROWS_PREFILL)
 CHOICE("prefill.gemm.m256", "bool", True, "GEMM_M256", doc="256-row GEMM kernels (_m256) beside the 64/128-row ones.", **_PG)
+CHOICE("prefill.gemm.q4_0_native", "bool", False, "GEMM_Q4_0_NATIVE", kernels=["g_gemm_q4_0_*", "g_moe_*q4_0*"], rows=ROWS_PREFILL,
+       from_pr="gemma-qat-perf",
+       doc="Dense Q4_0 GEMMs stage their 16-value half-block straight to F16 (moe_q4_0.dequant16: the values of @g_q4_0_values + "
+           "fptrunc) and get the 128/256-row kernels; off: the shared value helper and the 64-row tile at every size (quant/q4_0 node).")
 CHOICE("prefill.gemm.n_fastest", "bool", True, "GEMM_N_FASTEST", derive=_n_fastest, from_pr="gemm_n_fastest",
        doc="Output-column tiles fastest. cfg gemm_n_fastest is the model's own value (Glimmer-30B +4/+7/+6 % at 2k/8k/32k; "
            "Flint -4 % at 8k).", **_PG)
@@ -277,6 +281,11 @@ CHOICE("prefill.gemm.f16o_swiglu", "bool", False, "GEMM_F16O", kernels=["g_gemm_
 CHOICE("decode.mxfp4s.act_q8", "bool", False, "MXFP4S_Q8", kernels=["g_mv_mxfp4s_*_q8*", "g_mxfp4s_icodes"], rows=ROWS_DECODE + ROWS_STREAMS, from_pr="mxfp4st-kern",
        doc="MXFP4 split-plane dense matvecs take int8 activations (ACT_Q8's dot4 path, as Q8_0 / the K-quants) instead of f32 conversions and fused multiply-adds: the 4-token verify "
            "matvec of a drafted decode is ALU-bound on the f32 path (the GGUF MXFP4 Qwen3.8-27B measured 47 tok/s drafted vs 74 with int8 activations). Opt-in per model.")
+CHOICE("decode.q4_0.act_q8", "bool", False, "Q4_0_Q8", kernels=["g_mv_q4_0_*", "g_head_mv*", "g_moe_*q4_0*", "g_quant_q8"],
+       rows=ROWS_DECODE + ROWS_STREAMS, from_pr="gemma-qat-perf",
+       doc="Q4_0 dense matvecs, head and expert matvecs take int8 activations (ACT_Q8's dot4 path with @g_q4_0_icodes, as llama.cpp's "
+           "vec_dot_q4_0_q8_1) instead of f32 values and a per-row subgroup reduction per token, which is ALU-bound at 4 tokens "
+           "(quant/q4_0 node).")
 CHOICE("decode.verify.fuse", "str", None, "VERIFY_FUSE", kernels=["g_pmv_*"], rows=ROWS_DECODE, from_pr="mxfp4st-ostep",
        doc="Drafted verify epochs of 2-4 tokens on the int8 matvec path run fused layers (starter gen_pstep.py; the layer as generated stays "
            "for every other epoch, every value is the launch chain's: kernel tests compare with equality). swq: gate + up + g_silu_mul + "
