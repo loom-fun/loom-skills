@@ -1,0 +1,18 @@
+{
+ "scope": "quant/q4_0",
+ "match": {
+  "quant": [
+   "q4_0"
+  ]
+ },
+ "owner": "kb",
+ "choices": [
+  {
+   "set": {
+    "prefill.gemm.q4_0_native": true,
+    "decode.q4_0.act_q8": true
+   },
+   "evidence": "pending: DevLab A/B of the Gemma 4 QAT packages (Q4_0 dense + experts), see quant/q4_0/README.md"
+  }
+ ]
+}
