@@ -28,7 +28,8 @@
       ],
       "steps": [
         "func:final",
-        "consistency:final:5",
+        "determinism:final:1:5",
+        "determinism:final:4:5",
         "perf:final:1",
         "perf:final:1:long",
         "c4:final",
@@ -89,7 +90,8 @@
       ],
       "steps": [
         "func:final",
-        "consistency:final:5",
+        "determinism:final:1:5",
+        "determinism:final:4:5",
         "perf:final:1",
         "perf:final:1:long",
         "c4:final",
