@@ -86,6 +86,7 @@ if not d.get('passed'):
 PY
   python3 "$HERE/cold_capacity_targeted.py" validate-monitor \
     "$dir/memory_summary.json" "$dir/monitor_metadata.json" "$dir/summary.json" \
+    "$OUT/hardware_identity.json" \
     > "$dir/memory_coverage.json"
 }
 

@@ -83,7 +83,7 @@
     "checkpoint_fetch": "#554 Strix exact E4B fetch reached 2.2GiB at 73.8MiB/s, ETA35s; use as time anchor only",
     "llama_compare": "#554 Strix exact-checkpoint compare/golden suite PASS; see gates_staging/gates_compare.log"
   },
-  "gpu_execution": "not run; final code review, push, and dispatch remain lead-owned",
+  "gpu_execution": "run44208590762 reached only the 65536-context/rows1 candidate; both semantic oracles passed, but monitor validation rejected generic SDK device label because that run lacked independent KFD architecture proof; baseline and comparison did not run; no RAM win or total-memory claim",
   "build_config": {
     "path": "work/issue-campaign-2026-11-17/eng/gemma-e4b-min-ram/frozen-v1/target_build_config.json",
     "sha256": "30f607b7e0ed58dbcde90df0518395639c61c6970c1ad2a6e80ddc0390e63345",
@@ -130,8 +130,8 @@
     ],
     "servers_concurrent": false,
     "readiness": "same first short semantic oracle retries HTTP 503 only, <=120 seconds, all response bodies/status/latencies recorded; monitor must stop by explicit marker before deadline",
-    "monitor_validation": "requires explicit stop marker, nonempty samples, stable matching PID/start_ticks, selected gfx1151, exactly one AMD sysfs card, and a non-null GPU memory counter; missing host channels unknown; total RAM never claimed verified",
-    "dispatch": "official workflow path above; no job dispatched",
+    "monitor_validation": "requires explicit stop marker, nonempty samples, stable matching PID/start_ticks, exactly one AMD sysfs card, preflight KFD proof matching its BDF/vendor/device with gfx_target_version=110501, and a non-null GPU memory counter; a generic SDK device label is accepted only with that independent proof; missing host channels unknown; total RAM never claimed verified",
+    "dispatch": "run44208590762 candidate passed and baseline was refused by gfx1151 identity gate; this correction adds a pre-fetch KFD proof; no further job is authorized by this freeze",
     "device_settle": {
       "pre_arm_samples": 5,
       "pre_arm_stability_range_bytes": 16777216,
@@ -164,11 +164,11 @@
     "checkout_guard": "under GitHub Actions require git HEAD == GITHUB_SHA and no tracked modifications; standalone run may omit GITHUB_SHA"
   },
   "runner_scripts": {
-    "run_job.sh": "721108082719fd81d552238ae127239e219f6921ebc95f23e04de0f72fbe4add",
-    "run_frontier.sh": "f045d7729577a4158a6c077c39b41b11272d4943814d363a88163710b13adf0b",
+    "run_job.sh": "2e3e4b83a45768426ddabd620a682e1df2f6f5a2c84f0dd5d354339c53489145",
+    "run_frontier.sh": "91d3281e23d8cefe01414539ed49fb5ac117a5de2deeb70d8108a1f36b3aa461",
     "prepare_packages.sh": "85bf088bc2378839289bf32f39e6aa7d14094ea3d2a5ce244282272f3d7ff840",
-    "cold_capacity_targeted.py": "d80a28c82487e4b5087c2657f9695ad8e94fef8db3d9831dd9b914e35b14c624",
-    "test_frontier.py": "66f9dbb1745974e47177b12c56f7ccc4cc6fd45156b3bb7d83905099783bef9a",
+    "cold_capacity_targeted.py": "e581e70bf2571f8988e13c786f20f780d2445d01f9f694572ec6d10e0508c5c5",
+    "test_frontier.py": "de605b83310cddc87f1399d5b4ca63143f1599e4a4ab98942cc4df8b4a0513e8",
     "compare_arms.py": "fbfcdb1f99b004b097f5c0d6b17121e7b5c3fed8303edd9d5895e4cdb6ffa089",
     "build.py": "faeb722cee49d011cd3422d79832dfb9533710845f7f9e8041b841ff9d363db4",
     "target_build_config.json": "30f607b7e0ed58dbcde90df0518395639c61c6970c1ad2a6e80ddc0390e63345",
@@ -186,6 +186,22 @@
     "size": 4977171584,
     "lfs_oid_sha256": "85a896a047553e842f25297ee5b031d64ff30147d9c4af17b1e4b394cd1fab87",
     "receipt": "eng/gemma-e4b-min-ram/checkpoint_hub_pin.json"
+  },
+  "hardware_identity_preflight": {
+    "command": "python eng/gemma-e4b-min-ram/cold_capacity_targeted.py identify-gpu --out OUT/hardware_identity.json",
+    "runs_before": "checkpoint lookup/fetch and model work",
+    "source": "read-only /sys/class/drm and /sys/class/kfd/kfd/topology/nodes/*/properties",
+    "match": "single AMD card matched to KFD GPU node by vendor/device plus domain/location BDF; when both KFD PCI-location fields are absent, allow only one GPU node matching vendor/device",
+    "target": "gfx_target_version=110501 means gfx1151",
+    "raw_provenance": "persist DRM uevent, PCI BDF, and raw KFD properties in hardware_identity.json; independent validation cross-checks monitored card identity",
+    "target_version_source": "https://github.com/ROCm/amdgpu/blob/master/drivers/gpu/drm/amd/amdkfd/kfd_device.c",
+    "location_encoding_source": "https://rocm.docs.amd.com/projects/amdsmi/en/docs-7.1.1/doxygen/docBin/html/group__tagPCIeQuery.html",
+    "prior_run_limit": "run44208590762 did not capture KFD properties; its candidate evidence is preserved but does not retroactively establish gfx1151",
+    "tests": {
+      "path": "eng/gemma-e4b-min-ram/test_frontier.py",
+      "focused": "FrontierTests.test_kfd_hardware_identity_positive_missing_wrong_arch_and_ambiguous; FrontierTests.test_monitor_contract_requires_stable_process_gfx1151_and_counters",
+      "result": "PASS; focused exact-BDF and sole-node positives, missing/wrong-architecture/ambiguous/conflicting-location negatives, identify-gpu CLI write path, and generic SDK label accepted only with matched independent proof"
+    }
   },
   "preparation_helper": {
     "path": "eng/gemma-e4b-min-ram/prepare_packages.sh",

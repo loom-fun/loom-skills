@@ -53,9 +53,124 @@ def amd_cards(drm=Path('/sys/class/drm')):
             continue
         dev = card / 'device'
         cards.append({'card': card.name, 'pci_path': str(dev.resolve()),
-                      'device_id': read(dev / 'device'), 'product_name': read(dev / 'product_name'),
+                      'vendor_id': read(dev / 'vendor'), 'device_id': read(dev / 'device'),
+                      'product_name': read(dev / 'product_name'),
                       'uevent': read(dev / 'uevent'), 'sysfs': str(dev)})
     return cards
+
+
+def pci_bdf(card):
+    match = re.search(r'^PCI_SLOT_NAME=([0-9a-fA-F]{4}):([0-9a-fA-F]{2}):([0-9a-fA-F]{2})\.([0-7])$',
+                      card.get('uevent') or '', re.M)
+    if not match:
+        raise ValueError('AMD DRM card lacks a parseable PCI_SLOT_NAME')
+    domain, bus, device, function = (int(value, 16) for value in match.groups())
+    return {'domain': domain, 'bus': bus, 'device': device, 'function': function,
+            'bdf': f'{domain:04x}:{bus:02x}:{device:02x}.{function}',
+            'kfd_location_id_low16': (bus << 8) | (device << 3) | function}
+
+
+def parse_kfd_properties(text):
+    properties = {}
+    for line in (text or '').splitlines():
+        fields = line.split(None, 1)
+        if len(fields) == 2:
+            properties[fields[0]] = fields[1]
+    return properties
+
+
+def raw_hardware_inventory(drm, kfd):
+    cards = []
+    for card in amd_cards(Path(drm)):
+        cards.append({key: value for key, value in card.items() if key != 'sysfs'})
+    nodes = []
+    for properties_path in sorted((Path(kfd) / 'nodes').glob('*/properties')):
+        nodes.append({'node': properties_path.parent.name,
+                      'properties_path': str(properties_path),
+                      'properties_raw': read(properties_path)})
+    return {'drm_cards': cards, 'kfd_nodes': nodes}
+
+
+def property_int(properties, key):
+    raw = properties.get(key)
+    if raw is None:
+        return None
+    try:
+        return int(raw, 0) if raw.lower().startswith('0x') else int(raw, 10)
+    except ValueError as error:
+        raise ValueError(f'KFD {key} is not an integer: {raw!r}') from error
+
+
+def gfx1151_hardware_identity(drm=Path('/sys/class/drm'),
+                              kfd=Path('/sys/class/kfd/kfd/topology')):
+    """Match the sole AMD DRM card to one KFD GPU node and require gfx_target_version 110501."""
+    cards = amd_cards(drm)
+    if len(cards) != 1:
+        raise ValueError(f'expected exactly one AMD DRM card, observed {len(cards)}')
+    card = cards[0]
+    bdf = pci_bdf(card)
+    vendor_raw = read(Path(card['sysfs']) / 'vendor')
+    device_raw = card.get('device_id')
+    if not vendor_raw or not device_raw:
+        raise ValueError('AMD DRM card is missing vendor/device PCI identifiers')
+    try:
+        vendor_id, device_id = int(vendor_raw, 16), int(device_raw, 16)
+    except ValueError as error:
+        raise ValueError('AMD DRM vendor/device PCI identifiers are malformed') from error
+
+    gpu_nodes = []
+    for properties_path in sorted((Path(kfd) / 'nodes').glob('*/properties')):
+        raw = read(properties_path)
+        props = parse_kfd_properties(raw)
+        simd = property_int(props, 'simd_count') if 'simd_count' in props else None
+        target = property_int(props, 'gfx_target_version') if 'gfx_target_version' in props else None
+        if (simd or 0) > 0 or (target or 0) > 0:
+            gpu_nodes.append({'node': properties_path.parent.name,
+                              'properties_path': str(properties_path),
+                              'properties_raw': raw,
+                              'properties': props})
+    if not gpu_nodes:
+        raise ValueError(f'no GPU nodes found under {Path(kfd) / "nodes"}')
+
+    # KFD location_id stores PCI B:D.F in bits [15:0]; domain is a separate property.
+    # AMD SMI documents the same KFD-to-PCI field mapping.
+    target_nodes = []
+    for node in gpu_nodes:
+        props = node['properties']
+        node_vendor = property_int(props, 'vendor_id') if 'vendor_id' in props else None
+        node_device = property_int(props, 'device_id') if 'device_id' in props else None
+        node_target = property_int(props, 'gfx_target_version') if 'gfx_target_version' in props else None
+        if node_vendor is None or node_device is None or node_target is None:
+            raise ValueError(f'KFD GPU node {node["node"]} is missing vendor/device/gfx_target_version')
+        node_domain = property_int(props, 'domain') if 'domain' in props else None
+        node_location = property_int(props, 'location_id') if 'location_id' in props else None
+        if node_vendor == vendor_id and node_device == device_id:
+            if (node_domain is None) != (node_location is None):
+                raise ValueError(f'KFD GPU node {node["node"]} has partial domain/location identity')
+            if node_domain is None:
+                if len(gpu_nodes) != 1:
+                    raise ValueError(f'KFD GPU node {node["node"]} lacks PCI identity among multiple GPU nodes')
+                target_nodes.append((node, 'sole_gpu_node_vendor_device'))
+            elif node_domain == bdf['domain'] and (node_location & 0xffff) == bdf['kfd_location_id_low16']:
+                target_nodes.append((node, 'domain_location_id'))
+        elif (node_domain == bdf['domain'] and node_location is not None
+              and (node_location & 0xffff) == bdf['kfd_location_id_low16']):
+            raise ValueError(f'KFD GPU node {node["node"]} conflicts with DRM vendor/device at the same BDF')
+
+    if len(target_nodes) != 1:
+        raise ValueError(f'expected one KFD GPU node matching {bdf["bdf"]} vendor={vendor_raw} device={device_raw}; '
+                         f'observed {len(target_nodes)} matches among {len(gpu_nodes)} GPU nodes')
+    node, match_method = target_nodes[0]
+    target_version = property_int(node['properties'], 'gfx_target_version')
+    if target_version != 110501:
+        raise ValueError(f'matched KFD node reports gfx_target_version={target_version}, expected 110501 (gfx1151)')
+    return {'passed': True, 'source': 'read-only KFD topology sysfs',
+            'architecture': 'gfx1151', 'gfx_target_version': target_version,
+            'match_method': match_method,
+            'drm_card': {'card': card['card'], 'pci_path': card['pci_path'], 'pci_bdf': bdf['bdf'],
+                         'vendor_id': vendor_raw, 'device_id': device_raw,
+                         'uevent_raw': card.get('uevent')},
+            'kfd_node': node, 'gpu_nodes_seen': gpu_nodes}
 
 
 def sample(pid_file, model, phase_file, cards, cgroup_root=None):
@@ -100,7 +215,7 @@ def monitor(a):
     write(out / 'monitor_metadata.json', {'interval_seconds': a.interval, 'cards': cards,
           'pid_file': a.pid_file, 'model': a.model, 'cgroup_root': a.cgroup_root,
           'limitations': ['100ms sampled driver totals may miss transient GPU peaks.',
-                         'All AMD cards recorded; selected device is identified separately by server status.',
+                         'All AMD cards recorded; selected architecture is independently matched through KFD topology.',
                          'VmHWM is process RSS high-water, not GPU/host combined usage.',
                          'RSS, VRAM/GTT and unified host RAM overlap; do not sum them.']})
     deadline = time.monotonic() + a.timeout
@@ -279,7 +394,7 @@ def short_with_readiness_retry(request, payload, out, budget=120.0, interval=1.0
         time.sleep(min(interval, max(0.0, deadline - time.monotonic())))
 
 
-def validate_monitor(summary, metadata, probe_summary):
+def validate_monitor(summary, metadata, probe_summary, hardware_identity):
     """Fail closed on monitor/process/device integrity; never label overlapping metrics TOTAL RAM."""
     if not summary or not metadata or not probe_summary:
         raise ValueError('missing monitor metadata/summary or probe summary')
@@ -295,8 +410,25 @@ def validate_monitor(summary, metadata, probe_summary):
     if not summary.get('amd_cards_observed') or len(cards) != 1:
         raise ValueError(f'expected one AMD sysfs device for selected-card attribution; observed {len(cards)}')
     active = (probe_summary.get('active') or {}).get('device', '')
-    if 'gfx1151' not in str(active).lower():
-        raise ValueError(f'probe status does not identify gfx1151: {active!r}')
+    if not isinstance(active, str) or not active.strip():
+        raise ValueError('probe status has no device label')
+    explicit_arch = re.search(r'gfx\d+', active.lower())
+    if explicit_arch and explicit_arch.group(0) != 'gfx1151':
+        raise ValueError(f'probe status conflicts with required gfx1151: {active!r}')
+    if not hardware_identity or not hardware_identity.get('passed'):
+        raise ValueError('independent KFD hardware identity proof is missing or failed')
+    if hardware_identity.get('architecture') != 'gfx1151' or hardware_identity.get('gfx_target_version') != 110501:
+        raise ValueError('independent KFD hardware identity does not prove gfx1151')
+    proof_card = hardware_identity.get('drm_card') or {}
+    card = cards[0]
+    current_bdf = pci_bdf(card)['bdf']
+    pci_id = re.search(r'^PCI_ID=([0-9a-fA-F]{4}):([0-9a-fA-F]{4})$', card.get('uevent') or '', re.M)
+    if not pci_id:
+        raise ValueError('monitor metadata lacks a parseable PCI_ID for the selected AMD card')
+    if (proof_card.get('pci_bdf') != current_bdf
+            or proof_card.get('vendor_id', '').lower() != ('0x' + pci_id.group(1).lower())
+            or proof_card.get('device_id', '').lower() != ('0x' + pci_id.group(2).lower())):
+        raise ValueError('KFD gfx1151 proof does not match the monitored DRM card BDF/vendor/device')
     maxima = summary.get('maxima_by_phase') or {}
     observed = {key: value for phase in maxima.values() for key, value in phase.items()}
     gpu_keys = [key for key, value in observed.items()
@@ -308,7 +440,8 @@ def validate_monitor(summary, metadata, probe_summary):
     coverage = {key: ('observed' if any(key in phase for phase in maxima.values()) else 'unknown')
                 for key in required_host}
     return {'host_channel_coverage': coverage, 'amd_card': cards[0], 'amd_counter_keys': gpu_keys,
-            'selected_device': active, 'process_identity': identity,
+            'selected_device': active, 'hardware_identity': hardware_identity,
+            'process_identity': identity,
             'total_ram_verified': False,
             'total_ram_reason': 'RSS, UMA/GTT, file pages and cgroup may overlap; no union attribution is available.'}
 
@@ -535,8 +668,10 @@ def main():
     p = sub.add_parser('probe'); p.add_argument('package'); p.add_argument('url'); p.add_argument('--preset'); p.add_argument('--target-prompt-tokens', type=int, default=None, help='server-counted prompt length; defaults to full preset context')
     p.add_argument('--timeout', type=float, default=3600)
     v = sub.add_parser('validate-monitor'); v.add_argument('summary'); v.add_argument('metadata'); v.add_argument('probe_summary')
+    v.add_argument('hardware_identity')
     i = sub.add_parser('capture-idle'); i.add_argument('--samples', type=int, default=5); i.add_argument('--interval', type=float, default=1.0); i.add_argument('--stable-range-bytes', type=int, default=16*1024*1024); i.add_argument('--out', required=True)
     s = sub.add_parser('settle'); s.add_argument('--idle', required=True); s.add_argument('--timeout', type=float, default=60.0); s.add_argument('--interval', type=float, default=1.0); s.add_argument('--tolerance-bytes', type=int, default=64*1024*1024); s.add_argument('--stable-range-bytes', type=int, default=16*1024*1024); s.add_argument('--stable-samples', type=int, default=5); s.add_argument('--out', required=True)
+    g = sub.add_parser('identify-gpu'); g.add_argument('--out', required=True); g.add_argument('--drm-root', default='/sys/class/drm'); g.add_argument('--kfd-root', default='/sys/class/kfd/kfd/topology')
     for command in (m, p):
         command.add_argument('--out', required=True)
     args = parser.parse_args()
@@ -544,10 +679,22 @@ def main():
         try:
             result = validate_monitor(json.loads(Path(args.summary).read_text()),
                                       json.loads(Path(args.metadata).read_text()),
-                                      json.loads(Path(args.probe_summary).read_text()))
+                                      json.loads(Path(args.probe_summary).read_text()),
+                                      json.loads(Path(args.hardware_identity).read_text()))
             print(json.dumps(result, indent=2)); return 0
         except Exception as error:
             print(f'{type(error).__name__}: {error}', flush=True); return 1
+    if args.mode == 'identify-gpu':
+        try:
+            result = gfx1151_hardware_identity(Path(args.drm_root), Path(args.kfd_root))
+        except Exception as error:
+            result = {'passed': False, 'source': 'read-only KFD topology sysfs',
+                      'error': f'{type(error).__name__}: {error}',
+                      'raw_inventory': raw_hardware_inventory(args.drm_root, args.kfd_root)}
+        write(args.out, result)
+        print(json.dumps({'passed': result.get('passed', False), 'architecture': result.get('architecture'),
+                          'error': result.get('error')}), flush=True)
+        return 0 if result.get('passed') else 1
     if args.mode == 'capture-idle':
         if args.samples < 2 or args.interval <= 0 or args.stable_range_bytes < 0:
             parser.error('idle baseline needs at least two samples and nonnegative stable range')

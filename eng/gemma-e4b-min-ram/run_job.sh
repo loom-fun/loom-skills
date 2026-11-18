@@ -45,6 +45,9 @@ FETCH_PY="$PY"
 test -x "$VENV/bin/loom-serve" && test -x "$PY" || { echo 'pinned SDK tools are incomplete' >&2; exit 20; }
 "$PY" "$HERE/runner/sdk_pin.py" matches "$SDK_ROOT" "$CONFIG" || { echo 'installed SDK pin mismatch' >&2; exit 21; }
 
+# Bind the target DRM card to its read-only KFD gfx target before fetching model weights.
+"$PY" "$HERE/cold_capacity_targeted.py" identify-gpu --out "$OUT/hardware_identity.json"
+
 # Use the exact immutable public checkpoint revision in the official HF cache. One cache fetch only.
 FETCH_JSON="$JOB_DIR/assets/checkpoint_fetch.json"
 PYTHONPATH="$HERE/runner${PYTHONPATH:+:$PYTHONPATH}" "$FETCH_PY" - "$FETCH_JSON" <<'PY'
