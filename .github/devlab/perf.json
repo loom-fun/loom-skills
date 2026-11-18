@@ -1,47 +1,160 @@
 {
- "_comment": "R9700 per-model measurement (r9700_jobs.py): one job per model on one R9700 runner; loom-fun-staging card, llama.cpp ROCm b1375 + Vulkan b12211 with the matched drafting, reduced-context models served at served_context. Does not fit: none",
- "runner": "r9700",
- "memory_bytes": 34000000000,
- "llama_spec": "matched",
- "jobs": [
-  {
-   "name": "unsloth-qwen3-0-6b-loom",
-   "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
-   "kit": null,
-   "llamacpp": "b1375",
-   "llamacpp_vulkan": "b12211",
-   "memory_bytes_r9700": 17000000000,
-   "variants": [
+  "_comment": "Final R9700 qualification proposal: both actual upper presets accepted, same immutable packages and reviewed89eb779a harness. Two of the four required final jobs; no repeated successful kernels. Separate isolated experiment branch proposed so active upper1253 stays untouched. Lead dispatch only.",
+  "jobs": [
     {
-     "name": "card",
-     "build": {}
+      "name": "gemma-qat-31b-r9700-final",
+      "runner": "r9700",
+      "card": "loom-fun-staging/unsloth-gemma-4-31B-it-qat-loom@849df3f0fa133606d51cf671d8acfacc5542a8ed",
+      "memory_bytes": 34000000000,
+      "kit": "gemma4",
+      "llamacpp": "b1375",
+      "llamacpp_vulkan": "b12211",
+      "sdk": "0.2.0",
+      "llama_spec": "matched",
+      "thinking": "off",
+      "variants": [
+        {
+          "name": "final",
+          "sdk": "0.2.0",
+          "execution": {
+            "context_capacity": 10240,
+            "prefill_capacity": 1024,
+            "draft_depth": 0
+          },
+          "serve_args": [
+            "--parameter_mode=preload"
+          ]
+        }
+      ],
+      "steps": [
+        "func:final",
+        "consistency:final:5",
+        "perf:final:1",
+        "perf:final:1:long",
+        "c4:final",
+        "llama@rocm.np1:1",
+        "llama@rocm.np1:1:long",
+        "llamac4@rocm.nodraft",
+        "llama@vulkan.np1:1",
+        "llama@vulkan.np1:1:long",
+        "llamac4@vulkan.perslot.nodraft",
+        "perf:final:1",
+        "perf:final:1:long",
+        "c4:final",
+        "llama@rocm.np1:1",
+        "llama@rocm.np1:1:long",
+        "llamac4@rocm.nodraft",
+        "llama@vulkan.np1:1",
+        "llama@vulkan.np1:1:long",
+        "llamac4@vulkan.perslot.nodraft",
+        "perf:final:1",
+        "perf:final:1:long",
+        "c4:final",
+        "llama@rocm.np1:1",
+        "llama@rocm.np1:1:long",
+        "llamac4@rocm.nodraft",
+        "llama@vulkan.np1:1",
+        "llama@vulkan.np1:1:long",
+        "llamac4@vulkan.perslot.nodraft"
+      ],
+      "env": {
+        "KTEST_GEMM_ALL": "1"
+      },
+      "require_preset_r9700": true,
+      "repeat_rows": 1,
+      "llama_kv_rocm": 10240,
+      "llama_kv_vulkan": 10240
     },
     {
-     "name": "nodraft",
-     "build": {},
-     "execution": {
-      "draft_depth": 0
-     }
+      "name": "gemma-qat-26b-r9700-final",
+      "runner": "r9700",
+      "card": "loom-fun-staging/unsloth-gemma-4-26B-A4B-it-qat-loom@8ac71dbdd2dc0608bed6ea3fed09cbf50033b595",
+      "memory_bytes": 34000000000,
+      "kit": "gemma4",
+      "llamacpp": "b1375",
+      "llamacpp_vulkan": "b12211",
+      "sdk": "0.2.0",
+      "llama_spec": "matched",
+      "thinking": "off",
+      "variants": [
+        {
+          "name": "final",
+          "sdk": "0.2.0",
+          "execution": {
+            "context_capacity": 36864,
+            "prefill_capacity": 4096,
+            "draft_depth": 0
+          },
+          "serve_args": [
+            "--parameter_mode=preload"
+          ]
+        }
+      ],
+      "steps": [
+        "func:final",
+        "consistency:final:5",
+        "perf:final:1",
+        "perf:final:1:long",
+        "c4:final",
+        "llama@rocm.np1:1",
+        "llama@rocm.np1:1:long",
+        "llamac4@rocm.nodraft",
+        "llama@vulkan.np1:1",
+        "llama@vulkan.np1:1:long",
+        "llamac4@vulkan.perslot.nodraft",
+        "perf:final:1",
+        "perf:final:1:long",
+        "c4:final",
+        "llama@rocm.np1:1",
+        "llama@rocm.np1:1:long",
+        "llamac4@rocm.nodraft",
+        "llama@vulkan.np1:1",
+        "llama@vulkan.np1:1:long",
+        "llamac4@vulkan.perslot.nodraft",
+        "perf:final:1",
+        "perf:final:1:long",
+        "c4:final",
+        "llama@rocm.np1:1",
+        "llama@rocm.np1:1:long",
+        "llamac4@rocm.nodraft",
+        "llama@vulkan.np1:1",
+        "llama@vulkan.np1:1:long",
+        "llamac4@vulkan.perslot.nodraft",
+        "perf:final:1",
+        "perf:final:1:long",
+        "c4:final",
+        "llama@rocm.np1:1",
+        "llama@rocm.np1:1:long",
+        "llamac4@rocm.nodraft",
+        "llama@vulkan.np1:1",
+        "llama@vulkan.np1:1:long",
+        "llamac4@vulkan.perslot.nodraft",
+        "perf:final:1",
+        "perf:final:1:long",
+        "c4:final",
+        "llama@rocm.np1:1",
+        "llama@rocm.np1:1:long",
+        "llamac4@rocm.nodraft",
+        "llama@vulkan.np1:1",
+        "llama@vulkan.np1:1:long",
+        "llamac4@vulkan.perslot.nodraft",
+        "perf:final:1",
+        "perf:final:1:long",
+        "c4:final",
+        "llama@rocm.np1:1",
+        "llama@rocm.np1:1:long",
+        "llamac4@rocm.nodraft",
+        "llama@vulkan.np1:1",
+        "llama@vulkan.np1:1:long",
+        "llamac4@vulkan.perslot.nodraft"
+      ],
+      "env": {
+        "KTEST_GEMM_ALL": "1"
+      },
+      "require_preset_r9700": true,
+      "repeat_rows": 3,
+      "llama_kv_rocm": 36864,
+      "llama_kv_vulkan": 36864
     }
-   ],
-   "steps": [
-    "func:card",
-    "ktest:card",
-    "gates:card:dev",
-    "perf:card:3",
-    "perf:card:3:long",
-    "c4:nodraft",
-    "llama@rocm.np1:3",
-    "llama@rocm.np1:3:long",
-    "llamac4@rocm.nodraft",
-    "llama@vulkan.np1:3",
-    "llama@vulkan.np1:3:long",
-    "llamac4@vulkan.perslot.nodraft"
-   ]
-  }
- ],
- "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
- "kit": null,
- "llamacpp": "b1375",
- "llamacpp_vulkan": "b12211"
+  ]
 }
