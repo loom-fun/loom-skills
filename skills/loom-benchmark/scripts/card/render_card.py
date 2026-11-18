@@ -482,16 +482,16 @@ def chat_request(model, feats):
     body = {"model": model["model"]["id"], "messages": [{"role": "user", "content": "Hello"}]}
     thinking = feats.get("thinking") or {}
     effort = feats.get("reasoning_effort") or {}
-    note = "In another terminal, send a request:"
+    note = "In another terminal:"
     if thinking.get("status") == "yes" and (thinking.get("value") or {}).get("mode") == "toggle":
         body["chat_template_kwargs"] = {"enable_thinking": False}
-        note = "In another terminal, send a request (optional thinking is turned off):"
+        note = "In another terminal (optional thinking is turned off):"
     elif effort.get("status") == "yes":
         levels = (effort.get("value") or {}).get("levels") or []
         lowest = next((x for x in ("none", "minimal", "low", "medium", "high", "max") if x in levels), None)
         if lowest:
             body["reasoning_effort"] = lowest
-            note = f"In another terminal, send a request (`reasoning_effort` is set to `{lowest}`):"
+            note = f"In another terminal (`reasoning_effort` is set to `{lowest}`):"
     payload = shlex.quote(json.dumps(body, ensure_ascii=True))
     return [note, "", "```bash", "curl http://127.0.0.1:8080/v1/chat/completions \\",
             "  -H 'Content-Type: application/json' \\", f"  -d {payload}", "```", ""]
@@ -785,7 +785,6 @@ def render(d):
         L += quickstart_flag_notes(fetch_for(serving[0]), serve_command(info, facts, feats, serving[0], output, bare)) + [""]
         if stock_line(serving[0]):
             L += [stock_line(serving[0]), ""]
-        L += request
     else:   # one collapsed block per GPU, each self-contained: install, fetch with that GPU's preset, serve with that GPU's flags
         L += ["## Quick start", "", "Open your GPU and copy its commands.", ""]
         for g in serving:
@@ -795,8 +794,9 @@ def render(d):
             for line in (served_context_line(g, True), stock_line(g)):   # GPU-specific startup notes precede the request example
                 if line:
                     L += [line, ""]
-            L += request
             L += ["</details>", ""]
+    if request:
+        L += ["## Send a request", "", *request]
     if release(pin):
         tag, whl, _ = release_wheel(pin)
         L += [f"hrx-loom {pin['hrx_loom']} is a pre-release published on its [GitHub release]({RELEASE_URL.replace('/download', '/tag')}/{tag}), "
@@ -810,7 +810,8 @@ def render(d):
               f"**These instructions expire on {pin.get('expires') or 'the artifact expiry date'}**, when GitHub "
               "deletes the CI artifact; after that the package's SDK pin has to be refreshed to a newer build "
               "(or a PyPI release that has the features), and this card republished.", ""]
-    L += [f"The server listens on `127.0.0.1:8080` and {api}.", ""]
+    if kind != "chat":
+        L += [f"The server listens on `127.0.0.1:8080` and {api}.", ""]
     if len(serving) == 1:   # one GPU: its sentences follow the commands (a card of several GPUs says them inside each GPU's block)
         for g in serving:
             for line in (served_context_line(g, False), preset_line(g, False)):

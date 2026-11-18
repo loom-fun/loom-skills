@@ -611,6 +611,34 @@ for n in flint d1 ratchet r9700_two r9700_none r9700_staging r9700_preset r9700_
   py "$C/render_card.py" --check "$tmp/$n" "$tmp/$n/README.md" >/dev/null \
     || { echo "FAIL $n: expected/README.md is not the render of expected/info.json"; bad=1; }
 done
+# Chat cards share one visible request after all GPU-specific quick-start blocks. Exercise one-, two- and four-GPU
+# cards so moving the example cannot duplicate it or drop the per-GPU fetch/serve commands.
+py -c "from pathlib import Path
+import json, shlex, sys
+root = Path(sys.argv[1])
+for name, gpus in ((\"flint\", 1), (\"r9700_two\", 2), (\"gpus4\", 4)):
+    card = root / name
+    readme = (card / \"README.md\").read_text()
+    assert readme.count(\"## Send a request\") == 1, (name, \"request heading count\")
+    assert readme.count(\"curl http://127.0.0.1:8080/v1/chat/completions\") == 1, (name, \"curl count\")
+    assert \"The server listens on 127.0.0.1:8080\" not in readme, (name, \"redundant API sentence\")
+    start = readme.index(\"## Quick start\")
+    heading = readme.index(\"## Send a request\")
+    quickstart = readme[start:heading]
+    assert quickstart.count(\"loom-fetch \" ) == gpus, (name, \"fetch commands\")
+    assert quickstart.count(\"loom-serve \" ) == gpus, (name, \"serve commands\")
+    details = 0 if gpus == 1 else gpus
+    assert readme.count(\"<details>\") == readme.count(\"</details>\") == details, (name, \"GPU details\")
+    assert readme.rfind(\"</details>\", start, heading) < heading, (name, \"request inside GPU details\")
+    section = readme[heading:]
+    assert \"In another terminal\" in section, (name, \"terminal cue\")
+    command = next(line for line in section.splitlines() if line.lstrip().startswith(\"-d \"))
+    body = json.loads(shlex.split(command.strip())[1])
+    model = json.loads((card / \"model.json\").read_text())
+    assert body[\"model\"] == model[\"model\"][\"id\"], (name, \"model selector\")
+    assert body[\"messages\"] == [{\"role\": \"user\", \"content\": \"Hello\"}], (name, \"payload\")
+    print(f\"OK   {name}: one visible shared request; {gpus} GPU quick-start command sets intact\")" "$tmp" \
+  || { echo "FAIL shared request: one-/two-/four-GPU layout contract"; bad=1; }
 # Quick start pins the hrx-loom the package was generated with (flint: PyPI 0.1.0 recorded in llm_config.json);
 # a card with no recorded SDK (d1 fixture) is the only one that installs unpinned
 grep -qF 'pipx install "hrx-loom[hf]==0.1.0"' "$tmp/flint/README.md" && echo "OK   quick start pins the recorded hrx-loom version" \
