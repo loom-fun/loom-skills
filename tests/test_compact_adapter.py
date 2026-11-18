@@ -94,6 +94,7 @@ class AdapterTests(unittest.TestCase):
         self.assertEqual(source['runner/sdk_pin.py'],changed['runner/sdk_pin.py'])
         self.assertIn('context=65536; rows=1',changed['prepare_packages.sh'])
         self.assertIn('--pool 65536',changed['prepare_packages.sh'])
+        self.assertIn('"$SDK_ROOT/.tools/bin/python" "$ADAPTER/generate_checks.py"',changed['run_frontier.sh'])
         with self.assertRaises(ValueError):runner.replace_once('ambiguous ambiguous','ambiguous','x')
 
     def test_flash_launches_respect_native_multiple_and_pair_split_counts(self):

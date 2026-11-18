@@ -405,6 +405,7 @@ def generate(legacy, candidate, out):
     hashes = {p.name:digest(p.read_bytes()) for p in sorted(out.iterdir()) if p.is_file()}
     manifest = dict(legacy_source_sha256=digest(legacy.read_bytes()),compact_source_sha256=digest(candidate.read_bytes()),
                     kernel_pins_sha256=digest(pins_path.read_bytes()),
+                    numpy_version=np.__version__, python_version=sys.version,
                     cases=cases,kernels=records,files=hashes,positive_cases=[c.name for c in positive_cases],
                     positive_expectations={c.name: 3 * len(variants(c)) + 3 * int(c.store) for c in positive_cases},
                     negative_specs=['@'+c.name+'=EXPECT/006' for c in NEGATIVES],GPU_executed=False,

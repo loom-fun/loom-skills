@@ -56,7 +56,7 @@ def patch_sources(source, head, kit_sha, builder_sha):
     p=replace_once(p,'BASELINE="$OUT/builds/baseline"', '''# Strict kernel gate before either model server starts. All data remain local.
 ADAPTER="$ROOT/.github/devlab/compact-kv"
 OPENBLAS_NUM_THREADS=2 OMP_NUM_THREADS=2 timeout --signal=TERM --kill-after=5s 60s \\
-  "$VENV/bin/python" "$ADAPTER/generate_checks.py" \\
+  "$SDK_ROOT/.tools/bin/python" "$ADAPTER/generate_checks.py" \\
   --legacy "$OUT/builds/baseline/program/llm.loom" \\
   --candidate "$OUT/builds/candidate/program/llm.loom" --out "$OUT/kernel-fixtures"
 timeout --signal=TERM --kill-after=5s 425s "$VENV/bin/python" "$ADAPTER/run_checks.py" \\
