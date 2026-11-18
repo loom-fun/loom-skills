@@ -1656,7 +1656,7 @@
   "unsloth-gemma-4-26B-A4B-it-qat-loom": {
    "staging": {
     "repo": "loom-fun-staging/unsloth-gemma-4-26B-A4B-it-qat-loom",
-    "revision": "2350dda5595f74f259907b75e94eaf08f7c39f87"
+    "revision": "4bf08bd8d7fe8a20ce01cbed427778604a971ca7"
    },
    "model_id": "google/gemma-4-26B-A4B-it-qat-q4_0-unquantized",
    "kit": "gemma4",
@@ -1727,14 +1727,14 @@
   "unsloth-gemma-4-31B-it-qat-loom": {
    "staging": {
     "repo": "loom-fun-staging/unsloth-gemma-4-31B-it-qat-loom",
-    "revision": "30769169ced16628e04b85b11f3aa4bf3f5c6b75"
+    "revision": "8496d48196eccbb8137f771834ea6c4458c66265"
    },
    "model_id": "google/gemma-4-31B-it-qat-q4_0-unquantized",
    "kit": "gemma4",
    "arch": "gemma4",
    "build": {
     "preset": "chat",
-    "context": 65536,
+    "context": 81920,
     "prefill": 1024,
     "rows": 4,
     "max_tokens": 4096,
