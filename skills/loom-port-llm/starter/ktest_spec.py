@@ -7,7 +7,7 @@ row, cursor (first packed input), -, flags (1 selected, 2 proposes, 4 speculativ
 of `count` i32 offsets follows the first `count` records. Token ids are packed with stride 8 when header word 2 (mixed) is
 set, else 1. Every output buffer starts filled with a sentinel, so a word a kernel must not write is checked too.
 
-cases(lib, H, eps, save, rng) -> [check.case text]: only for the kernels the library LIB defines."""
+cases(lib, save, rng, ks) -> [check.case text]: only for the kernels the library LIB defines."""
 import re
 
 import numpy as np
@@ -22,8 +22,19 @@ def _def(lib, name):
     return m.group(0) if m else None
 
 
+def _width(lib, name):
+    """The hidden width a row kernel was generated for: its 32-value group count (%groups) times 32, or None."""
+    m = re.search(r"^\s*%groups = index\.constant (\d+) : index$", _def(lib, name) or "", re.M)
+    return int(m.group(1)) * 32 if m else None
+
+
+def _eps(lib, name):
+    m = re.search(r"^\s*%eps = scalar\.constant ([0-9.e+-]+) : f32$", _def(lib, name) or "", re.M)
+    return float(m.group(1)) if m else None
+
+
 def _ty(a):
-    return "tensor<" + "x".join(map(str, a.shape)) + "x" + {"float32": "f32", "int32": "i32"}[str(a.dtype)] + ">"
+    return "tensor<" + "x".join(map(str, a.shape)) + "x" + {"float32": "f32", "int32": "i32", "int8": "i8", "float16": "f16"}[str(a.dtype)] + ">"
 
 
 class _Case:
@@ -237,64 +248,69 @@ def mtp_advance_case(save, rng, mixed):
     return c.text()
 
 
-def mtp_pair_save_cases(save, rng, H):
+def mtp_pair_save_cases(save, rng, H, pair, keep):
     T, S, rows = 9, 3, 5
     meta, rec, _, _ = _packet(rng, S, T, 1, False, False, lengths=np.array([3, 2, 3]))
     hidden = rng.standard_normal((T, H)).astype(np.float32)
     carry = rng.standard_normal((rows, H)).astype(np.float32)
-    info = np.zeros((T, 4), np.int32)
-    for s in range(S):
-        for t in range(rec[s, 4], rec[s, 4] + rec[s, 0]):
-            info[t] = (rec[s, 3], 0, 1, s)
-    info[8, 2] = 0          # a dead row
-    prev = np.zeros((T, H), np.float32)
-    for t in range(T):
-        if info[t, 2]:
-            s = info[t, 3]
-            prev[t] = carry[info[t, 0]] if t == rec[s, 4] else hidden[max(t, 1) - 1]
-    c = _Case("mtp_pair", save)
-    args = [c.lit("t", T), c.lit("s", S), c.lit("o", 1), c.inp("meta", meta), c.inp("info", info), c.inp("hid", hidden),
-            c.inp("carry", carry), c.out("prev", prev)]
-    c.launch("g_mtp_pair", ["%t"], args)
-    out = [c.text()]
-    meta2 = meta.copy(); meta2[0] = 2           # the third span is past the live count
-    rec2 = rec.copy(); rec2[1, 0] = 0             # an empty span keeps its row's carry
-    meta2[4:4 + 9 * S] = rec2.reshape(-1)
-    carry_e = carry.copy()
-    for s in range(2):
-        if rec2[s, 0] > 0:
-            carry_e[rec2[s, 3]] = hidden[rec2[s, 4] + rec2[s, 0] - 1]
-    c = _Case("mtp_save", save)
-    args = [c.lit("t", T), c.lit("s", S), c.lit("o", 1), c.inp("meta", meta2), c.inp("hid", hidden), c.out("carry", carry_e, init=carry)]
-    c.launch("g_mtp_save", ["%s"], args)
-    out.append(c.text())
-    return out
-
-
-def mtp_rows_cases(save, rng, H, eps, lib):
-    T = 3
-    a = rng.standard_normal((T, H)).astype(np.float32) * np.array([[1e-2], [1.0], [40.0]], np.float32)
-    b = rng.standard_normal((T, H)).astype(np.float32)
     out = []
-    if _def(lib, "g_mtp_copy"):
-        c = _Case("mtp_copy", save)
-        c.launch("g_mtp_copy", ["%t"], [c.lit("t", T), c.inp("a", a), c.out("o", a.copy())])
+    if pair:
+        info = np.zeros((T, 4), np.int32)
+        for s in range(S):
+            for t in range(rec[s, 4], rec[s, 4] + rec[s, 0]):
+                info[t] = (rec[s, 3], 0, 1, s)
+        info[8, 2] = 0          # a dead row
+        prev = np.zeros((T, H), np.float32)
+        for t in range(T):
+            if info[t, 2]:
+                s = info[t, 3]
+                prev[t] = carry[info[t, 0]] if t == rec[s, 4] else hidden[max(t, 1) - 1]
+        c = _Case("mtp_pair", save)
+        args = [c.lit("t", T), c.lit("s", S), c.lit("o", 1), c.inp("meta", meta), c.inp("info", info), c.inp("hid", hidden),
+                c.inp("carry", carry), c.out("prev", prev)]
+        c.launch("g_mtp_pair", ["%t"], args)
         out.append(c.text())
-    if _def(lib, "g_mtp_concat"):
-        c = _Case("mtp_concat", save)
-        c.launch("g_mtp_concat", ["%t"], [c.lit("t", T), c.inp("a", a), c.inp("b", b), c.out("o", np.stack([a, b], 1).astype(np.float32))])
-        out.append(c.text())
-    if _def(lib, "g_spec_rmsnorm"):
-        w = (1 + 0.1 * rng.standard_normal(H)).astype(np.float32)
-        a64 = a.astype(np.float64)
-        y = (a64 / np.sqrt((a64 * a64).mean(-1, keepdims=True) + eps) * w).astype(np.float32)
-        c = _Case("spec_rmsnorm", save)
-        c.launch("g_spec_rmsnorm", ["%t"], [c.lit("t", T), c.inp("a", a), c.inp("w", w), c.out("o", y, close="1.0e-5")])
+    if keep:
+        meta2 = meta.copy(); meta2[0] = 2           # the third span is past the live count
+        rec2 = rec.copy(); rec2[1, 0] = 0             # an empty span keeps its row's carry
+        meta2[4:4 + 9 * S] = rec2.reshape(-1)
+        carry_e = carry.copy()
+        for s in range(2):
+            if rec2[s, 0] > 0:
+                carry_e[rec2[s, 3]] = hidden[rec2[s, 4] + rec2[s, 0] - 1]
+        c = _Case("mtp_save", save)
+        args = [c.lit("t", T), c.lit("s", S), c.lit("o", 1), c.inp("meta", meta2), c.inp("hid", hidden), c.out("carry", carry_e, init=carry)]
+        c.launch("g_mtp_save", ["%s"], args)
         out.append(c.text())
     return out
 
 
-def cases(lib, H, eps, save, rng, ks=""):
+def mtp_rows_cases(save, rng, lib):
+    T = 3
+    out = []
+    for name in ("g_mtp_copy", "g_mtp_concat", "g_spec_rmsnorm"):
+        H = _width(lib, name)
+        if not H:
+            continue
+        a = rng.standard_normal((T, H)).astype(np.float32) * np.array([[1e-2], [1.0], [40.0]], np.float32)
+        b = rng.standard_normal((T, H)).astype(np.float32)
+        c = _Case(name[2:], save)
+        if name == "g_mtp_copy":
+            c.launch(name, ["%t"], [c.lit("t", T), c.inp("a", a), c.out("o", a.copy())])
+        elif name == "g_mtp_concat":
+            c.launch(name, ["%t"], [c.lit("t", T), c.inp("a", a), c.inp("b", b), c.out("o", np.stack([a, b], 1).astype(np.float32))])
+        else:
+            eps = _eps(lib, name)
+            w = (1 + 0.1 * rng.standard_normal(H)).astype(np.float32)
+            a64 = a.astype(np.float64)
+            y = (a64 / np.sqrt((a64 * a64).mean(-1, keepdims=True) + eps) * w).astype(np.float32)
+            c.launch(name, ["%t"], [c.lit("t", T), c.inp("a", a), c.inp("w", w), c.out("o", y, close="1.0e-5")])
+        out.append(c.text())
+    return out
+
+
+def cases(lib, save, rng, ks=""):
+    """The cases of the bookkeeping kernels LIB defines; widths and eps are read off each kernel."""
     global KS
     KS = ks
     if not lib:
@@ -306,16 +322,17 @@ def cases(lib, H, eps, save, rng, ks=""):
     if has("g_spec_rows"):
         out.append(spec_rows_case(save, rng))
     if has("g_spec_accept"):
-        mrope = "%m_table" in _def(lib, "g_spec_accept")
+        mrope = "%m_tv" in _def(lib, "g_spec_accept")   # the M-RoPE offset table is copied
         out += [spec_accept_case(save, rng, mrope, False), spec_accept_case(save, rng, mrope, True)]
     if has("g_mtp_prepare"):
-        mrope = "%m_table" in _def(lib, "g_mtp_prepare")
+        mrope = "%m_tv" in _def(lib, "g_mtp_prepare")
         out += [mtp_prepare_case(save, rng, mrope, False), mtp_prepare_case(save, rng, mrope, True)]
-    if has("g_mtp_gather"):
-        out.append(mtp_gather_case(save, rng, H))
+    if _width(lib, "g_mtp_gather"):
+        out.append(mtp_gather_case(save, rng, _width(lib, "g_mtp_gather")))
     if has("g_mtp_advance"):
         out += [mtp_advance_case(save, rng, False), mtp_advance_case(save, rng, True)]
-    if has("g_mtp_pair") and has("g_mtp_save"):
-        out += mtp_pair_save_cases(save, rng, H)
-    out += mtp_rows_cases(save, rng, H, eps, lib)
+    pw, sw = _width(lib, "g_mtp_pair"), _width(lib, "g_mtp_save")
+    if pw or sw:
+        out += mtp_pair_save_cases(save, rng, pw or sw, bool(pw), bool(sw) and sw == (pw or sw))
+    out += mtp_rows_cases(save, rng, lib)
     return out
