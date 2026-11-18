@@ -14,7 +14,7 @@ from pathlib import Path
 import subprocess
 
 ROOT=Path(__file__).resolve().parents[3]
-PIN='099c95909633e2fa0ae80a5a75cecb826157562c'
+PIN='67a784a187d57f9ab78bdd2785e04b00322192b8'
 PREFIX='eng/gemma-e4b-min-ram/'
 FILES=['run_job.sh','run_frontier.sh','prepare_packages.sh','cold_capacity_targeted.py',
        'compare_arms.py','runner/sdk_pin.py','runner/hf_download.py',

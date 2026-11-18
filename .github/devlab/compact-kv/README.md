@@ -37,13 +37,19 @@ with exact candidate/legacy outputs. These are synthetic kernel checks; the
 matched full-model phase uses the pinned real checkpoint and meaningful outputs.
 
 `materialize_runner.py` derives, with one-match source anchors and a saved diff,
-from ordinary runner `099c95909633e2fa0ae80a5a75cecb826157562c`. This includes the reviewed empty-token download correction; its monitoring
+from ordinary runner `67a784a187d57f9ab78bdd2785e04b00322192b8`. This includes the reviewed empty-token download and checkpoint-pin corrections; its monitoring
 contracts are unchanged from `7abe4277`. Monitoring, status,
 readiness retry, stop and settle implementations are preserved. Changes are:
 matched 64k/one-row configs and no-cache policy, the kernel gate before either
 server, 65536-token retrieval plus over-limit rejection, and a fresh-session short
 answer after the long request. The ordinary launcher's files are not edited.
 The original `run_arm` body changes only 65535 to 65536; focused tests prove this.
+
+The immutable checkpoint revision `bfc15c382204943c3a8fff0c750b94ae2364d7a3`
+has 4977171584 bytes and SHA256
+`85a896a047553e842f25297ee5b031d64ff30147d9c4af17b1e4b394cd1fab87`.
+The earlier ordinary-runner hash was incorrect. This correction changes neither
+the pinned tensor metadata nor any numerical kernel, cache layout or reference.
 
 Lead dispatch entrypoint, on the exact clean reviewed checkout containing both
 this adapter and the source fix (ordinary pinned commit must exist in local git):
