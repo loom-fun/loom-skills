@@ -133,6 +133,20 @@ if not WIN:
             E[f] = sh(f"cat {GPUDEV}/{f} 2>/dev/null")
 save()
 
+# -- microbenchmarks only (REPO "rtt") ----------------------------------------------------------------------------------
+if a.repo == "rtt":
+    venv = os.path.join(WORK, "venv")
+    subprocess.run([sys.executable, "-m", "venv", venv], check=True)
+    BIN = os.path.join(venv, "Scripts" if WIN else "bin")
+    VPY = os.path.join(BIN, "python.exe" if WIN else "python")
+    p = subprocess.run([VPY, "-m", "pip", "install", "-q", "hrx-loom==0.2.0", "psutil"], capture_output=True, text=True)
+    step("pip", p.returncode == 0, tail=(p.stdout + p.stderr)[-800:])
+    p = subprocess.run([sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "rtt.py"), BIN, OUT],
+                       capture_output=True, text=True, timeout=7200)
+    open(os.path.join(OUT, "rtt.log"), "w").write(p.stdout + p.stderr)
+    step("rtt", p.returncode == 0, tail=(p.stdout + p.stderr)[-1500:])
+    sys.exit(0)
+
 # -- card + venv --------------------------------------------------------------------------------------------------------
 readme = urllib.request.urlopen(f"https://huggingface.co/{a.repo}/raw/main/README.md", timeout=120).read().decode()
 m = re.search(r"## Quick start.*?```(?:bash|sh|shell)?\n(.*?)```", readme, re.S)

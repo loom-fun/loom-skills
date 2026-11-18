@@ -1,12 +1,12 @@
 {
  "models": [
-  "loom-fun/ggml-org-gemma-3-1b-it-loom"
+  "rtt"
  ],
  "os": [
   "windows",
   "linux"
  ],
- "variants": "card,card_cpuload4",
- "profile": "q:dec,m:dec,q:dec@card_cpuload4",
- "reps": 2
+ "variants": "",
+ "profile": "",
+ "reps": 3
 }
