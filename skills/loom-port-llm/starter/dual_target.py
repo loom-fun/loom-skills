@@ -226,10 +226,10 @@ def apply(text, enable=None, select=None):
     if select is None:
         select = select_mode()
     if not enable or "target.decl @device" in text:
-        return text
+        return encodings_first(text)
     tw = set(twins(text))
     if not tw:
-        return text
+        return encodings_first(text)
     lines = text.split("\n")
     out, last_def_end = [], -1
     i = 0
@@ -296,44 +296,63 @@ def apply(text, enable=None, select=None):
     return HEADER + encodings_first(body)
 
 
-ENC_LIMIT = 60000   # SSA values (counted as below) before an encoding-typed use that hrx-loom 0.1.0 still resolves
+ENC_LIMIT = 60000   # SSA values defined before an encoding-typed line (counted as _enc_depth does); the parser truncates at 2^16
 
 
 ENC_BYTES = 4_000_000   # bytes before an encoding-typed line: hrx-loom 0.1.0 fails past 4 MiB (engineer sweep bisected 4,191,941 ok, 4,281,430 fails)
 
+_ENC_LINE = re.compile(r"encoding<layout>|view<[^>]*, %")
+# Values a line defines: op results (`%a, %b:2 = ...`, also scf.for induction variables and iter_args `%x = %init`) and
+# block / launch arguments (`%x: T`). A use never has `=` or `: ` right after its name (a type annotation is ` : T`).
+_VALUE_DEFS = re.compile(r"%[\w.$]+(?::(\d+))?(?=(?:, %[\w.$]+(?::\d+)?)* = )|%[\w.$]+(?=: )")
+
+
+def _is_enc(part):
+    return bool(_ENC_LINE.search(part))
+
 
 def _enc_depth(text):
     """The largest count of SSA values defined before a line that defines or uses an encoding in a type (or ENC_LIMIT + 1
-    when such a line lies past ENC_BYTES of the file)."""
+    when such a line lies past ENC_BYTES of the file). Counts as the parser numbers a module's values (results, packs `%x:N`,
+    loop variables, block and launch arguments): within about 0.2 % of the value ids hrx-loom 0.2.0 assigned on
+    Qwen3.8-27B's llm.loom (the first truncated reference sat between estimates 65,474 and 65,604)."""
     c = worst = pos = 0
     for l in text.split("\n"):
         pos += len(l.encode()) + 1
-        if pos > ENC_BYTES and ("encoding<layout>" in l or re.search(r"view<[^>]*, %", l)):
+        enc = _ENC_LINE.search(l)
+        if enc and pos > ENC_BYTES:
             return ENC_LIMIT + 1
-        m = re.match(r"\s*((?:%[\w.]+\s*,\s*)*%[\w.]+)\s*=", l)
-        if m:
-            c += m.group(1).count("%")
-        if "encoding<layout>" in l or re.search(r"view<[^>]*, %", l):
+        if enc:
             worst = max(worst, c)
+        for m in _VALUE_DEFS.finditer(l):
+            c += int(m.group(1)) if m.group(1) else 1
     return worst
 
 
 def encodings_first(text):
-    """hrx-loom 0.1.0 resolves an encoding referenced in a type wrongly once the module has defined about 2^16 values before
-    it (ENCODING/004 '... references encoding value %x which is not defined at this point', naming an unrelated earlier
-    value; seen on Laguna-XS-2.1's dual-target llm.loom, 94k lines). A big file whose encoding-typed kernels sit that deep
-    gets its top-level definitions reordered, stably: funcs, then the kernels that use encodings, then the rest (templates
-    and command programs stay after them). Kernel texts are unchanged; smaller files are returned as they are."""
+    """hrx-loom (0.1.0 and 0.2.0) keeps the value id of an SSA encoding referenced in a type in 16 bits: the text parser
+    stores `(uint16_t)` of the module-wide value id (format/text/parser/types.c, loom_parse_type_encoding), so a type
+    whose encoding is defined after the module's 65,536th value silently names an unrelated earlier value. The parse
+    verifier reports it as ENCODING/004 '... references encoding value %x which is not defined at this point' (Laguna-XS-2.1,
+    94k lines); a package registers, and loom-serve fails when a compile request clones such a kernel: `source value %N has
+    no target remap` (N = id - 65536; Qwen3.8-27B with both quant/q4_0 choices, whose attention kernels sat 65.6k values
+    deep). A file with an encoding-typed line that deep gets its top-level definitions reordered, stably: the funcs that
+    lead the file, then every kernel that uses encodings (wherever it was: a weight-converter command program can sit in
+    the middle of the kernels), then everything else in its order. Kernel texts are unchanged; smaller files are returned
+    as they are. Raises ValueError when the encoding kernels alone are too deep (split the library)."""
     if _enc_depth(text) <= ENC_LIMIT:
         return text
     parts = re.split(r"(?m)^(?=kernel\.def |func\.def |template\.|command\.def )", text)
     head, rest = parts[0], parts[1:]
     first_late = next((i for i, p in enumerate(rest) if p.startswith(("template.", "command.def"))), len(rest))
-    defs, late = rest[:first_late], rest[first_late:]
-    funcs = [p for p in defs if p.startswith("func.def")]
-    enc = [p for p in defs if p.startswith("kernel.def") and ("encoding<layout>" in p or re.search(r"view<[^>]*, %", p))]
-    other = [p for p in defs if not p.startswith("func.def") and p not in enc]
-    return head + "".join(funcs + enc + other + late)
+    funcs = [i for i in range(first_late) if rest[i].startswith("func.def")]
+    enc = [i for i, p in enumerate(rest) if p.startswith("kernel.def") and _is_enc(p)]
+    moved = set(funcs) | set(enc)
+    out = head + "".join([rest[i] for i in funcs + enc] + [p for i, p in enumerate(rest) if i not in moved])
+    if _enc_depth(out) > ENC_LIMIT:
+        raise ValueError(f"encoding-typed lines still lie {_enc_depth(out)} values deep after reordering (limit {ENC_LIMIT}): "
+                         "hrx-loom truncates SSA encoding value ids to 16 bits; split the kernel library into more files")
+    return out
 
 
 def apply_file(path):

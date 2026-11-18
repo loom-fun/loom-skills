@@ -8,16 +8,11 @@
  "owner": "kb",
  "choices": [
   {
-   "when": {
-    "not_facets": [
-     "mtp"
-    ]
-   },
    "set": {
     "prefill.gemm.q4_0_native": true,
     "decode.q4_0.act_q8": true
    },
-   "evidence": "DevLab runs 44306088328 / 44312519207 (same-job ABBA vs 33c407da): Gemma 4 31B QAT R9700 prefill 1k/2k/8k +54/+60/+57 %, 4 streams 58.5 -> 121.2 tok/s, decode +3 %; Strix Halo prefill +39..49 %, 4 streams 26.5 -> 46.2; 26B-A4B QAT 4 streams +28 % R9700 / +19 % Strix Halo, prefill +8..16 %, decode -1..-3 %; kernel tests and dev gates pass on both GPUs. Not for MTP models: Qwen3.8-27B (Q4_0 only in its MTP block) with both choices fails registration on hrx-loom 0.2.0 (runs 44312519207, 44332419573; topic sdk)."
+   "evidence": "DevLab runs 44306088328 / 44312519207 (same-job ABBA vs 33c407da): Gemma 4 31B QAT R9700 prefill 1k/2k/8k +54/+60/+57 %, 4 streams 58.5 -> 121.2 tok/s, decode +3 %; Strix Halo prefill +39..49 %, 4 streams 26.5 -> 46.2; 26B-A4B QAT 4 streams +28 % R9700 / +19 % Strix Halo, prefill +8..16 %, decode -1..-3 %; kernel tests and dev gates pass on both GPUs. Qwen3.8-27B (Q4_0 only in its MTP block) first failed registration with both (runs 44312519207, 44332419573): its attention kernels' SSA layouts crossed hrx-loom's 16-bit encoding value ids; fixed in the kit (dual_target.encodings_first; topic sdk); with the fix both GPUs register, gates and kernel tests pass, every row within its band (run 44348479712)."
   }
  ]
 }
