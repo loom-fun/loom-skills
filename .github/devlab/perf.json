@@ -1,5 +1,5 @@
 {
- "_comment": "Gemma 4 QAT 31B drafted (assistant d1) Strix capacity: cold-capacity probe (cold memory, exact full-context completion, structured overflow rejection) at served context 90112 and 86016 under the 110 GB host guard. Experiment only.",
+ "_comment": "Gemma 4 QAT 31B drafted (assistant d1) Strix capacity: cold-capacity probe (cold memory, exact full-context completion, structured overflow rejection) at served context 86016 and 81920, built against the 110 GB host guard (--memory-gib 102). Experiment only.",
  "jobs": [
   {
    "name": "qat-31b-strix-capacity",
@@ -12,10 +12,10 @@
    "thinking": "off",
    "llama_spec": "",
    "variants": [
-    {"name": "c90", "build": {}, "build_args": ["--context", "90112"]},
-    {"name": "c86", "build": {}, "build_args": ["--context", "86016"]}
+    {"name": "c86", "build": {}, "build_args": ["--context", "86016", "--memory-gib", "102"], "serve_args": ["--parameter_mode=preload"]},
+    {"name": "c80", "build": {}, "build_args": ["--context", "81920", "--memory-gib", "102"], "serve_args": ["--parameter_mode=preload"]}
    ],
-   "steps": ["coldcapacity:c90", "coldcapacity:c86"]
+   "steps": ["coldcapacity:c86", "coldcapacity:c80"]
   }
  ]
 }
