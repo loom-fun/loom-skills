@@ -1,86 +1,6 @@
 {
- "_comment": "Gemma QAT Q4_0 round 2 (base 33c407da, head 270732d3): final gates on the QAT packages (R9700 31B+26B, Strix 26B); iterate A/B of Qwen3.8-27B (Q4_0 MTP block) on both GPUs and of the 31B QAT on Strix Halo",
+ "_comment": "Gemma QAT Q4_0 round 3: Qwen3.8-27B (Q4_0 MTP block) iterate A/B on both GPUs, base 33c407da vs 5e4ce757 (kernel-limit fix)",
  "jobs": [
-  {
-   "llama_kv_rocm": 36864,
-   "name": "rab-unsloth-gemma-4-31b-it-qat-loom",
-   "runner": "r9700",
-   "card": "loom-fun/unsloth-gemma-4-31B-it-qat-loom",
-   "memory_bytes_r9700": 34000000000,
-   "served_context": 10240,
-   "kit": "gemma4",
-   "llamacpp": "b1375",
-   "llamacpp_vulkan": "b12211",
-   "variants": [
-    {
-     "name": "staging",
-     "build": {},
-     "ref": "270732d3",
-     "context": 10240,
-     "cap_pool": 13312,
-     "execution": {
-      "context_capacity": 10240,
-      "prefill_capacity": 1024
-     }
-    }
-   ],
-   "steps": [
-    "func:staging",
-    "ktest:staging",
-    "gates:staging:dev"
-   ]
-  },
-  {
-   "llama_kv_rocm": 53248,
-   "name": "rab-unsloth-gemma-4-26b-a4b-it-qat-loom",
-   "runner": "r9700",
-   "repeat_rows": 3,
-   "card": "loom-fun/unsloth-gemma-4-26B-A4B-it-qat-loom",
-   "memory_bytes_r9700": 34000000000,
-   "served_context": 36864,
-   "kit": "gemma4",
-   "llamacpp": "b1375",
-   "llamacpp_vulkan": "b12211",
-   "variants": [
-    {
-     "name": "staging",
-     "build": {},
-     "ref": "270732d3",
-     "context": 36864,
-     "cap_pool": 55296,
-     "execution": {
-      "context_capacity": 36864,
-      "prefill_capacity": 4096
-     }
-    }
-   ],
-   "steps": [
-    "func:staging",
-    "ktest:staging",
-    "gates:staging:dev"
-   ]
-  },
-  {
-   "name": "sab-unsloth-gemma-4-26b-a4b-it-qat-loom",
-   "runner": "strix",
-   "card": "loom-fun/unsloth-gemma-4-26B-A4B-it-qat-loom",
-   "memory_bytes": 110000000000,
-   "kit": "gemma4",
-   "llamacpp": "b1375",
-   "llamacpp_vulkan": "b12211",
-   "variants": [
-    {
-     "name": "staging",
-     "build": {},
-     "ref": "270732d3"
-    }
-   ],
-   "steps": [
-    "func:staging",
-    "ktest:staging",
-    "gates:staging:dev"
-   ]
-  },
   {
    "name": "rab-bartowski-qwen3-8-27b-loom",
    "runner": "r9700",
@@ -105,7 +25,7 @@
     {
      "name": "staging",
      "build": {},
-     "ref": "270732d3",
+     "ref": "5e4ce757",
      "context": 120832,
      "cap_pool": 124928,
      "execution": {
@@ -128,7 +48,7 @@
     {
      "name": "stagingnd",
      "build": {},
-     "ref": "270732d3",
+     "ref": "5e4ce757",
      "context": 120832,
      "cap_pool": 124928,
      "execution": {
@@ -178,7 +98,7 @@
     {
      "name": "staging",
      "build": {},
-     "ref": "270732d3"
+     "ref": "5e4ce757"
     },
     {
      "name": "funnd",
@@ -191,66 +111,7 @@
     {
      "name": "stagingnd",
      "build": {},
-     "ref": "270732d3",
-     "execution": {
-      "draft_depth": 0
-     }
-    }
-   ],
-   "steps": [
-    "perf:fun:1",
-    "perf:staging:1",
-    "perf:staging:1",
-    "perf:fun:1",
-    "perf:fun:1",
-    "perf:staging:1",
-    "perf:staging:1:long",
-    "perf:fun:1:long",
-    "perf:fun:1:long",
-    "perf:staging:1:long",
-    "perf:staging:1:long",
-    "perf:fun:1:long",
-    "c4:funnd",
-    "c4:stagingnd",
-    "c4:stagingnd",
-    "c4:funnd",
-    "textmatch:fun",
-    "textmatch:staging",
-    "smoke:staging",
-    "ktest:staging"
-   ]
-  },
-  {
-   "name": "sab-unsloth-gemma-4-31b-it-qat-loom",
-   "runner": "strix",
-   "card": "loom-fun/unsloth-gemma-4-31B-it-qat-loom",
-   "memory_bytes": 110000000000,
-   "kit": "gemma4",
-   "llamacpp": "b1375",
-   "llamacpp_vulkan": "b12211",
-   "variants": [
-    {
-     "name": "fun",
-     "build": {},
-     "ref": "33c407da"
-    },
-    {
-     "name": "staging",
-     "build": {},
-     "ref": "270732d3"
-    },
-    {
-     "name": "funnd",
-     "build": {},
-     "ref": "33c407da",
-     "execution": {
-      "draft_depth": 0
-     }
-    },
-    {
-     "name": "stagingnd",
-     "build": {},
-     "ref": "270732d3",
+     "ref": "5e4ce757",
      "execution": {
       "draft_depth": 0
      }
