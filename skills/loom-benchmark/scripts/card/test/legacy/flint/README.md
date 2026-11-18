@@ -26,15 +26,15 @@ loom-serve --model=flint/model.json '--device=amdgpu://?completion_spin_ns=42949
 - `--pool_backing=fixed` commits the preset's memory pool up front instead of growing elastic backing.
 - `--parameter_mode=preload` only changes how the weights are loaded on the host, so the performance rows were measured without it unless their job served with it.
 
-In another terminal, send a request:
+## Send a request
+
+In another terminal:
 
 ```bash
 curl http://127.0.0.1:8080/v1/chat/completions \
   -H 'Content-Type: application/json' \
   -d '{"model": "flint", "messages": [{"role": "user", "content": "Hello"}]}'
 ```
-
-The server listens on `127.0.0.1:8080` and answers OpenAI-style `/v1/chat/completions` requests.
 
 ## Performance vs llama.cpp
 
