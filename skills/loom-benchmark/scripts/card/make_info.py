@@ -883,7 +883,10 @@ def cmd_perf(a):
     rep = {k: max(lcount[k]) for k in keep if k in lcount and k != "streams4" and max(lcount[k]) > 1}
     if rep:
         runs["samples"] = rep   # rows measured several times per session (perf.py --repeat-rows): samples per session
-    date = a.date or max([r["time"][:10] for r in loom_rows + llama_rows if r.get("time")] or [None], key=lambda x: x or "")
+    c4_rows = [r for f in (a.c4_loom, a.c4_llama) if f for r in read_rows(f)]   # c4_steady.py lines carry their time
+    date = a.date or max([r["time"][:10] for r in loom_rows + llama_rows + c4_rows if r.get("time")] or [None], key=lambda x: x or "")
+    if not date:   # a session without a day renders as "Measured not recorded" on the card
+        sys.exit("perf: no row carries a time (an older c4_steady.py log): give --date YYYY-MM-DD, the job's day")
     commands = list(a.command or [])
     if a.commands_file:
         commands += [line.rstrip("\n") for line in open(a.commands_file, encoding="utf-8") if line.strip()]
