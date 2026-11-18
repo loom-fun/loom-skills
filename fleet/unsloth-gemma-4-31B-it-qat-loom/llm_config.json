@@ -290,6 +290,74 @@
     "run": 44319924141
    },
    {
+    "kind": "assist",
+    "depth": 1,
+    "device": "strix-halo",
+    "rows": {
+     "decode": 18.7,
+     "decode_2k": 16.53,
+     "decode_32k": 13.18
+    },
+    "acceptance": {
+     "decode": 0.774,
+     "decode_2k": 0.678,
+     "decode_32k": 0.75
+    },
+    "spec": "PASS",
+    "run": 44322584404
+   },
+   {
+    "kind": "assist",
+    "depth": 2,
+    "device": "strix-halo",
+    "rows": {
+     "decode": 16.08,
+     "decode_2k": 14.8,
+     "decode_32k": 11.84
+    },
+    "acceptance": {
+     "decode": 0.655,
+     "decode_2k": 0.628,
+     "decode_32k": 0.645
+    },
+    "spec": "PASS",
+    "run": 44322584404
+   },
+   {
+    "kind": "assist",
+    "depth": 3,
+    "device": "strix-halo",
+    "rows": {
+     "decode": 18.49,
+     "decode_2k": 15.06,
+     "decode_32k": 11.81
+    },
+    "acceptance": {
+     "decode": 0.578,
+     "decode_2k": 0.465,
+     "decode_32k": 0.507
+    },
+    "spec": "PASS",
+    "run": 44322584404
+   },
+   {
+    "kind": "assist",
+    "depth": 4,
+    "device": "strix-halo",
+    "rows": {
+     "decode": 12.95,
+     "decode_2k": 10.57,
+     "decode_32k": 8.96
+    },
+    "acceptance": {
+     "decode": 0.473,
+     "decode_2k": 0.381,
+     "decode_32k": 0.435
+    },
+    "spec": "PASS",
+    "run": 44322584404
+   },
+   {
     "kind": "dflash",
     "depth": 1,
     "device": "strix-halo",
@@ -339,6 +407,17 @@
     },
     "spec": "PASS",
     "run": 44307376426
+   },
+   {
+    "kind": "none",
+    "depth": 0,
+    "device": "strix-halo",
+    "rows": {
+     "decode": 12.64,
+     "decode_2k": 11.83,
+     "decode_32k": 9.87
+    },
+    "run": 44322584404
    }
   ]
  }
