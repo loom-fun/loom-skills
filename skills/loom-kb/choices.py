@@ -214,6 +214,16 @@ CHOICE("decode.attn.span.from_pos", "int", 1024, "ATTN_MT_FROM", rows=["decode_3
 CHOICE("decode.attn.span.min_kv_heads", "int", 8, "ATTN_MT_MIN_KV", rows=["decode_32k", "decode_2k"],
        kernels=["g_attention_split"],
        doc="KV heads from which the span path is taken (8 KV heads +8..2x, 4 KV heads 0/-15 %, <= 2 KV heads -6..-27 %).")
+CHOICE("decode.attn.span.head_dims", "str", "", "ATTN_MT_DIMS", rows=["decode_32k", "decode_2k"], kits=["gemma4"],
+       kernels=["gd*_attention_split"], from_pr="gemma-verify-attn",
+       doc="Kits with mixed head dims (Gemma 4: gd256 sliding / gd512 global decode kernels): head dims, a comma list, whose per-dim "
+           "decode split kernel takes the verify-span path of decode.attn.span.* in drafting packages (one K/V load per key for the span's "
+           "tokens; every token's own split range and block order, so bit-identical). Empty: only the plain g_attention_split may.")
+CHOICE("decode.attn.tokens_per_wg", "str", "", "ATTN_TPW", rows=["decode", "decode_2k", "decode_32k"], kits=["gemma4"],
+       kernels=["gd*_attention_split"], from_pr="gemma-verify-attn",
+       doc="Kits with per-head-dim decode kernels (Gemma 4 gd256 / gd512): \"D:T[,D:T]\" = the split kernel of head dim D runs T "
+           "consecutive epoch tokens per workgroup (T x G waves, each the unchanged per-token code), so a verify span's tokens read each "
+           "key's K/V through one CU's caches instead of from DRAM once per token. Bit-identical to one token per workgroup.")
 CHOICE("decode.attn.segment", "bool", True, "SEG_ATTN", rows=["decode_32k"], kernels=["g_attention_split", "g_attention_combine"],
        doc="Drafting builds with <= 2 KV heads and head_dim 64/128 decode long spans in segments (False: split kernel everywhere).")
 CHOICE("decode.attn.segment.min_ctx", "int", 8192, "SEG_MIN", rows=["decode_32k"], kernels=["g_attention_split"],
@@ -238,6 +248,15 @@ CHOICE("decode.mv.wg4", "int", 128, "MV_WG4", doc="Workgroup target of 4-token m
        "differ (consistency.py fails): record it in the report.", **_MV)
 CHOICE("decode.mv.wg_long", "int", 640, "MV_WG_LONG", doc="Workgroup target of 1-token matvecs with K >= 8192.", **_MV)
 CHOICE("decode.mv.q8_r16", "bool", True, "MV_Q8_R16", doc="Int8 multi-token matvecs with 16 rows when n % 16 == 0.", **_MV)
+CHOICE("decode.mv.q8_live_slots", "bool", False, "MV_Q8_LIVE", kernels=["g_mv_*_t8_q8*", "g_mv_*_t16_q8*"], rows=ROWS_DECODE + ROWS_STREAMS,
+       from_pr="gemma-verify-attn",
+       doc="Int8 matvecs of 8+ tokens skip the dot products of token slots past the epoch's tokens (a depth-4 verify runs 5 tokens on the "
+           "8-token kernel); those slots are never stored, so every output is unchanged.")
+CHOICE("decode.mv.q8_t4_upto", "int", 4, "MV_Q8_T4_UPTO", kernels=["g_mv_*_q8*", "g_head_mv*_q8*"], rows=ROWS_DECODE + ROWS_STREAMS,
+       from_pr="gemma-verify-attn",
+       doc="Epochs of up to N tokens (4..8) run the 4-token int8 matvecs and head (ceil(t / 4) token groups per row group, the second "
+           "re-reading the rows through the cache) instead of the 8-token kernels. Exact (every variant rounds a token as the 1-token "
+           "kernel does). 31B QAT Strix, depth 4 (5-token verify): the 8-token kernels cost ~5 ms per step over the 4-token ones.")
 CHOICE("decode.mv.q8_r32", "bool", True, "MV_Q8_R32", doc="Int8 16-token matvecs with 32 rows (pair kernels / K >= 8192).", **_MV)
 CHOICE("decode.spec.gdn_copy_split", "int", 1, "GDN_COPY_SPLIT", kernels=["g_gdn_capture*", "g_gdn_restore*"], rows=ROWS_DECODE, devices=["rdna4"], per_target=True,
        doc="Workgroups per token of the gated delta-net capture / restore copies of a drafted step (gfx12 twin; 1 = the one-workgroup-per-token "
@@ -451,6 +470,10 @@ CHOICE("draft.verify.mm_from", "int", None, "SPEC_MM_FROM", dynamic=True,
 CHOICE("draft.verify.exact", "bool", False, "SPEC_EXACT", enc=("1", "0"),
        doc="Verify with the 4-token matvec at every width (decode's rounding) instead of the GEMM from 5 tokens.", **_SP)
 CHOICE("draft.warm.mm_from", "int", 5, "DRAFT_MM_FROM", doc="The drafter's catch-up program takes the GEMM from this many tokens.", **_SP)
+CHOICE("draft.assist.argmax_parts", "int", 0, "ASSIST_ARGMAX_PARTS", kernels=["g_as_argmax*"], rows=ROWS_DECODE, from_pr="gemma-verify-attn",
+       doc="Gemma 4 assistant drafter (draft/gen_assist.py): 0 = the proposal argmax is one 256-lane workgroup per row over the whole "
+           "vocabulary (g_as_argmax, ~0.4 ms per round over 262144 logits on Strix Halo); N = N workgroups per row reduce slices "
+           "(g_as_argmax_part) and g_as_argmax_fin folds them (same token, lowest index on ties).")
 CHOICE("draft.propose.head", "str", "q4_0", "PROPOSE_HEAD", doc="q4_0: the proposals' head pass reads a load-time Q4_0 copy of the "
        "target's head (off: the head itself; q6_k: with PROPOSE_HEAD_ROWS the subset's rows stay Q6_K).", **_SP)
 CHOICE("draft.propose.head_rows", "int", 0, "PROPOSE_HEAD_ROWS", kernels=["g_prep_*", "g_head_mv*_p40", "g_head_select_p"], rows=ROWS_DECODE + ROWS_STREAMS,

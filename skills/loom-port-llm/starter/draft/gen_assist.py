@@ -388,7 +388,122 @@ kernel.def export("g_as_argmax") @g_as_argmax(%tokens: index) {{
   kernel.return
 }}
 """)
+    P = argmax_parts()
+    if P:
+        C = -(-V // P)
+        T.append(f"""
+// Two-stage proposal argmax (draft.assist.argmax_parts = {P}), stage 1: workgroup (row t, part p) reduces logits
+// [p * {C}, min((p + 1) * {C}, {V})) to its maximum and the lowest index holding it.
+kernel.def export("g_as_argmax_part") @g_as_argmax_part(%tokens: index) {{
+  %c1 = index.constant 1 : index
+  %c256 = index.constant 256 : index
+  %cparts = index.constant {P} : index
+  kernel.launch.config workgroups(%tokens, %cparts, %c1) workgroup_size(%c256, %c1, %c1) : index
+}} launch(%tokens_arg: index, %logits: buffer, %pm: buffer, %pi: buffer) {{
+  %tokens = index.assume %tokens_arg [range(%tokens_arg, 1, 8192)] : index
+  %token_id = kernel.workgroup.id<x> : index
+  %token = index.assume %token_id [range(%token_id, 0, 2147483646), lt(%token_id, %tokens)] : index
+  %part_id = kernel.workgroup.id<y> : index
+  %part = index.assume %part_id [range(%part_id, 0, {P - 1})] : index
+  %lane_id = kernel.workitem.id<x> : index
+  %lane = index.assume %lane_id [range(%lane_id, 0, 255)] : index
+  %zero = index.constant 0 : offset
+  %c256i = index.constant 256 : index
+  %cv = index.constant {V} : index
+  %cc = index.constant {C} : index
+  %lo = index.mul %part, %cc : index
+  %hi_raw = index.add %lo, %cc : index
+  %hi = index.min %hi_raw, %cv : index
+  %first_i = index.add %lo, %lane : index
+  %lv = buffer.view %logits[%zero] : buffer -> view<[%tokens]x{V}xf32>
+  %ninf = scalar.constant -3.0e38 : f32
+  %best = scf.for %i0 = [%first_i to %hi step %c256i](%m = %ninf : f32) -> (f32) {{
+    %i = index.assume %i0 [range(%i0, 0, {V - 1})] : index
+    %v = view.load %lv[%token, %i] : view<[%tokens]x{V}xf32> -> f32
+    %n = scalar.maxnumf %m, %v : f32
+    scf.yield %n : f32
+  }}
+  %top = kernel.workgroup.reduce<maxnumf> %best : f32
+  %big = scalar.constant {V} : i32
+  %first = scf.for %i0 = [%first_i to %hi step %c256i](%k = %big : i32) -> (i32) {{
+    %i = index.assume %i0 [range(%i0, 0, {V - 1})] : index
+    %v = view.load %lv[%token, %i] : view<[%tokens]x{V}xf32> -> f32
+    %eq = scalar.cmpf oeq, %v, %top : f32
+    %i32 = index.cast %i : index to i32
+    %cand = scf.select %eq, %i32, %big : i32
+    %n = scalar.minui %k, %cand : i32
+    scf.yield %n : i32
+  }}
+  %pick = kernel.workgroup.reduce<minui> %first : i32
+  %c0 = index.constant 0 : index
+  %lead = index.cmp eq, %lane, %c0 : index
+  scf.if %lead {{
+    %pmv = buffer.view %pm[%zero] : buffer -> view<[%tokens]x{P}xf32>
+    %piv = buffer.view %pi[%zero] : buffer -> view<[%tokens]x{P}xi32>
+    view.store %top, %pmv[%token, %part] : f32, view<[%tokens]x{P}xf32>
+    view.store %pick, %piv[%token, %part] : i32, view<[%tokens]x{P}xi32>
+  }}
+  kernel.return
+}}
+
+// Stage 2: proposals[t] = the lowest stage-1 index among the parts holding the row's maximum: the same token as
+// g_as_argmax (maxnum and the lowest-index tie rule are associative over the parts).
+kernel.def export("g_as_argmax_fin") @g_as_argmax_fin(%tokens: index) {{
+  %c1 = index.constant 1 : index
+  %c256 = index.constant 256 : index
+  kernel.launch.config workgroups(%tokens, %c1, %c1) workgroup_size(%c256, %c1, %c1) : index
+}} launch(%tokens_arg: index, %pm: buffer, %pi: buffer, %out: buffer) {{
+  %tokens = index.assume %tokens_arg [range(%tokens_arg, 1, 8192)] : index
+  %token_id = kernel.workgroup.id<x> : index
+  %token = index.assume %token_id [range(%token_id, 0, 2147483646), lt(%token_id, %tokens)] : index
+  %lane_id = kernel.workitem.id<x> : index
+  %lane = index.assume %lane_id [range(%lane_id, 0, 255)] : index
+  %zero = index.constant 0 : offset
+  %c256i = index.constant 256 : index
+  %cparts = index.constant {P} : index
+  %pmv = buffer.view %pm[%zero] : buffer -> view<[%tokens]x{P}xf32>
+  %piv = buffer.view %pi[%zero] : buffer -> view<[%tokens]x{P}xi32>
+  %ninf = scalar.constant -3.0e38 : f32
+  %best = scf.for %p0 = [%lane to %cparts step %c256i](%m = %ninf : f32) -> (f32) {{
+    %p = index.assume %p0 [range(%p0, 0, {P - 1})] : index
+    %v = view.load %pmv[%token, %p] : view<[%tokens]x{P}xf32> -> f32
+    %n = scalar.maxnumf %m, %v : f32
+    scf.yield %n : f32
+  }}
+  %top = kernel.workgroup.reduce<maxnumf> %best : f32
+  %big = scalar.constant {V} : i32
+  %first = scf.for %p0 = [%lane to %cparts step %c256i](%k = %big : i32) -> (i32) {{
+    %p = index.assume %p0 [range(%p0, 0, {P - 1})] : index
+    %v = view.load %pmv[%token, %p] : view<[%tokens]x{P}xf32> -> f32
+    %ix = view.load %piv[%token, %p] : view<[%tokens]x{P}xi32> -> i32
+    %eq = scalar.cmpf oeq, %v, %top : f32
+    %cand = scf.select %eq, %ix, %big : i32
+    %n = scalar.minui %k, %cand : i32
+    scf.yield %n : i32
+  }}
+  %pick = kernel.workgroup.reduce<minui> %first : i32
+  %last = scalar.constant {V - 1} : i32
+  %safe = scalar.minui %pick, %last : i32
+  %ov = buffer.view %out[%zero] : buffer -> view<[%tokens]xi32>
+  %c0 = index.constant 0 : index
+  %lead = index.cmp eq, %lane, %c0 : index
+  scf.if %lead {{
+    view.store %safe, %ov[%token] : i32, view<[%tokens]xi32>
+  }}
+  kernel.return
+}}
+""")
     return "\n".join(T)
+
+
+def argmax_parts():
+    """Choice draft.assist.argmax_parts (env ASSIST_ARGMAX_PARTS): 0 = one workgroup per row scans the whole vocabulary
+    (g_as_argmax: ~0.4 ms per proposal round over 262144 logits on Strix Halo, a latency-bound serial scan); N = N
+    workgroups per row each reduce a slice (g_as_argmax_part), then g_as_argmax_fin folds the N partials. Same token."""
+    import os
+    n = int(os.environ.get("ASSIST_ARGMAX_PARTS", "0") or 0)
+    assert 0 <= n <= 256, f"ASSIST_ARGMAX_PARTS={n}: 0..256"
+    return n
 
 
 def programs(g):
@@ -482,7 +597,7 @@ command.def public @llm_as_propose() launch(%w_embed: buffer, %w_as: buffer, %ep
   %slots = buffer.alloca<global> align(256) %word_size : buffer
   %proposals = buffer.alloca<global> align(256) %word_size : buffer
   %vis = buffer.alloca<global> align(256) %info_size : buffer
-{buf("hidden", H)}{buf("x", H)}{buf("xh", 2 * H, True)}{buf("cur", E)}{buf("nrm", E, True)}{buf("y", E)}{buf("qa", QA * Dmax)}{buf("oa", QA * Dmax, True)}{buf("f", F, True)}{buf("logits", V)}{buf("qt", QT * Dmax)}{buf("ot", QT * Dmax)}  %pacc_bytes = index.constant {QT * 64 * Dmax * 4} : offset
+{buf("hidden", H)}{buf("x", H)}{buf("xh", 2 * H, True)}{buf("cur", E)}{buf("nrm", E, True)}{buf("y", E)}{buf("qa", QA * Dmax)}{buf("oa", QA * Dmax, True)}{buf("f", F, True)}{buf("logits", V)}{buf("qt", QT * Dmax)}{buf("ot", QT * Dmax)}{(buf("am_m", argmax_parts()) + buf("am_i", argmax_parts())) if argmax_parts() else ""}  %pacc_bytes = index.constant {QT * 64 * Dmax * 4} : offset
   %pml_bytes = index.constant {QT * 64 * 2 * 4} : offset
   %pacc_size = index.scale %t, %pacc_bytes : index, offset -> offset
   %pml_size = index.scale %t, %pml_bytes : index, offset -> offset
@@ -536,9 +651,12 @@ command.def public @llm_as_propose() launch(%w_embed: buffer, %w_as: buffer, %ep
   kernel.launch @g_as_norm[%t](%t, %zero_i32, %zero_i32, %cur, %fn_{l}, %cur, %no_scale, %nrm) : [index](index, i32, i32, buffer, view<{E}xf32>, buffer, buffer, buffer)
 {scaled("nrm", "%nE")}{L(b + "ffn_gate.weight", "nrm", f"%fg_{l}", "f", "%nE", "%nF", E, "swiglu", f"%fu_{l}")}{scaled("f", "%nF")}{L(b + "ffn_down.weight", "f", f"%fd_{l}", "y", "%nF", "%nE", F)}  kernel.launch @g_as_norm[%t](%t, %one_i32, %one_i32, %y, %fpn_{l}, %cur, %los_{l}, %cur) : [index](index, i32, i32, buffer, view<{E}xf32>, buffer, view<1xf32>, buffer)
 """)
+    AP = argmax_parts()
+    argmax = (f"  kernel.launch @g_as_argmax_part[%t](%t, %logits, %am_m, %am_i) : [index](index, buffer, buffer, buffer)\n"
+              f"  kernel.launch @g_as_argmax_fin[%t](%t, %am_m, %am_i, %proposals) : [index](index, buffer, buffer, buffer)\n" if AP else
+              "  kernel.launch @g_as_argmax[%t](%t, %logits, %proposals) : [index](index, buffer, buffer)\n")
     P.append(f"""  kernel.launch @g_as_norm[%t](%t, %zero_i32, %zero_i32, %cur, %w_onorm, %cur, %no_scale, %nrm) : [index](index, i32, i32, buffer, view<{E}xf32>, buffer, buffer, buffer)
-{scaled("nrm", "%nE")}{L("token_embd.weight", "nrm", "%w_head", "logits", "%nE", "%nV", E)}  kernel.launch @g_as_argmax[%t](%t, %logits, %proposals) : [index](index, buffer, buffer)
-{L("nextn.post_projection.weight", "nrm", "%w_post", "hidden", "%nE", "%nH", E)}  kernel.launch @g_mtp_advance(%round, %t, %epoch_tokens, %epoch, %metadata, %slots, %proposals, %tokens, %target_tokens) : (index, index, index, buffer, buffer, buffer, buffer, buffer, buffer)
+{scaled("nrm", "%nE")}{L("token_embd.weight", "nrm", "%w_head", "logits", "%nE", "%nV", E)}{argmax}{L("nextn.post_projection.weight", "nrm", "%w_post", "hidden", "%nE", "%nH", E)}  kernel.launch @g_mtp_advance(%round, %t, %epoch_tokens, %epoch, %metadata, %slots, %proposals, %tokens, %target_tokens) : (index, index, index, buffer, buffer, buffer, buffer, buffer, buffer)
   }}
   command.return
 }}

@@ -684,7 +684,7 @@ print('$p1', k, [x.get(k) for x in r if x.get(k)], 'median', round(st.median(v),
         [ "$capture_request_ok" = 1 ] || { capture_failed=1; break; }
         [ "$capture_kind" = profile ] || continue
         grep -c "dispatch " "$out/${capture_kind}_${p1}_$sc.serve.log" | sed "s/^/dispatch rows: /"; grep -A6 "IREE HAL device statistics" "$out/${capture_kind}_${p1}_$sc.serve.log" | head -8
-        [ "$sc" = probe ] || { steps_n=0; [ "$sc" = dec ] && steps_n=$(python3 -c "
+        [ "$sc" = probe ] || { steps_n=0; [ "${sc#dec}" != "$sc" ] && steps_n=$(python3 -c "
 import json; r=json.loads(open('$out/${capture_kind}_${p1}_$sc.req.json').read().splitlines()[-1]); d=r.get('draft') or {}; w=r.get('warmup_draft') or {}; print(round((d.get('draft_proposed_tokens', 0) + w.get('draft_proposed_tokens', 0)) / ${depth:-3}))" 2>/dev/null || echo 0)
           "$T" "$B/profile_stats.py" "$out/${capture_kind}_${p1}_$sc.serve.log" "$out/${capture_kind}_${p1}_$sc.req.json" --steps "$steps_n" --families "$B/profile_families.json" \
             --md "$out/${capture_kind}_${p1}_$sc.md" --json "$out/${capture_kind}_${p1}_$sc.json" > "$out/${capture_kind}_${p1}_$sc.table.txt" 2>&1; head -14 "$out/${capture_kind}_${p1}_$sc.table.txt" | cut -c1-200; }
