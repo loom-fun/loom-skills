@@ -1,0 +1,216 @@
+// KV geometry: 48 planes (K and V per attention layer) of pool x 2048 bytes (F16 KV heads x head_dim).
+// Recurrent slots: 4 bytes each (gated delta-net state of every recurrent layer; 4 = none).
+// logits:begin
+// A declaration: the one definition (default false) is in llm.loom; a second config.def of the key links ambiguously (LINK/MATERIALIZE).
+config.decl @llm.logits : i1
+// logits:end
+
+func.def @allocation(%records: buffer, %slot: index, %bytes: i64, %clear: i64) {
+  %origin = index.constant 0 : offset
+  %bounded = index.assume %slot [range(%slot, 0, 10)] : index
+  %view = buffer.view %records[%origin] : buffer -> view<11x3xi64>
+  %alignment = scalar.constant 256 : i64
+  view.store %bytes, %view[%bounded, 0] : i64, view<11x3xi64>
+  view.store %alignment, %view[%bounded, 1] : i64, view<11x3xi64>
+  view.store %clear, %view[%bounded, 2] : i64, view<11x3xi64>
+  func.return
+}
+
+// KV is a stable prefix; private views and recurrent slots grow by appending.
+func.def public @llm_storage(%maximum: i64, %span_capacity: i64, %context: i64, %pool: i64, %rows: i64, %pins: i64, %drafting: i64) -> (buffer, buffer, buffer, buffer, buffer) {
+  // drafting = 0 (draft_depth 0 at serve time): no drafter allocations, one cache region, no draft table.
+  %zero_flag = scalar.constant 0 : i64
+  %on = scalar.cmpi ne, %drafting, %zero_flag : i64
+  %origin = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c0_i32 = scalar.constant 0 : i32
+  %c0_i64 = scalar.constant 0 : i64
+  %c1_i64 = scalar.constant 1 : i64
+  %c4_i64 = scalar.constant 4 : i64
+  %bounded_rows = scalar.assume %rows [range(%rows, 1, 2147483647)] : i64
+  %row_count = index.cast %bounded_rows : i64 to index
+  %slot_stride = scalar.constant 256 : i64
+  %token_bytes = scalar.muli %maximum, %c4_i64 : i64
+  %alignment_bias = scalar.constant 255 : i64
+  %biased_token_bytes = scalar.addi %token_bytes, %alignment_bias : i64
+  %token_slots = scalar.divui %biased_token_bytes, %slot_stride : i64
+  %padded_token_bytes = scalar.muli %token_slots, %slot_stride : i64
+  %progress_offset = scalar.addi %slot_stride, %padded_token_bytes : i64
+  %recurrent_offset = scalar.addi %progress_offset, %slot_stride : i64
+  %recurrent_bytes = scalar.constant 4 : i64
+  %recurrent_padded = scalar.addi %recurrent_bytes, %alignment_bias : i64
+  %recurrent_pages = scalar.divui %recurrent_padded, %slot_stride : i64
+  %recurrent_region = scalar.muli %recurrent_pages, %slot_stride : i64
+  %row_stride = scalar.addi %recurrent_offset, %recurrent_region : i64
+  %pinned = scalar.cmpi ne, %pins, %c0_i64 : i64
+  %twice_rows = scalar.addi %rows, %rows : i64
+  %fork_slots = scalar.addi %twice_rows, %pins : i64
+  %slots = scf.select %pinned, %fork_slots, %rows : i64
+  %private_bytes = scalar.muli %slots, %row_stride : i64
+  %kv_position_bytes = scalar.constant 2048 : i64
+  %plane_count = scalar.constant 48 : i64
+  %plane_bytes = scalar.muli %pool, %kv_position_bytes : i64
+  %pool_bytes = scalar.muli %plane_bytes, %plane_count : i64
+  %biased_pool = scalar.addi %pool_bytes, %alignment_bias : i64
+  %pool_slots = scalar.divui %biased_pool, %slot_stride : i64
+  %private_origin = scalar.muli %pool_slots, %slot_stride : i64
+  %recurrent_origin = scalar.addi %private_origin, %recurrent_offset : i64
+  %arena_bytes = scalar.addi %private_origin, %private_bytes : i64
+  %c3_i64 = scalar.constant 3 : i64
+  %c15_i64 = scalar.constant 15 : i64
+  %c16_i64 = scalar.constant 16 : i64
+  %padded = scalar.addi %context, %c15_i64 : i64
+  %blocks = scalar.divui %padded, %c16_i64 : i64
+  %map_entries = scalar.muli %rows, %blocks : i64
+  %map_bytes = scalar.muli %map_entries, %c4_i64 : i64
+  %origin_stride = scalar.constant 40 : i64
+  %map_origin = scalar.muli %bounded_rows, %origin_stride : i64
+  %table_bytes = scalar.addi %map_origin, %map_bytes : i64
+  %allocation_bytes = index.constant 264 : offset
+  %allocations = buffer.alloca<private> align(8) %allocation_bytes : buffer
+  %allocation_count = index.constant 11 : index
+  scf.for %i = [%c0 to %allocation_count step %c1] {
+    func.call @allocation(%allocations, %i, %c0_i64, %c0_i64) : (buffer, index, i64, i64)
+  }
+  // Final normalized hidden rows (the drafter's catch-up input) live in the residual allocation.
+  %hidden_row = scalar.constant 10240 : i64
+  %carry_stride = scalar.constant 10240 : i64
+  %residual_bytes = scalar.muli %maximum, %hidden_row : i64
+  %span_floor = scalar.muli %span_capacity, %c4_i64 : i64
+  %feedback_bytes = scalar.maxui %residual_bytes, %span_floor : i64
+  %header_bytes = scalar.constant 16 : i64
+  %record_bytes = scalar.constant 36 : i64
+  %plan_bytes = scalar.muli %span_capacity, %record_bytes : i64
+  %metadata_bytes = scalar.addi %header_bytes, %plan_bytes : i64
+  %c2 = index.constant 2 : index
+  %c3 = index.constant 3 : index
+  %c4 = index.constant 4 : index
+  %c5 = index.constant 5 : index
+  func.call @allocation(%allocations, %c0, %feedback_bytes, %c0_i64) : (buffer, index, i64, i64)
+  func.call @allocation(%allocations, %c1, %arena_bytes, %c0_i64) : (buffer, index, i64, i64)
+  func.call @allocation(%allocations, %c2, %metadata_bytes, %c0_i64) : (buffer, index, i64, i64)
+  func.call @allocation(%allocations, %c3, %table_bytes, %c0_i64) : (buffer, index, i64, i64)
+  func.call @allocation(%allocations, %c4, %token_bytes, %c0_i64) : (buffer, index, i64, i64)
+  func.call @allocation(%allocations, %c5, %span_floor, %c0_i64) : (buffer, index, i64, i64)
+  // Drafter: carry (one hidden row per resident row and checkpoint), committed packet, verification
+  // results (first bank 40 B/span, second bank 44 B/span), draft K/V (1 planes over the pool's
+  // page ids), and the draft page table (same layout as the target table).
+  %c6 = index.constant 6 : index
+  %c7 = index.constant 7 : index
+  %c8 = index.constant 8 : index
+  %c9 = index.constant 9 : index
+  %c10 = index.constant 10 : index
+  %owners = scalar.addi %rows, %pins : i64
+  %carry_bytes = scalar.muli %owners, %carry_stride : i64
+  %committed_stride = scalar.constant 40 : i64
+  %committed_records = scalar.muli %span_capacity, %committed_stride : i64
+  %committed_bytes = scalar.addi %committed_records, %header_bytes : i64
+  %result_stride = scalar.constant 84 : i64
+  %results_bytes = scalar.muli %span_capacity, %result_stride : i64
+  %first_bank_stride = scalar.constant 40 : i64
+  %feedback_split = scalar.muli %span_capacity, %first_bank_stride : i64
+  %draft_planes = scalar.constant 1 : i64
+  %draft_pos_bytes = scalar.constant 4 : i64
+  %draft_plane_bytes = scalar.muli %pool, %draft_pos_bytes : i64
+  %draft_bytes = scalar.muli %draft_plane_bytes, %draft_planes : i64
+  %carry_on = scf.select %on, %carry_bytes, %c0_i64 : i64
+  %committed_on = scf.select %on, %committed_bytes, %c0_i64 : i64
+  %results_on = scf.select %on, %results_bytes, %c0_i64 : i64
+  %draft_on = scf.select %on, %draft_bytes, %c0_i64 : i64
+  %table_on = scf.select %on, %table_bytes, %c0_i64 : i64
+  %carry_stride_on = scf.select %on, %carry_stride, %c0_i64 : i64
+  %split_on = scf.select %on, %feedback_split, %c4_i64 : i64
+  func.call @allocation(%allocations, %c6, %carry_on, %carry_on) : (buffer, index, i64, i64)
+  func.call @allocation(%allocations, %c7, %committed_on, %c0_i64) : (buffer, index, i64, i64)
+  func.call @allocation(%allocations, %c8, %results_on, %c0_i64) : (buffer, index, i64, i64)
+  func.call @allocation(%allocations, %c9, %draft_on, %c0_i64) : (buffer, index, i64, i64)
+  func.call @allocation(%allocations, %c10, %table_on, %c0_i64) : (buffer, index, i64, i64)
+
+  // logits:begin
+  // Opt-in logits readback (card config llm.logits, default off; gen_llm.py g_logits_export): the outputs allocation also holds
+  // one full-vocabulary f32 row per slot (min(span_capacity, rows)) after the 8192-span token region. Spans hold at most 8192 tokens (4 B each).
+  %logits_on = config.get @llm.logits : i1
+  scf.if %logits_on {
+    %logit_region = scalar.constant 32768 : i64
+    %logit_row = scalar.constant 1048576 : i64
+    %logit_slots = scalar.minsi %span_capacity, %rows : i64
+    %logit_rows = scalar.muli %logit_slots, %logit_row : i64
+    %logit_total = scalar.addi %logit_region, %logit_rows : i64
+    func.call @allocation(%allocations, %c5, %logit_total, %c0_i64) : (buffer, index, i64, i64)
+  }
+  // logits:end
+
+  %view_stride = index.constant 64 : offset
+  %view_bytes = index.scale %row_count, %view_stride : index, offset -> offset
+  %views = buffer.alloca<private> align(8) %view_bytes : buffer
+  %view_records = buffer.view %views[%origin] : buffer -> view<[%row_count]x4x2xi64>
+  %origin_bytes = index.cast %map_origin : i64 to offset
+  %origins = buffer.alloca<private> align(8) %origin_bytes : buffer
+  buffer.fill %c0_i32, %origins[%origin], %origin_bytes : i32
+  %origin_records = buffer.view %origins[%origin] : buffer -> view<[%row_count]x5xi64>
+  %control_bytes = scalar.constant 12 : i64
+  %progress_bytes = scalar.constant 32 : i64
+  scf.for %row = [%c0 to %row_count step %c1] {
+    %row64 = index.cast %row : index to i64
+    %relative = scalar.muli %row64, %row_stride : i64
+    %base = scalar.addi %private_origin, %relative : i64
+    %tokens = scalar.addi %base, %slot_stride : i64
+    %progress = scalar.addi %base, %progress_offset : i64
+    view.store %base, %view_records[%row, 0, 0] : i64, view<[%row_count]x4x2xi64>
+    view.store %control_bytes, %view_records[%row, 0, 1] : i64, view<[%row_count]x4x2xi64>
+    view.store %c0_i64, %view_records[%row, 1, 0] : i64, view<[%row_count]x4x2xi64>
+    view.store %c0_i64, %view_records[%row, 1, 1] : i64, view<[%row_count]x4x2xi64>
+    view.store %tokens, %view_records[%row, 2, 0] : i64, view<[%row_count]x4x2xi64>
+    view.store %token_bytes, %view_records[%row, 2, 1] : i64, view<[%row_count]x4x2xi64>
+    view.store %progress, %view_records[%row, 3, 0] : i64, view<[%row_count]x4x2xi64>
+    view.store %progress_bytes, %view_records[%row, 3, 1] : i64, view<[%row_count]x4x2xi64>
+    view.store %c0_i64, %origin_records[%row, 2] : i64, view<[%row_count]x5xi64>
+    %map_stride = scalar.muli %blocks, %c4_i64 : i64
+    %map_offset = scalar.muli %row64, %map_stride : i64
+    %map_base = scalar.addi %map_origin, %map_offset : i64
+    view.store %map_base, %origin_records[%row, 4] : i64, view<[%row_count]x5xi64>
+  }
+  %geometry_one = index.constant 104 : offset
+  %geometry_two = index.constant 144 : offset
+  %geometry_bytes = scf.select %on, %geometry_two, %geometry_one : offset
+  %geometry = buffer.alloca<private> align(8) %geometry_bytes : buffer
+  %geometry_view = buffer.view %geometry[%origin] : buffer -> view<13xi64>
+  view.store %c16_i64, %geometry_view[0] : i64, view<13xi64>
+  view.store %map_origin, %geometry_view[1] : i64, view<13xi64>
+  view.store %carry_stride_on, %geometry_view[2] : i64, view<13xi64>
+  view.store %split_on, %geometry_view[3] : i64, view<13xi64>
+  view.store %recurrent_origin, %geometry_view[4] : i64, view<13xi64>
+  view.store %row_stride, %geometry_view[5] : i64, view<13xi64>
+  view.store %recurrent_bytes, %geometry_view[6] : i64, view<13xi64>
+  view.store %slots, %geometry_view[7] : i64, view<13xi64>
+  view.store %c1_i64, %geometry_view[8] : i64, view<13xi64>
+  view.store %c0_i64, %geometry_view[9] : i64, view<13xi64>
+  view.store %plane_count, %geometry_view[10] : i64, view<13xi64>
+  view.store %plane_bytes, %geometry_view[11] : i64, view<13xi64>
+  %block_bytes = scalar.constant 32768 : i64
+  view.store %block_bytes, %geometry_view[12] : i64, view<13xi64>
+  // second cache region: the drafter's K/V planes (allocation 9), same page geometry
+  %draft_origins = scf.if %on -> (buffer) {
+    %region_at = index.constant 104 : offset
+    %region = buffer.view %geometry[%region_at] : buffer -> view<5xi64>
+    %c9_i64 = scalar.constant 9 : i64
+    %draft_block_bytes = scalar.constant 64 : i64
+    view.store %c9_i64, %region[0] : i64, view<5xi64>
+    view.store %c0_i64, %region[1] : i64, view<5xi64>
+    view.store %draft_planes, %region[2] : i64, view<5xi64>
+    view.store %draft_plane_bytes, %region[3] : i64, view<5xi64>
+    view.store %draft_block_bytes, %region[4] : i64, view<5xi64>
+    // the draft page table starts as a copy of the target's (page maps at the same offsets)
+    %copy = buffer.alloca<private> align(8) %origin_bytes : buffer
+    buffer.copy %origins[%origin], %copy[%origin], %origin_bytes
+    scf.yield %copy : buffer
+  } else {
+    %none_bytes = index.constant 0 : offset
+    %none = buffer.alloca<private> align(1) %none_bytes : buffer
+    scf.yield %none : buffer
+  }
+  %empty_bytes = index.constant 0 : offset
+  %empty = buffer.alloca<private> align(1) %empty_bytes : buffer
+  func.return %allocations, %views, %origins, %draft_origins, %geometry : buffer, buffer, buffer, buffer, buffer
+}

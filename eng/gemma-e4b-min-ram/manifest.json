@@ -1,0 +1,210 @@
+{
+  "experiment_id": "gemma-e4b-min-ram-dispatch-v2",
+  "root_git_commit": "bacdd3ed241eb62f9578b909ef63eaa0751f3c49",
+  "checkpoint": {
+    "repo": "unsloth/gemma-4-E4B-it-GGUF",
+    "revision": "bfc15c382204943c3a8fff0c750b94ae2364d7a3",
+    "file": "gemma-4-E4B-it-Q4_K_M.gguf",
+    "bytes": 4977171584,
+    "sha256": "36c0282999c77e97bca7354f5a7aa8cd43b0f4167e1f4febfa755073428d1b41",
+    "sha256_source": "existing exact #554 staged Q4_K_M file; dedicated DevLab runner must verify after cache reuse/fetch"
+  },
+  "tokenizer": {
+    "origin": "exact maintained E4B package tokenizer previously used by card source",
+    "path": "work/issue-campaign-2026-11-17/eng/1145/finite-preservation/payloads/unsloth-gemma-4-E4B-it-loom/tokenizer.json",
+    "bytes": 15142283,
+    "sha256": "fad8ef1277f412fd6276f1fef8169f1c4b36dc3e1b784888c58ae458470900fd",
+    "card_source": "loom-fun/unsloth-gemma-4-E4B-it-loom@1d1f17f3438cdc9c3d0fc83255c9c8f9a68d38f7"
+  },
+  "sdk_source_commit": "0cd370f2baaa0cfef47cc23007f1a109906f8a52",
+  "builder": {
+    "path": "eng/gemma-e4b-min-ram/kit/build.py",
+    "sha256": "faeb722cee49d011cd3422d79832dfb9533710845f7f9e8041b841ff9d363db4",
+    "kit_sha256": "e40fd8d3d77174bf809860ae91f6db2214a9e207dad341b663dc3af22f0127fd",
+    "kit_source": "official reference/apply_example.sh gemma4 from clean bacdd3ed241eb62f9578b909ef63eaa0751f3c49; KIT_SOURCE dirty=false, modified=false, absolute kb_root omitted for portability; job sets LOOM_KB_ROOT to the same pinned source tree",
+    "args_common": [
+      "--draft",
+      "none",
+      "--prefill",
+      "1024",
+      "--memory-gib",
+      "auto"
+    ],
+    "omit_args": [
+      "--pool"
+    ],
+    "sdk_source_commit": "0cd370f2baaa0cfef47cc23007f1a109906f8a52",
+    "kit_source_prior_dirty_receipt": "previous analysis-only kit hash 2491e2548667defe0d0dd2fadcfc2ae65e84d094353b918ad381843ade8bc3fe remains in original pre-review work artifact; not used by this experiment"
+  },
+  "source_config": {
+    "path": "eng/gemma-e4b-min-ram/target_build_config.json",
+    "sha256": "30f607b7e0ed58dbcde90df0518395639c61c6970c1ad2a6e80ddc0390e63345",
+    "role": "720-tensor exact E4B target-only build config; no vision, assistant or drafter"
+  },
+  "target_text_config": {
+    "path": "eng/gemma-e4b-min-ram/target_text_llm_config.json",
+    "sha256": "9320e0b11be38e812c9524d456a571d3361d6f27090c4a1a1f0dd44eb9cd28c7",
+    "role": "SDK 0.2.0 wheel pin and model identity metadata only; codegen uses target_build_config.json"
+  },
+  "arms": [
+    {
+      "name": "target-only-131k-r4",
+      "context": 131072,
+      "rows": 4,
+      "build_result": "build-output-03/baseline",
+      "builder_pool_estimate_positions": 196608
+    },
+    {
+      "name": "target-only-64k-r1",
+      "context": 65536,
+      "rows": 1,
+      "build_result": "build-output-03/candidate",
+      "builder_pool_estimate_positions": 131072
+    }
+  ],
+  "storage_formula_source": {
+    "path": "work/issue-campaign-2026-11-17/eng/gemma-qat-impl/fleet-head/unsloth-gemma-4-E4B-it-loom/program/storage.loom",
+    "sha256": "62ab19951a2128b5dd2a6c720fae217daca2ffac191f68fe4253f241fee97dd2",
+    "constants": {
+      "planes": 48,
+      "bytes_per_plane_position": 2048
+    },
+    "built_package_storage_sha256": "4039b5e7121843d8574ce8607dae2f61bd35f5c478d13c239bdb93177dace708"
+  },
+  "runtime_storage_prediction": {
+    "if_pool_equals_context": {
+      "131072_pool_bytes": 12884901888,
+      "65536_pool_bytes": 6442450944
+    },
+    "interpretation": "source-derived fixed-backing estimate only; runtime status must report actual storage and must not infer pool positions from context alone"
+  },
+  "reference_data": {
+    "full_context": "#554 Strix exact E4B: 130997/131072 tokens completed in 69s; see pinned fullctx_staging.txt",
+    "checkpoint_fetch": "#554 Strix exact E4B fetch reached 2.2GiB at 73.8MiB/s, ETA35s; use as time anchor only",
+    "llama_compare": "#554 Strix exact-checkpoint compare/golden suite PASS; see gates_staging/gates_compare.log"
+  },
+  "gpu_execution": "not run; final code review, push, and dispatch remain lead-owned",
+  "build_config": {
+    "path": "work/issue-campaign-2026-11-17/eng/gemma-e4b-min-ram/frozen-v1/target_build_config.json",
+    "sha256": "30f607b7e0ed58dbcde90df0518395639c61c6970c1ad2a6e80ddc0390e63345",
+    "origin": "#554 exact E4B fresh.json (720 tensors); vision/assistant/drafter absent; used as input to the frozen kit builder"
+  },
+  "builder_sizing_estimates": {
+    "baseline_default_pool_positions": 196608,
+    "baseline_kv_bytes": 19327352832,
+    "candidate_default_pool_positions": 131072,
+    "candidate_kv_bytes": 12884901888,
+    "interpretation": "build.py --memory-gib auto sizing output; not proven as runtime fixed-pool allocation because pool is not serialized in model.json preset"
+  },
+  "build_artifacts": {
+    "directory": "work/issue-campaign-2026-11-17/eng/gemma-e4b-min-ram/frozen-v1/build-output-03",
+    "source_config_runtime_rewritten_only_gguf_path": true,
+    "packages_built_without_gpu": true,
+    "model_json_sha256": {
+      "baseline": "55189a7fc60eed67bfc6b751c0d084bbf618dbbdf95749e782eb2a6b70fa2d32",
+      "candidate": "8976fc256be4ff341db5e2036576834c5d4fa6b4f165d35b38341983c7645be0"
+    },
+    "llm_loom_sha256_both": "4954e7dfcea7c005796bfb247b1838acdfa52b6fe5a67fd3ad887a6d1071cb62",
+    "storage_loom_sha256_both": "4039b5e7121843d8574ce8607dae2f61bd35f5c478d13c239bdb93177dace708",
+    "runtime_IR_parse": "not run; lead-reviewed DevLab startup will compile/parse"
+  },
+  "sampler": {
+    "path": "eng/gemma-e4b-min-ram/cold_capacity_targeted.py",
+    "sha256": "d80a28c82487e4b5087c2657f9695ad8e94fef8db3d9831dd9b914e35b14c624",
+    "behavioral_tests": {
+      "path": "eng/gemma-e4b-min-ram/test_frontier.py",
+      "sha256": "3bea5257729bd0bb1dfa939062c557ab583055482c57d6ad80e6672f1502de03",
+      "result": "focused mocked inter-arm settle success and 60-second timeout test PASS; original readiness/monitor checks retained unchanged"
+    },
+    "correctness": "same server-counted 65535-token retrieval, planted-word oracle, short Paris oracle, one-token usage; compare requires identical outputs and prompt hash",
+    "storage_reporting": "records runtime committed storage but does not infer pool_positions from context_capacity"
+  },
+  "frontier_runner": {
+    "path": "eng/gemma-e4b-min-ram/run_frontier.sh",
+    "sha256": "f045d7729577a4158a6c077c39b41b11272d4943814d363a88163710b13adf0b",
+    "outer_timeout_seconds": 1800,
+    "inner_job_timeout_seconds": 1700,
+    "order": [
+      "candidate",
+      "baseline"
+    ],
+    "servers_concurrent": false,
+    "readiness": "same first short semantic oracle retries HTTP 503 only, <=120 seconds, all response bodies/status/latencies recorded; monitor must stop by explicit marker before deadline",
+    "monitor_validation": "requires explicit stop marker, nonempty samples, stable matching PID/start_ticks, selected gfx1151, exactly one AMD sysfs card, and a non-null GPU memory counter; missing host channels unknown; total RAM never claimed verified",
+    "dispatch": "official workflow path above; no job dispatched",
+    "device_settle": {
+      "pre_arm_samples": 5,
+      "pre_arm_stability_range_bytes": 16777216,
+      "inter_arm_timeout_seconds": 60,
+      "baseline_tolerance_bytes": 67108864,
+      "stable_window_samples": 5,
+      "stable_window_range_bytes": 16777216,
+      "channels": [
+        "target PCI mem_info_vram_used",
+        "same PCI mem_info_gtt_used"
+      ],
+      "host_memavailable": "raw context only; no settle gate or cache eviction",
+      "timeout_outcome": "preserve candidate; mark baseline contaminated_not_run; no memory win",
+      "pre_arm_timeout_seconds": 15
+    },
+    "source_helpers": {
+      "serve": {
+        "path": "skills/loom-setup/scripts/serve.sh",
+        "sha256": "05ff396c1e5d889ad16226183d7f98a2531e5114293a4eabf783fc1e0223dba3"
+      },
+      "stop": {
+        "path": "skills/loom-setup/scripts/stop.sh",
+        "sha256": "49bccbd184270d2d1106daf845bc3de888b836d6a44dce3f646152eef9047f3e"
+      },
+      "memcheck": {
+        "path": "skills/loom-setup/scripts/memcheck.sh",
+        "sha256": "c590ff8b5a05e2190560048ddc7de2ff09cac646517826dbdcaeb650acc4f895"
+      }
+    },
+    "checkout_guard": "under GitHub Actions require git HEAD == GITHUB_SHA and no tracked modifications; standalone run may omit GITHUB_SHA"
+  },
+  "runner_scripts": {
+    "run_job.sh": "5b7c148d43fe5d5384cf3392b3691b46b83d4dbe7064ad4ce733f0471dad4692",
+    "run_frontier.sh": "f045d7729577a4158a6c077c39b41b11272d4943814d363a88163710b13adf0b",
+    "prepare_packages.sh": "02d9307e3d4dbb8783eb809837b6d4d5770b1c50060908c71dd7d4d40baf4d1a",
+    "cold_capacity_targeted.py": "d80a28c82487e4b5087c2657f9695ad8e94fef8db3d9831dd9b914e35b14c624",
+    "test_frontier.py": "3bea5257729bd0bb1dfa939062c557ab583055482c57d6ad80e6672f1502de03",
+    "compare_arms.py": "fbfcdb1f99b004b097f5c0d6b17121e7b5c3fed8303edd9d5895e4cdb6ffa089",
+    "build.py": "faeb722cee49d011cd3422d79832dfb9533710845f7f9e8041b841ff9d363db4",
+    "target_build_config.json": "30f607b7e0ed58dbcde90df0518395639c61c6970c1ad2a6e80ddc0390e63345",
+    "target_text_llm_config.json": "9320e0b11be38e812c9524d456a571d3361d6f27090c4a1a1f0dd44eb9cd28c7",
+    "sdk_pin.py": "27b2270276db1699c86c431bd00630db2c99bb7bfe49556d9cd3df2f76c808f4"
+  },
+  "isolated_source_form": "clean isolated branch/worktree from origin/main bacdd3ed241eb62f9578b909ef63eaa0751f3c49; official gemma4 example kit freshly generated from that source",
+  "checkpoint_sha_local_read_note": "One actual SHA256 scan of the pre-existing staged #554 GGUF was performed locally before the latest DevLab-only guard. No download/copy/cache reset; possible page-cache warming is disclosed in REPORT.md. Future full scan is guarded for designated DevLab.",
+  "preparation_helper": {
+    "path": "eng/gemma-e4b-min-ram/prepare_packages.sh",
+    "sha256": "02d9307e3d4dbb8783eb809837b6d4d5770b1c50060908c71dd7d4d40baf4d1a",
+    "actual_checkpoint_hash": "computed once by sha256sum on designated DevLab, bound to device/inode/size/mtime; no user digest accepted",
+    "host_meminfo_pre_post_hash": "recorded as MemTotal/MemFree/MemAvailable/Cached/SReclaimable/Shmem",
+    "fetch_policy": "official pinned Hugging Face cache; if absent one immutable fetch; cache-hit status, full-file-size estimate and fetch elapsed time recorded; actual resumable network bytes may be unavailable from hf_hub_download"
+  },
+  "artifact_inventory": {
+    "frozen_kit": "fresh official clean-main Gemma4 kit; hash e40fd8d3d77174bf809860ae91f6db2214a9e207dad341b663dc3af22f0127fd; no generated package output or weights committed",
+    "source_config": "720-tensor exact E4B build config; no vision, assistant or drafter",
+    "prior_dirty_kit": "preserved only in pre-review analysis artifact outside this dispatch branch; excluded from build inputs",
+    "dispatch_payload": "one-variant JSON and branch-only workflow timeout override",
+    "generated_outputs": "removed before artifact upload; job-local absolute paths scrubbed; checkpoint remains in official Hugging Face cache"
+  },
+  "git_branch": "codex/issue-campaign-20261117-gemma-e4b-min-ram",
+  "dispatch_route": {
+    "workflow": ".github/workflows/devlab-experiment.yml",
+    "experiment": ".github/devlab/gemma-e4b-min-ram.json",
+    "variant_count": 1,
+    "runner": "[strix-halo, devlab-dispatch, Linux, self-hosted]",
+    "workflow_timeout_minutes": 30,
+    "step_timeout_seconds": 1800,
+    "dispatch_command": "gh workflow run devlab-experiment.yml --ref codex/issue-campaign-20261117-gemma-e4b-min-ram -f experiment=.github/devlab/gemma-e4b-min-ram.json",
+    "dispatch_status": "not dispatched; lead pushes and runs after final review",
+    "source_kit": "fresh official gemma4 example from clean main bacdd3ed241eb62f9578b909ef63eaa0751f3c49; hash e40fd8d3d77174bf809860ae91f6db2214a9e207dad341b663dc3af22f0127fd"
+  },
+  "startup_shell_check": {
+    "check": "env -u HF_HOME with set -u evaluates the two separate defaults",
+    "result": "PASS; values point to $HOME/.cache/huggingface and its hub subdirectory; no files written"
+  }
+}

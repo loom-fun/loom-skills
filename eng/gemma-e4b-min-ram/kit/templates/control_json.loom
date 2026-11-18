@@ -1,0 +1,400 @@
+
+// ---- Llama-3-style chat pieces (build.py appends this file only when the chat block has system_preamble,
+// tools_in_user, tools_indent, tool_content_json or call_format "json"; other packages' control.loom is unchanged).
+
+// A JSON string literal of %text (Jinja tojson of a string: Llama 3 prints tool results that way).
+func.def @json_quote(%text: buffer) -> (buffer) {
+  %c0 = index.constant 0 : offset
+  %c1 = index.constant 1 : offset
+  %c2 = index.constant 2 : offset
+  %quote = scalar.constant 34 : i32
+  %length = buffer.length %text
+  %twice = index.add %length, %length : offset
+  %capacity = index.add %twice, %c2 : offset
+  %output = buffer.alloca<private> align(1) %capacity : buffer
+  buffer.store.i8 %quote, %output[%c0]
+  %end = func.call @json_escape(%text, %c0, %length, %output, %c1) : (buffer, offset, offset, buffer, offset) -> (offset)
+  buffer.store.i8 %quote, %output[%end]
+  %used = index.add %end, %c1 : offset
+  %result = func.call @slice(%output, %c0, %used) : (buffer, offset, offset) -> (buffer)
+  func.return %result : buffer
+}
+
+// A newline and %levels indentation steps at %out; returns the end.
+func.def @json_newline(%output: buffer, %out: offset, %levels: i64) -> (offset) {
+  %c1 = index.constant 1 : offset
+  %newline = scalar.constant 10 : i32
+  %space = scalar.constant 32 : i32
+  %width = scalar.constant @@TOOLS_INDENT@@ : i64
+  %zero64 = scalar.constant 0 : i64
+  %one64 = scalar.constant 1 : i64
+  buffer.store.i8 %newline, %output[%out]
+  %start = index.add %out, %c1 : offset
+  %count = scalar.muli %levels, %width : i64
+  %final_k, %final_position = scf.while(%k = %zero64 : i64, %position = %start : offset) -> (i64, offset) {
+    %more = scalar.cmpi slt, %k, %count : i64
+    scf.condition %more, %k, %position : i1, i64, offset
+  } do(%k: i64, %position: offset) {
+    buffer.store.i8 %space, %output[%position]
+    %next_k = scalar.addi %k, %one64 : i64
+    %next_position = index.add %position, %c1 : offset
+    scf.yield %next_k, %next_position : i64, offset
+  }
+  func.return %final_position : offset
+}
+
+// Compact JSON laid out as Python's json.dumps(indent=TOOLS_INDENT) (Jinja tojson(indent=N), Llama 3's tool list):
+// a newline and the depth's indentation after '{', '[' and ',' and before '}' and ']', ': ' after a key, empty
+// containers kept as {} and [].
+func.def @json_indent(%text: buffer) -> (buffer) {
+  %c0 = index.constant 0 : offset
+  %c1 = index.constant 1 : offset
+  %c2 = index.constant 2 : offset
+  %quote = scalar.constant 34 : i32
+  %backslash = scalar.constant 92 : i32
+  %comma = scalar.constant 44 : i32
+  %colon = scalar.constant 58 : i32
+  %space = scalar.constant 32 : i32
+  %brace_open = scalar.constant 123 : i32
+  %brace_close = scalar.constant 125 : i32
+  %bracket_open = scalar.constant 91 : i32
+  %bracket_close = scalar.constant 93 : i32
+  %zero32 = scalar.constant 0 : i32
+  %zero64 = scalar.constant 0 : i64
+  %one64 = scalar.constant 1 : i64
+  %three64 = scalar.constant 3 : i64
+  %width = scalar.constant @@TOOLS_INDENT@@ : i64
+  %false = scalar.constant false : i1
+  %length = buffer.length %text
+  // Pass 1: the deepest nesting bounds the output: each input byte writes at most itself, a newline, the
+  // indentation of that depth and a space.
+  %d_in, %d_inside, %d_escape, %d_depth, %d_deepest = scf.while(%in = %c0 : offset, %inside = %false : i1, %escape = %false : i1, %depth = %zero64 : i64, %deepest = %zero64 : i64) -> (offset, i1, i1, i64, i64) {
+    %more = index.cmp ult, %in, %length : offset
+    scf.condition %more, %in, %inside, %escape, %depth, %deepest : i1, offset, i1, i1, i64, i64
+  } do(%in: offset, %inside: i1, %escape: i1, %depth: i64, %deepest: i64) {
+    %byte = buffer.load.i8.u %text[%in]
+    %is_quote = scalar.cmpi eq, %byte, %quote : i32
+    %is_backslash = scalar.cmpi eq, %byte, %backslash : i32
+    %outside = scalar.cmpi eq, %inside, %false : i1
+    %plain = scalar.cmpi eq, %escape, %false : i1
+    %live = scalar.andi %inside, %plain : i1
+    %starts_escape = scalar.andi %live, %is_backslash : i1
+    %closes = scalar.andi %live, %is_quote : i1
+    %opens = scalar.andi %outside, %is_quote : i1
+    %stays = scalar.cmpi eq, %closes, %false : i1
+    %kept = scalar.andi %inside, %stays : i1
+    %next_inside = scalar.ori %kept, %opens : i1
+    %is_brace_open = scalar.cmpi eq, %byte, %brace_open : i32
+    %is_bracket_open = scalar.cmpi eq, %byte, %bracket_open : i32
+    %is_open = scalar.ori %is_brace_open, %is_bracket_open : i1
+    %is_brace_close = scalar.cmpi eq, %byte, %brace_close : i32
+    %is_bracket_close = scalar.cmpi eq, %byte, %bracket_close : i32
+    %is_close = scalar.ori %is_brace_close, %is_bracket_close : i1
+    %level_up = scalar.andi %outside, %is_open : i1
+    %level_down = scalar.andi %outside, %is_close : i1
+    %up = scalar.addi %depth, %one64 : i64
+    %down_from = scf.select %level_down, %depth, %one64 : i64
+    %down = scalar.subi %down_from, %one64 : i64
+    %depth_a = scf.select %level_up, %up, %depth : i64
+    %next_depth = scf.select %level_down, %down, %depth_a : i64
+    %is_deeper = scalar.cmpi sgt, %next_depth, %deepest : i64
+    %next_deepest = scf.select %is_deeper, %next_depth, %deepest : i64
+    %next_in = index.add %in, %c1 : offset
+    scf.yield %next_in, %next_inside, %starts_escape, %next_depth, %next_deepest : offset, i1, i1, i64, i64
+  }
+  %indent_bytes = scalar.muli %d_deepest, %width : i64
+  %per_byte = scalar.addi %indent_bytes, %three64 : i64
+  %length64 = index.cast %length : offset to i64
+  %body64 = scalar.muli %length64, %per_byte : i64
+  %capacity64 = scalar.addi %body64, %three64 : i64
+  %bounded_capacity = scalar.assume %capacity64 [range(%capacity64, 0, 9223372036854775807)] : i64
+  %capacity = index.cast %bounded_capacity : i64 to offset
+  %output = buffer.alloca<private> align(1) %capacity : buffer
+  // Pass 2: the layout.
+  %final_in, %final_out, %final_inside, %final_escape, %final_depth = scf.while(%in = %c0 : offset, %out = %c0 : offset, %inside = %false : i1, %escape = %false : i1, %depth = %zero64 : i64) -> (offset, offset, i1, i1, i64) {
+    %more = index.cmp ult, %in, %length : offset
+    scf.condition %more, %in, %out, %inside, %escape, %depth : i1, offset, offset, i1, i1, i64
+  } do(%in: offset, %out: offset, %inside: i1, %escape: i1, %depth: i64) {
+    %byte = buffer.load.i8.u %text[%in]
+    %is_quote = scalar.cmpi eq, %byte, %quote : i32
+    %is_backslash = scalar.cmpi eq, %byte, %backslash : i32
+    %outside = scalar.cmpi eq, %inside, %false : i1
+    %plain = scalar.cmpi eq, %escape, %false : i1
+    %live = scalar.andi %inside, %plain : i1
+    %starts_escape = scalar.andi %live, %is_backslash : i1
+    %closes = scalar.andi %live, %is_quote : i1
+    %opens = scalar.andi %outside, %is_quote : i1
+    %stays = scalar.cmpi eq, %closes, %false : i1
+    %kept = scalar.andi %inside, %stays : i1
+    %next_inside = scalar.ori %kept, %opens : i1
+    %next_at = index.add %in, %c1 : offset
+    %has_next = index.cmp ult, %next_at, %length : offset
+    %next_byte = scf.if %has_next -> (i32) {
+      %value = buffer.load.i8.u %text[%next_at]
+      scf.yield %value : i32
+    } else {
+      scf.yield %zero32 : i32
+    }
+    %is_brace_open = scalar.cmpi eq, %byte, %brace_open : i32
+    %is_bracket_open = scalar.cmpi eq, %byte, %bracket_open : i32
+    %is_open = scalar.ori %is_brace_open, %is_bracket_open : i1
+    %is_brace_close = scalar.cmpi eq, %byte, %brace_close : i32
+    %is_bracket_close = scalar.cmpi eq, %byte, %bracket_close : i32
+    %is_close = scalar.ori %is_brace_close, %is_bracket_close : i1
+    %next_brace_close = scalar.cmpi eq, %next_byte, %brace_close : i32
+    %next_bracket_close = scalar.cmpi eq, %next_byte, %bracket_close : i32
+    %empty_object = scalar.andi %is_brace_open, %next_brace_close : i1
+    %empty_array = scalar.andi %is_bracket_open, %next_bracket_close : i1
+    %empty_pair = scalar.ori %empty_object, %empty_array : i1
+    %empty = scalar.andi %outside, %empty_pair : i1
+    %not_empty = scalar.cmpi eq, %empty, %false : i1
+    %open_any = scalar.andi %outside, %is_open : i1
+    %open = scalar.andi %open_any, %not_empty : i1
+    %close = scalar.andi %outside, %is_close : i1
+    %is_comma = scalar.cmpi eq, %byte, %comma : i32
+    %is_colon = scalar.cmpi eq, %byte, %colon : i32
+    %separator = scalar.andi %outside, %is_comma : i1
+    %key_end = scalar.andi %outside, %is_colon : i1
+    // Before a closing bracket: a newline at the enclosing depth.
+    %close_from = scf.select %close, %depth, %one64 : i64
+    %close_depth = scalar.subi %close_from, %one64 : i64
+    %after_lead = scf.if %close -> (offset) {
+      %position = func.call @json_newline(%output, %out, %close_depth) : (buffer, offset, i64) -> (offset)
+      scf.yield %position : offset
+    } else {
+      scf.yield %out : offset
+    }
+    buffer.store.i8 %byte, %output[%after_lead]
+    %after_byte = index.add %after_lead, %c1 : offset
+    %after_pair = scf.if %empty -> (offset) {
+      buffer.store.i8 %next_byte, %output[%after_byte]
+      %position = index.add %after_byte, %c1 : offset
+      scf.yield %position : offset
+    } else {
+      scf.yield %after_byte : offset
+    }
+    // After an opening bracket (one level deeper) or a comma: a newline at that depth.
+    %open_depth = scalar.addi %depth, %one64 : i64
+    %breaks = scalar.ori %open, %separator : i1
+    %break_depth = scf.select %open, %open_depth, %depth : i64
+    %after_break = scf.if %breaks -> (offset) {
+      %position = func.call @json_newline(%output, %after_pair, %break_depth) : (buffer, offset, i64) -> (offset)
+      scf.yield %position : offset
+    } else {
+      scf.yield %after_pair : offset
+    }
+    %written = scf.if %key_end -> (offset) {
+      buffer.store.i8 %space, %output[%after_break]
+      %position = index.add %after_break, %c1 : offset
+      scf.yield %position : offset
+    } else {
+      scf.yield %after_break : offset
+    }
+    %depth_a = scf.select %open, %open_depth, %depth : i64
+    %next_depth = scf.select %close, %close_depth, %depth_a : i64
+    %step = scf.select %empty, %c2, %c1 : offset
+    %next_in = index.add %in, %step : offset
+    scf.yield %next_in, %written, %next_inside, %starts_escape, %next_depth : offset, offset, i1, i1, i64
+  }
+  %result = func.call @slice(%output, %c0, %final_out) : (buffer, offset, offset) -> (buffer)
+  func.return %result : buffer
+}
+// @@IF_CHAT:call_arguments_key@@
+
+// ---- Bare JSON tool calls (chat.call_format "json"; Llama 3: {"name": NAME, "parameters": ARGS}) ----------------
+// '{"name": "', '", "<call_arguments_key>": ', '}' and the arguments key as the model writes it
+global.rodata.def @json_call_open = bytes("7b226e616d65223a2022")
+
+global.rodata.def @json_call_middle = bytes("@@HEX_JSON_CALL_MIDDLE@@")
+
+global.rodata.def @json_call_close = bytes("7d")
+
+global.rodata.def @json_arguments_field = bytes("@@HEX_JSON_ARGUMENTS_FIELD@@")
+
+// The token a model may write before its call (chat.call_prefix_token, Llama 3.1: <|python_tag|>, kept in the
+// decoded text as nonspecial); empty when none.
+global.rodata.def @json_call_prefix = bytes("@@HEX_JSON_CALL_PREFIX@@")
+
+// Content ends at the call: the call prefix token or the call marker, whichever comes first (the rest goes to
+// parse_tools). No reasoning channel (build.py requires thinking never with JSON calls).
+func.def public @output_next(%response: buffer, %previous: i64, %state: i64, %phase: i32) -> (i64, i64, i64, i64) {
+  %origin = index.constant 0 : offset
+  %one64 = scalar.constant 1 : i64
+  %marker = global.load @text_tool_marker : buffer
+  %call_prefix = global.load @json_call_prefix : buffer
+  %prefix_length = buffer.length %call_prefix
+  %has_prefix = index.cmp ne, %prefix_length, %origin : offset
+  %at_marker = func.call @text_until(%response, %marker, %previous, %phase) : (buffer, buffer, i64, i32) -> (i64)
+  %at_prefix = scf.if %has_prefix -> (i64) {
+    %value = func.call @text_until(%response, %call_prefix, %previous, %phase) : (buffer, buffer, i64, i32) -> (i64)
+    scf.yield %value : i64
+  } else {
+    scf.yield %at_marker : i64
+  }
+  %prefix_first = scalar.cmpi slt, %at_prefix, %at_marker : i64
+  %end = scf.select %prefix_first, %at_prefix, %at_marker : i64
+  func.return %one64, %previous, %end, %state : i64, i64, i64, i64
+}
+
+// End of the JSON object or array that opens at %begin (just after its closing bracket) and whether it closed
+// before %end; strings are skipped.
+func.def @json_value_end(%text: buffer, %begin: offset, %end: offset) -> (offset, i1) {
+  %c1 = index.constant 1 : offset
+  %quote = scalar.constant 34 : i32
+  %backslash = scalar.constant 92 : i32
+  %brace_open = scalar.constant 123 : i32
+  %brace_close = scalar.constant 125 : i32
+  %bracket_open = scalar.constant 91 : i32
+  %bracket_close = scalar.constant 93 : i32
+  %zero64 = scalar.constant 0 : i64
+  %one64 = scalar.constant 1 : i64
+  %false = scalar.constant false : i1
+  %final_in, %final_depth, %final_inside, %final_escape, %final_done = scf.while(%in = %begin : offset, %depth = %zero64 : i64, %inside = %false : i1, %escape = %false : i1, %done = %false : i1) -> (offset, i64, i1, i1, i1) {
+    %more = index.cmp ult, %in, %end : offset
+    %open_scan = scalar.cmpi eq, %done, %false : i1
+    %go = scalar.andi %more, %open_scan : i1
+    scf.condition %go, %in, %depth, %inside, %escape, %done : i1, offset, i64, i1, i1, i1
+  } do(%in: offset, %depth: i64, %inside: i1, %escape: i1, %done: i1) {
+    %byte = buffer.load.i8.u %text[%in]
+    %is_quote = scalar.cmpi eq, %byte, %quote : i32
+    %is_backslash = scalar.cmpi eq, %byte, %backslash : i32
+    %outside = scalar.cmpi eq, %inside, %false : i1
+    %plain = scalar.cmpi eq, %escape, %false : i1
+    %live = scalar.andi %inside, %plain : i1
+    %starts_escape = scalar.andi %live, %is_backslash : i1
+    %closes = scalar.andi %live, %is_quote : i1
+    %opens = scalar.andi %outside, %is_quote : i1
+    %stays = scalar.cmpi eq, %closes, %false : i1
+    %kept = scalar.andi %inside, %stays : i1
+    %next_inside = scalar.ori %kept, %opens : i1
+    %is_brace_open = scalar.cmpi eq, %byte, %brace_open : i32
+    %is_bracket_open = scalar.cmpi eq, %byte, %bracket_open : i32
+    %is_open = scalar.ori %is_brace_open, %is_bracket_open : i1
+    %is_brace_close = scalar.cmpi eq, %byte, %brace_close : i32
+    %is_bracket_close = scalar.cmpi eq, %byte, %bracket_close : i32
+    %is_close = scalar.ori %is_brace_close, %is_bracket_close : i1
+    %level_up = scalar.andi %outside, %is_open : i1
+    %level_down = scalar.andi %outside, %is_close : i1
+    %up = scalar.addi %depth, %one64 : i64
+    %down = scalar.subi %depth, %one64 : i64
+    %depth_a = scf.select %level_up, %up, %depth : i64
+    %next_depth = scf.select %level_down, %down, %depth_a : i64
+    %at_top = scalar.cmpi eq, %next_depth, %zero64 : i64
+    %next_done = scalar.andi %level_down, %at_top : i1
+    %next_in = index.add %in, %c1 : offset
+    scf.yield %next_in, %next_depth, %next_inside, %starts_escape, %next_done : offset, i64, i1, i1, i1
+  }
+  func.return %final_in, %final_done : offset, i1
+}
+
+// The call that starts at the call marker, scanned without a JSON parser like hermes_calls: its "name" string and
+// its arguments object (bracket-matched); the template takes one call per turn, so text after it is dropped.
+// Returns the host's call records ([] when no complete call).
+func.def @json_calls(%response: buffer) -> (buffer) {
+  %origin = index.constant 0 : offset
+  %c1 = index.constant 1 : offset
+  %c64 = index.constant 64 : offset
+  %colon = scalar.constant 58 : i32
+  %quote = scalar.constant 34 : i32
+  %brace_open = scalar.constant 123 : i32
+  %open_bracket = scalar.constant 91 : i32
+  %close_bracket = scalar.constant 93 : i32
+  %length = buffer.length %response
+  %twice = index.add %length, %length : offset
+  %scaled = index.add %twice, %twice : offset
+  %capacity = index.add %scaled, %c64 : offset
+  %output = buffer.alloca<private> align(1) %capacity : buffer
+  %marker = global.load @text_tool_marker : buffer
+  %start = func.call @find(%response, %origin, %length, %marker) : (buffer, offset, offset, buffer) -> (offset)
+  %has_start = index.cmp ult, %start, %length : offset
+  // "name": "<value>"
+  %name_field = global.load @name_field : buffer
+  %name_field_length = buffer.length %name_field
+  %name_key = func.call @find(%response, %start, %length, %name_field) : (buffer, offset, offset, buffer) -> (offset)
+  %after_name_key = index.add %name_key, %name_field_length : offset
+  %name_colon = func.call @skip_space(%response, %after_name_key, %length) : (buffer, offset, offset) -> (offset)
+  %has_name_colon = func.call @byte_is(%response, %name_colon, %length, %colon) : (buffer, offset, offset, i32) -> (i1)
+  %after_name_colon = index.add %name_colon, %c1 : offset
+  %name_quote = func.call @skip_space(%response, %after_name_colon, %length) : (buffer, offset, offset) -> (offset)
+  %has_name_quote = func.call @byte_is(%response, %name_quote, %length, %quote) : (buffer, offset, offset, i32) -> (i1)
+  %name_begin = index.add %name_quote, %c1 : offset
+  %name_end = func.call @string_end(%response, %name_begin, %length) : (buffer, offset, offset) -> (offset)
+  %name_ok_a = scalar.andi %has_name_colon, %has_name_quote : i1
+  %name_closed = index.cmp ult, %name_end, %length : offset
+  %name_ok = scalar.andi %name_ok_a, %name_closed : i1
+  // "<arguments key>": {...}
+  %arguments_field = global.load @json_arguments_field : buffer
+  %arguments_field_length = buffer.length %arguments_field
+  %arguments_key = func.call @find(%response, %name_end, %length, %arguments_field) : (buffer, offset, offset, buffer) -> (offset)
+  %after_arguments_key = index.add %arguments_key, %arguments_field_length : offset
+  %arguments_colon = func.call @skip_space(%response, %after_arguments_key, %length) : (buffer, offset, offset) -> (offset)
+  %has_arguments_colon = func.call @byte_is(%response, %arguments_colon, %length, %colon) : (buffer, offset, offset, i32) -> (i1)
+  %after_arguments_colon = index.add %arguments_colon, %c1 : offset
+  %value_begin = func.call @skip_space(%response, %after_arguments_colon, %length) : (buffer, offset, offset) -> (offset)
+  %is_object = func.call @byte_is(%response, %value_begin, %length, %brace_open) : (buffer, offset, offset, i32) -> (i1)
+  %value_end, %value_closed = func.call @json_value_end(%response, %value_begin, %length) : (buffer, offset, offset) -> (offset, i1)
+  %arguments_ok_a = scalar.andi %has_arguments_colon, %is_object : i1
+  %arguments_ok = scalar.andi %arguments_ok_a, %value_closed : i1
+  %found = scalar.andi %has_start, %name_ok : i1
+  %ok = scalar.andi %found, %arguments_ok : i1
+  buffer.store.i8 %open_bracket, %output[%origin]
+  %final_out = scf.if %ok -> (offset) {
+    %record_open = global.load @record_open : buffer
+    %record_middle = global.load @record_middle : buffer
+    %record_close = global.load @record_close : buffer
+    %after_open = func.call @tool_append(%output, %c1, %record_open) : (buffer, offset, buffer) -> (offset)
+    // The name is already JSON string content.
+    %name_bytes = index.sub %name_end, %name_begin : offset
+    buffer.copy %response[%name_begin], %output[%after_open], %name_bytes
+    %after_name = index.add %after_open, %name_bytes : offset
+    %after_middle = func.call @tool_append(%output, %after_name, %record_middle) : (buffer, offset, buffer) -> (offset)
+    %after_value = func.call @json_escape(%response, %value_begin, %value_end, %output, %after_middle) : (buffer, offset, offset, buffer, offset) -> (offset)
+    %after_record = func.call @tool_append(%output, %after_value, %record_close) : (buffer, offset, buffer) -> (offset)
+    scf.yield %after_record : offset
+  } else {
+    scf.yield %c1 : offset
+  }
+  buffer.store.i8 %close_bracket, %output[%final_out]
+  %used = index.add %final_out, %c1 : offset
+  %result = func.call @slice(%output, %origin, %used) : (buffer, offset, offset) -> (buffer)
+  func.return %result : buffer
+}
+
+// One call as the template prints it: {"name": "NAME", "<key>": ARGS} with the arguments re-spaced the way
+// Python's json.dumps prints them (", " and ": "), so generated calls round-trip byte-exactly.
+func.def public @render_tool(%name: buffer, %arguments: buffer, %ordinal: i64) -> (buffer, i64) {
+  %zero64 = scalar.constant 0 : i64
+  %has_prior = scalar.cmpi ne, %ordinal, %zero64 : i64
+  %separator_value = global.load @call_separator : buffer
+  %empty = global.load @empty : buffer
+  %separator = scf.select %has_prior, %separator_value, %empty : buffer
+  %open = global.load @json_call_open : buffer
+  %middle = global.load @json_call_middle : buffer
+  %close = global.load @json_call_close : buffer
+  %compacted = func.call @compact(%arguments) : (buffer) -> (buffer)
+  %spaced = func.call @json_spaced(%compacted) : (buffer) -> (buffer)
+  %head = func.call @join4(%separator, %open, %name, %middle) : (buffer, buffer, buffer, buffer) -> (buffer)
+  %result = func.call @join4(%head, %spaced, %close, %empty) : (buffer, buffer, buffer, buffer) -> (buffer)
+  %length_bytes = buffer.length %result
+  %length = index.cast %length_bytes : offset to i64
+  func.return %result, %length : buffer, i64
+}
+
+func.def public @parse_tools(%schemas: buffer, %response: buffer, %truncated: i64) -> (buffer) {
+  %c0 = index.constant 0 : offset
+  %zero64 = scalar.constant 0 : i64
+  %length = buffer.length %response
+  %has_text = index.cmp ne, %length, %c0 : offset
+  %schema_fields, %schema_type, %schema_count = func.call @members(%schemas) : (buffer) -> (buffer, i32, i64)
+  %schema_present = scalar.cmpi ne, %schema_count, %zero64 : i64
+  %parse = scalar.andi %has_text, %schema_present : i1
+  %calls = scf.if %parse -> (buffer) {
+    %records = func.call @json_calls(%response) : (buffer) -> (buffer)
+    scf.yield %records : buffer
+  } else {
+    %none = global.load @no_tools : buffer
+    scf.yield %none : buffer
+  }
+  func.return %calls : buffer
+}
+// @@END_CHAT@@

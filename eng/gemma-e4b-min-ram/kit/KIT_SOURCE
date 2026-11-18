@@ -1,0 +1,7 @@
+{
+ "dirty": false,
+ "example": "gemma4",
+ "kb_root": null,
+ "kit_sha256": "e40fd8d3d77174bf809860ae91f6db2214a9e207dad341b663dc3af22f0127fd",
+ "skills_commit": "bacdd3ed241eb62f9578b909ef63eaa0751f3c49"
+}

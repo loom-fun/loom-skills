@@ -1,0 +1,59 @@
+kernel.def export("g_row_scale_f16") @g_row_scale_f16(%rows: index) {
+  %c1 = index.constant 1 : index
+  %c256 = index.constant 256 : index
+  kernel.launch.config workgroups(%rows, %c1, %c1) workgroup_size(%c256, %c1, %c1) : index
+} launch(%rows_arg: index, %k_arg: index, %x: buffer, %scales: buffer, %x16: buffer) {
+  %rows = index.assume %rows_arg [range(%rows_arg, 1, 2097152)] : index
+  %k = index.assume %k_arg [range(%k_arg, 256, 65536), multiple_of(%k_arg, 256)] : index
+  %row_id = kernel.workgroup.id<x> : index
+  %row = index.assume %row_id [lt(%row_id, %rows)] : index
+  %lane = kernel.workitem.id<x> : index
+  %zero = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c256 = index.constant 256 : index
+  %zero_f = scalar.constant 0.0 : f32
+  %x_view = buffer.view %x[%zero] : buffer -> view<[%rows]x[%k]xf32>
+  %h_view = buffer.view %x16[%zero] : buffer -> view<[%rows]x[%k]xf16>
+  %local = scf.for %c = [%lane to %k step %c256](%m = %zero_f : f32) -> (f32) {
+    %bc = index.assume %c [lt(%c, %k)] : index
+    %v = view.load %x_view[%row, %bc] : view<[%rows]x[%k]xf32> -> f32
+    %a = scalar.absf %v : f32
+    %n = scalar.maxnumf %m, %a : f32
+    scf.yield %n : f32
+  }
+  %maximum = kernel.workgroup.reduce<maxnumf> %local : f32
+  %bits = scalar.bitcast %maximum : f32 to i32
+  %c23 = scalar.constant 23 : i32
+  %c255 = scalar.constant 255 : i32
+  %shifted = scalar.shrui %bits, %c23 : i32
+  %biased = scalar.andi %shifted, %c255 : i32
+  %c127 = scalar.constant 127 : i32
+  %c13 = scalar.constant 13 : i32
+  %c0_i32 = scalar.constant 0 : i32
+  %c100 = scalar.constant 100 : i32
+  %unbiased = scalar.subi %biased, %c127 : i32
+  %raw_e = scalar.subi %unbiased, %c13 : i32
+  %positive = scalar.maxsi %raw_e, %c0_i32 : i32
+  %e = scalar.minsi %positive, %c100 : i32
+  %scale_exp = scalar.subi %c127, %e : i32
+  %inverse_exp = scalar.addi %c127, %e : i32
+  %scale_bits = scalar.shli %scale_exp, %c23 : i32
+  %inverse_bits = scalar.shli %inverse_exp, %c23 : i32
+  %scale = scalar.bitcast %scale_bits : i32 to f32
+  %inverse = scalar.bitcast %inverse_bits : i32 to f32
+  scf.for %c = [%lane to %k step %c256] {
+    %bc = index.assume %c [lt(%c, %k)] : index
+    %v = view.load %x_view[%row, %bc] : view<[%rows]x[%k]xf32> -> f32
+    %sv = scalar.mulf %v, %scale : f32
+    %hv = scalar.fptrunc %sv : f32 to f16
+    view.store %hv, %h_view[%row, %bc] : f16, view<[%rows]x[%k]xf16>
+  }
+  %first = index.cmp eq, %lane, %c0 : index
+  scf.if %first {
+    %s_view = buffer.view %scales[%zero] : buffer -> view<[%rows]x2xf32>
+    view.store %scale, %s_view[%row, %c0] : f32, view<[%rows]x2xf32>
+    view.store %inverse, %s_view[%row, %c1] : f32, view<[%rows]x2xf32>
+  }
+  kernel.return
+}

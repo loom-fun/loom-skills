@@ -1,0 +1,5 @@
+{"arch": "gemma4",
+ "decodes": ["BF16"],
+ "lacks": ["IQ4_NL"],
+ "hint": "the plain Q4_K_M at nvidia/NVIDIA-Nemotron-3.5-Bolt-E4B-4GB:Nemotron-3.5-Bolt-E4B-Q4_K_M.gguf uses only formats this example decodes",
+ "why": "the per-layer-embedding projection is BF16 in Q4_K_M files and the example decodes it (gen_llm.py, gen_gemm.py); unsloth's UD-Q4_K_XL stores the per-layer embeddings as IQ4_NL, which the example's PLE kernel does not decode (DevLab trials spent up to 200 min adding it)"}
