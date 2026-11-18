@@ -667,7 +667,7 @@
  "loom-fun/unsloth-gemma-4-31B-it-qat-loom": {
   "card": "loom-fun/unsloth-gemma-4-31B-it-qat-loom",
   "live_kind": "assist",
-  "live_depth": 1,
+  "live_depth": 3,
   "choice": "assist",
   "provenance": [
    "https://huggingface.co/unsloth/gemma-4-31B-it-qat-GGUF/blob/43cc1aeb31adf47ec06a854507ce552cd9862e6f/MTP/README.md",

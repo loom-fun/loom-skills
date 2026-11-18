@@ -154,67 +154,67 @@
  "drafter": {
   "kind": "assist",
   "depth": 1,
-  "note": "tuned on DevLab (devlab-perf sweeps, perf.py short/long rows, spec gate per candidate); DFlash rows: the non-QAT Anbeeld drafter, comparison only (classification rule 1)",
+  "note": "tuned on DevLab on the final programs (int8 Q4_0 verify, #1273): perf.py rows and the spec gate per depth on both GPUs; R9700 at its drafted preset (31B 10240/prefill 512 measured at 8192/prefill 1024, 26B 36864/prefill 2048)",
   "tuned": [
    {
     "kind": "assist",
     "depth": 1,
     "device": "radeon-r9700",
     "rows": {
-     "decode": 203.61,
-     "decode_2k": 184.85
+     "decode": 220.59,
+     "decode_2k": 193.95
     },
     "acceptance": {
-     "decode": 0.763,
-     "decode_2k": 0.759
+     "decode": 0.749,
+     "decode_2k": 0.711
     },
     "spec": "PASS",
-    "run": 44307376426
+    "run": 44366709833
    },
    {
     "kind": "assist",
     "depth": 2,
     "device": "radeon-r9700",
     "rows": {
-     "decode": 163.33,
-     "decode_2k": 147.84
+     "decode": 192.0,
+     "decode_2k": 176.07
     },
     "acceptance": {
-     "decode": 0.62,
+     "decode": 0.591,
      "decode_2k": 0.59
     },
     "spec": "PASS",
-    "run": 44307376426
+    "run": 44366709833
    },
    {
     "kind": "assist",
     "depth": 3,
     "device": "radeon-r9700",
     "rows": {
-     "decode": 178.76,
-     "decode_2k": 161.63
+     "decode": 219.04,
+     "decode_2k": 182.63
     },
     "acceptance": {
-     "decode": 0.538,
-     "decode_2k": 0.522
+     "decode": 0.541,
+     "decode_2k": 0.473
     },
     "spec": "PASS",
-    "run": 44307376426
+    "run": 44366709833
    },
    {
     "kind": "assist",
     "depth": 4,
     "device": "radeon-r9700",
     "rows": {
-     "decode": 118.1,
-     "decode_2k": 104.48
+     "decode": 149.03,
+     "decode_2k": 131.21
     },
     "acceptance": {
-     "decode": 0.433,
-     "decode_2k": 0.391
+     "decode": 0.43,
+     "decode_2k": 0.394
     },
     "spec": "PASS",
-    "run": 44307376426
+    "run": 44366709833
    },
    {
     "kind": "dflash",
@@ -229,7 +229,8 @@
      "decode_2k": 0.509
     },
     "spec": "PASS",
-    "run": 44307376426
+    "run": 44307376426,
+    "programs": "before #1273 (f32 Q4_0 verify); the non-QAT Anbeeld drafter, comparison only"
    },
    {
     "kind": "dflash",
@@ -244,7 +245,8 @@
      "decode_2k": 0.267
     },
     "spec": "PASS",
-    "run": 44307376426
+    "run": 44307376426,
+    "programs": "before #1273 (f32 Q4_0 verify); the non-QAT Anbeeld drafter, comparison only"
    },
    {
     "kind": "dflash",
@@ -259,60 +261,61 @@
      "decode_2k": 0.158
     },
     "spec": "PASS",
-    "run": 44307376426
+    "run": 44307376426,
+    "programs": "before #1273 (f32 Q4_0 verify); the non-QAT Anbeeld drafter, comparison only"
    },
    {
     "kind": "none",
     "depth": 0,
     "device": "radeon-r9700",
     "rows": {
-     "decode": 174.59,
-     "decode_2k": 156.31
+     "decode": 171.6,
+     "decode_2k": 152.81
     },
-    "run": 44307376426
+    "run": 44366709833
    },
    {
     "kind": "assist",
     "depth": 1,
     "device": "strix-halo",
     "rows": {
-     "decode": 95.06,
-     "decode_2k": 80.32,
-     "decode_32k": 65.88
+     "decode": 103.48,
+     "decode_2k": 87.35,
+     "decode_32k": 66.02
     },
     "acceptance": {
      "decode": 0.763,
-     "decode_2k": 0.656,
-     "decode_32k": 0.716
+     "decode_2k": 0.66,
+     "decode_32k": 0.649
     },
     "spec": "PASS",
-    "run": 44307376426
+    "run": 44354585376
    },
    {
     "kind": "assist",
     "depth": 2,
     "device": "strix-halo",
     "rows": {
-     "decode": 76.27,
-     "decode_2k": 65.02,
-     "decode_32k": 54.49
+     "decode": 88.46,
+     "decode_2k": 79.22,
+     "decode_32k": 61.69
     },
     "acceptance": {
-     "decode": 0.62,
-     "decode_2k": 0.541,
+     "decode": 0.629,
+     "decode_2k": 0.609,
      "decode_32k": 0.625
     },
     "spec": "PASS",
-    "run": 44307376426
+    "run": 44354585376
    },
    {
     "kind": "assist",
     "depth": 3,
     "device": "strix-halo",
     "rows": {
-     "decode": 85.48,
-     "decode_2k": 72.48,
-     "decode_32k": 53.69
+     "decode": 101.57,
+     "decode_2k": 84.1,
+     "decode_32k": 60.55
     },
     "acceptance": {
      "decode": 0.538,
@@ -320,24 +323,41 @@
      "decode_32k": 0.497
     },
     "spec": "PASS",
-    "run": 44307376426
+    "run": 44354585376
    },
    {
     "kind": "assist",
     "depth": 4,
     "device": "strix-halo",
     "rows": {
-     "decode": 52.92,
-     "decode_2k": 50.2,
-     "decode_32k": 39.02
+     "decode": 70.53,
+     "decode_2k": 64.84,
+     "decode_32k": 47.12
     },
     "acceptance": {
-     "decode": 0.433,
-     "decode_2k": 0.433,
-     "decode_32k": 0.44
+     "decode": 0.44,
+     "decode_2k": 0.426,
+     "decode_32k": 0.426
     },
     "spec": "PASS",
-    "run": 44307376426
+    "run": 44354585376
+   },
+   {
+    "kind": "assist",
+    "depth": 5,
+    "device": "strix-halo",
+    "rows": {
+     "decode": 70.9,
+     "decode_2k": 64.17,
+     "decode_32k": 49.23
+    },
+    "acceptance": {
+     "decode": 0.373,
+     "decode_2k": 0.367,
+     "decode_32k": 0.415
+    },
+    "spec": "PASS",
+    "run": 44354585376
    },
    {
     "kind": "dflash",
@@ -354,7 +374,8 @@
      "decode_32k": 0.465
     },
     "spec": "PASS",
-    "run": 44307376426
+    "run": 44307376426,
+    "programs": "before #1273 (f32 Q4_0 verify); the non-QAT Anbeeld drafter, comparison only"
    },
    {
     "kind": "dflash",
@@ -371,7 +392,8 @@
      "decode_32k": 0.219
     },
     "spec": "PASS",
-    "run": 44307376426
+    "run": 44307376426,
+    "programs": "before #1273 (f32 Q4_0 verify); the non-QAT Anbeeld drafter, comparison only"
    },
    {
     "kind": "dflash",
@@ -388,18 +410,8 @@
      "decode_32k": 0.168
     },
     "spec": "PASS",
-    "run": 44307376426
-   },
-   {
-    "kind": "none",
-    "depth": 0,
-    "device": "strix-halo",
-    "rows": {
-     "decode": 74.64,
-     "decode_2k": 67.56,
-     "decode_32k": 55.99
-    },
-    "run": 44307376426
+    "run": 44307376426,
+    "programs": "before #1273 (f32 Q4_0 verify); the non-QAT Anbeeld drafter, comparison only"
    }
   ]
  }

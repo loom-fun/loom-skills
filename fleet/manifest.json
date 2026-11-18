@@ -1656,7 +1656,7 @@
   "unsloth-gemma-4-26B-A4B-it-qat-loom": {
    "staging": {
     "repo": "loom-fun-staging/unsloth-gemma-4-26B-A4B-it-qat-loom",
-    "revision": "4bf08bd8d7fe8a20ce01cbed427778604a971ca7"
+    "revision": "aacb7418e90274f669ec0eb741e3da27d590a71a"
    },
    "model_id": "google/gemma-4-26B-A4B-it-qat-q4_0-unquantized",
    "kit": "gemma4",
@@ -1727,7 +1727,7 @@
   "unsloth-gemma-4-31B-it-qat-loom": {
    "staging": {
     "repo": "loom-fun-staging/unsloth-gemma-4-31B-it-qat-loom",
-    "revision": "8496d48196eccbb8137f771834ea6c4458c66265"
+    "revision": "a3eb8e456ae37bf5f1f32377eb7cd8012c0a0926"
    },
    "model_id": "google/gemma-4-31B-it-qat-q4_0-unquantized",
    "kit": "gemma4",
@@ -1738,7 +1738,7 @@
     "prefill": 1024,
     "rows": 4,
     "max_tokens": 4096,
-    "draft_depth": 1
+    "draft_depth": 3
    },
    "files": {
     "gemma-4-31B-it-qat-UD-Q4_K_XL.gguf": {
