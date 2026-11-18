@@ -1,0 +1,111 @@
+name: gapprof
+# Windows-vs-Linux performance gap profiler: the same loom-fun card (same hrx-loom wheel) on AMD DevLab Dispatch Strix
+# Halo runners of both OSes, perf.py variants under telemetry plus per-kernel HAL profiles (.github/gapprof/gapprof.py).
+# One matrix job per (model, os) in .github/gapprof/targets.json. Runs on a push to a gapprof/** branch.
+on:
+  push:
+    branches: ["gapprof/**"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gapprof-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  plan:
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.pick.outputs.matrix }}
+      variants: ${{ steps.pick.outputs.variants }}
+      profile: ${{ steps.pick.outputs.profile }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: pick
+        run: |
+          python3 - >> "$GITHUB_OUTPUT" <<'PY'
+          import json
+          t = json.load(open('.github/gapprof/targets.json'))
+          print('matrix=' + json.dumps({'repo': t['models'], 'os': t['os']}))
+          print('variants=' + t.get('variants', 'card'))
+          print('profile=' + t.get('profile', ''))
+          PY
+
+  windows:
+    needs: plan
+    if: contains(fromJSON(needs.plan.outputs.matrix).os, 'windows')
+    strategy:
+      fail-fast: false
+      matrix:
+        repo: ${{ fromJSON(needs.plan.outputs.matrix).repo }}
+    name: win ${{ matrix.repo }}
+    runs-on: [windows, strix-halo, devlab-dispatch]
+    timeout-minutes: 300
+    env:
+      HF_TOKEN: ${{ secrets.HF_TOKEN }}
+      HF_HUB_DOWNLOAD_TIMEOUT: "120"
+      PYTHONUTF8: "1"
+    defaults:
+      run:
+        shell: powershell
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            .github/gapprof
+            skills/loom-benchmark
+      - name: gapprof
+        run: |
+          $slug = "${{ matrix.repo }}".Split("/")[1]
+          "SLUG=$slug" >> $env:GITHUB_ENV
+          python .github/gapprof/gapprof.py "${{ matrix.repo }}" "$env:RUNNER_TEMP\gapprof-out" --variants "${{ needs.plan.outputs.variants }}" --profile "${{ needs.plan.outputs.profile }}"
+          if ($LASTEXITCODE -ne 0) { throw "gapprof exited $LASTEXITCODE" }
+      - name: upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gapprof-windows-${{ env.SLUG }}
+          path: ${{ runner.temp }}/gapprof-out
+          retention-days: 30
+      - name: clean up
+        if: always()
+        run: Remove-Item -Recurse -Force "$env:RUNNER_TEMP\gapprof-work","$env:RUNNER_TEMP\gapprof-out" -ErrorAction SilentlyContinue
+
+  linux:
+    needs: plan
+    if: contains(fromJSON(needs.plan.outputs.matrix).os, 'linux')
+    strategy:
+      fail-fast: false
+      matrix:
+        repo: ${{ fromJSON(needs.plan.outputs.matrix).repo }}
+    name: linux ${{ matrix.repo }}
+    runs-on: [strix-halo, devlab-dispatch, Linux, self-hosted]
+    timeout-minutes: 300
+    env:
+      HF_TOKEN: ${{ secrets.HF_TOKEN }}
+      HF_HUB_DOWNLOAD_TIMEOUT: "120"
+      PYTHONUTF8: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            .github/gapprof
+            skills/loom-benchmark
+      - name: gapprof
+        env:
+          REPO: ${{ matrix.repo }}
+        run: |
+          echo "SLUG=${REPO#*/}" >> "$GITHUB_ENV"
+          export HF_HOME="$RUNNER_TEMP/hf"
+          python3 .github/gapprof/gapprof.py "$REPO" "$RUNNER_TEMP/gapprof-out" --variants "${{ needs.plan.outputs.variants }}" --profile "${{ needs.plan.outputs.profile }}"
+      - name: upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gapprof-linux-${{ env.SLUG }}
+          path: ${{ runner.temp }}/gapprof-out
+          retention-days: 30
+      - name: clean up
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/gapprof-work" "$RUNNER_TEMP/gapprof-out" "$RUNNER_TEMP/hf"
