@@ -164,6 +164,7 @@ sys.path.insert(0, subprocess.run([VPY, "-c", "import sysconfig; print(sysconfig
                                   capture_output=True, text=True).stdout.strip())
 import psutil  # noqa: E402  (from the venv: same interpreter version)
 
+
 # -- serving -------------------------------------------------------------------------------------------------------------
 BASE_ARGS = shlex.split(serve_line)[1:]
 PROFILE_FLAGS = ["--device_profiling_mode=dispatch-events,executable-metadata", "--device_profiling_flush_interval_ms=5",
@@ -250,6 +251,27 @@ def hwmon(name):
         return None
 
 
+def proc_snapshot():
+    snap = {}
+    for pr in psutil.process_iter(["name", "cmdline"]):
+        try:
+            t = pr.cpu_times()
+            snap[pr.pid] = (pr.info["name"], " ".join(pr.info["cmdline"] or [])[:160], t.user + t.system)
+        except Exception:
+            pass
+    return snap
+
+
+def top_procs(a_, b_, secs, n=8):
+    """Processes by CPU cores used between two snapshots (other than this harness's own load generators)."""
+    rows = []
+    for pid, (name, cmd, t1) in b_.items():
+        t0 = a_.get(pid, (None, None, 0.0))[2] if pid in a_ else 0.0
+        rows.append((round((t1 - t0) / secs, 2), name, pid, cmd))
+    rows.sort(reverse=True)
+    return [{"cores": c, "name": nm, "pid": pid, "cmd": cmd} for c, nm, pid, cmd in rows[:n] if c >= 0.05]
+
+
 class Telemetry:
     def __init__(self, pid, path):
         self.pid, self.path, self.rows, self.stop_ev = pid, path, [], threading.Event()
@@ -263,6 +285,7 @@ class Telemetry:
                         r"\Thermal Zone Information(*)\Throttle Reasons"]
             self.tp = subprocess.Popen(["typeperf"] + counters + ["-si", "1", "-f", "CSV", "-o", self.tpcsv, "-y"],
                                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self.snap0, self.snap_t0 = proc_snapshot(), time.time()
         self.th = threading.Thread(target=self.run, daemon=True)
         self.th.start()
 
@@ -306,7 +329,7 @@ class Telemetry:
         with open(self.path, "w") as f:
             for r in self.rows:
                 f.write(json.dumps(r) + "\n")
-        s = {}
+        s = {"top_procs": top_procs(self.snap0, proc_snapshot(), time.time() - self.snap_t0)}
         for t0, t1, label in marks:
             rows = [r for r in self.rows if t0 <= r["t"] <= t1]
             d = {}
@@ -376,6 +399,14 @@ def summarize_typeperf(path, marks):
 def cpuload_proc():
     return subprocess.Popen([sys.executable, "-c", "while True: pass"])
 
+
+# -- baseline: background CPU on the runner before any GPU work -------------------------------------------------------
+_s0, _t0 = proc_snapshot(), time.time()
+psutil.cpu_percent(None)
+time.sleep(30)
+E["baseline_cpu_total"] = psutil.cpu_percent(None)
+E["baseline_top_procs"] = top_procs(_s0, proc_snapshot(), time.time() - _t0)
+save()
 
 # -- variants: perf.py under telemetry -------------------------------------------------------------------------------
 for v in [x for x in a.variants.split(",") if x]:
