@@ -40,6 +40,7 @@ IGNORED_JSON = ("origins", "origin")   # model.json: where the files came from, 
 TOP_COMMENT = re.compile(r"^//.*\n?", re.M)   # column-0 comments sit between blocks: which block owns one shifts when blocks are inserted
 RDNA3_TAG = re.compile(r" target\(@(?:rdna3|device)\)")
 MACHINERY = ("template", "decl")   # block kinds the dual-target machinery adds (template.decl/def, target.decl, amdgpu.target)
+CATALOG_ABSENT = "new model: absent from base fleet/manifest.json"
 
 
 def norm(text):
@@ -217,12 +218,15 @@ def diff_model(base, head, slug, rules):
 
 
 def _skipped(d):
-    """The models build_fleet.py skipped in a build dir: their source path does not exist in that ref's kit (a new model)."""
+    """Models explicitly proven absent from the historical ref's fleet catalog by impact planning."""
     sj = os.path.join(d, "summary.json")
-    return set((_read(sj, json.load) if os.path.isfile(sj) else {}).get("skipped") or {})
+    summary = _read(sj, json.load) if os.path.isfile(sj) else {}
+    proof = summary.get("catalog_absent") or {}
+    skipped = summary.get("skipped") or {}
+    return {s for s, reason in proof.items() if reason == CATALOG_ABSENT and skipped.get(s) == reason}
 
 
-def report(base, head, models=None):
+def report(base, head, models=None, removed_from_head=()):
     rules = load_rules()
     slugs = sorted(s for s in set(os.listdir(base)) | set(os.listdir(head)) if os.path.isdir(os.path.join(base, s)) or os.path.isdir(os.path.join(head, s)))
     slugs = [s for s in slugs if not s.startswith("_") and (not models or s in models)]
@@ -230,8 +234,9 @@ def report(base, head, models=None):
     for s in slugs:
         if s in _skipped(base) and os.path.isdir(os.path.join(head, s)):   # a model the base's kit cannot build yet: new at the head
             progs, _, cfg = read_dir(head, s)
+            reason = (_read(os.path.join(base, "summary.json"), json.load).get("skipped", {}).get(s, ""))
             out["models"][s] = {"new_model": True, "files": [], "blocks": [], "model_json": [], "gpus": [], "rows": [], "gates": [],
-                                "stratum": strata(cfg, "\n".join(progs.values()))}
+                                "reason": reason, "stratum": strata(cfg, "\n".join(progs.values()))}
             continue
         if not (os.path.isdir(os.path.join(base, s)) and os.path.isdir(os.path.join(head, s))):
             out["models"][s] = {"error": "present in only one build"}
@@ -241,6 +246,8 @@ def report(base, head, models=None):
             out["models"][s] = r
         else:
             out["untouched"].append(s)
+    for s in sorted(set(removed_from_head)):
+        out["models"][s] = {"removed_model": True, "files": [], "blocks": [], "model_json": [], "gpus": [], "rows": [], "gates": []}
     fam = {}
     for s, r in out["models"].items():
         for b in r.get("blocks", []):
@@ -266,7 +273,10 @@ def markdown(rep):
             L.append(f"| {m} | {r['error']} | | | | |")
             continue
         if r.get("new_model"):
-            L.append(f"| {m} | new model (the base kit cannot build its source yet) | | | | |")
+            L.append(f"| {m} | {r.get('reason') or 'new model (absent from BASE catalog)'} | | | | |")
+            continue
+        if r.get("removed_model"):
+            L.append(f"| {m} | removed from HEAD catalog | | | | |")
             continue
         c = {k: sum(1 for b in r["blocks"] if b["status"] == k) for k in ("added", "removed", "changed")}
         st = r["stratum"]
@@ -282,7 +292,17 @@ def check_complete(d, slugs):
     """Problems that make a build dir unfit for a comparison: a missing or empty model, or failures its summary.json recorded.
     Without this an empty directory compares equal to another empty one ('0 models differ')."""
     bad = []
+    sj = os.path.join(d, "summary.json")
+    summary = _read(sj, json.load) if os.path.isfile(sj) else {}
+    proof = summary.get("catalog_absent") or {}
+    build_skips = summary.get("skipped") or {}
     skipped = _skipped(d)
+    unproven_skips = set(build_skips) - skipped
+    invalid_proofs = set(proof) - skipped
+    bad = [f"{s}: unproven skipped build in {d}" for s in sorted(unproven_skips) if not slugs or s in slugs]
+    bad += [f"{s}: invalid catalog absence evidence in {d}" for s in sorted(invalid_proofs)]
+    if not set(slugs) >= skipped:
+        bad.append(f"catalog absence markers outside selected models in {d}")
     for s in slugs:
         if s in skipped:
             continue
@@ -290,7 +310,6 @@ def check_complete(d, slugs):
         has = os.path.isfile(os.path.join(p, "model.json")) and any(f.endswith(".loom") for _, _, fs in os.walk(p) for f in fs)
         if not has:
             bad.append(f"{s}: no model.json / program in {d}")
-    sj = os.path.join(d, "summary.json")
     if os.path.isfile(sj):
         fails = _read(sj, json.load).get("failures") or {}
         bad += [f"{s}: the build failed ({str(e)[:100]})" for s, e in sorted(fails.items()) if not slugs or s in slugs]

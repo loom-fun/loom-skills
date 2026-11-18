@@ -44,6 +44,7 @@ class Repo:
         """EXTRA {path: text}: files of the base commit written over the defaults."""
         self.d = tempfile.mkdtemp(prefix="scope_lint_test_")
         self.write("fleet/ownership.json", json.dumps(OWN))
+        self.write("fleet/manifest.json", json.dumps({"models": {}}))
         self.write("skills/loom-kb/choices.py", CHOICES)
         self.write("skills/loom-kb/resolve.py", (ROOT / "skills" / "loom-kb" / "resolve.py").read_text())
         for node, m in {"arch/llm/moe/qwen35moe": {"arch": ["qwen35moe"]}, "facet/drafted": {"facets": ["drafted"]},
@@ -150,8 +151,6 @@ class T(unittest.TestCase):
         self.assertFalse(output.exists())
 
     def test_valid_preflight_preserves_existing_plan(self):
-        self.r.write("fleet/manifest.json", json.dumps({"models": {}}))
-        self.r.commit()
         expected = PLAN.make_plan(self.r.d, "base")
         body = Path(self.r.d, "pr-body.md")
         body.write_text("kind: architecture\n")
@@ -160,8 +159,6 @@ class T(unittest.TestCase):
         self.assertEqual(json.loads(output.read_text()), expected)
 
     def test_standalone_plan_without_pr_body_keeps_previous_output(self):
-        self.r.write("fleet/manifest.json", json.dumps({"models": {}}))
-        self.r.commit()
         expected = PLAN.make_plan(self.r.d, "base")
         output = Path(self.r.d, "standalone-plan.json")
         PLAN.main(["plan", "--repo", self.r.d, "--base", "base", "--out", str(output)])

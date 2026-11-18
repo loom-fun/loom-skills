@@ -106,11 +106,15 @@ builder's process pool, capped at two processes per runner; GPU/device subjobs a
 only generates both targets' programs on CPU. Exact caches include the immutable revision, target kit/KB
 trees, HEAD's fleet input/tool tree, selected model list, and installed dependency versions.
 Both revisions intentionally use HEAD's manifest/config/header inputs, matching
-`build_fleet.py --ref` semantics.
+`build_fleet.py --ref` semantics. The planner also validates each revision's own
+`fleet/manifest.json`: selected additions are accounted as absent from BASE and built
+at HEAD; removals are reported from the catalog comparison.
 
 The final `impact` job fails if planning or any build fails, any expected shard or model
-is absent, its revision/model set is wrong, or a HEAD model is skipped. Base-kit skips
-for newly introduced source formats remain visible as new models. Non-input PRs still
+is absent, its revision/model set is wrong, or any build reports a skip. Only a selected
+model proven absent from the historical BASE manifest receives a truthful catalog-absence
+marker; missing/corrupt catalogs and failures for cataloged BASE models remain fatal.
+Non-input PRs still
 fail for invalid/missing scope blocks and protected-file violations. No GPU correctness
 or performance gate is removed by this CPU optimization. When introducing a new build
 dependency outside the kit/KB/fleet trees, update the planner's explicit non-input contract
