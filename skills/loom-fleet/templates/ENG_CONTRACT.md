@@ -7,7 +7,7 @@
   `🤖 Generated with [Claude Code](https://claude.com/claude-code)`. Commit trailer exactly `Co-Authored-By: Claude <noreply@anthropic.com>`; no model names or
   versions anywhere in commits or PR text.
 - Declare the scope first (`skills/loom-kb/SKILL.md`, mandate rules); run `fleet/scope_lint.py --local` before opening the PR.
-- Before delegating or resuming delegated work, follow `skills/loom-fleet/reference/campaign.md`'s model-selection and dispatch procedure. Check every spawn payload, including nested tasks, for its own tier, reason, host model, and supported controls; record actual dispatch evidence and verification or explicit unverified fallback. Pass only supported overrides on the actual call, keep active-worker status separate from new launches on resume, and make no-history briefs self-contained.
+- Before every spawn, resume, or nested delegation, follow `skills/loom-fleet/reference/campaign.md`'s exact model-family mapping and check the actual model argument. Every payload needs its own tier, reason, allowed family/concrete ID, dispatch arguments/result, and verification or explicit unverified limitation. Never use Astra or Fable or silently substitute another family. Keep reasoning effort separate, active-worker status separate from new launches on resume, and no-history briefs self-contained.
 - Tests: `python -m unittest discover -s tests` passes; add tests for what you build. Unless the task says otherwise, your change
   must not change any generated program or card: prove it with the fleet program diff (`fleet/README.md`).
 - NO local GPU. GPU work only on DevLab via the devlab-perf workflow (labels in `skills/loom-fleet/reference/campaign.md`). Poll with

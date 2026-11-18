@@ -2,6 +2,7 @@
 
 Campaign directory: @DIR@. Integration branch: `@INTEGRATION@` (from `@BASE@`). Started @DATE@.
 How a campaign runs, and why each rule exists: `skills/loom-fleet/reference/campaign.md` in the loom-skills repo.
+Before campaign startup, resume, or any delegation, apply its exact model-family mapping and verify the actual dispatch arguments.
 
 ## Goal
 TODO one paragraph: the owner's goal in their words (new GPU, new models, a refactor ...), then the numbered deliverables.
