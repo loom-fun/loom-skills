@@ -54,6 +54,14 @@ the pinned tensor metadata nor any numerical kernel, cache layout or reference.
 Lead dispatch entrypoint, on the exact clean reviewed checkout containing both
 this adapter and the source fix (ordinary pinned commit must exist in local git):
 
+Use the existing `devlab-experiment.yml` workflow with experiment input
+`.github/devlab/gemma-e4b-compact-kv.json` at the exact reviewed branch/head. The
+workflow permits explicit dispatch only, validates the one frozen variant, and
+invokes the entrypoint below. Its 30-minute job limit includes upload/cleanup;
+the experiment step has a 1610-second TERM plus 10-second KILL limit, leaving up
+to three minutes for checkout and artifact handling. Other experiments keep
+their existing route and timeout.
+
 ```sh
 GEMMA_E4B_DEVLAB_ACK=1 GITHUB_SHA=<reviewed-full-head> \
   .github/devlab/compact-kv/run.sh /absolute/job/artifacts
@@ -65,10 +73,13 @@ bounded by 1790 seconds TERM plus 10 seconds KILL. The kernel process has a 420-
 sub-budget. Failure or timeout means incomplete, never a RAM win or retry request.
 Candidate runs first. The inherited stable-idle and inter-arm settle requirements
 must pass before baseline starts. Exact short/long/reset outputs must agree.
-Report committed storage, workspace subset, RSS/PSS, GTT/VRAM, process attribution,
+Report committed storage, workspace subset, RSS/high-water, GTT/VRAM, process attribution,
 system/page-cache/cgroup channels and speed separately; never sum overlapping
 counters. Checkpoint fetch/hash warming receipts are retained. Any useful actual
 memory reduction counts; no 3 GB or 1 GB pass/fail threshold applies.
+PSS and per-file residency are not collected. The one-token long-context output
+does not measure sustained decode; request throughput includes end-to-end work.
+Runtime invalid-setting registration negatives are not executed by this pilot.
 
 Expected address-storage change only: 6 GiB uniform KV to 1 GiB global + 80 MiB local
 rings (1.078125 GiB), a 4.921875 GiB allocation reduction before workspace, weights and
