@@ -365,6 +365,49 @@ def apply_dir(program_dir):
     return [n for n in files if apply_file(os.path.join(program_dir, n))]
 
 
+# hrx-loom 0.2.0 fails to register a model whose program file holds more than 180 kernel.defs ("source value %N has no
+# target remap"; Qwen3.8-27B with Q4_0 MTP-block GEMMs and int8 matvecs: 181 fails, 180 after dropping either of two unused
+# kernels serves and answers). A dual-target twin counts as its own kernel.def.
+KERNEL_LIMIT = 180
+KERNEL_BODY = re.compile(r"^kernel\.def\b[^\n]*?@([\w.]+)\(.*?^\}\n", re.M | re.S)
+
+
+def limit_kernels(text, limit=KERNEL_LIMIT):
+    """(text, dropped): TEXT unchanged at or below LIMIT kernel.defs; above it, without the kernels nothing references
+    (generated but never launched). Raises ValueError when the file is still above the limit."""
+    defs = list(KERNEL_BODY.finditer(text))
+    if len(defs) <= limit:
+        return text, []
+    dropped = []
+    for m in reversed(defs):
+        rest = text[:m.start()] + text[m.end():]
+        if not re.search(r"@" + re.escape(m.group(1)) + r"[\[(<]", rest):
+            text = rest
+            dropped.append(m.group(1))
+    n = len(defs) - len(dropped)
+    if n > limit:
+        raise ValueError(f"{n} kernel.defs after dropping the unreferenced ones; hrx-loom 0.2.0 registers at most {limit}")
+    return text, sorted(dropped)
+
+
+def limit_dir(program_dir, limit=KERNEL_LIMIT):
+    """limit_kernels() over every *.loom file of program/: {file: dropped kernels} of the files rewritten."""
+    out = {}
+    for n in sorted(os.listdir(program_dir)):
+        if not n.endswith(".loom"):
+            continue
+        p = os.path.join(program_dir, n)
+        text = open(p, encoding="utf-8", newline="").read()
+        try:
+            new, dropped = limit_kernels(text, limit)
+        except ValueError as e:
+            raise ValueError(f"program/{n}: {e}") from None
+        if dropped:
+            open(p, "w", encoding="utf-8", newline="").write(new)
+            out[n] = dropped
+    return out
+
+
 if __name__ == "__main__":
     if len(sys.argv) < 2:
         sys.exit(__doc__)

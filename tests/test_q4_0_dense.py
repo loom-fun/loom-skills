@@ -75,6 +75,26 @@ class Q40Dense(unittest.TestCase):
             self.assertIs(off[key], False, key)
 
 
+class KernelLimit(unittest.TestCase):
+    def k(self, name):
+        return (f'kernel.def export("{name}") @{name}(%n: index) {{\n  kernel.launch.config workgroups(%n) : index\n'
+                f'}} launch(%x: buffer) {{\n  kernel.return\n}}\n')
+
+    def test_drops_only_unreferenced_above_the_limit(self):
+        sys.path.insert(0, str(STARTER))
+        import dual_target
+        used = "".join(self.k(f"k{i}") for i in range(4))
+        prog = "command.def public @p() {\n" + "".join(f"  kernel.launch @k{i}[%t](%t) : [index](index)\n" for i in range(4)) + "}\n"
+        text = used + self.k("dead") + prog
+        self.assertEqual(dual_target.limit_kernels(text, limit=5), (text, []))   # at the limit: untouched
+        new, dropped = dual_target.limit_kernels(text, limit=4)
+        self.assertEqual(dropped, ["dead"])
+        self.assertNotIn("@dead(", new)
+        self.assertEqual(new.count("kernel.def"), 4)
+        with self.assertRaises(ValueError):
+            dual_target.limit_kernels(text, limit=3)
+
+
 class LintSeesTensorTypes(unittest.TestCase):
     def test_load_cfg_overlays_target_tensor_types(self):
         sys.path.insert(0, str(ROOT / 'fleet'))

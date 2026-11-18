@@ -973,6 +973,12 @@ for dev, n in chunks.items():
 # Dual-target (RDNA3 + RDNA4) programs: every program file that has a `K_rdna4` twin kernel selects it per device
 # (dual_target.py; LOOM_RDNA4=0 turns it off, and files without twins are left as they are).
 dual_target.apply_dir(os.path.join(pkg, "program"))
+# The SDK's kernel.def limit per program file (dual_target.limit_kernels): above it, unreferenced kernels are dropped.
+try:
+    for _pf, _dropped in dual_target.limit_dir(os.path.join(pkg, "program")).items():
+        print(f"program/{_pf}: above {dual_target.KERNEL_LIMIT} kernel.defs (SDK limit): dropped unreferenced {', '.join(_dropped)}", file=sys.stderr)
+except ValueError as e:
+    sys.exit(str(e))
 json.dump(card, open(os.path.join(pkg, "model.json"), "w"), indent=1)
 # The benchmark scripts read the chat format and model id from here.
 bench = {k: v for k, v in cfg.items() if k != "tensors"}
