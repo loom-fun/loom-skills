@@ -37,3 +37,7 @@ The JSON contains exactly one variant. The branch-only workflow override uses th
 - The original 10 CPU behavioral tests pass, including readiness retry/non-503/timeout and monitor identity/device/counter rejection cases. The inter-arm settle follow-up has a separate mocked success/timeout test.
 - Shell syntax checks pass for `run_job.sh` and `run_frontier.sh`; an `env -u HF_HOME` prefix check confirms the default HF cache path initializes under `set -u`; `git diff --check` is clean.
 - No GPU execution, weight download, local cache reset, or checkpoint read was performed in this branch work.
+
+## Terminal setup correction
+
+The first dispatched run (`44205258468`) failed before model execution or weight fetch because Actions supplied `HF_TOKEN` as an empty string and Hugging Face Hub emitted the invalid `Bearer ` header. The checkpoint fetch paths now share a wrapper that maps unset or empty tokens to `None` while preserving a nonempty token. A mocked invocation test covers unset, empty, and present values; it passed without network access. This setup failure provides no memory or performance result. The run consumed 17 seconds after setup began; it did not reach either arm or the blue/Paris correctness gate.

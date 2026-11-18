@@ -47,22 +47,23 @@ test -x "$VENV/bin/loom-serve" && test -x "$PY" || { echo 'pinned SDK tools are 
 
 # Use the exact immutable public checkpoint revision in the official HF cache. One cache fetch only.
 FETCH_JSON="$JOB_DIR/assets/checkpoint_fetch.json"
-"$FETCH_PY" - "$FETCH_JSON" <<'PY'
+PYTHONPATH="$HERE/runner${PYTHONPATH:+:$PYTHONPATH}" "$FETCH_PY" - "$FETCH_JSON" <<'PY'
 import json, os, sys, time
 from pathlib import Path
 from huggingface_hub import hf_hub_download
+from hf_download import download_with_optional_token
 repo='unsloth/gemma-4-E4B-it-GGUF'
 revision='bfc15c382204943c3a8fff0c750b94ae2364d7a3'
 filename='gemma-4-E4B-it-Q4_K_M.gguf'
 cache=Path(os.environ['HF_HUB_CACHE'])
 start=time.monotonic(); cache_hit=True
 try:
-    path=hf_hub_download(repo_id=repo, filename=filename, revision=revision, cache_dir=str(cache),
-                         token=os.environ.get('HF_TOKEN'), local_files_only=True)
+    path=download_with_optional_token(hf_hub_download, repo_id=repo, filename=filename,
+                         revision=revision, cache_dir=str(cache), local_files_only=True)
 except Exception:
     cache_hit=False
-    path=hf_hub_download(repo_id=repo, filename=filename, revision=revision, cache_dir=str(cache),
-                         token=os.environ.get('HF_TOKEN'))
+    path=download_with_optional_token(hf_hub_download, repo_id=repo, filename=filename,
+                         revision=revision, cache_dir=str(cache))
 elapsed=time.monotonic()-start
 p=Path(path); size=p.stat().st_size
 json.dump({'repo':repo,'revision':revision,'filename':filename,'bytes':size,
@@ -72,7 +73,7 @@ json.dump({'repo':repo,'revision':revision,'filename':filename,'bytes':size,
           open(sys.argv[1],'w'),indent=2)
 print(json.dumps({'checkpoint_bytes':size,'fetch_elapsed_seconds':elapsed}),flush=True)
 PY
-GGUF=$("$FETCH_PY" -c 'import json,os,sys; from huggingface_hub import hf_hub_download; d=json.load(open(sys.argv[1])); print(hf_hub_download(repo_id=d["repo"],filename=d["filename"],revision=d["revision"],cache_dir=os.environ["HF_HUB_CACHE"],token=os.environ.get("HF_TOKEN")))' "$FETCH_JSON")
+GGUF=$(PYTHONPATH="$HERE/runner${PYTHONPATH:+:$PYTHONPATH}" "$FETCH_PY" -c 'import json,os,sys; from hf_download import download_with_optional_token; from huggingface_hub import hf_hub_download; d=json.load(open(sys.argv[1])); print(download_with_optional_token(hf_hub_download, repo_id=d["repo"],filename=d["filename"],revision=d["revision"],cache_dir=os.environ["HF_HUB_CACHE"]))' "$FETCH_JSON")
 FETCH_BYTES=$("$PY" -c 'import json,sys; print(json.load(open(sys.argv[1]))["fetch_bytes"])' "$FETCH_JSON")
 FETCH_SECONDS=$("$PY" -c 'import json,sys; print(json.load(open(sys.argv[1]))["fetch_elapsed_seconds"])' "$FETCH_JSON")
 FETCH_CACHE_HIT=$("$PY" -c 'import json,sys; print(str(json.load(open(sys.argv[1]))["cache_hit"]).lower())' "$FETCH_JSON")

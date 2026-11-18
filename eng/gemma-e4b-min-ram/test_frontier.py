@@ -8,9 +8,32 @@ HERE = Path(__file__).resolve().parent
 SPEC = importlib.util.spec_from_file_location('sampler', HERE / 'cold_capacity_targeted.py')
 sampler = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(sampler)
+HF_SPEC = importlib.util.spec_from_file_location('hf_download', HERE / 'runner' / 'hf_download.py')
+hf_download = importlib.util.module_from_spec(HF_SPEC)
+HF_SPEC.loader.exec_module(hf_download)
 
 
 class FrontierTests(unittest.TestCase):
+    def test_hf_fetch_invocation_normalizes_empty_unset_and_preserves_present_token(self):
+        from unittest.mock import patch
+
+        for env, expected in ((None, None), ('', None), ('hf_test_token', 'hf_test_token')):
+            with self.subTest(env=env):
+                received = {}
+                def mocked_hub_download(**kwargs):
+                    received.update(kwargs)
+                    return '/mock/checkpoint.gguf'
+                with patch.dict('os.environ', {}, clear=True):
+                    if env is not None:
+                        import os
+                        os.environ['HF_TOKEN'] = env
+                    path = hf_download.download_with_optional_token(
+                        mocked_hub_download, repo_id='repo', filename='file.gguf')
+                self.assertEqual(path, '/mock/checkpoint.gguf')
+                self.assertEqual(received['token'], expected)
+                self.assertEqual(received['repo_id'], 'repo')
+                self.assertEqual(received['filename'], 'file.gguf')
+
     def test_readiness_retries_same_short_oracle_only_for_503_and_records_attempts(self):
         class Fake:
             def __init__(self, out): self.out=out; self.sequence=0; self.codes=[503,200]; self.timeout=30

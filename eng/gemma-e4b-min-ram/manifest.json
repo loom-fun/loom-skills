@@ -164,16 +164,17 @@
     "checkout_guard": "under GitHub Actions require git HEAD == GITHUB_SHA and no tracked modifications; standalone run may omit GITHUB_SHA"
   },
   "runner_scripts": {
-    "run_job.sh": "5b7c148d43fe5d5384cf3392b3691b46b83d4dbe7064ad4ce733f0471dad4692",
+    "run_job.sh": "721108082719fd81d552238ae127239e219f6921ebc95f23e04de0f72fbe4add",
     "run_frontier.sh": "f045d7729577a4158a6c077c39b41b11272d4943814d363a88163710b13adf0b",
     "prepare_packages.sh": "02d9307e3d4dbb8783eb809837b6d4d5770b1c50060908c71dd7d4d40baf4d1a",
     "cold_capacity_targeted.py": "d80a28c82487e4b5087c2657f9695ad8e94fef8db3d9831dd9b914e35b14c624",
-    "test_frontier.py": "3bea5257729bd0bb1dfa939062c557ab583055482c57d6ad80e6672f1502de03",
+    "test_frontier.py": "66f9dbb1745974e47177b12c56f7ccc4cc6fd45156b3bb7d83905099783bef9a",
     "compare_arms.py": "fbfcdb1f99b004b097f5c0d6b17121e7b5c3fed8303edd9d5895e4cdb6ffa089",
     "build.py": "faeb722cee49d011cd3422d79832dfb9533710845f7f9e8041b841ff9d363db4",
     "target_build_config.json": "30f607b7e0ed58dbcde90df0518395639c61c6970c1ad2a6e80ddc0390e63345",
     "target_text_llm_config.json": "9320e0b11be38e812c9524d456a571d3361d6f27090c4a1a1f0dd44eb9cd28c7",
-    "sdk_pin.py": "27b2270276db1699c86c431bd00630db2c99bb7bfe49556d9cd3df2f76c808f4"
+    "sdk_pin.py": "27b2270276db1699c86c431bd00630db2c99bb7bfe49556d9cd3df2f76c808f4",
+    "runner/hf_download.py": "be0c85e07ae00f3f5630ff43be8c79f507ff579ff3937f5c6e5b21f98d803b42"
   },
   "isolated_source_form": "clean isolated branch/worktree from origin/main bacdd3ed241eb62f9578b909ef63eaa0751f3c49; official gemma4 example kit freshly generated from that source",
   "checkpoint_sha_local_read_note": "One actual SHA256 scan of the pre-existing staged #554 GGUF was performed locally before the latest DevLab-only guard. No download/copy/cache reset; possible page-cache warming is disclosed in REPORT.md. Future full scan is guarded for designated DevLab.",
@@ -206,5 +207,10 @@
   "startup_shell_check": {
     "check": "env -u HF_HOME with set -u evaluates the two separate defaults",
     "result": "PASS; values point to $HOME/.cache/huggingface and its hub subdirectory; no files written"
+  },
+  "hf_token_mock_test": {
+    "path": "eng/gemma-e4b-min-ram/test_frontier.py",
+    "test": "FrontierTests.test_hf_fetch_invocation_normalizes_empty_unset_and_preserves_present_token",
+    "result": "PASS; mocked hub client receives token=None for unset and empty HF_TOKEN, and receives a nonempty token unchanged; no network or weights accessed"
   }
 }
