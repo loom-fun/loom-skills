@@ -163,5 +163,10 @@
   "source": "pypi",
   "wheel_sha256": "5148f9e3a264af400ec4bae38bd7b06bf551d28cc33b7a61d67f7bcefa590438",
   "hrx_system_sha": "0cd370f2baaa0cfef47cc23007f1a109906f8a52"
+ },
+ "assistant": {
+  "repo": "unsloth/gemma-4-31B-it-qat-GGUF",
+  "file": "mtp-gemma-4-31B-it.gguf",
+  "gguf": "mtp-gemma-4-31B-it.gguf"
  }
 }

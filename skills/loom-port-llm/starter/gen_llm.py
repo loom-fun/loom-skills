@@ -5821,7 +5821,7 @@ if __name__ == "__main__":
                 for d in t["shape"]:
                     n *= d
                 return n * 4 if t["type"] == "f32" else n // SB[t["type"]] * FMT[t["type"]]
-            gfacts.update(assist=acfg, QH=QH, KVH=KVH, V=V, EFMT=EFMT, row_bytes=row_bytes, FMT=FMT, SB=SB,
+            gfacts.update(assist=acfg, QH=QH, KVH=KVH, KVH_G=CFG.get("kv_heads_global") or KVH, V=V, EFMT=EFMT, row_bytes=row_bytes, FMT=FMT, SB=SB,
                           afmt=lambda n: AT[n]["type"], asize=asize,
                           assist_attention=gen_assist.target_attention(program, L, L - 2, L - 1))
         spec = [gen_draft.advance_program(program, gfacts), gen_draft.verify_program(program, gfacts)]
