@@ -389,9 +389,6 @@ CHOICE("moe.decode.rows_per_wg", "int", None, "MOE_R", dynamic=True, kit_legacy=
        doc="Rows of one expert matvec per workgroup; default aims at ~3000 workgroups within 2..8 (Qwen3-30B-A3B decodes "
            "10 % faster at R=2 than R=8).", **_MO)
 CHOICE("moe.decode.act_q8", "bool", True, "MOE_Q8", doc="Decode expert matvecs read int8 activations (with decode.mv.act_q8).", **_MO)
-CHOICE("moe.decode.act_q8_input", "bool", False, "MOE_Q8_INPUT", from_pr="gemma-qat-perf",
-       doc="With moe.decode.act_q8: an expert input other than the router input %h (gemma4's own pre-FFN norm %h2) is quantized to "
-           "int8 in the decode branch (one g_quant_q8 into %xmq), so those layers also take the int8 expert matvecs; off: f32.", **_MO)
 CHOICE("moe.route.unroll", "int", 4, "MOE_ROUTE_U", doc="Experts per wave scored together in the router.", **_MO)
 CHOICE("moe.route.tokens_per_wg", "int", 0, "ROUTE_TR", doc="Router tokens per workgroup (0: the largest of 1/2/4/8 whose LDS fits 48 KiB).",
        **_MO)
