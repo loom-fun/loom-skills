@@ -9,7 +9,7 @@ hold one full context ("shared pool byte limit cannot address one model context"
 full length that must complete, followed by a correct answer to a sanity prompt (step down 5 % if not). max_context is the
 context_capacity a 9070 XT preset would carry.
 
-usage: test_9070xt.py PKG [--loom-root ~/loom] [--memory-bytes 15000000000] [--prefill-capacity N] [--port 8080] -o rx9070xt.json
+usage: test_9070xt.py PKG [--loom-root ~/loom] [--memory-bytes 15000000000] [--state-slab-bytes 4mib|none] [--prefill-capacity N] [--port 8080] -o rx9070xt.json
        test_9070xt.py --untested REASON -o rx9070xt.json        (a package whose weights do not fit 16 GB: {tested: false})
 PKG: a fetched package (loom-fetch MODEL.json --materialize=share --output=PKG, the default preset; not the -r9700 preset, whose
 fixed pool is sized for 32 GB). Run with the tools venv's python ($LOOM_ROOT/.tools/bin/python: requests, tokenizers).
@@ -61,6 +61,8 @@ def main(argv=None):
     ap.add_argument("--prefill-capacity", type=int, help="serve through a deployment document with this prefill_capacity")
     ap.add_argument("--weight-slab-bytes", help="loom-serve --weight_slab_bytes (default 1 GiB): smaller slabs for a package whose weights leave "
                     "less than a 1 GiB workspace slab of the budget (LFM2.5-24B: 64mib with --prefill-capacity 256)")
+    ap.add_argument("--state-slab-bytes", default="4mib", help="loom-serve --state_slab_bytes (default 4mib, the 9070 XT's flag); none: the SDK "
+                    "default, as gfx1150 serves (--memory-bytes 14000000000 --state-slab-bytes none)")
     ap.add_argument("--untested", metavar="REASON", help="write {tested: false, reason} without serving")
     ap.add_argument("-o", required=True)
     a = ap.parse_args(argv)
@@ -74,7 +76,7 @@ def main(argv=None):
     card = json.load(open(os.path.join(pkg, "model.json")))
     cfg = json.load(open(os.path.join(pkg, "llm_config.json")))
     native = next(iter(card["presets"].values()))["execution"]["context_capacity"]
-    flags = [f"--memory_bytes={a.memory_bytes}", "--state_slab_bytes=4mib"] + ([f"--parameter_mode={a.parameter_mode}"] if a.parameter_mode != "file" else [])
+    flags = [f"--memory_bytes={a.memory_bytes}"] + ([f"--state_slab_bytes={a.state_slab_bytes}"] if a.state_slab_bytes != "none" else []) + ([f"--parameter_mode={a.parameter_mode}"] if a.parameter_mode != "file" else [])
     if a.weight_slab_bytes:
         flags.append(f"--weight_slab_bytes={a.weight_slab_bytes}")
     # Served through a deployment document: the card's preset with context_capacity (the search variable) and the given execution

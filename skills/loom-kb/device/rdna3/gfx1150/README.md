@@ -54,6 +54,9 @@ and the model stays `failed` (code 8) until restart. Measured with preload (Qwen
 - **Context cap per package.** 0.2.0 refuses registration when the budget cannot address one full context
   (`code 8: shared pool byte limit cannot address one model context`), so a 262k-context card needs a device preset with a smaller
   `context_capacity`: build with `LOOM_MEMORY_CAP_GIB=<GTT GiB>` (the kit fits the context to the budget; Qwen3.5-4B: 63488).
+  Measured with `test_9070xt.py --memory-bytes 14000000000 --state-slab-bytes none` (largest context a fresh server completes and then
+  answers correctly after): Qwen3.5-2B 262144 (native, default preset), Qwen3.5-9B 40960 (above ~41k a full-length request drops the
+  connection or garbles the next answer instead of a clean 503).
 - Without `--memory_bytes` the server sizes its pool to MemTotal (32.4e9), not the GTT: Qwen3.5-4B then registers at 262k,
   completes a 128k-token request and fails at ~141k with `driver_failure RESOURCE_EXHAUSTED` (GTT full); the model stays `failed`
   until restart. No OOM kill, the desktop stays usable. Do not serve budget-less on this device.
@@ -77,5 +80,20 @@ func and the dev gates (consistency, spec, agent, golden, compare, vision, sampl
 Loom leads llama.cpp ROCm by +43 % decode, +30 % at 32k, +42-160 % prefill (the gap widens with prompt length), +11 % with 4 streams. The io_uring and POSIX I/O backends give the same rows within 1-2 %.
 Absolute rates are ~0.36x Strix Halo, close to the compute ratio (16/40 CUs). hrx-loom 0.1.0 gave the same numbers within 1-3 %.
 Provenance and raw values: `fleet/devices/gfx1150.json`. Achieved / roofline ceiling from the stored rows: decode 0.884 / 0.822 / 0.882 (short / 2k / 32k; single-pass ceilings at 96 GB/s, Loom drafts), prefill 0.301-0.361 (1k-32k), 4 streams 0.602. The roofline evidence's `efficiency` field is a different number: roofline.py's demonstrated fraction for the metric class (EFF, the far-from-roofline guardrail), not this ratio.
+
+## Measured: Qwen3.5-2B and Qwen3.5-9B (hrx-loom 0.2.0, 2026-11-18, served as the cards print: elastic, `--memory_bytes=14e9`, preload)
+
+Same machine, `devlab_perf.sh` run locally (no seccomp prefix: preload needs none), 3 sessions per row; llama.cpp ROCm b1374 / Vulkan b12211.
+
+| row | 2B Loom | 2B ROCm | 2B Vulkan | 9B Loom (ctx 40960) | 9B ROCm | 9B Vulkan |
+|---|---|---|---|---|---|---|
+| decode | 63.3 | 52.1 | 55.5 | 26.1 | 16.4 | 17.6 |
+| decode @32k | 48.6 | 42.5 | 43.6 | 19.0 | 13.5 | 11.6 |
+| prefill 2k | 3057 | 1760 | 1703 | 699 | 449 | 400 |
+| prefill 32k | 2406 | 1042 | 1320 | 613 | 301 | 339 |
+| 4 streams | 224.6 | 148.0 | 152.2 | 61.1 | 48.2 | 49.7 |
+
+func and the dev gates pass on both (9B spec acceptance 0.72; 2B has no drafter). 2B serves its native 262144 with the default preset;
+9B gets `chat-gfx1150` (context 40960). Raw values and provenance: `fleet/devices/gfx1150.json`.
 
 Data: `device.json`; decode levers measured here: `decode.md`.
