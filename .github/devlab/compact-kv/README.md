@@ -37,8 +37,7 @@ with exact candidate/legacy outputs. These are synthetic kernel checks; the
 matched full-model phase uses the pinned real checkpoint and meaningful outputs.
 
 `materialize_runner.py` derives, with one-match source anchors and a saved diff,
-from ordinary runner `67a784a187d57f9ab78bdd2785e04b00322192b8`. This includes the reviewed empty-token download and checkpoint-pin corrections; its monitoring
-contracts are unchanged from `7abe4277`. Monitoring, status,
+from ordinary runner `78400f56d909d0f777ba4fb239db4fbd6dfb86a9`. This includes the empty-token download, checkpoint-pin and hardware-identity corrections. Before checkpoint fetch, its read-only preflight requires actual matched PCI/KFD evidence for gfx1151 and retains `hardware_identity.json`; generic SDK labeling alone is insufficient. This proof must come from the same host and does not upgrade historical artifacts that lack KFD evidence. Other monitoring, status,
 readiness retry, stop and settle implementations are preserved. Changes are:
 matched 64k/one-row configs and no-cache policy, the kernel gate before either
 server, 65536-token retrieval plus over-limit rejection, and a fresh-session short
