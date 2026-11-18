@@ -2862,6 +2862,12 @@ def attention_twin(dec, S):
     return "\n" + twin_names(k(t)) if k(t) != k(dec) else ""
 
 
+# The split kernel's layer assumption (historically [0, 51]). A Gemma-4 assistant launches it from its propose program with
+# the target's LAST layers (L-2, L-1); on gfx12 the checker proves layer 59 of a 60-layer target (31B) outside [0, 51] and
+# refuses the package. Widened only for assistant builds of targets deeper than 52 layers: every other program is unchanged.
+SPLIT_LAYER_MAX = max(51, L - 1) if gen_draft.enabled() and gen_draft.DRAFT.get("kind") == "assist" else 51
+
+
 def attention_text(S, P, twin=False):
     """Split-K causal GQA attention: workgroup (token, KV head, split) of 16
     waves, wave w = query head 16*kv + w, lane l = dims 4l..4l+3. Sliding
@@ -2991,7 +2997,7 @@ kernel.def export("{P}_attention_split") @{P}_attention_split(%tokens: index) {{
   kernel.launch.config workgroups(%tokens, %ckvh, %cS) workgroup_size(%clanes, %c1, %c1) : index
 }} launch(%tokens_arg: index, %layer_arg: index, %sliding: i32, %context_arg: index, %pool_arg: index, %q: buffer, %info: buffer, %origins: buffer, %arena: buffer, %part_acc: buffer, %part_ml: buffer) {{
   %tokens = index.assume %tokens_arg [range(%tokens_arg, 1, 8192)] : index
-  %layer = index.assume %layer_arg [range(%layer_arg, 0, 51)] : index
+  %layer = index.assume %layer_arg [range(%layer_arg, 0, {SPLIT_LAYER_MAX})] : index
   %context = index.assume %context_arg [range(%context_arg, 16, 262144)] : index
   %pool = index.assume %pool_arg [range(%pool_arg, 16, 2147483584)] : index
   %token_id = kernel.workgroup.id<x> : index
