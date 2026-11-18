@@ -1663,7 +1663,7 @@
    "arch": "gemma4",
    "build": {
     "preset": "chat",
-    "context": 232448,
+    "context": 262144,
     "prefill": 4096,
     "rows": 4,
     "max_tokens": 4096
@@ -1725,7 +1725,7 @@
    "arch": "gemma4",
    "build": {
     "preset": "chat",
-    "context": 57344,
+    "context": 65536,
     "prefill": 1024,
     "rows": 4,
     "max_tokens": 4096
