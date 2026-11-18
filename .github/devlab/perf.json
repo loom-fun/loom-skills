@@ -18,14 +18,16 @@
     }
    ],
    "steps": [
-    "ktest:staging",
     "logits:staging"
    ],
    "env": {
     "KTEST_GEMM_ALL": "1"
    },
    "bundle": {
-    "run": "44388380668"
+    "build": {
+     "extension": "loom-fun/loom-gufo-extension@45b2bc0062e73d9fcce8d3d71be9a85a2bfe448f",
+     "gufo": "loom-fun/gufo@2255d6f3754f530af1d178097abe48c436104908"
+    }
    }
   },
   {
@@ -58,15 +60,16 @@
     }
    ],
    "steps": [
-    "ktest:staging",
-    "logits:staging",
-    "gates:card:dev"
+    "logits:staging"
    ],
    "env": {
     "KTEST_GEMM_ALL": "1"
    },
    "bundle": {
-    "run": "44388380668"
+    "build": {
+     "extension": "loom-fun/loom-gufo-extension@45b2bc0062e73d9fcce8d3d71be9a85a2bfe448f",
+     "gufo": "loom-fun/gufo@2255d6f3754f530af1d178097abe48c436104908"
+    }
    },
    "require_preset_r9700": true
   },
@@ -87,14 +90,16 @@
     }
    ],
    "steps": [
-    "ktest:staging",
     "logits:staging"
    ],
    "env": {
     "KTEST_GEMM_ALL": "1"
    },
    "bundle": {
-    "run": "44388380668"
+    "build": {
+     "extension": "loom-fun/loom-gufo-extension@45b2bc0062e73d9fcce8d3d71be9a85a2bfe448f",
+     "gufo": "loom-fun/gufo@2255d6f3754f530af1d178097abe48c436104908"
+    }
    }
   },
   {
@@ -121,14 +126,16 @@
     }
    ],
    "steps": [
-    "ktest:staging",
     "logits:staging"
    ],
    "env": {
     "KTEST_GEMM_ALL": "1"
    },
    "bundle": {
-    "run": "44388380668"
+    "build": {
+     "extension": "loom-fun/loom-gufo-extension@45b2bc0062e73d9fcce8d3d71be9a85a2bfe448f",
+     "gufo": "loom-fun/gufo@2255d6f3754f530af1d178097abe48c436104908"
+    }
    }
   }
  ]
