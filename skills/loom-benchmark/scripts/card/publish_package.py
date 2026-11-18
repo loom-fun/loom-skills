@@ -28,6 +28,8 @@
 import argparse
 import json
 import os
+import glob
+import stat
 import re
 import shutil
 import subprocess
@@ -73,6 +75,19 @@ def refuse_dirty(cfgp, allow=False):
                  f"(scope.json / llm_config choices), or pass --allow-dirty")
 
 
+def portable_config(cfg):
+    """Strip build-machine checkpoint paths from package and saved generator configs."""
+    def base(d, k):
+        if isinstance(d, dict) and isinstance(d.get(k), str):
+            d[k] = os.path.basename(d[k])
+    base(cfg, "gguf"); base(cfg.get("vision"), "mmproj")
+    if isinstance(cfg.get("weights"), dict):   # a safetensors package (inspect_safetensors.py): the file names only
+        cfg["weights"] = {"format": cfg["weights"]["format"], "files": [os.path.basename(p) for p in cfg["weights"]["files"]]}
+    for k in ("draft", "drafter", "assistant", "mtp"):
+        base(cfg.get(k), "gguf")
+    return cfg
+
+
 def cmd_prepare(a):
     refuse_dirty(os.path.join(a.pkg, "llm_config.json"), a.allow_dirty)
     pkg, out = os.path.abspath(a.pkg), os.path.abspath(a.out)
@@ -113,22 +128,24 @@ def cmd_prepare(a):
     with open(os.path.join(out, "model.json"), "w", encoding="utf-8") as f:
         json.dump(card, f, indent=1)
         f.write("\n")
-    # llm_config.json names the GGUFs by file name only (no local paths in a published file)
-    cfgp = os.path.join(out, "llm_config.json")
-    cfg = json.load(open(cfgp, encoding="utf-8"))
-    def base(d, k):
-        if isinstance(d, dict) and isinstance(d.get(k), str):
-            d[k] = os.path.basename(d[k])
-    base(cfg, "gguf"); base(cfg.get("vision"), "mmproj")
-    if isinstance(cfg.get("weights"), dict):   # a safetensors package (inspect_safetensors.py): the file names only
-        cfg["weights"] = {"format": cfg["weights"]["format"], "files": [os.path.basename(p) for p in cfg["weights"]["files"]]}
-    for k in ("draft", "drafter", "assistant", "mtp"):
-        base(cfg.get(k), "gguf")
-    json.dump(cfg, open(cfgp, "w", encoding="utf-8"), indent=1)
+    # Saved generator configs are shipped too; none should retain build-machine paths.
+    cfg_paths = [os.path.join(out, "llm_config.json"),
+                 *sorted(glob.glob(os.path.join(out, "gen", "*cfg.json")))]
+    for cfgp in cfg_paths:
+        with open(cfgp, encoding="utf-8") as f:
+            cfg = portable_config(json.load(f))
+        with open(cfgp, "w", encoding="utf-8") as f:
+            json.dump(cfg, f, indent=1)
     cmd = [a.loom_fetch, os.path.join(out, "model.json"), "--update-lock", "--all-variants", "--no-input",
            *(["--quiet"] if fetch_supports(a.loom_fetch, "--quiet") else []),
            *[f"--origin={n}={r}" for n, r in roots.items()]]
     subprocess.run(cmd, check=True)
+    transient_lock = os.path.join(out, ".loom-fetch.lock")
+    if os.path.lexists(transient_lock):
+        lock_stat = os.lstat(transient_lock)
+        if not stat.S_ISREG(lock_stat.st_mode) or lock_stat.st_size:
+            sys.exit(f"refusing unexpected transient fetch lock: {transient_lock}")
+        os.unlink(transient_lock)
     lock = json.load(open(os.path.join(out, "model.json.lock"), encoding="utf-8"))
     print(f"prepared {out}: origins {json.dumps(origins)}; lock: {len(lock.get('files', []))} files")
 

@@ -72,6 +72,28 @@ def gap_at(ids, tops, loom_id, k):
     return top[ids[k]] - top[loom_id] if loom_id in top else None
 
 
+def choose_rebuild(P, raw, alternatives, gids, gtops):
+    """Choose among raw spellings already known to be consistent with the parsed reply.
+
+    Keep the longest agreement with the reference. At the same divergence position,
+    prefer a spelling that meets the existing near-tie rule over one that does not:
+    an omitted empty reasoning block can start with another token at position zero.
+    This does not admit new spellings or change the comparison's tolerance.
+    """
+    ids = P.ids(raw)
+    d = text_divergence(P.tok, ids, gids)
+    for alt in alternatives:
+        if d is None:
+            break
+        aids = P.ids(alt)
+        da = text_divergence(P.tok, aids, gids)
+        if da is None or da[0] > d[0] or (da[0] == d[0]
+                and near_at(gids, gtops, da[1], da[0])
+                and not near_at(gids, gtops, d[1], d[0])):
+            raw, ids, d = alt, aids, da
+    return raw, ids, d
+
+
 def history_edits(hist, prompt):
     """Edits that turn the retained history HIST (the previous prompt + output) into the start of PROMPT, as character
     offsets (i1, i2, j1, j2): HIST[i1:i2] became PROMPT[j1:j2]. What PROMPT adds after the history is not an edit."""
@@ -268,10 +290,7 @@ def main():
             raw = None   # the rebuilt output, completed from the golden where the reply can't tell (below)
             if a.llama:
                 raw = P.raw_from_chat(m, ch["finish_reason"] in ("stop", "tool_calls"), thinking, prompt)
-                loom_ids = P.ids(raw)
                 g, gids, gtops = llama_greedy(a.llama, ids, max(1, u["completion_tokens"]), P)
-                # The same text split into other tokens is no divergence (bench_common.text_divergence).
-                d = text_divergence(P.tok, loom_ids, gids)
                 import chat_probe as _cp
                 finished = ch["finish_reason"] in ("stop", "tool_calls")
                 alts = []
@@ -294,15 +313,7 @@ def main():
                     # write that block itself, which the parsed reply can't show; only when Loom generated enough
                     # tokens to hold it (as output_dropped counts), so it can't hide a divergence at token 0.
                     alts += [block + r for r in [raw] + alts]
-                if d is not None:
-                    # Use the rebuild that agrees longest with the golden.
-                    for alt in alts:
-                        aids = P.ids(alt)
-                        da = text_divergence(P.tok, aids, gids)
-                        if da is None or da[0] > d[0]:
-                            raw, loom_ids, d = alt, aids, da
-                            if d is None:
-                                break
+                raw, loom_ids, d = choose_rebuild(P, raw, alts, gids, gtops)
                 raw, d = call_whitespace(P, raw, gids, d)
                 loom_ids = P.ids(raw)
                 rec["golden_match"] = d is None

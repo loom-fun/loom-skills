@@ -25,6 +25,8 @@
 #   "llama_spec_vulkan": a Vulkan-only override, for a drafter the Vulkan build cannot run (record it with --differs).
 #   A job may override card, kit, memory_bytes, llamacpp, llamacpp_vulkan, vulkan_kv and llama_spec: one experiment can
 #   measure several cards.
+#   "llama_kv_vulkan": positive integer tokens per slot (or total tokens with unified KV); optional, keeps the
+#   selected Vulkan slot policy and changes only its capacity when the default does not fit beside the weights.
 #   "llamacpp_vulkan": "b12211": the official ggml-org Vulkan release (sha256-pinned in skills/loom-benchmark/data) that the
 #   steps llama@vulkan, llamac4@vulkan and the other llama.cpp steps with @vulkan run, with the SAME llama_spec and workloads as
 #   the ROCm "llamacpp" build (fetch_llamacpp.sh / llamacpp_server.sh LLAMACPP_BACKEND=vulkan). A server that cannot run a
@@ -82,6 +84,7 @@
 #                               (job "vllm_max_len": --max-model-len, default the served context); perf_vllm_nN.jsonl, vllm_args_on.txt, vllm_kv_on.txt, vllm_version.txt (a card with no llama.cpp baseline)
 #          vllmc4[:N]           4 streams on vLLM without drafting, N (default 3) runs of c4_steady.py: c4_vllm_nN.txt
 #          fullctx:V[:TOKENS]   ctx_admit.py --complete: a request of ~the served context (or TOKENS) is prefilled to the end and answered (fullctx_V*.txt)
+#          coldcapacity:V      opt-in experiment: cold sampled memory, exact full-context completion and structured overflow rejection
 #          func:V               V served alone: the functional checks the card claims (chat, tool calling, image input;
 #                               r9700_func.py: the same checks as the Windows red-team harness), out/func_V.json
 #          logits:V[:N]         host logits readback (loom-skills#736): V's package through the Gufo bundle (loom-gufo-extension
@@ -139,6 +142,7 @@ steps=$(q "print(' '.join(j['steps']))")
 vtag=$(q "print(j.get('llamacpp_vulkan') or e.get('llamacpp_vulkan') or '-')")
 vkv=$(q "print(j.get('vulkan_kv') or e.get('vulkan_kv') or 'auto')")
 lkv=$(q "print(j.get('llama_kv_rocm') or '')")   # ROCm llama.cpp KV pool tokens when 65536 does not fit the GPU (r9700_jobs.py sets it)
+lvkv=$(q "v=j.get('llama_kv_vulkan'); assert v is None or (type(v) is int and v > 0), 'llama_kv_vulkan must be a positive integer'; print(v if v is not None else '')") || exit 1
 # "repeat_rows": 3 on a job (a fast model, published decode > 100 tok/s: methodology rule 5): every perf.py run measures decode_2k,
 # decode_32k and prefill_8k that many times (perf.py --repeat-rows); a session's value is the median of its samples
 rrows=$(q "print(j.get('repeat_rows') or e.get('repeat_rows') or 1)")
@@ -178,6 +182,7 @@ vllm_down() {   # stop the vLLM OpenAI server this job started (its process grou
   return 0
 }
 cleanup() {
+  coldcapacity_stop
   vllm_down
   for f in "$LOOM_SERVE_STATE"/*.pid; do [ -f "$f" ] && "$SV/stop.sh" "$(basename "$f" .pid)" >/dev/null 2>&1; done
   "$B/llamacpp_server.sh" --stop "$LLAMA_PORT" >/dev/null 2>&1; VLLM_STATE=$D/vllm-state "$B/vllm_server.sh" --stop "$LLAMA_PORT" >/dev/null 2>&1
@@ -186,6 +191,14 @@ cleanup() {
   echo "devlab_perf.sh: servers stopped"
 }
 trap cleanup EXIT
+
+coldcapacity_stop() {
+  if [ -n "${CAPACITY_MONITOR_PID:-}" ]; then
+    touch "$CAPACITY_MONITOR_DIR/monitor.stop"
+    wait "$CAPACITY_MONITOR_PID" || true
+    CAPACITY_MONITOR_PID=""
+  fi
+}
 
 # 1. Loom SDK + tools venv: the SDK the card pins in its llm_config.json (ensure_sdk.sh), else the default
 step "Loom SDK"
@@ -477,6 +490,17 @@ serve_alone() { # serve_alone VARIANT
   # VRAM still held by the process that was just stopped (a vLLM / llama.cpp server, the reference fill, the last loom-serve) makes the load fail
   # (RESOURCE_EXHAUSTED / "model is unavailable"): wait until it is released, and log what was held (vram_log.txt)
   "$B/wait_vram.sh" "serve $1" 1024 180 "$out/vram_log.txt"
+  if [ -n "${COLD_CAPACITY_DIR:-}" ]; then
+    CAPACITY_MONITOR_DIR=$COLD_CAPACITY_DIR; mkdir -p "$CAPACITY_MONITOR_DIR"
+    rm -f "$CAPACITY_MONITOR_DIR/monitor.ready" "$CAPACITY_MONITOR_DIR/monitor.stop"
+    printf 'cold' > "$CAPACITY_MONITOR_DIR/phase"
+    "$T" "$here/.github/scripts/cold_capacity.py" monitor --pid-file "$LOOM_SERVE_STATE/perf-$1.pid" \
+      --model "$D/$1/pkg/model.json" --out "$CAPACITY_MONITOR_DIR" > "$CAPACITY_MONITOR_DIR/monitor.log" 2>&1 &
+    CAPACITY_MONITOR_PID=$!
+    for _ in $(seq 50); do [ -f "$CAPACITY_MONITOR_DIR/monitor.ready" ] && break; sleep 0.1; done
+    [ -f "$CAPACITY_MONITOR_DIR/monitor.ready" ] || { echo "FAIL: cold capacity monitor has no baseline"; coldcapacity_stop; return 1; }
+    printf '%s\n' "${rp:-}" > "$CAPACITY_MONITOR_DIR/preset.txt"
+  fi
   step "serve $1 (SDK root $vroot)"; LOOM_MEMNEED=$memneed LOOM_ACTIVE_WAIT=$aw "$SV/serve.sh" "perf-$1" "$PORT" amdgpu "$vmem" "$D/$1/pkg/model.json" ${sa:+-- $sa} > "$out/serve_$1.out" 2>&1; tail -2 "$out/serve_$1.out"
   grep -q '^FAILED' "$out/serve_$1.out" && { echo "REGISTRATION FAILED on $RUNNER for variant $1 (fast fail, see serve_$1.out):"; grep -m6 -E 'AMDGPU|error|ERROR' "$out/serve_$1.out" | cut -c1-300; return 1; }
   curl -sf "$url/v1/models" >/dev/null || return 1
@@ -488,6 +512,8 @@ serve_alone() { # serve_alone VARIANT
     echo "serve $1: the model did not load (cold_first_serve_$1.txt)"; cp "$LOOM_SERVE_STATE/perf-$1.log" "$out/cold_first_serve_$1.log" 2>/dev/null; return 1
   fi
   rm -f "$out/cold_first_serve_$1.txt"
+  [ -z "${COLD_CAPACITY_DIR:-}" ] || printf 'loaded' > "$COLD_CAPACITY_DIR/phase"
+  return 0
 }
 gufo_bundle() {   # gufo_bundle -> exports GUFO_BUNDLE (the experiment's/job's "bundle" tarball, fetched once per runner), or fails
   [ -n "${GUFO_BUNDLE:-}" ] && [ -x "$GUFO_BUNDLE/run.sh" ] && return 0
@@ -540,6 +566,7 @@ llama_up() {   # llama_up [N_MAX]: llama.cpp with the experiment's llama_spec (n
     elif [[ $MODS == *perslot* ]]; then kv=(36864)
     # auto: per-slot unless the server drafts with DFlash (b12211 aborts a DFlash server with 4 concurrent streams on per-slot caches)
     elif [ "$vkv" = per-slot ] || { [ "$vkv" = auto ] && [[ "$LLAMA_SPEC" != *draft-dflash* ]]; }; then kv=(36864); fi
+    [ -z "$lvkv" ] || kv[0]=$lvkv
   fi
   LLAMACPP_BACKEND=$BK LLAMACPP_DIR=$dir LLAMACPP_ARGS_FILE=$out/llamacpp_args$bkt.txt "$B/llamacpp_server.sh" "$gguf" "$LLAMA_PORT" $np "${kv[@]}" | tail -1
   sed -i -e "s#$WORK/hf/#hf:#g" -e "s#$card/#card:#g" "$out/llamacpp_args$bkt.txt" 2>/dev/null   # runner paths out of the recorded arguments
@@ -730,7 +757,8 @@ print('vllm', k, [x.get(k) for x in r if x.get(k)], 'median', round(st.median(v)
       nm=$(echo "$LSPEC" | grep -oE "n-max [0-9]+" | grep -oE "[0-9]+"); nm=${nm:-0}   # 0: no drafting
       step "llama.cpp$bkt n-max $nm c4"
       for i in 1 2 3; do (cd "$out" && "$T" "$B/c4_steady.py" "$lurl" 4 --thinking "$TH" | tail -1 | tee -a "c4_llamacpp${bkt}_n$nm.txt"); done
-      res[$s]=$("$T" -c "import json,statistics as st; print('llamacpp$bkt n-max $nm c4 median', st.median(json.loads(l)['agg_tps'] for l in open('$out/c4_llamacpp${bkt}_n$nm.txt')))");;
+      echo "{\"session_end\": \"llamacpp$bkt-n$nm\"}" >> "$out/c4_llamacpp${bkt}_n$nm.txt"
+      res[$s]=$("$T" -c "import json,statistics as st; print('llamacpp$bkt n-max $nm c4 median', st.median(r['agg_tps'] for l in open('$out/c4_llamacpp${bkt}_n$nm.txt') if 'agg_tps' in (r := json.loads(l))))");;
     textmatch)   # textmatch:V: first 50 generated tokens of perf.py's prompts, Loom V then llama.cpp (one at a time)
       serve_alone "$p1" || { res[$s]=ERROR; continue; }
       "$T" "$B/text_match.py" save "$url" "$out/text_$p1.json" --model "$cardid" --tokenizer "$card/tokenizer.json" --thinking "$TH" | tail -1
@@ -851,6 +879,19 @@ PY
       step "full-context request $p1 ${p2:-}"
       (cd "$out" && "$T" "$B/ctx_admit.py" "$D/$p1/pkg" "$url" ${p2:+--tokens "$p2"} --complete 2>&1 | tee "fullctx_${p1}${p2:+_$p2}.txt" | tail -3)
       res[$s]=$(tail -1 "$out/fullctx_${p1}${p2:+_$p2}.txt" | cut -c1-200);;
+    coldcapacity)   # explicitly selected experimental step; all ordinary serve/gate/perf paths are unchanged
+      capdir="$out/coldcapacity_$p1"
+      if COLD_CAPACITY_DIR="$capdir" serve_alone "$p1"; then
+        cappreset=$(cat "$capdir/preset.txt")
+        "$T" "$here/.github/scripts/cold_capacity.py" probe "$D/$p1/pkg" "$url" \
+          ${cappreset:+--preset "$cappreset"} --out "$capdir" > "$capdir/probe.log" 2>&1
+        caprc=$?
+      else caprc=1; fi
+      coldcapacity_stop
+      if [ "$caprc" = 0 ] && "$T" -c 'import json,sys; d=json.load(open(sys.argv[1])); sys.exit(not(d["identity_ok"] and d["amd_cards_observed"] and d["driver_used_counters_observed"] and d["stopped_by_marker"]))' "$capdir/memory_summary.json"; then
+        res[$s]=PASS
+      else res[$s]=ERROR; fi
+      tail -1 "$capdir/probe.log" 2>/dev/null;;
     gates)
       serve_alone "$p1" || { res[$s]=ERROR; continue; }
       if [ -n "$safetensors" ]; then   # the reference is vLLM (gates.sh picks it from source.kind); VLLM_VERSION / VLLM_ROCM_VARIANT / VLLM_EXTRA_ENV come from the job's "env"

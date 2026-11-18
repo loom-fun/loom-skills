@@ -1,0 +1,24 @@
+{
+ "scope": "model/unsloth-gemma-4-26B-A4B-it-qat-loom",
+ "match": {
+  "slug": [
+   "unsloth-gemma-4-26B-A4B-it-qat-loom"
+  ]
+ },
+ "owner": "kb",
+ "choices": [
+  {
+   "when": {
+    "devices": [
+     "radeon-r9700"
+    ]
+   },
+   "set": {
+    "exec.context_capacity": 36864,
+    "exec.context_cap": 36864,
+    "exec.prefill_capacity": 4096
+   },
+   "evidence": "Gemma4 QAT DevLab run 44208046899, exact staged programs and hrx-loom 0.2.0: R9700 at context 36864, prefill 4096, rows 4, target-only. Cold fixed/preloaded load, completed logical full-limit and SDK stored-limit requests, structured over-limit rejection and health passed. All six full model gates passed. Cold fixed storage 32606887936 bytes including workspace; sampled VRAM maximum 32715558912 of 34208743424 bytes (100 ms samples, not an instantaneous peak). Context frozen for final sampled qualification; no higher context is claimed."
+  }
+ ]
+}

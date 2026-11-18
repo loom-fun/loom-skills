@@ -574,6 +574,18 @@
   "n_exp": 0
  },
  {
+  "slug": "unsloth-gemma-4-26B-A4B-it-qat-loom",
+  "w": 18352752960,
+  "kv": 64424509440,
+  "kv32": 8053063680,
+  "kvpp": 245760,
+  "ctx": 262144,
+  "mem": 110000000000,
+  "need": 84777262400.0,
+  "verdict": "fits (reduced ctx)",
+  "n_exp": 128
+ },
+ {
   "slug": "unsloth-gemma-4-31B-it-loom",
   "w": 23010311776,
   "kv": 263066746880,
@@ -582,6 +594,18 @@
   "ctx": 262144,
   "mem": 80000000000,
   "need": 288077058656.0,
+  "verdict": "fits (reduced ctx)",
+  "n_exp": 0
+ },
+ {
+  "slug": "unsloth-gemma-4-31B-it-qat-loom",
+  "w": 18780432928,
+  "kv": 257698037760,
+  "kv32": 32212254720,
+  "kvpp": 983040,
+  "ctx": 262144,
+  "mem": 110000000000,
+  "need": 278478470688.0,
   "verdict": "fits (reduced ctx)",
   "n_exp": 0
  },

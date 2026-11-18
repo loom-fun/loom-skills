@@ -114,6 +114,46 @@ class GitPlanTests(unittest.TestCase):
         self.assertEqual(plan["selected"], ["alpha"])
         self.assertIn("fleet/alpha/llm_config.json", plan["changed"])
 
+    def test_added_catalog_model_is_only_absent_from_base_builds(self):
+        models = dict(MANIFEST["models"])
+        models["gamma"] = {"files": {"weights": {"dump": "gamma/gguf/weights.json.gz"}}}
+        self.write("fleet/manifest.json", json.dumps({"models": models}))
+        self.write("fleet/gamma/llm_config.json", "{}")
+        self.write("fleet/gamma/tokenizer_min.json", "{}")
+        self.write("fleet/gamma/gguf/weights.json.gz", "stub")
+        self.commit()
+        plan = PLAN.make_plan(self.repo, self.base)
+        self.assertEqual(plan["selected"], ["alpha", "beta", "gamma"])
+        self.assertEqual(plan["base_selected"], ["alpha", "beta"])
+        self.assertEqual(plan["head_selected"], ["alpha", "beta", "gamma"])
+        self.assertEqual(plan["base_absent_catalog"], {"gamma": "new model: absent from base fleet/manifest.json"})
+        self.assertEqual({j["side"] for j in plan["matrix"]["include"]}, {"base", "head"})
+
+    def test_removed_catalog_models_are_explicit(self):
+        self.write("fleet/manifest.json", json.dumps({"models": {"alpha": MANIFEST["models"]["alpha"]}}))
+        self.commit()
+        plan = PLAN.make_plan(self.repo, self.base)
+        self.assertEqual(plan["removed_from_head"], ["beta"])
+
+    def test_missing_or_corrupt_historical_catalog_fails_closed(self):
+        for contents in (None, "not json"):
+            with self.subTest(contents=contents), tempfile.TemporaryDirectory() as tmp:
+                repo = Path(tmp)
+                subprocess.run(["git", "init", "-q", str(repo)], check=True)
+                subprocess.run(["git", "-C", str(repo), "config", "user.name", "test"], check=True)
+                subprocess.run(["git", "-C", str(repo), "config", "user.email", "test@example.com"], check=True)
+                if contents is not None:
+                    p = repo / "fleet/manifest.json"
+                    p.parent.mkdir()
+                    p.write_text(contents)
+                else:
+                    (repo / "README.md").write_text("catalog missing")
+                subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True)
+                subprocess.run(["git", "-C", str(repo), "commit", "-qm", "base"], check=True)
+                base = subprocess.check_output(["git", "-C", str(repo), "rev-parse", "HEAD"], text=True).strip()
+                with self.assertRaisesRegex(SystemExit, "missing or corrupt|invalid"):
+                    PLAN.make_plan(repo, base)
+
 
 class AggregationTests(unittest.TestCase):
     def plan(self):
@@ -166,18 +206,49 @@ class AggregationTests(unittest.TestCase):
 
     def test_new_source_model_is_reported_not_silently_skipped(self):
         with tempfile.TemporaryDirectory() as tmp:
-            self.summary(tmp, "base", skipped={"alpha": "new source format"})
+            plan = self.plan()
+            plan["base_selected"] = []
+            plan["head_selected"] = ["alpha"]
+            plan["base_absent_catalog"] = {"alpha": "new model: absent from base fleet/manifest.json"}
+            plan["matrix"]["include"] = [{"side": "head", "ref": "b", "shard": 0, "slugs": "alpha"}]
             self.summary(tmp, "head")
             model = Path(tmp) / "head" / "alpha"
             model.mkdir()
             (model / "model.json").write_text("{}")
             (model / "main.loom").write_text("kernel.def @g_test() {}\n")
-            report = PLAN.aggregate(self.plan(), tmp, Path(tmp) / "out")
+            report = PLAN.aggregate(plan, tmp, Path(tmp) / "out")
             self.assertTrue(report["models"]["alpha"]["new_model"])
+            self.assertIn("absent from base fleet/manifest.json", report["models"]["alpha"]["reason"])
+            text = (Path(tmp) / "out" / "impact.md").read_text()
+            self.assertIn("new model: absent from base fleet/manifest.json", text)
             self.summary(tmp, "head", skipped={"alpha": "unsupported at head"})
+            with self.assertRaisesRegex(SystemExit, "failed impact shard"):
+                PLAN.aggregate(plan, tmp, Path(tmp) / "out")
+
+    def test_historical_model_failure_is_not_a_new_model_skip(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.summary(tmp, "base", failures={"alpha": "old generator failed"})
+            self.summary(tmp, "head")
             with self.assertRaisesRegex(SystemExit, "failed impact shard"):
                 PLAN.aggregate(self.plan(), tmp, Path(tmp) / "out")
 
+    def test_unknown_catalog_absence_claim_fails_closed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            plan = self.plan()
+            plan["base_selected"] = []
+            plan["head_selected"] = ["alpha"]
+            plan["base_absent_catalog"] = {"not-selected": "new model"}
+            with self.assertRaisesRegex(SystemExit, "invalid impact plan model accounting"):
+                PLAN.aggregate(plan, tmp, Path(tmp) / "out")
+
+    def test_removed_catalog_model_is_rendered_explicitly(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            plan = {"selected": [], "base_selected": [], "head_selected": [], "base_absent_catalog": {},
+                    "unchanged_inputs": [], "reasons": ["catalog changed"], "removed_from_head": ["legacy"],
+                    "base": "a", "head": "b", "matrix": {"include": []}}
+            report = PLAN.aggregate(plan, tmp, Path(tmp) / "out")
+            self.assertTrue(report["models"]["legacy"]["removed_model"])
+            self.assertIn("removed from HEAD catalog", (Path(tmp) / "out" / "impact.md").read_text())
 
 if __name__ == "__main__":
     unittest.main()
