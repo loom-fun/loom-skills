@@ -1,47 +1,74 @@
 {
- "_comment": "R9700 per-model measurement (r9700_jobs.py): one job per model on one R9700 runner; loom-fun-staging card, llama.cpp ROCm b1375 + Vulkan b12211 with the matched drafting, reduced-context models served at served_context. Does not fit: none",
- "runner": "r9700",
- "memory_bytes": 34000000000,
- "llama_spec": "matched",
+ "_comment": "Run 5 (A/B + kernel tests, one Strix job): 31B QAT built from the branch: base (depth 3); several verify tokens per attention workgroup (ATTN_TPW 512:2,256:4) at depth 3; two-stage argmax + 5-token verify on the 4-token int8 kernels at depth 4 (u4), and u4 + TPW. ktest of u4t. ABBA short and long sessions. Experiment only.",
  "jobs": [
   {
-   "name": "unsloth-qwen3-0-6b-loom",
-   "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
-   "kit": null,
+   "name": "q31-strix-ab4",
+   "runner": "strix",
+   "card": "loom-fun/unsloth-gemma-4-31B-it-qat-loom@ad5024c0480adfe03459f60a72ffb3700fd9794f",
+   "memory_bytes": 110000000000,
+   "kit": "gemma4",
    "llamacpp": "b1375",
-   "llamacpp_vulkan": "b12211",
-   "memory_bytes_r9700": 17000000000,
+   "sdk": "0.2.0",
+   "llama_spec": "matched",
+   "thinking": "off",
    "variants": [
     {
-     "name": "card",
-     "build": {}
-    },
-    {
-     "name": "nodraft",
+     "name": "base",
      "build": {},
      "execution": {
-      "draft_depth": 0
+      "draft_depth": 3
+     }
+    },
+    {
+     "name": "tpw",
+     "build": {
+      "ATTN_TPW": "512:2,256:4"
+     },
+     "execution": {
+      "draft_depth": 3
+     }
+    },
+    {
+     "name": "u4",
+     "build": {
+      "ASSIST_ARGMAX_PARTS": "128",
+      "MV_Q8_T4_UPTO": "8"
+     },
+     "execution": {
+      "draft_depth": 4
+     }
+    },
+    {
+     "name": "u4t",
+     "build": {
+      "ASSIST_ARGMAX_PARTS": "128",
+      "MV_Q8_T4_UPTO": "8",
+      "ATTN_TPW": "512:2,256:4"
+     },
+     "execution": {
+      "draft_depth": 4
      }
     }
    ],
    "steps": [
-    "func:card",
-    "ktest:card",
-    "gates:card:dev",
-    "perf:card:3",
-    "perf:card:3:long",
-    "c4:nodraft",
-    "llama@rocm.np1:3",
-    "llama@rocm.np1:3:long",
-    "llamac4@rocm.nodraft",
-    "llama@vulkan.np1:3",
-    "llama@vulkan.np1:3:long",
-    "llamac4@vulkan.perslot.nodraft"
+    "ktest:u4t",
+    "perf:base:1",
+    "perf:tpw:1",
+    "perf:u4:1",
+    "perf:u4t:1",
+    "perf:u4t:1",
+    "perf:u4:1",
+    "perf:tpw:1",
+    "perf:base:1",
+    "perf:base:1:long",
+    "perf:tpw:1:long",
+    "perf:u4:1:long",
+    "perf:u4t:1:long",
+    "perf:u4t:1:long",
+    "perf:u4:1:long",
+    "perf:tpw:1:long",
+    "perf:base:1:long"
    ]
   }
- ],
- "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
- "kit": null,
- "llamacpp": "b1375",
- "llamacpp_vulkan": "b12211"
+ ]
 }
