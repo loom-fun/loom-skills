@@ -405,10 +405,11 @@ for v in [x for x in a.variants.split(",") if x]:
 
 # -- profiles: per-kernel device time ----------------------------------------------------------------------------------
 for spec_ in [x for x in a.profile.split(",") if x]:
-    sc, _, pv = spec_.partition("@")
+    trace = spec_.startswith("trace:")   # trace:SC[@V]: same requests, no HAL timestamps, per-chunk arrival times
+    sc, _, pv = spec_.removeprefix("trace:").partition("@")
     pv = pv or "card"
-    key = sc if pv == "card" else f"{sc}_{pv}"
-    srv = Server(serve_args(pv) + PROFILE_FLAGS, os.path.join(OUT, f"profile_{key}.serve.log"))
+    key = ("trace_" if trace else "") + (sc if pv == "card" else f"{sc}_{pv}")
+    srv = Server(serve_args(pv) + ([] if trace else PROFILE_FLAGS), os.path.join(OUT, f"profile_{key}.serve.log"))
     mid = srv.ready()
     if not mid:
         step(f"profile_{key}", False, tail=tail(srv.log, 30))
@@ -419,7 +420,8 @@ for spec_ in [x for x in a.profile.split(",") if x]:
     t0 = time.time()
     req = os.path.join(OUT, f"profile_{key}.req.json")
     with open(req, "w") as f:
-        p = subprocess.run([VPY, os.path.join(SCRIPTS, "profile_requests.py"), URL, mid, sc], cwd=SCRIPTS, env=env,
+        p = subprocess.run([VPY, os.path.join(SCRIPTS, "profile_requests.py"), URL, mid, sc] + (["--trace-gaps"] if trace else []),
+                           cwd=SCRIPTS, env=env,
                            stdout=f, stderr=subprocess.PIPE, text=True, timeout=3600)
     t1 = time.time()
     tsum = tel.finish([(t0, t1, "requests")])
