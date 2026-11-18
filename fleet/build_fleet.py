@@ -92,7 +92,9 @@ def real_inputs(slug, m, work, real):
     shutil.copy(os.path.join(real, slug, "tokenizer.json"), os.path.join(work, "tokenizer_min.json"))
 
 
-def build_one(slug, m, skills, out, rdna4, keep, real=None, with_gen=False):
+def build_one(slug, m, skills, out, rdna4, keep, real=None, with_gen=False, inp=None):
+    """inp: the fleet input root (dumps, llm_config.json, tokenizer_min.json): this checkout's, or the ref's own (--own-inputs)."""
+    inp = inp or HERE
     t0 = time.time()
     work = os.path.join(out, "_work", slug)
     shutil.rmtree(work, ignore_errors=True)
@@ -105,10 +107,10 @@ def build_one(slug, m, skills, out, rdna4, keep, real=None, with_gen=False):
         else:
             for name, f in m["files"].items():
                 if name not in st:
-                    gguf_stub.write_stub(gguf_stub.load(os.path.join(HERE, f["dump"])), os.path.join(work, name))
-            shutil.copy(os.path.join(HERE, slug, "tokenizer_min.json"), work)
+                    gguf_stub.write_stub(gguf_stub.load(os.path.join(inp, f["dump"])), os.path.join(work, name))
+            shutil.copy(os.path.join(inp, slug, "tokenizer_min.json"), work)
         kit = kit_dir(skills, m.get("kit"), work)
-        pcfg = json.load(open(os.path.join(HERE, slug, "llm_config.json")))
+        pcfg = json.load(open(os.path.join(inp, slug, "llm_config.json")))
         if st and not os.path.exists(os.path.join(kit, "inspect_safetensors.py")):
             # a model whose source path (safetensors) the ref's kit does not have yet: it did not exist there (a new model of a PR
             # that adds the path), not a failure; the diff reports it as a new model
@@ -117,7 +119,7 @@ def build_one(slug, m, skills, out, rdna4, keep, real=None, with_gen=False):
         if st:
             (sname, sf), = st.items()
             ck = os.path.join(work, sname)   # the package links it as parameter/<name>; never read when the build has no weights (cfg source.bytes)
-            rc, o = sh([sys.executable, os.path.join(kit, "inspect_safetensors.py"), os.path.join(HERE, sf["dump"]), "fresh.json", "--checkpoint", ck], work)
+            rc, o = sh([sys.executable, os.path.join(kit, "inspect_safetensors.py"), os.path.join(inp, sf["dump"]), "fresh.json", "--checkpoint", ck], work)
         else:
             rc, o = sh([sys.executable, os.path.join(kit, "inspect_gguf.py"), os.path.basename(pcfg["gguf"]), "fresh.json"], work)
         log.append(o)
@@ -187,6 +189,10 @@ def main():
     ap.add_argument("--rdna4", default="1", choices=["0", "1"])
     ap.add_argument("--keep-work", action="store_true")
     ap.add_argument("--with-gen", action="store_true", help="also keep gen/ and the authentic generator stamp for publication; default: programs only")
+    ap.add_argument("--own-inputs", action="store_true",
+                    help="with --ref: a model whose inputs (manifest entry or fleet/<slug>/) differ at the ref is built from the ref's own "
+                         "inputs, i.e. the ref exactly as it was (impact base side: a PR that changes a model's inputs, e.g. adds a drafter "
+                         "the ref's kit cannot build, is compared with what the ref really built)")
     ap.add_argument("--real", help="proof build: GGUFs from the HF cache and DIR/<slug>/tokenizer.json (full tokenizers) instead of stubs")
     a = ap.parse_args()
     preflight.require()
@@ -208,10 +214,20 @@ def main():
     else:
         tree, ref = os.path.abspath(a.tree), "tree:" + os.path.abspath(a.tree)
     skills = os.path.join(tree, "skills", "loom-port-llm")
+    own = {}   # slug -> (the ref's manifest entry, the ref's fleet dir) for models whose inputs changed since the ref
+    if a.own_inputs and a.ref:
+        rfleet = os.path.join(tree, "fleet")
+        rman = json.load(open(os.path.join(rfleet, "manifest.json")))["models"]
+        for s in slugs:
+            if s in rman and (rman[s] != manifest[s] or subprocess.run(["git", "diff", "--quiet", sha, "--", f"fleet/{s}"], cwd=repo).returncode):
+                own[s] = (rman[s], rfleet)
+        if own:
+            print(f"own inputs of {a.ref} for {', '.join(sorted(own))}", flush=True)
     res, fails, skipped = {}, {}, {}
     try:
         with cf.ProcessPoolExecutor(a.jobs) as ex:
-            futs = [ex.submit(build_one, s, manifest[s], skills, out, a.rdna4, a.keep_work, a.real, a.with_gen) for s in slugs]
+            futs = [ex.submit(build_one, s, own.get(s, (manifest[s],))[0], skills, out, a.rdna4, a.keep_work, a.real, a.with_gen,
+                              own.get(s, (None, None))[1]) for s in slugs]
             for f in cf.as_completed(futs):
                 s, err, dt = f.result()
                 res[s] = round(dt, 1)
