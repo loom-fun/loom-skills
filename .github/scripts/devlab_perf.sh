@@ -757,7 +757,8 @@ print('vllm', k, [x.get(k) for x in r if x.get(k)], 'median', round(st.median(v)
       nm=$(echo "$LSPEC" | grep -oE "n-max [0-9]+" | grep -oE "[0-9]+"); nm=${nm:-0}   # 0: no drafting
       step "llama.cpp$bkt n-max $nm c4"
       for i in 1 2 3; do (cd "$out" && "$T" "$B/c4_steady.py" "$lurl" 4 --thinking "$TH" | tail -1 | tee -a "c4_llamacpp${bkt}_n$nm.txt"); done
-      res[$s]=$("$T" -c "import json,statistics as st; print('llamacpp$bkt n-max $nm c4 median', st.median(json.loads(l)['agg_tps'] for l in open('$out/c4_llamacpp${bkt}_n$nm.txt')))");;
+      echo "{\"session_end\": \"llamacpp$bkt-n$nm\"}" >> "$out/c4_llamacpp${bkt}_n$nm.txt"
+      res[$s]=$("$T" -c "import json,statistics as st; print('llamacpp$bkt n-max $nm c4 median', st.median(r['agg_tps'] for l in open('$out/c4_llamacpp${bkt}_n$nm.txt') if 'agg_tps' in (r := json.loads(l))))");;
     textmatch)   # textmatch:V: first 50 generated tokens of perf.py's prompts, Loom V then llama.cpp (one at a time)
       serve_alone "$p1" || { res[$s]=ERROR; continue; }
       "$T" "$B/text_match.py" save "$url" "$out/text_$p1.json" --model "$cardid" --tokenizer "$card/tokenizer.json" --thinking "$TH" | tail -1

@@ -1,5 +1,8 @@
 """Execute real baseline argument resolution with only engine/network stubs."""
 import json
+import importlib.util
+import statistics
+import sys
 import os
 from pathlib import Path
 import shlex
@@ -86,6 +89,45 @@ class LlamaCapacity(unittest.TestCase):
                 self.assertNotEqual(result.returncode,0)
                 self.assertIsNone(args)
                 self.assertIn('llama_kv_vulkan must be a positive integer',result.stderr)
+
+
+@unittest.skipIf(os.name == 'nt', 'DevLab shell runs only on Linux')
+class LlamaSessions(unittest.TestCase):
+    def test_c4_steps_preserve_sessions_for_real_card_ingestion(self):
+        fragment = SCRIPT.read_text().split('    llamac4)   #', 1)[1]
+        fragment = '    llamac4)   #' + fragment.split('    textmatch)', 1)[0]
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            # Equal-sized sessions where pooling would give 4, but the required
+            # median of session medians is median(2, 5, 100) = 5.
+            (root/'rates.json').write_text(json.dumps([1,2,3,4,5,6,.5,100,101]))
+            (root/'c4_steady.py').write_text("""import json
+from pathlib import Path
+p=Path('calls'); i=int(p.read_text()) if p.exists() else 0
+p.write_text(str(i+1))
+print(json.dumps({'agg_tps':json.load(open('rates.json'))[i], 'window_s':1}))
+""")
+            env = dict(os.environ, T=sys.executable, B=tmp, out=tmp,
+                       lurl='http://unused', TH='off', bkt='-vulkan.perslot.nodraft',
+                       LSPEC='vulkan.perslot.nodraft|', p1='', s='llamac4')
+            script = 'declare -A res\nllama_up() { :; }\nstep() { :; }\n'
+            script += 'for round in 1 2 3; do\ncase "$s" in\n' + fragment + 'esac\ndone\n'
+            result = subprocess.run(['bash','-c',script],env=env,capture_output=True,text=True)
+            self.assertEqual(result.returncode,0,result.stderr)
+            self.assertNotIn('Traceback',result.stderr)
+            log=root/'c4_llamacpp-vulkan.perslot.nodraft_n0.txt'
+            rows=[json.loads(x) for x in log.read_text().splitlines()]
+            self.assertEqual(sum('session_end' in r for r in rows),3)
+            self.assertEqual([r['agg_tps'] for r in rows if 'agg_tps' in r],[1,2,3,4,5,6,.5,100,101])
+            card=SCRIPT.parents[2]/'skills/loom-benchmark/scripts/card'
+            sys.path.insert(0,str(card))
+            spec=importlib.util.spec_from_file_location('qat_make_info',card/'make_info.py')
+            module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+            values,counts,_=module.loom_sessions([],str(log))
+            self.assertEqual(counts['streams4'],[3,3,3])
+            self.assertEqual(values['streams4'],[2,5,100])
+            self.assertEqual(module.summary('streams4',values['streams4']),5)
+            self.assertEqual(statistics.median(module.c4_samples(str(log))),4)
 
 
 if __name__ == '__main__':
