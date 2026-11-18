@@ -22,7 +22,7 @@ def card(package,arm):
     if arm=='candidate' and any(e.get(k)!=v for k,v in POLICY.items()):
         raise ValueError('candidate did not emit the supported cache policy')
     before=dict(e);e.update(POLICY)
-    (package/'matched_policy.json').write_text(json.dumps({'arm':arm,'before':before,'after':e},indent=2)+'\n')
+    (package.parent/(package.name+'.matched_policy.json')).write_text(json.dumps({'arm':arm,'before':before,'after':e},indent=2)+'\n')
     path.write_text(json.dumps(d,indent=1)+'\n')
 
 

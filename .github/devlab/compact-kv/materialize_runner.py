@@ -14,10 +14,11 @@ from pathlib import Path
 import subprocess
 
 ROOT=Path(__file__).resolve().parents[3]
-PIN='7abe4277c4ff30195592f80ff170df1b3ad19985'
+PIN='099c95909633e2fa0ae80a5a75cecb826157562c'
 PREFIX='eng/gemma-e4b-min-ram/'
 FILES=['run_job.sh','run_frontier.sh','prepare_packages.sh','cold_capacity_targeted.py',
-       'compare_arms.py','runner/sdk_pin.py','target_build_config.json','target_text_llm_config.json']
+       'compare_arms.py','runner/sdk_pin.py','runner/hf_download.py',
+       'target_build_config.json','target_text_llm_config.json']
 
 
 def replace_once(text, old, new):
@@ -71,7 +72,8 @@ BASELINE="$OUT/builds/baseline"''')
         result['reset_text'] = body['choices'][0]['message']['content']
         if result['reset_text'] != result['short_text']:
             raise ValueError('fresh-session short answer changed after full-context request')
-        result['phase'] = 'health_after' ''')
+        result['phase'] = 'health_after'
+''')
     result['cold_capacity_targeted.py']=p
     p=source['compare_arms.py'].replace('65535','65536')
     p=replace_once(p,"('short_text', 'retrieval_text')", "('short_text', 'retrieval_text', 'reset_text')")
