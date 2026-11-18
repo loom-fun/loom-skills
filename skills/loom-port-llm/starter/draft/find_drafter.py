@@ -19,9 +19,10 @@ authors) next, then downloads. Whether the drafter is worth using is decided lat
 drafter that does not speed decoding up is not selected.
 
 Gemma-4 family targets (cfg arch gemma4) also get a Gemma-4 "assistant" (GGUF arch gemma4-assistant, Gemma 4's own
-multi-token-prediction head, draft/gen_assist.py): repos named "<model>-assistant" are searched by the base name and,
-since assistants are published for the Google base models, by "gemma-4 assistant"; one is accepted when its header
-matches the target (output width = hidden size, vocabulary, KV heads, head dims) and recorded as cfg["assistant"].
+multi-token-prediction head, draft/gen_assist.py): the target's own GGUF repo is searched first for mtp-*.gguf (Unsloth's
+QAT repos ship the exact-QAT assistant there), then repos named "<model>-assistant" by the base name and, since assistants
+are published for the Google base models, by "gemma-4 assistant"; one is accepted when its header matches the target
+(output width = hidden size, vocabulary, KV heads per layer kind, head dims) and recorded as cfg["assistant"].
 Prints ASSISTANT_RESULT {...} too.
 """
 import argparse
@@ -33,7 +34,7 @@ import sys
 import urllib.request
 
 SUPPORTED = {"F32", "Q4_K", "Q5_K", "Q6_K", "Q8_0", "BF16", "F16"}   # DFlash drafters (BF16/F16: f32-activation matvec, f16 GEMM)
-ASSIST_SUPPORTED = {"F32", "Q4_K", "Q5_K", "Q6_K", "Q8_0"}           # Gemma-4 assistants (gen_assist.py)
+ASSIST_SUPPORTED = {"F32", "Q4_0", "Q4_K", "Q5_K", "Q6_K", "Q8_0"}   # Gemma-4 assistants (gen_assist.py; Q4_0: the QAT ones)
 REQUANT = {"BF16", "F16"}       # converted to Q8_0 on download only with --requantize (requantize())
 QUANT_ORDER = ["Q4_K_M", "Q4_K", "Q5_K_M", "Q5_K", "Q6_K", "Q8_0", "BF16", "F16"]   # read on every proposal: lighter first
 TYPES = {0: "F32", 1: "F16", 2: "Q4_0", 3: "Q4_1", 6: "Q5_0", 7: "Q5_1", 8: "Q8_0", 9: "Q8_1", 10: "Q2_K", 11: "Q3_K", 12: "Q4_K",
@@ -209,11 +210,19 @@ def check_assistant(cfg, kv, tensors):
     a = lambda k, d=None: kv.get(f"gemma4-assistant.{k}", d)
     if kv.get("general.architecture") != "gemma4-assistant":
         return "not arch gemma4-assistant"
-    want = {"embedding_length_out": cfg["hidden"], "attention.head_count_kv": cfg["kv_heads"],
+    want = {"embedding_length_out": cfg["hidden"],
             "attention.key_length": cfg["head_dim"], "attention.key_length_swa": cfg.get("head_dim_swa") or cfg["head_dim"]}
     for k, v in want.items():
         if a(k) != v:
             return f"{k} {a(k)} != target {v}"
+    # KV heads per layer kind: one number (E2B/E4B), or one per layer (26B-A4B / 31B: sliding 16, full 4 on the 31B)
+    kv, swa = a("attention.head_count_kv"), a("attention.sliding_window_pattern") or []
+    kvl = kv if isinstance(kv, list) else [kv] * max(len(swa), 1)
+    kinds = [sorted({kvl[i] for i in range(len(kvl)) if i < len(swa) and bool(swa[i]) == s}) for s in (True, False)]
+    have = (kinds[0] or kinds[1] or sorted(set(kvl)), kinds[1] or kinds[0] or sorted(set(kvl)))
+    target = ([cfg["kv_heads"]], [cfg.get("kv_heads_global") or cfg["kv_heads"]])
+    if have != target:
+        return f"KV heads (sliding, full) {have} != target {target}"
     emb = tensors.get("token_embd.weight")
     if not emb or emb[1][-1] != cfg["vocab"]:
         return f"vocabulary {emb[1][-1] if emb else None} != target {cfg['vocab']}"
@@ -229,6 +238,27 @@ def find_assistant(cfg, target_repo, api, download, tried):
     """A Gemma-4 assistant for a gemma4-family target, or None (and the reason)."""
     if cfg.get("arch") != "gemma4":
         return None, "target is not a gemma4-family model"
+    # The target's own GGUF repo first: Unsloth's QAT repos ship the exact-QAT assistant as mtp-<model>.gguf (root, what
+    # llama.cpp's -hf auto-discovery loads) and MTP/mtp-<model>-<QUANT>.gguf.
+    try:
+        own = [x.rfilename for x in api.model_info(target_repo).siblings if re.match(r"(?i)(MTP/)?mtp-.*\.gguf$", x.rfilename)]
+    except Exception as e:  # noqa: BLE001
+        own = []
+        tried.append(f"{target_repo}: {e}")
+    own.sort(key=lambda f: (0 if "/" not in f else 1 if "Q4_0" in f.upper() else 2 if "Q8_0" in f.upper() else 3))   # the root (recommended) file first
+    for f in own[:3]:
+        try:
+            kv, tensors = header(target_repo, f)
+        except Exception as e:  # noqa: BLE001
+            tried.append(f"{target_repo}/{f}: header {e}"); continue
+        why = check_assistant(cfg, kv, tensors)
+        if why:
+            tried.append(f"{target_repo}/{f}: {why}"); continue
+        out = {"repo": target_repo, "file": f, "gguf": None}
+        if download:
+            from huggingface_hub import hf_hub_download
+            out["gguf"] = cached(target_repo).get(f) or hf_hub_download(target_repo, f)
+        return out, "ok"
     base = base_name(cfg, target_repo)
     seen, found = set(), []
     for q in dict.fromkeys([f"{base}-assistant", base.split("-Instruct")[0] + "-assistant", "gemma-4 assistant", "gemma-4-assistant"]):

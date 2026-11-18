@@ -75,7 +75,8 @@ jobs:
           BUILD_SIDE: ${{ matrix.side }}
           BUILD_SHARD: ${{ matrix.shard }}
         run: |
-          python fleet/build_fleet.py --ref "$BUILD_REF" --slugs "$BUILD_SLUGS" --out "$RUNNER_TEMP/impact/$BUILD_SIDE" --jobs 2
+          # base side: a model whose inputs this PR changes is built from the base's own inputs (what the base really built)
+          python fleet/build_fleet.py --ref "$BUILD_REF" --slugs "$BUILD_SLUGS" --out "$RUNNER_TEMP/impact/$BUILD_SIDE" --jobs 2 $([ "$BUILD_SIDE" = base ] && echo --own-inputs)
           mv "$RUNNER_TEMP/impact/$BUILD_SIDE/summary.json" "$RUNNER_TEMP/impact/$BUILD_SIDE/summary-$BUILD_SHARD.json"
       - uses: actions/upload-artifact@v4
         with:

@@ -145,5 +145,262 @@
   "source": "pypi",
   "wheel_sha256": "5148f9e3a264af400ec4bae38bd7b06bf551d28cc33b7a61d67f7bcefa590438",
   "hrx_system_sha": "0cd370f2baaa0cfef47cc23007f1a109906f8a52"
+ },
+ "assistant": {
+  "repo": "unsloth/gemma-4-26B-A4B-it-qat-GGUF",
+  "file": "mtp-gemma-4-26B-A4B-it.gguf",
+  "gguf": "mtp-gemma-4-26B-A4B-it.gguf"
+ },
+ "drafter": {
+  "kind": "assist",
+  "depth": 1,
+  "note": "tuned on DevLab (devlab-perf sweeps, perf.py short/long rows, spec gate per candidate); DFlash rows: the non-QAT Anbeeld drafter, comparison only (classification rule 1)",
+  "tuned": [
+   {
+    "kind": "assist",
+    "depth": 1,
+    "device": "radeon-r9700",
+    "rows": {
+     "decode": 203.61,
+     "decode_2k": 184.85
+    },
+    "acceptance": {
+     "decode": 0.763,
+     "decode_2k": 0.759
+    },
+    "spec": "PASS",
+    "run": 44307376426
+   },
+   {
+    "kind": "assist",
+    "depth": 2,
+    "device": "radeon-r9700",
+    "rows": {
+     "decode": 163.33,
+     "decode_2k": 147.84
+    },
+    "acceptance": {
+     "decode": 0.62,
+     "decode_2k": 0.59
+    },
+    "spec": "PASS",
+    "run": 44307376426
+   },
+   {
+    "kind": "assist",
+    "depth": 3,
+    "device": "radeon-r9700",
+    "rows": {
+     "decode": 178.76,
+     "decode_2k": 161.63
+    },
+    "acceptance": {
+     "decode": 0.538,
+     "decode_2k": 0.522
+    },
+    "spec": "PASS",
+    "run": 44307376426
+   },
+   {
+    "kind": "assist",
+    "depth": 4,
+    "device": "radeon-r9700",
+    "rows": {
+     "decode": 118.1,
+     "decode_2k": 104.48
+    },
+    "acceptance": {
+     "decode": 0.433,
+     "decode_2k": 0.391
+    },
+    "spec": "PASS",
+    "run": 44307376426
+   },
+   {
+    "kind": "dflash",
+    "depth": 1,
+    "device": "radeon-r9700",
+    "rows": {
+     "decode": 154.75,
+     "decode_2k": 129.9
+    },
+    "acceptance": {
+     "decode": 0.52,
+     "decode_2k": 0.509
+    },
+    "spec": "PASS",
+    "run": 44307376426
+   },
+   {
+    "kind": "dflash",
+    "depth": 3,
+    "device": "radeon-r9700",
+    "rows": {
+     "decode": 119.39,
+     "decode_2k": 107.31
+    },
+    "acceptance": {
+     "decode": 0.248,
+     "decode_2k": 0.267
+    },
+    "spec": "PASS",
+    "run": 44307376426
+   },
+   {
+    "kind": "dflash",
+    "depth": 5,
+    "device": "radeon-r9700",
+    "rows": {
+     "decode": 70.59,
+     "decode_2k": 63.09
+    },
+    "acceptance": {
+     "decode": 0.161,
+     "decode_2k": 0.158
+    },
+    "spec": "PASS",
+    "run": 44307376426
+   },
+   {
+    "kind": "none",
+    "depth": 0,
+    "device": "radeon-r9700",
+    "rows": {
+     "decode": 174.59,
+     "decode_2k": 156.31
+    },
+    "run": 44307376426
+   },
+   {
+    "kind": "assist",
+    "depth": 1,
+    "device": "strix-halo",
+    "rows": {
+     "decode": 95.06,
+     "decode_2k": 80.32,
+     "decode_32k": 65.88
+    },
+    "acceptance": {
+     "decode": 0.763,
+     "decode_2k": 0.656,
+     "decode_32k": 0.716
+    },
+    "spec": "PASS",
+    "run": 44307376426
+   },
+   {
+    "kind": "assist",
+    "depth": 2,
+    "device": "strix-halo",
+    "rows": {
+     "decode": 76.27,
+     "decode_2k": 65.02,
+     "decode_32k": 54.49
+    },
+    "acceptance": {
+     "decode": 0.62,
+     "decode_2k": 0.541,
+     "decode_32k": 0.625
+    },
+    "spec": "PASS",
+    "run": 44307376426
+   },
+   {
+    "kind": "assist",
+    "depth": 3,
+    "device": "strix-halo",
+    "rows": {
+     "decode": 85.48,
+     "decode_2k": 72.48,
+     "decode_32k": 53.69
+    },
+    "acceptance": {
+     "decode": 0.538,
+     "decode_2k": 0.484,
+     "decode_32k": 0.497
+    },
+    "spec": "PASS",
+    "run": 44307376426
+   },
+   {
+    "kind": "assist",
+    "depth": 4,
+    "device": "strix-halo",
+    "rows": {
+     "decode": 52.92,
+     "decode_2k": 50.2,
+     "decode_32k": 39.02
+    },
+    "acceptance": {
+     "decode": 0.433,
+     "decode_2k": 0.433,
+     "decode_32k": 0.44
+    },
+    "spec": "PASS",
+    "run": 44307376426
+   },
+   {
+    "kind": "dflash",
+    "depth": 1,
+    "device": "strix-halo",
+    "rows": {
+     "decode": 72.94,
+     "decode_2k": 61.09,
+     "decode_32k": 48.46
+    },
+    "acceptance": {
+     "decode": 0.52,
+     "decode_2k": 0.5,
+     "decode_32k": 0.465
+    },
+    "spec": "PASS",
+    "run": 44307376426
+   },
+   {
+    "kind": "dflash",
+    "depth": 3,
+    "device": "strix-halo",
+    "rows": {
+     "decode": 56.81,
+     "decode_2k": 51.85,
+     "decode_32k": 35.9
+    },
+    "acceptance": {
+     "decode": 0.244,
+     "decode_2k": 0.28,
+     "decode_32k": 0.219
+    },
+    "spec": "PASS",
+    "run": 44307376426
+   },
+   {
+    "kind": "dflash",
+    "depth": 5,
+    "device": "strix-halo",
+    "rows": {
+     "decode": 32.52,
+     "decode_2k": 27.22,
+     "decode_32k": 23.47
+    },
+    "acceptance": {
+     "decode": 0.161,
+     "decode_2k": 0.139,
+     "decode_32k": 0.168
+    },
+    "spec": "PASS",
+    "run": 44307376426
+   },
+   {
+    "kind": "none",
+    "depth": 0,
+    "device": "strix-halo",
+    "rows": {
+     "decode": 74.64,
+     "decode_2k": 67.56,
+     "decode_32k": 55.99
+    },
+    "run": 44307376426
+   }
+  ]
  }
 }

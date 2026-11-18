@@ -1,6 +1,6 @@
-# Drafting classification of all 52 cards (final benchmark rule)
+# Drafting classification of all 54 cards (final benchmark rule)
 
-Choice per model, identical on Loom and llama.cpp ROCm+Vulkan: MTP head in the card's own GGUF > DFlash/assistant drafter published for this exact model (maker or Z-Lab, GGUF = faithful conversion) > no drafting. No ngram. Counts: {'mtp': 6, 'dflash': 17, 'assist': 2, 'none': 27}; Loom rebuilds needed: 20.
+Choice per model, identical on Loom and llama.cpp ROCm+Vulkan: MTP head in the card's own GGUF > DFlash/assistant drafter published for this exact model (maker or Z-Lab, GGUF = faithful conversion) > no drafting. No ngram. Counts: {'mtp': 4, 'dflash': 18, 'assist': 4, 'none': 28}; Loom rebuilds needed: 20.
 
 Evidence for MTP: the checkpoint GGUF header was read (`nextn_predict_layers`, nextn tensors; `work/baselines/nextn.json`). Drafter provenance: HF repo + its upstream release (`classify_data.json`). llama.cpp n-max: the drafter README's stated value (GGUF repo `--spec-draft-n-max`, else upstream `num_speculative_tokens` / block size - 1), else llama.cpp's default (flag omitted). Loom keeps its tuned depth. MTP GGUF variants published separately upstream (e.g. unsloth/Qwen3.5-9B-MTP-GGUF) are different checkpoints and are NOT used (the card's GGUF has no NextN head) - noted as a possible follow-up.
 
@@ -58,6 +58,8 @@ Evidence for MTP: the checkpoint GGUF header was read (`nextn_predict_layers`, n
 | bartowski-Mellum2.1-12B-A2.5B-Thinking-loom | none | none  | `none` |  |  no MTP head in the GGUF; no drafter from the model maker or Z-Lab for this exact model | ok: keep |
 | unsloth-Qwen3.8-Flash-Next-loom | mtp | mtp 3 | `--spec-type draft-mtp --spec-draft-model {hf:unsloth/Qwen3.8-Flash-Next-GGUF/mtp-Qwen3.8-Flash-Next-Q8_0.gguf} -ngl 99` | llama.cpp default | https://huggingface.co/unsloth/Qwen3.8-Flash-Next-GGUF separate MTP GGUF (qwen4exp.nextn_predict_layers=1, 6 nextn tensors) from the same release | ok: keep |
 | amd-Qwen3.8-27B-Quark-AWQ-MXFP4-loom | mtp | mtp 3 | `none` (no llama.cpp baseline: llama.cpp cannot read the safetensors checkpoint) |  | https://huggingface.co/amd/Qwen3.8-27B-Quark-AWQ-MXFP4 safetensors header: mtp.fc, mtp.layers.0.*, mtp.norm (bf16); text_config.mtp_num_hidden_layers=1 | ok: keep |
+| unsloth-gemma-4-31B-it-qat-loom | assist | assist 1 | `--spec-type draft-mtp --spec-draft-model {drafter} --spec-draft-n-max 4 -ngld 99` | unsloth/gemma-4-31B-it-qat-GGUF MTP/README.md (--spec-draft-n-max 4) | https://huggingface.co/google/gemma-4-31B-it-qat-q4_0-unquantized-assistant (model maker); GGUF https://huggingface.co/unsloth/gemma-4-31B-it-qat-GGUF mtp-gemma-4-31B-it.gguf = conversion of that release, in the target's own repo. Anbeeld DFlash: trained for the non-QAT target (another model), comparison only | ok: assist (exact-QAT assistant) |
+| unsloth-gemma-4-26B-A4B-it-qat-loom | assist | assist 1 | `--spec-type draft-mtp --spec-draft-model {drafter} --spec-draft-n-max 4 -ngld 99` | unsloth/gemma-4-26B-A4B-it-qat-GGUF MTP/README.md (--spec-draft-n-max 4) | https://huggingface.co/google/gemma-4-26B-A4B-it-qat-q4_0-unquantized-assistant (model maker); GGUF https://huggingface.co/unsloth/gemma-4-26B-A4B-it-qat-GGUF mtp-gemma-4-26B-A4B-it.gguf = conversion of that release, in the target's own repo. Anbeeld DFlash: trained for the non-QAT target (another model), comparison only | ok: assist (exact-QAT assistant) |
 
 ## Rebuilds (20)
 

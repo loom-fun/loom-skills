@@ -1656,7 +1656,7 @@
   "unsloth-gemma-4-26B-A4B-it-qat-loom": {
    "staging": {
     "repo": "loom-fun-staging/unsloth-gemma-4-26B-A4B-it-qat-loom",
-    "revision": "8ac71dbdd2dc0608bed6ea3fed09cbf50033b595"
+    "revision": "4bf08bd8d7fe8a20ce01cbed427778604a971ca7"
    },
    "model_id": "google/gemma-4-26B-A4B-it-qat-q4_0-unquantized",
    "kit": "gemma4",
@@ -1666,7 +1666,8 @@
     "context": 262144,
     "prefill": 4096,
     "rows": 4,
-    "max_tokens": 4096
+    "max_tokens": 4096,
+    "draft_depth": 1
    },
    "files": {
     "gemma-4-26B-A4B-it-qat-UD-Q4_K_XL.gguf": {
@@ -1676,6 +1677,14 @@
      "path": "gemma-4-26B-A4B-it-qat-UD-Q4_K_XL.gguf",
      "size": 14249047104,
      "dump": "unsloth-gemma-4-26B-A4B-it-qat-loom/gguf/gemma-4-26B-A4B-it-qat-UD-Q4_K_XL.gguf.json.gz"
+    },
+    "mtp-gemma-4-26B-A4B-it.gguf": {
+     "origin": "drafter",
+     "repo": "unsloth/gemma-4-26B-A4B-it-qat-GGUF",
+     "revision": "7b92b5b28818151e8669af2e45e88d6086f490dd",
+     "path": "mtp-gemma-4-26B-A4B-it.gguf",
+     "size": 251939328,
+     "dump": "unsloth-gemma-4-26B-A4B-it-qat-loom/gguf/mtp-gemma-4-26B-A4B-it.gguf.json.gz"
     }
    }
   },
@@ -1718,17 +1727,18 @@
   "unsloth-gemma-4-31B-it-qat-loom": {
    "staging": {
     "repo": "loom-fun-staging/unsloth-gemma-4-31B-it-qat-loom",
-    "revision": "849df3f0fa133606d51cf671d8acfacc5542a8ed"
+    "revision": "8496d48196eccbb8137f771834ea6c4458c66265"
    },
    "model_id": "google/gemma-4-31B-it-qat-q4_0-unquantized",
    "kit": "gemma4",
    "arch": "gemma4",
    "build": {
     "preset": "chat",
-    "context": 65536,
+    "context": 81920,
     "prefill": 1024,
     "rows": 4,
-    "max_tokens": 4096
+    "max_tokens": 4096,
+    "draft_depth": 1
    },
    "files": {
     "gemma-4-31B-it-qat-UD-Q4_K_XL.gguf": {
@@ -1738,6 +1748,14 @@
      "path": "gemma-4-31B-it-qat-UD-Q4_K_XL.gguf",
      "size": 17287670048,
      "dump": "unsloth-gemma-4-31B-it-qat-loom/gguf/gemma-4-31B-it-qat-UD-Q4_K_XL.gguf.json.gz"
+    },
+    "mtp-gemma-4-31B-it.gguf": {
+     "origin": "drafter",
+     "repo": "unsloth/gemma-4-31B-it-qat-GGUF",
+     "revision": "43cc1aeb31adf47ec06a854507ce552cd9862e6f",
+     "path": "mtp-gemma-4-31B-it.gguf",
+     "size": 279955968,
+     "dump": "unsloth-gemma-4-31B-it-qat-loom/gguf/mtp-gemma-4-31B-it.gguf.json.gz"
     }
    }
   },

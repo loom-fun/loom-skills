@@ -28,7 +28,7 @@ from card_lib import (DEFAULT_GPU, FEATURES, GATE_NAMES, GATES, GPUS, HF, gpu_pr
                       TIMED, PRELOAD_FLAG, preload_mode, card_gpus, card_metrics, derived_tags, beyond_context, gate_applies, generator_commit, gpu_context, gpu_memory, gpu_serve_args, info_serve_args, serves,
                       gpu_view, has_results, has_runner, load_info, load_json, load_package, metric_applies, native_context, over_context,
                       package_facts, programs_sha256, require_valid, stale_metrics, with_gate_features)
-from matched_spec import TIE_BAND  # noqa: E402
+from matched_spec import TIE_BAND, classification  # noqa: E402
 
 YES, NO, NA, MISSING = "✅", "❌", "—", "—"
 FIT = "doesn't fit"   # a row or gate that needs more context than the GPU's memory serves: accepted, not a failure
@@ -245,7 +245,25 @@ def methodology_other(base, spec, drafter, values, runs_c4, measured, cross=None
     return out
 
 
-def methodology(base, extra, spec, drafter, values, runs_c4, machine=False, cross=None, measured=True):
+NO_DRAFTER = "no MTP head in the GGUF and no drafter published for this exact model"
+
+
+def no_draft_reason(repo):
+    """Why a card drafts on neither engine: the classification's own evidence for the model (a drafter can exist and still not be
+    used, e.g. one trained for another model, or one the package does not implement), else the generic reason."""
+    try:
+        c = classification(repo) if repo else {}
+    except (KeyError, OSError, ValueError):
+        c = {}
+    ev = (c.get("evidence") or "").strip().rstrip(".")
+    if c.get("choice", "none") != "none":   # a card measured before its package adopted the classified drafter
+        return f"this package does not use the classified {c['choice']} drafter yet"
+    if not ev or ev.startswith("no MTP head in the GGUF; no drafter from the model maker"):
+        return NO_DRAFTER
+    return ev
+
+
+def methodology(base, extra, spec, drafter, values, runs_c4, machine=False, cross=None, measured=True, repo=None):
     """The card's methodology: the same short template on every card, filled from the card's own data (baseline server
     arguments, drafting setting, runs). Anything that differs between the engines is stated as it is, not smoothed over.
     cross: {"llama": [(date, source)], "loom": (date, source)} when the llama.cpp rows were measured in another job than the Loom rows (a Loom-only
@@ -258,7 +276,7 @@ def methodology(base, extra, spec, drafter, values, runs_c4, machine=False, cros
     loom_m = METHOD.get(spec[0], spec[0]) if spec else None
     ll = [(n, *llama_draft(b.get("args"))) for n, b in engines]
     if spec is None and all(m is None for _, m, _ in ll):
-        draft = "no drafting on either engine (no MTP head in the GGUF and no drafter published for this exact model)"
+        draft = f"no drafting on either engine ({no_draft_reason(repo)})"
         depth = ""
     elif spec and all(m is not None and (m == loom_m or (loom_m == "assistant drafter" and m == "MTP")) for _, m, _ in ll):
         d = f" ({drafter})" if drafter else ""
@@ -644,7 +662,7 @@ def perf_section(L, info, facts, feats, d, g, here, ctx):
     cross = {"llama": [(d or None, sources[sid]) for d, sid in bfs],
              "loom": (sessions[primary]["date"], sources[sessions[primary]["source"]])} if bfs and primary is not None else None
     L += ["", "**Methodology**", "", *methodology(base, extra, facts["spec"], drafter, values_of(tps_keys), runs_of(["streams4"], True), machine, cross,
-                                                        has_baseline_values(m for m, _ in (shown[k] for k, _ in METRICS if k in shown))),
+                                                        has_baseline_values(m for m, _ in (shown[k] for k, _ in METRICS if k in shown)), info.get("repo")),
           (f"- Measured on {device_text(psrc['device'])}, a named machine (this GPU has no DevLab runner); both engines ran on it."
            if machine else f"- Measured on AMD DevLab Dispatch {GPUS[g]['runner']} runners (`devlab-perf` jobs); runners differ between sessions.")]
     if bname == "llama.cpp":
