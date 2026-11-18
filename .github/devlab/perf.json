@@ -1,5 +1,5 @@
 {
- "_comment": "Gemma 4 QAT 31B drafted (assistant d1, int8 Q4_0 programs) R9700 capacity: the 10240 preset is RESOURCE_EXHAUSTED with drafting on. Cold-capacity probe at 9216 / 8192 / 7168 (execution override, same programs), d1 and d3. Experiment only.",
+ "_comment": "Gemma 4 QAT 31B drafted (int8 Q4_0 programs) R9700 capacity at the 10240 context with a smaller prefill (the drafted workspace scales with prefill_capacity): prefill 512, depth 1 and 3; 9216/512. Experiment only.",
  "jobs": [
   {
    "name": "qat-31b-r9700-capacity",
@@ -13,12 +13,12 @@
    "llama_spec": "",
    "require_preset_r9700": true,
    "variants": [
-    {"name": "c9d3", "execution": {"context_capacity": 9216, "draft_depth": 3}, "serve_args": ["--parameter_mode=preload"]},
-    {"name": "c9", "execution": {"context_capacity": 9216, "draft_depth": 1}, "serve_args": ["--parameter_mode=preload"]},
-    {"name": "c8", "execution": {"context_capacity": 8192, "draft_depth": 1}, "serve_args": ["--parameter_mode=preload"]},
-    {"name": "c7", "execution": {"context_capacity": 7168, "draft_depth": 1}, "serve_args": ["--parameter_mode=preload"]}
+    {"name": "c10p5", "execution": {"context_capacity": 10240, "prefill_capacity": 512, "draft_depth": 1}, "serve_args": ["--parameter_mode=preload"]},
+    {"name": "c10p5d3", "execution": {"context_capacity": 10240, "prefill_capacity": 512, "draft_depth": 3}, "serve_args": ["--parameter_mode=preload"]},
+    {"name": "c9p5", "execution": {"context_capacity": 9216, "prefill_capacity": 512, "draft_depth": 1}, "serve_args": ["--parameter_mode=preload"]},
+    {"name": "c8d3", "execution": {"context_capacity": 8192, "prefill_capacity": 1024, "draft_depth": 3}, "serve_args": ["--parameter_mode=preload"]}
    ],
-   "steps": ["coldcapacity:c9d3", "coldcapacity:c9", "coldcapacity:c8", "coldcapacity:c7"]
+   "steps": ["coldcapacity:c10p5", "coldcapacity:c10p5d3", "coldcapacity:c9p5", "coldcapacity:c8d3"]
   }
  ]
 }
