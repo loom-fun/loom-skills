@@ -4750,9 +4750,16 @@ USED_MOEQ = set()   # (fmt, K, N, mode) of the int8 expert matvecs; USED_MOEF: t
 USED_MOEF = set()
 
 
+# MOE_Q8_INPUT=1 (choice moe.decode.act_q8_input): an expert input other than %h (gemma4: %h2, its own pre-FFN norm) is
+# quantized for the int8 expert matvecs by a g_quant_q8 launch of its own in the decode branch (into %xmq); off: such
+# layers keep the f32 expert matvecs.
+MOE_Q8_INPUT = os.environ.get("MOE_Q8_INPUT", "0") == "1"
+
+
 def moe_iq(gu, fd, x):
-    """Whether this layer's decode expert matvecs take int8 activations (needs the router input as %h: its h16q)."""
-    return (ACT_Q8 and MOE_Q8 and x == "%h" and "+" not in gu and gu in IQ_FMTS and fd in IQ_FMTS
+    """Whether this layer's decode expert matvecs take int8 activations (the router input %h: its h16q; another input with
+    MOE_Q8_INPUT: %xmq)."""
+    return (ACT_Q8 and MOE_Q8 and (x == "%h" or MOE_Q8_INPUT) and "+" not in gu and gu in IQ_FMTS and fd in IQ_FMTS
             and H // 32 <= 1024 and MOE["ffn"] // 32 <= 1024 and not MOE.get("expert_bias"))
 
 
@@ -4795,9 +4802,10 @@ def moe_routed(i, b, x="%h", rx="%h", out="%y"):
     for key, ok in (((gu, H, FE, "gu"), iq), ((fd, FE, H, "dn"), iq)):
         (USED_MOEQ if ok else USED_MOEF).add(key)
     q8 = "_q8" if iq else ""
-    xa = f"{x}16q" if iq else x
+    xa = (f"{x}16q" if x == "%h" else "%xmq") if iq else x
     quant_act = (f"    kernel.launch @g_quant_q8[%ta, %nFE](%ta, %nFE, %act, %actq) : [index, index](index, index, buffer, buffer)\n" if iq else "")
-    hq = "    // moe-hq: %h16q beside the gemm-gap (see gen_draft.small_gemm)\n" if iq else ""
+    hq = ("    // moe-hq: %h16q beside the gemm-gap (see gen_draft.small_gemm)\n" if x == "%h" else
+          f"    kernel.launch @g_quant_q8[%t, %nH](%t, %nH, {x}, %xmq) : [index, index](index, index, buffer, buffer)\n") if iq else ""
     actd = "%actq" if iq else "%act"
     rty = TENS[b + "ffn_gate_inp.weight"]["type"]
     sgarg, sgty = ("%sg, ", "buffer, ") if SHGATE else ("", "")
@@ -4857,7 +4865,10 @@ def moe_alloc():
   %ys_bytes = index.constant {KU * H * 4} : offset
   %ys_size = index.scale %t, %ys_bytes : index, offset -> offset
   %ys = buffer.alloca<global> align(256) %ys_size : buffer
-  %c64m = index.constant 64 : index
+""" + (f"""  %xmq_bytes = index.constant {H * 2} : offset
+  %xmq_size = index.scale %t, %xmq_bytes : index, offset -> offset
+  %xmq = buffer.alloca<global> align(256) %xmq_size : buffer
+""" if MOE_Q8_INPUT else "") + f"""  %c64m = index.constant 64 : index
   %cEm = index.constant {MOE["experts"]} : index
   %ta_tiles = index.div %ta, %c64m : index
   %max_tiles = index.add %ta_tiles, %cEm : index
