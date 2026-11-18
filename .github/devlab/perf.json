@@ -1,47 +1,76 @@
 {
- "_comment": "R9700 per-model measurement (r9700_jobs.py): one job per model on one R9700 runner; loom-fun-staging card, llama.cpp ROCm b1375 + Vulkan b12211 with the matched drafting, reduced-context models served at served_context. Does not fit: none",
- "runner": "r9700",
- "memory_bytes": 34000000000,
- "llama_spec": "matched",
+ "_comment": "Run 3 (perf A/B + kernel tests, one Strix job): 31B QAT built from the branch: base (depth 3); the verify-span attention on the gd256/gd512 decode kernels (mt, depth 3); depth 4 with the two-stage argmax and live-slot 8-token matvecs (l4); l4 + span attention (mt4). ktest of mt4 (every launched kernel, incl. the new span_d<D> and argmax cases). ABBA short and long sessions. Experiment only.",
  "jobs": [
   {
-   "name": "unsloth-qwen3-0-6b-loom",
-   "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
-   "kit": null,
+   "name": "q31-strix-ab2",
+   "runner": "strix",
+   "card": "loom-fun/unsloth-gemma-4-31B-it-qat-loom@ad5024c0480adfe03459f60a72ffb3700fd9794f",
+   "memory_bytes": 110000000000,
+   "kit": "gemma4",
    "llamacpp": "b1375",
-   "llamacpp_vulkan": "b12211",
-   "memory_bytes_r9700": 17000000000,
+   "sdk": "0.2.0",
+   "llama_spec": "matched",
+   "thinking": "off",
    "variants": [
     {
-     "name": "card",
-     "build": {}
-    },
-    {
-     "name": "nodraft",
+     "name": "base",
      "build": {},
      "execution": {
-      "draft_depth": 0
+      "draft_depth": 3
+     }
+    },
+    {
+     "name": "mt",
+     "build": {
+      "ATTN_MT_DIMS": "256,512",
+      "ATTN_MT_MIN_KV": "4"
+     },
+     "execution": {
+      "draft_depth": 3
+     }
+    },
+    {
+     "name": "l4",
+     "build": {
+      "ASSIST_ARGMAX_PARTS": "128",
+      "MV_Q8_LIVE": "1"
+     },
+     "execution": {
+      "draft_depth": 4
+     }
+    },
+    {
+     "name": "mt4",
+     "build": {
+      "ATTN_MT_DIMS": "256,512",
+      "ATTN_MT_MIN_KV": "4",
+      "ASSIST_ARGMAX_PARTS": "128",
+      "MV_Q8_LIVE": "1"
+     },
+     "execution": {
+      "draft_depth": 4
      }
     }
    ],
    "steps": [
-    "func:card",
-    "ktest:card",
-    "gates:card:dev",
-    "perf:card:3",
-    "perf:card:3:long",
-    "c4:nodraft",
-    "llama@rocm.np1:3",
-    "llama@rocm.np1:3:long",
-    "llamac4@rocm.nodraft",
-    "llama@vulkan.np1:3",
-    "llama@vulkan.np1:3:long",
-    "llamac4@vulkan.perslot.nodraft"
+    "ktest:mt4",
+    "perf:base:1",
+    "perf:mt:1",
+    "perf:l4:1",
+    "perf:mt4:1",
+    "perf:mt4:1",
+    "perf:l4:1",
+    "perf:mt:1",
+    "perf:base:1",
+    "perf:base:1:long",
+    "perf:mt:1:long",
+    "perf:l4:1:long",
+    "perf:mt4:1:long",
+    "perf:mt4:1:long",
+    "perf:l4:1:long",
+    "perf:mt:1:long",
+    "perf:base:1:long"
    ]
   }
- ],
- "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
- "kit": null,
- "llamacpp": "b1375",
- "llamacpp_vulkan": "b12211"
+ ]
 }
