@@ -1,11 +1,11 @@
 {
-  "_comment": "Serving-only correction after discovery44199152114: real-weight ktests already passed all4 and are not repeated. Exact staged programs/weights unchanged. Let registry add fixed backing and clear physical budget while retaining LOOM_MEMNEED; explicit preload stays. Requires final lead dispatch review.",
+  "_comment": "Bounded four-outcome upper-context qualification on reviewed harness aed8405f. Official higher-bound packages use new immutable staging pins; numerical kernels unchanged. Full cold/context and model gates precede one exploratory performance session; not final sampled performance.",
   "jobs": [
     {
-      "name": "gemma-qat-31b-strix-serving",
+      "name": "gemma-qat-31b-strix-upper",
       "runner": "strix",
-      "card": "loom-fun-staging/unsloth-gemma-4-31B-it-qat-loom@417aa0158cf4f6ca260b405db00287116e5cc27f",
-      "memory_bytes": 81000000000,
+      "card": "loom-fun-staging/unsloth-gemma-4-31B-it-qat-loom@849df3f0fa133606d51cf671d8acfacc5542a8ed",
+      "memory_bytes": 110000000000,
       "kit": "gemma4",
       "llamacpp": "b1375",
       "llamacpp_vulkan": "b12211",
@@ -14,10 +14,10 @@
       "thinking": "off",
       "variants": [
         {
-          "name": "target",
+          "name": "upper",
           "sdk": "0.2.0",
           "execution": {
-            "context_capacity": 57344,
+            "context_capacity": 65536,
             "prefill_capacity": 1024,
             "draft_depth": 0
           },
@@ -27,20 +27,18 @@
         }
       ],
       "steps": [
-        "func:target",
-        "gates:target:dev",
-        "coldcapacity:target",
-        "perf:target:1",
-        "profile:target:pf2k,pf8k,dec"
+        "coldcapacity:upper",
+        "gates:upper:full",
+        "perf:upper:1:long"
       ],
       "env": {
         "KTEST_GEMM_ALL": "1"
       }
     },
     {
-      "name": "gemma-qat-31b-r9700-serving",
+      "name": "gemma-qat-31b-r9700-upper",
       "runner": "r9700",
-      "card": "loom-fun-staging/unsloth-gemma-4-31B-it-qat-loom@417aa0158cf4f6ca260b405db00287116e5cc27f",
+      "card": "loom-fun-staging/unsloth-gemma-4-31B-it-qat-loom@849df3f0fa133606d51cf671d8acfacc5542a8ed",
       "memory_bytes": 34000000000,
       "kit": "gemma4",
       "llamacpp": "b1375",
@@ -50,10 +48,10 @@
       "thinking": "off",
       "variants": [
         {
-          "name": "target",
+          "name": "upper",
           "sdk": "0.2.0",
           "execution": {
-            "context_capacity": 8192,
+            "context_capacity": 10240,
             "prefill_capacity": 1024,
             "draft_depth": 0
           },
@@ -63,11 +61,10 @@
         }
       ],
       "steps": [
-        "func:target",
-        "gates:target:dev",
-        "coldcapacity:target",
-        "perf:target:1",
-        "profile:target:pf2k,dec"
+        "coldcapacity:upper",
+        "gates:upper:full",
+        "perf:upper:1:long",
+        "profile:upper:pf8k"
       ],
       "env": {
         "KTEST_GEMM_ALL": "1"
@@ -75,10 +72,10 @@
       "require_preset_r9700": true
     },
     {
-      "name": "gemma-qat-26b-strix-serving",
+      "name": "gemma-qat-26b-strix-upper",
       "runner": "strix",
-      "card": "loom-fun-staging/unsloth-gemma-4-26B-A4B-it-qat-loom@0fa9e1a4e8f369b9e9a4eb5295749feaf42570f8",
-      "memory_bytes": 81000000000,
+      "card": "loom-fun-staging/unsloth-gemma-4-26B-A4B-it-qat-loom@8ac71dbdd2dc0608bed6ea3fed09cbf50033b595",
+      "memory_bytes": 110000000000,
       "kit": "gemma4",
       "llamacpp": "b1375",
       "llamacpp_vulkan": "b12211",
@@ -87,10 +84,10 @@
       "thinking": "off",
       "variants": [
         {
-          "name": "target",
+          "name": "upper",
           "sdk": "0.2.0",
           "execution": {
-            "context_capacity": 232448,
+            "context_capacity": 262144,
             "prefill_capacity": 4096,
             "draft_depth": 0
           },
@@ -100,20 +97,18 @@
         }
       ],
       "steps": [
-        "func:target",
-        "gates:target:dev",
-        "coldcapacity:target",
-        "perf:target:1",
-        "profile:target:pf2k,pf8k,dec"
+        "coldcapacity:upper",
+        "gates:upper:full",
+        "perf:upper:1:long"
       ],
       "env": {
         "KTEST_GEMM_ALL": "1"
       }
     },
     {
-      "name": "gemma-qat-26b-r9700-serving",
+      "name": "gemma-qat-26b-r9700-upper",
       "runner": "r9700",
-      "card": "loom-fun-staging/unsloth-gemma-4-26B-A4B-it-qat-loom@0fa9e1a4e8f369b9e9a4eb5295749feaf42570f8",
+      "card": "loom-fun-staging/unsloth-gemma-4-26B-A4B-it-qat-loom@8ac71dbdd2dc0608bed6ea3fed09cbf50033b595",
       "memory_bytes": 34000000000,
       "kit": "gemma4",
       "llamacpp": "b1375",
@@ -123,10 +118,10 @@
       "thinking": "off",
       "variants": [
         {
-          "name": "target",
+          "name": "upper",
           "sdk": "0.2.0",
           "execution": {
-            "context_capacity": 32768,
+            "context_capacity": 36864,
             "prefill_capacity": 4096,
             "draft_depth": 0
           },
@@ -136,11 +131,9 @@
         }
       ],
       "steps": [
-        "func:target",
-        "gates:target:dev",
-        "coldcapacity:target",
-        "perf:target:1",
-        "profile:target:pf2k,pf8k,dec"
+        "coldcapacity:upper",
+        "gates:upper:full",
+        "perf:upper:1:long"
       ],
       "env": {
         "KTEST_GEMM_ALL": "1"
