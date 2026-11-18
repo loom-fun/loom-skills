@@ -64,7 +64,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0   # variants may build with another commit's starter ("ref")
+          # Compact fetches only its exact cross-branch runner commit inside the bounded step.
+          fetch-depth: ${{ needs.variants.outputs.file == '.github/devlab/gemma-e4b-compact-kv.json' && 1 || 0 }}
           # The PR head, not GitHub's temporary merge commit: build.py stamps the checkout's commit into the
           # package as its generator, and only the head stays reachable (the merge commit is replaced on every push).
           ref: ${{ github.event.pull_request.head.sha || github.sha }}

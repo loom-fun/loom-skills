@@ -52,7 +52,7 @@ The earlier ordinary-runner hash was incorrect. This correction changes neither
 the pinned tensor metadata nor any numerical kernel, cache layout or reference.
 
 Lead dispatch entrypoint, on the exact clean reviewed checkout containing both
-this adapter and the source fix (ordinary pinned commit must exist in local git):
+this adapter and the source fix:
 
 Use the existing `devlab-experiment.yml` workflow with experiment input
 `.github/devlab/gemma-e4b-compact-kv.json` at the exact reviewed branch/head. The
@@ -61,6 +61,10 @@ invokes the entrypoint below. Its 30-minute job limit includes upload/cleanup;
 the experiment step has a 1610-second TERM plus 10-second KILL limit, leaving up
 to three minutes for checkout and artifact handling. Other experiments keep
 their existing route and timeout.
+The compact checkout is shallow. Inside the experiment deadline, `bounded_job.sh`
+explicitly fetches only the full pinned ordinary commit with a 55-second TERM
+plus 5-second KILL cap, verifies that commit object, and records the command and
+result. The materializer still performs no implicit fetch and checks clean HEAD.
 
 ```sh
 GEMMA_E4B_DEVLAB_ACK=1 GITHUB_SHA=<reviewed-full-head> \
