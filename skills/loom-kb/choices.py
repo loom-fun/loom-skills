@@ -214,6 +214,11 @@ CHOICE("decode.attn.span.from_pos", "int", 1024, "ATTN_MT_FROM", rows=["decode_3
 CHOICE("decode.attn.span.min_kv_heads", "int", 8, "ATTN_MT_MIN_KV", rows=["decode_32k", "decode_2k"],
        kernels=["g_attention_split"],
        doc="KV heads from which the span path is taken (8 KV heads +8..2x, 4 KV heads 0/-15 %, <= 2 KV heads -6..-27 %).")
+CHOICE("decode.attn.span.head_dims", "str", "", "ATTN_MT_DIMS", rows=["decode_32k", "decode_2k"], kits=["gemma4"],
+       kernels=["gd*_attention_split"], from_pr="gemma-verify-attn",
+       doc="Kits with mixed head dims (Gemma 4: gd256 sliding / gd512 global decode kernels): head dims, a comma list, whose per-dim "
+           "decode split kernel takes the verify-span path of decode.attn.span.* in drafting packages (one K/V load per key for the span's "
+           "tokens; every token's own split range and block order, so bit-identical). Empty: only the plain g_attention_split may.")
 CHOICE("decode.attn.segment", "bool", True, "SEG_ATTN", rows=["decode_32k"], kernels=["g_attention_split", "g_attention_combine"],
        doc="Drafting builds with <= 2 KV heads and head_dim 64/128 decode long spans in segments (False: split kernel everywhere).")
 CHOICE("decode.attn.segment.min_ctx", "int", 8192, "SEG_MIN", rows=["decode_32k"], kernels=["g_attention_split"],
@@ -451,6 +456,10 @@ CHOICE("draft.verify.mm_from", "int", None, "SPEC_MM_FROM", dynamic=True,
 CHOICE("draft.verify.exact", "bool", False, "SPEC_EXACT", enc=("1", "0"),
        doc="Verify with the 4-token matvec at every width (decode's rounding) instead of the GEMM from 5 tokens.", **_SP)
 CHOICE("draft.warm.mm_from", "int", 5, "DRAFT_MM_FROM", doc="The drafter's catch-up program takes the GEMM from this many tokens.", **_SP)
+CHOICE("draft.assist.argmax_parts", "int", 0, "ASSIST_ARGMAX_PARTS", kernels=["g_as_argmax*"], rows=ROWS_DECODE, from_pr="gemma-verify-attn",
+       doc="Gemma 4 assistant drafter (draft/gen_assist.py): 0 = the proposal argmax is one 256-lane workgroup per row over the whole "
+           "vocabulary (g_as_argmax, ~0.4 ms per round over 262144 logits on Strix Halo); N = N workgroups per row reduce slices "
+           "(g_as_argmax_part) and g_as_argmax_fin folds them (same token, lowest index on ties).")
 CHOICE("draft.propose.head", "str", "q4_0", "PROPOSE_HEAD", doc="q4_0: the proposals' head pass reads a load-time Q4_0 copy of the "
        "target's head (off: the head itself; q6_k: with PROPOSE_HEAD_ROWS the subset's rows stay Q6_K).", **_SP)
 CHOICE("draft.propose.head_rows", "int", 0, "PROPOSE_HEAD_ROWS", kernels=["g_prep_*", "g_head_mv*_p40", "g_head_select_p"], rows=ROWS_DECODE + ROWS_STREAMS,

@@ -2561,6 +2561,11 @@ def allreduce(vals, p, outs):
 # work in one wave measured ~3 % slower drafted decode at short context on Qwen3-8B). attn_rules.multi_token decides.
 
 
+# Choice decode.attn.span.head_dims: head dims d whose per-dim decode split kernel gd<d>_* (kits with mixed head dims, Gemma 4)
+# takes the verify-span path of multi_token_split in drafting packages (the plain g_attention_split always may). Empty: none.
+ATTN_MT_DIMS = {int(x) for x in os.environ.get("ATTN_MT_DIMS", "").replace(",", " ").split()}
+
+
 def multi_token_split(text, P, U, T, until=None):
     """`P`_attention_split with a multi-token path: when the T epoch tokens of this token's aligned group are live,
     of one row and at consecutive positions (a verify span), the group's first workgroup computes all T (one K/V
@@ -3169,7 +3174,8 @@ kernel.def export("{P}_attention_combine") @{P}_attention_combine(%tokens: index
     gqa_on = P == "g" and attn_rules.gqa(gen_draft.enabled(), seg_tokens(), D, twin) and attn_rules.paged(U) and attn_rules.butterfly(U)
     if gqa_on:
         text = gqa_split(text, P, S)
-    if P == "g" and attn_rules.multi_token(U, KVH) and (not gqa_on or gen_draft.enabled()):   # nodraft + K/V-once body: no spans
+    span_p = P == "g" or (P.startswith("gd") and P[2:].isdigit() and int(P[2:]) in ATTN_MT_DIMS and gen_draft.enabled())
+    if span_p and attn_rules.multi_token(U, KVH) and (not gqa_on or gen_draft.enabled()):   # nodraft + K/V-once body: no spans
         text = multi_token_split(text, P, U, ATTN_MT, attn_rules.ATTN_GQA_FROM - 1 if gqa_on else None)   # gqa body from visible = ATTN_GQA_FROM, i.e. position FROM - 1
     if P == "g" and D == 64 and pa and ILP == 1 and not gqa_on and not attn_rules.multi_token(U, KVH):
         text = full_blocks(text, f"{P}_attention_split", U, twin=twin)
