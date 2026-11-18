@@ -173,6 +173,8 @@ PROFILE_FLAGS = ["--device_profiling_mode=dispatch-events,executable-metadata", 
 
 def serve_args(variant):
     args = list(BASE_ARGS)
+    if variant.startswith("elastic"):
+        args = [x for x in args if x != "--pool_backing=fixed"]
     if variant.startswith("nospin"):  # card_cpuload keeps the spin URI
         args = [re.sub(r"^--device=amdgpu://\?completion_spin_ns=\d+$", "--device=amdgpu", x) for x in args]
     return args
@@ -443,7 +445,8 @@ for spec_ in [x for x in a.profile.split(",") if x]:
     trace = spec_.startswith("trace:")   # trace:SC[@V]: same requests, no HAL timestamps, per-chunk arrival times
     sc, _, pv = spec_.removeprefix("trace:").partition("@")
     pv = pv or "card"
-    key = ("trace_" if trace else "") + (sc if pv == "card" else f"{sc}_{pv}")
+    key = ("trace_" if trace else "") + (sc if pv == "card" else f"{sc}_{pv}").replace("#", "_")
+    pv = pv.split("#")[0]   # V#n: the n-th repeat serve of variant V
     srv = Server(serve_args(pv) + ([] if trace else PROFILE_FLAGS), os.path.join(OUT, f"profile_{key}.serve.log"))
     mid = srv.ready()
     if not mid:
