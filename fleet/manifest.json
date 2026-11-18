@@ -451,7 +451,7 @@
   "bartowski-Qwen3.8-27B-loom": {
    "staging": {
     "repo": "loom-fun-staging/bartowski-Qwen3.8-27B-loom",
-    "revision": "4f5c86f25c32dbed66ec5262b62ee30e78ae37cb"
+    "revision": "c3902f08283cc51de683636253077bc80e56deeb"
    },
    "model_id": "qwen3.8-27b",
    "kit": null,
