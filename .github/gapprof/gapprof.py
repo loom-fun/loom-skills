@@ -24,6 +24,9 @@ import threading
 import time
 import urllib.request
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import gpumetrics  # noqa: E402
+
 ap = argparse.ArgumentParser()
 ap.add_argument("repo")
 ap.add_argument("outdir")
@@ -275,8 +278,15 @@ class Telemetry:
             pc = psutil.cpu_percent(None, percpu=True)
             r["cpu_max_core"], r["cpu_total"] = max(pc), round(sum(pc) / len(pc), 1)
             if GPUDEV:
-                for n in ("sclk", "mclk", "fclk", "socclk"):
-                    r[n] = dpm_cur("pp_dpm_" + n)
+                try:
+                    g = gpumetrics.read(GPUDEV + "/gpu_metrics")
+                    r.update(gfxclk=g["average_gfxclk_frequency"], fclk=g["average_fclk_frequency"],
+                             uclk=g["average_uclk_frequency"], socclk=g["average_socclk_frequency"],
+                             dram_reads=g["average_dram_reads"], gfx_activity=g["average_gfx_activity"],
+                             apu_power_w=g["average_apu_power"] / 1000)
+                except Exception:
+                    for n in ("sclk", "mclk", "fclk", "socclk"):
+                        r[n] = dpm_cur("pp_dpm_" + n)
                 try:
                     r["gpu_busy"] = int(open(GPUDEV + "/gpu_busy_percent").read())
                 except Exception:
@@ -296,7 +306,8 @@ class Telemetry:
         for t0, t1, label in marks:
             rows = [r for r in self.rows if t0 <= r["t"] <= t1]
             d = {}
-            for k in ("proc_cpu", "cpu_max_core", "cpu_total", "sclk", "mclk", "fclk", "socclk", "gpu_busy", "power_w"):
+            for k in ("proc_cpu", "cpu_max_core", "cpu_total", "gfxclk", "sclk", "mclk", "fclk", "uclk", "socclk", "dram_reads",
+                      "gfx_activity", "apu_power_w", "gpu_busy", "power_w"):
                 v = [r[k] for r in rows if r.get(k) is not None]
                 if v:
                     d[k] = {"median": round(statistics.median(v), 1), "min": min(v), "max": max(v)}
