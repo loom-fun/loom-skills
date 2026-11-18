@@ -31,9 +31,9 @@
     "presets": {
       "strix-halo": {
         "name": "AMD Ryzen AI Max+ 395 \"Strix Halo\" (gfx1151)",
-        "bw": 216000000000.0,
+        "bw": 228000000000.0,
         "flops": 59000000000000.0,
-        "note": "LPDDR5X-8000, 256-bit (256 GB/s peak); 40 CUs x 512 x 2.9 GHz"
+        "note": "LPDDR5X-8000, 256-bit (256 GB/s peak); bw MEASURED: 228 GB/s, Loom streaming read of 1 GiB (+64 MiB written; copy of 512 MiB the same), loom-benchmark dispatch_complete, 8 launches per batch, on a DevLab Strix Halo runner with and without the active wait (completion_spin_ns), hrx-loom 0.2.0, run 44388427539 (the same kernel: 611 GB/s on the R9700S). The earlier 216 GB/s sat under it: Loom dense decode and 4-stream rows measured above their ceilings (e.g. Nanbeige4.3-33B decode 105 %, Gemma 4 31B 4 streams 104 %). 40 CUs x 512 x 2.9 GHz"
       }
     }
   },

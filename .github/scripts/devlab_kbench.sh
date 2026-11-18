@@ -140,7 +140,7 @@ for v in variants:
         except Exception: continue
         by = {}
         for w in d.get("work_items", []):
-            if w.get("state") not in (None, "completed", "succeeded", "passed") and not w.get("profile_replay"):
+            if w.get("state") not in (None, "ok", "completed", "succeeded", "passed") and not w.get("profile_replay"):
                 fails.setdefault(v, {})[w.get("benchmark")] = (w.get("failure") or {}).get("message", w.get("state"))
             if os.environ.get("CASE_TIMING") == "1" and w.get("benchmark"):   # suite option "case_timing": the whole case (all its launches) per logical operation, host wall
                 try: by.setdefault("k_case_" + w["benchmark"], []).append(w["measurement"]["operation_timing_ns"]["p50"] / 1e6)

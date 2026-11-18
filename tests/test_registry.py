@@ -93,7 +93,7 @@ class DeviceRegistry(unittest.TestCase):
 
     def test_roofline_presets(self):
         p = registry.roofline_presets()
-        pinned = {"strix-halo": (216e9, 59e12), "radeon-rx7900xtx": (960e9, 123e12), "radeon-r9700": (613e9, 191.4e12), "radeon-r9700s": (613e9, 214e12)}
+        pinned = {"strix-halo": (228e9, 59e12), "radeon-rx7900xtx": (960e9, 123e12), "radeon-r9700": (613e9, 191.4e12), "radeon-r9700s": (613e9, 214e12)}
         self.assertEqual({k: (v["bw"], v["flops"]) for k, v in p.items() if k in pinned}, pinned)   # existing rows keep their values; new devices add presets
         for g in card_lib.GPUS.values():   # every card GPU names a roofline preset that exists
             self.assertIn(g["roofline"], p)
@@ -107,7 +107,7 @@ class DeviceRegistry(unittest.TestCase):
         except ModuleNotFoundError as e:   # roofline.py reads GGUFs (gguf, requests): not installed in the unit-test job
             self.skipTest(f"roofline.py needs {e.name}")
         self.assertEqual(roofline.DEVICES["radeon-r9700s"]["name"], "AMD Radeon AI PRO R9700S (gfx1201, 32 GB, 2.35 GHz)")
-        self.assertEqual((roofline.BW, roofline.FLOPS), (216e9, 59e12))
+        self.assertEqual((roofline.BW, roofline.FLOPS), (228e9, 59e12))
         self.assertEqual(roofline.AT_CEILING, 0.03)
 
     def test_dual_target_rows(self):

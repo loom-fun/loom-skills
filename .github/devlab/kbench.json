@@ -252,7 +252,8 @@
         "--batch-size=8"
       ],
       "device": "amdgpu://?completion_spin_ns=4294967295",
-      "repeats": 5
+      "repeats": 5,
+      "case_timing": true
     },
     {
       "suite": "bw_strix_nospin",
@@ -268,7 +269,8 @@
         "--batch-size=8"
       ],
       "device": "amdgpu",
-      "repeats": 5
+      "repeats": 5,
+      "case_timing": true
     },
     {
       "suite": "bw_r9700",
@@ -284,7 +286,8 @@
         "--batch-size=8"
       ],
       "device": "amdgpu://?completion_spin_ns=4294967295",
-      "repeats": 5
+      "repeats": 5,
+      "case_timing": true
     }
   ]
 }

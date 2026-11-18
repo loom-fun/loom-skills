@@ -93,7 +93,7 @@ Per metric it then prints a row:
 
 | Column | Meaning |
 |---|---|
-| ceiling | Hardware roofline. Decode: the device bandwidth (Strix Halo 216 GB/s) ÷ (weights + KV read per token). Prefill: the device's dense f16 WMMA peak (Strix Halo 59 TFLOP/s) ÷ (2·params + causal attention flops) per token. c4: 4 tokens per weight pass. For MoE, the 4 tokens route to their own experts, so those weights are read for each token. |
+| ceiling | Hardware roofline. Decode: the device bandwidth (Strix Halo 228 GB/s, measured) ÷ (weights + KV read per token). Prefill: the device's dense f16 WMMA peak (Strix Halo 59 TFLOP/s) ÷ (2·params + causal attention flops) per token. c4: 4 tokens per weight pass. For MoE, the 4 tokens route to their own experts, so those weights are read for each token. |
 | eff | llama.cpp's fraction of the ceiling. **This, not Loom, decides how big the win can be.** At eff 0.75, the most Loom can gain is about 1.3×. At eff 0.15, 3–6× is on the table, and such results are routinely reported for new architectures, MoE and prefill. |
 | TARGET | ceiling × the **best efficiency a Loom port has actually reached** on this hardware (`EFF` in the script; sources in the loom-kb `roofline` topic (`kb.py route --topic roofline`)). Realistic by construction. |
 | margin | TARGET ÷ llama.cpp − 1. Reported as is, with no cap and no label. |
@@ -110,7 +110,7 @@ llama.cpp's MMQ prefill uses int8 WMMA (twice the f16 rate), so on prefill it ca
 
 | `--device` | GPU | bw (streaming) | flops (dense f16 WMMA) |
 |---|---|---|---|
-| `strix-halo` (default) | Ryzen AI Max+ 395, gfx1151, LPDDR5X-8000 256-bit | 216 GB/s (256 peak) | 59 TFLOP/s (40 CU x 512 x 2.9 GHz) |
+| `strix-halo` (default) | Ryzen AI Max+ 395, gfx1151, LPDDR5X-8000 256-bit | 228 GB/s measured streaming read (256 peak) | 59 TFLOP/s (40 CU x 512 x 2.9 GHz) |
 | `radeon-r9700` | Radeon AI PRO R9700, gfx1201, 32 GB GDDR6 20 Gbps 256-bit | 613 GB/s measured (Loom streaming read on the DevLab R9700S; 640 peak) | 191 TFLOP/s (64 CU x 1024 x 2.92 GHz: RDNA4 doubles the dense f16 WMMA rate per CU; 383 is the sparse figure) |
 | `radeon-r9700s` | R9700S: the DevLab `radeon-r9700` runners (same memory, 2.35 GHz max clock) | 613 GB/s measured | 214 TFLOP/s (measured peak f16 WMMA on the runner, devlab-kbench gemm_r9700) |
 

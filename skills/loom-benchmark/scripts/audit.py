@@ -110,7 +110,7 @@ def ceiling(m, R):
 for m, R in metrics.items():
     if m in best:
         e = best[m] / ceiling(m, R)
-        # 216 GB/s is a conservative measured bandwidth: dense ports reached 221-237 GB/s. Above 0.97 is a
+        # 228 GB/s is the measured streaming read (216 before 2026-11-18, when dense ports reached 221-237 GB/s). Above 0.97 is a
         # WARN (check the byte count first); above 1.10 the roofline certainly undercounts.
         check(f"plausible: Loom {m}", e <= 0.97,
               f"Loom at {e:.2f} of the ceiling: check the roofline's byte count (sliding window, KV sharing, "

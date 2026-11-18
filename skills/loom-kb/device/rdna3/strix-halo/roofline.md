@@ -2,7 +2,7 @@
 
 ## Roofline calibration (achieved efficiency per class)
 
-Ceilings are from `roofline.py --device strix-halo` (216 GB/s, 59 TFLOP/s). Achieved numbers are end-to-end and client-side, from tuned Loom ports.
+Ceilings are from `roofline.py --device strix-halo` (228 GB/s measured, 59 TFLOP/s; 216 GB/s before 2026-11-18). Achieved numbers are end-to-end and client-side, from tuned Loom ports.
 Add one row per finished optimization campaign (including ones that missed), here for this device.
 end-to-end and client-side, from tuned Loom ports. `EFF` in `roofline.py` is the
 best (or a representative) value per class. Add one row per finished optimization

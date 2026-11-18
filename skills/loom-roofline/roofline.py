@@ -2,7 +2,7 @@
 """Roofline + target picker for a GGUF LLM on a Loom device.
 
 usage: roofline.py MODEL.gguf [--cfg cfg.json] [--baseline perf.json] [--out roofline.json]
-                   [--bw 216e9] [--flops 59e12] [--ctx 1000,2000,16000,32000]
+                   [--bw 228e9] [--flops 59e12] [--ctx 1000,2000,16000,32000]
 
 Reads tensor sizes straight from the GGUF, plus (optionally) the port's cfg.json for
 geometry the GGUF does not spell out (sliding_layers, head_dim_swa, kv_layers for KV
@@ -60,6 +60,10 @@ LAYER_US = 35
 # Qwen3-8B, whose K/V is half of the pass bytes there), Loom 0.92. The EFF decode cap (0.90, set by the per-layer small
 # kernels) applies to the weight bytes only; the K/V bytes of a decode row at ctx tokens stream at KV_EFF.
 KV_EFF = 0.97
+# The 4-stream row (c4_steady.py): each stream sends a ~30-token prompt and decodes 400 tokens (its --max-tokens default), timed in the
+# window where all four decode: the mean context a stream's pass reads is ~30 + 400 / 2 = 230 tokens of K/V (it was modeled at 600, which
+# over-counted the K/V a 4-stream pass reads).
+C4_CTX = 230
 GATHERED = re.compile(r"(^|\.)(token_embd|per_layer_token_embd)\.weight$")
 EXPERT = re.compile(r"_exps\.weight$")
 
@@ -250,16 +254,16 @@ def pass_bytes(m, tokens=1, ctx=0, streams=1):
 
 def ceilings(m, bw=BW, flops=FLOPS, ctxs=(1000, 2000, 16000, 32000), gain=1.0):
     """Hardware ceilings in tok/s by roofline.json metric name: decode_tps (no context), decode_tps_<c//1000>k and
-    prefill_<P> for each size in ctxs, c4_steady (4 streams, KV at ~600 tokens). gain multiplies decode and c4 (a
+    prefill_<P> for each size in ctxs, c4_steady (4 streams, KV at C4_CTX tokens). gain multiplies decode and c4 (a
     measured drafting gain, --draft-tune)."""
     out = {"decode_tps": bw / pass_bytes(m) * gain}
     for c in ctxs:
         out[f"decode_tps_{c // 1000}k"] = bw / pass_bytes(m, ctx=c) * gain
     for P in ctxs:   # 2 flops per matmul param per token, the head on the last token only, causal attention
         out[f"prefill_{P}"] = flops / (2 * (m["params"] - m["head_params"]) + attn_flops_per_token(m["geo"], P))
-    out["c4_steady"] = 4 * bw / pass_bytes(m, tokens=4, ctx=600, streams=4) * gain
+    out["c4_steady"] = 4 * bw / pass_bytes(m, tokens=4, ctx=C4_CTX, streams=4) * gain
     if m["geo"]["n_exp"]:   # MoE: streams of similar text share experts; the hard bound (all 4 tokens on the same experts) is what a measurement may not exceed
-        out["c4_steady_shared"] = 4 * bw / (pass_bytes(m, ctx=600) + 3 * kv_read_bytes(m["geo"], 600)) * gain
+        out["c4_steady_shared"] = 4 * bw / (pass_bytes(m, ctx=C4_CTX) + 3 * kv_read_bytes(m["geo"], C4_CTX)) * gain
     return out
 
 
@@ -273,7 +277,7 @@ def drafted_ceiling(m, depth, acceptance, bw=BW, ctx=0, streams=1):
 
 # The drafted rows by roofline.json metric name: (KV context read per decoded token, streams). card_lib.DRAFTED_ROWS
 # names the same rows by card key.
-DRAFTED_ROWS = {"decode_tps": (0, 1), "decode_tps_2k": (2000, 1), "decode_tps_32k": (32000, 1), "c4_steady": (600, 4)}
+DRAFTED_ROWS = {"decode_tps": (0, 1), "decode_tps_2k": (2000, 1), "decode_tps_32k": (32000, 1), "c4_steady": (C4_CTX, 4)}
 
 
 def drafted_row_ceiling(m, metric, depth, acceptance, bw=BW):
@@ -393,7 +397,7 @@ def main():
         # bound (all 4 tokens on the same experts) is what a measurement may not exceed (Qwen3-30B-A3B: 1.17 x ceiling)
         for r in rows:
             if r["metric"] == "c4_steady":
-                r["bound"] = round(4 * a.bw / (pass_bytes(m, ctx=600) + 3 * kv_read_bytes(m["geo"], 600)) * gain, 1)
+                r["bound"] = round(4 * a.bw / (pass_bytes(m, ctx=C4_CTX) + 3 * kv_read_bytes(m["geo"], C4_CTX)) * gain, 1)
 
     out = dict(gguf=a.gguf, cfg=a.cfg and os.path.abspath(a.cfg), geometry={k: (sorted(v) if isinstance(v, set) else v)
                                       for k, v in geo.items()},
