@@ -7,7 +7,7 @@ version. Write-ups for the SDK team are built from this file.
 
 ## Contents
 - hrx-loom 0.2.0: rewritten chat history
-- hrx-loom 0.2.0: registration fails with "source value %N has no target remap"
+- hrx-loom 0.1.0 / 0.2.0: SSA encoding ids are 16 bits ("source value %N has no target remap", ENCODING/004)
 - hrx-loom 0.2.0: development-build ABI and comparison pins
 - hrx-loom 0.1.0: tools (compile, test, profile)
 - hrx-loom 0.1.0: language and lowering
@@ -30,16 +30,32 @@ version. Write-ups for the SDK team are built from this file.
   the model's output and the template. A passing agent gate excuses verified template rewrites and does **not** mean this performance
   target was achieved. Issue #40 remains open; do not replace generated tokens or change the template merely to obtain a cache hit.
 
-## hrx-loom 0.2.0: registration fails with "source value %N has no target remap"
+## hrx-loom 0.1.0 / 0.2.0: SSA encoding ids are 16 bits ("source value %N has no target remap", ENCODING/004)
 
-- **A program that compiles with 0 errors can fail registration** (`/v1/status`: `registration: failed`, code 5, `source value %N
-  has no target remap`). Seen with Qwen3.8-27B and both `quant/q4_0` choices (its MTP block is Q4_0): each choice alone registers,
-  both together fail on the R9700 ([run 44312519207](https://github.com/loom-fun/loom-skills/actions/runs/44312519207)) and locally on
-  gfx1151 (181 kernel.defs in llm.loom). Locally, deleting any one never-launched kernel made it register (180 is also the largest
-  published file, Gemma-4-E2B), but on the R9700 dropping four unused kernels (177) still failed
-  ([run 44332419573](https://github.com/loom-fun/loom-skills/actions/runs/44332419573)): a plain kernel-count limit does not explain it.
-  Root cause open; the `quant/q4_0` rule skips MTP models. Repro: `fleet/build_fleet.py --tree . --slugs bartowski-Qwen3.8-27B-loom`
-  with `GEMM_Q4_0_NATIVE=1 Q4_0_Q8=1`, served with the cached GGUF. Unlock: an error naming the value's op and command program.
+- **A type that references an SSA encoding stores the encoding's module-wide value id in 16 bits.** The text parser truncates
+  silently (`format/text/parser/types.c`, `loom_parse_type_encoding`: `*out_encoding_id = (uint16_t)enc_value_id`; field
+  `loom_type_t.encoding_id`, `ir/types.h`), so in a module with more than 65,536 values a `view<..., %layout>` whose `%layout` is
+  defined after value 65,535 names value `id - 65536` of some earlier kernel. Symptoms: the parse verifier (`loom-compile` of the
+  file) reports `ENCODING/004 ... references encoding value '%x' which is not defined at this point`; loom-serve does not verify a
+  library, so the package compiles with 0 errors and registration fails when a compile request clones the kernel
+  (`/v1/status`: code 5, `source value %87 has no target remap`, 87 = id - 65536; `rewrite/remap_payload.c`). Only kernels that a
+  device compiles fail, so one GPU family can register and the other not.
+- Bit: Qwen3.8-27B with both `quant/q4_0` choices ([R9700 run 44312519207](https://github.com/loom-fun/loom-skills/actions/runs/44312519207),
+  [44332419573](https://github.com/loom-fun/loom-skills/actions/runs/44332419573), and gfx1151): the int8 matvecs and m256 GEMMs put
+  the rdna3 flash attention's `%out_layout` at about value 65,600. Kernel counts were a coincidence (dropping any kernel before it
+  moved it under the limit on gfx1151, not the rdna4 twin compiled on the R9700); Laguna-XS-2.1 (94k lines) and large kbench test
+  modules hit the same limit.
+- Workaround (kit): `dual_target.encodings_first` reorders a deep file (estimated depth above 60,000 values, or an encoding-typed line
+  past 4 MB) so the leading funcs and every encoding-typed kernel come first, wherever they were; it raises if they alone are too deep.
+  Before this fix it reordered only the kernels ahead of the first command program, and Qwen3.8-27B's MTP weight converter
+  (`@llm_prep_q6_k_q4_0`) sits in the middle of its kernels. Every published file is below 60,000 (deepest: Ornith-1.5-35B-A3B 59,399).
+- Standalone repro (no package): a file with one filler kernel of N `index.constant`s, then
+  `kernel.def export("k") @k() {...} launch(%out: buffer) {` ... `%layout = encoding.layout.strided [%c1, %c16] : encoding<layout>`,
+  `%v = buffer.view %out[%zero] : buffer -> view<16x16xf32, %layout>`, a `view.store` through `%v`. `loom-compile r.loom --root=@k
+  --target=amdgpu:gfx1151`: N = 65,000 compiles; N = 66,000 fails `ENCODING/004 ... encoding value '%v471'` (66,007 - 65,536).
+- Unlock (SDK fix): store SSA encoding references as full 32-bit value ids in `loom_type_t` (or intern them in a side table like
+  overflow dims), and until then make the parser fail with an explicit error when `enc_value_id > UINT16_MAX`, as
+  `loom_ir_remap_leaf_type` already does for remapped targets; loom-serve should verify libraries before registering.
 
 ## hrx-loom 0.2.0: development-build ABI and comparison pins
 
@@ -70,8 +86,8 @@ Recorded by the mxfp4st campaign, 2026-11-15/16 (hrx-loom 0.1.0 from PyPI, DevLa
   backend for WMMA / fp8 ops. Bit: every kernel numeric check is a DevLab round trip (3-10 min with the queue). Workaround: kbench suites
   with a `loom-test` step; the generators' numpy references are unit-tested on the CPU. Unlock: CPU execution of `vector.mma` and fragment ops.
 - **Large test modules fail to verify.** A module of about 65,000 lines fails with `ENCODING/004 view type references encoding value
-  '%blocks' ... which is not defined at this point`, naming values of other kernels; every kernel compiles alone. Workaround: about 60
-  check cases per test file (`gen_bench` TESTED). Unlock: fix the encoding-value tracking across a large module.
+  '%blocks' ... which is not defined at this point`, naming values of other kernels; every kernel compiles alone. Cause: 16-bit SSA
+  encoding ids (section above). Workaround: about 60 check cases per test file (`gen_bench` TESTED).
 - **Test-API drift between builds.** 0.1.0 has no `check.expect.close` (use `check.expect.approximate actual() expected() : T, T`); a newer
   dev build (0.0.0.dev0) rejects `vector.fragment.load` origins it cannot prove in bounds (`origin + 16 <= rows`: add
   `index.assume lt(row, rows - 15)`). Kernels and tests must compile on both.

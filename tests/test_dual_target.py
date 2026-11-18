@@ -223,3 +223,30 @@ class EncodingsFirstTests(unittest.TestCase):
         self.assertLess(out.index('@e()'), out.index('@f()'))
         self.assertLess(out.index('@h()'), out.index('@e()'))
         self.assertTrue(out.rstrip().endswith("command.def public target(@device) @p() {\n}".rstrip()))
+
+    def test_encoding_kernels_after_a_mid_file_command_hoisted(self):
+        # Qwen3.8-27B: a weight-converter command program sits between the kernels; the GEMM / attention kernels after it
+        # stayed 65.6k values deep (registration: "source value %87 has no target remap").
+        filler = "kernel.def export(\"f\") @f() {\n" + "".join(f"  %v{i} = index.constant 0 : index\n" for i in range(dual_target.ENC_LIMIT + 10)) + "}\n"
+        prep = "command.def public target(@device) @prep() launch(%o: buffer) {\n}\n"
+        enc = "kernel.def export(\"e\") @e() {\n  %l = encoding.layout.strided [%a, %b] : encoding<layout>\n}\n"
+        text = "func.def @h() {\n}\n" + filler + prep + enc + "template.decl @t()\n" + "command.def public target(@device) @p() {\n}\n"
+        out = dual_target.encodings_first(text)
+        self.assertEqual(sorted(out.split("\n")), sorted(text.split("\n")))
+        self.assertLess(out.index('@h()'), out.index('@e()'))
+        self.assertLess(out.index('@e()'), out.index('@f()'))
+        self.assertLess(out.index('@f()'), out.index('@prep()'))
+        self.assertLess(out.index('@prep()'), out.index('template.decl @t()'))
+        self.assertLessEqual(dual_target._enc_depth(out), dual_target.ENC_LIMIT)
+
+    def test_depth_counts_arguments_and_packs(self):
+        text = ("kernel.def export(\"k\") @k(%a: index, %b: buffer) {\n  %x:3 = vector.split %y : f32\n"
+                "  %s = scf.for %i = %c0 to %n step %c1 iter_args(%acc = %z) -> (f32) {\n  }\n"
+                "  %l = encoding.layout.strided [%a, %b] : encoding<layout>\n}\n")
+        self.assertEqual(dual_target._enc_depth(text), 2 + 3 + 3)
+
+    def test_too_deep_encodings_raise(self):
+        enc = "".join(f"kernel.def export(\"e{j}\") @e{j}() {{\n" + "".join(f"  %v{i} = index.constant 0 : index\n" for i in range(20000))
+                      + "  %l = encoding.layout.strided [%a, %b] : encoding<layout>\n}\n" for j in range(4))
+        with self.assertRaisesRegex(ValueError, "16 bits"):
+            dual_target.encodings_first(enc)

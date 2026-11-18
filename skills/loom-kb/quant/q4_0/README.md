@@ -11,8 +11,9 @@ The block has a signed F16 scale, then 16 packed bytes: low nibbles are columns
 0–15 and high nibbles 16–31; each code is centered at eight. Grouped gate/up
 supports the fused per-expert layout and different gate/up formats.
 
-Dense Q4_0 (this node's `scope.json` turns both on for every model with Q4_0 tensors except MTP models: Qwen3.8-27B, whose
-MTP block is Q4_0, fails registration with both on; topic `sdk`):
+Dense Q4_0 (this node's `scope.json` turns both on for every model with Q4_0 tensors; Qwen3.8-27B, whose MTP block is Q4_0,
+first failed registration with both on: its attention kernels crossed the SDK's 16-bit SSA encoding ids, fixed in the kit;
+topic `sdk`):
 - `prefill.gemm.q4_0_native`: dense GEMMs stage with the same `moe_q4_0.dequant16` snippet, so Q4_0 gets the
   128/256-row kernels (before: a helper format, the 64-row tile at every size).
 - `decode.q4_0.act_q8`: matvecs, head and expert matvecs take int8 activations (`@g_q4_0_icodes`, minimum 8 d),
