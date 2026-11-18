@@ -4,7 +4,9 @@
 Build selection is based on changed input paths, never the PR author's scope claim. Only
 edits confined to existing fleet model inputs can narrow the model set. Shared generators,
 KB data, build tooling, manifest changes, and unknown paths conservatively rebuild all.
-Non-input changes still run scope lint, including its independent serving-setting checks.
+The historical ref's own validated manifest controls which selected additions are not
+built there; every current model is still built at HEAD. Non-input changes still run
+scope lint, including its independent serving-setting checks.
 """
 import argparse
 import hashlib
@@ -18,6 +20,20 @@ HERE = Path(__file__).resolve().parent
 
 def git(repo, *args):
     return subprocess.check_output(["git", "-C", str(repo), *args], text=True).strip()
+
+
+def catalog(repo, ref):
+    """Read a ref's own fleet catalog; never infer absence from a failed build."""
+    try:
+        raw = git(repo, "show", f"{ref}:fleet/manifest.json")
+        data = json.loads(raw)
+    except (subprocess.CalledProcessError, json.JSONDecodeError) as e:
+        raise SystemExit(f"refusing impact plan: missing or corrupt fleet/manifest.json at {ref}: {e}")
+    models = data.get("models") if isinstance(data, dict) else None
+    if (not isinstance(models, dict) or
+            any(not isinstance(slug, str) or not slug or not isinstance(model, dict) for slug, model in models.items())):
+        raise SystemExit(f"refusing impact plan: invalid fleet/manifest.json catalog at {ref}")
+    return data
 
 
 def non_input(path):
@@ -63,20 +79,31 @@ def make_plan(repo, base, head="HEAD", shards=4):
     head = git(repo, "rev-parse", head)
     # --no-renames reports both the old and new path, so moving an input cannot evade selection.
     paths = git(repo, "diff", "--name-only", "--no-renames", base, head).splitlines()
-    manifest = json.loads(git(repo, "show", f"{head}:fleet/manifest.json"))
+    manifest = catalog(repo, head)
+    base_manifest = catalog(repo, base)
     selected, reasons = select(paths, manifest)
-    shards = max(1, min(shards, len(selected)))
-    buckets = [selected[n::shards] for n in range(shards)] if selected else []
+    # Manifest edits must account for deletions/renames as explicit catalog changes.
+    removed = sorted(set(base_manifest["models"]) - set(manifest["models"]))
+    if "fleet/manifest.json" in paths:
+        selected = sorted(set(selected) | set(manifest["models"]))
+        reasons = ["fleet catalog changed; checking every HEAD model"]
+    base_selected = sorted(set(selected) & set(base_manifest["models"]))
+    head_selected = sorted(set(selected) & set(manifest["models"]))
     # The builder uses the HEAD checkout's fleet inputs/tooling for BOTH revisions.
     # Include that tree plus each revision's complete kit/KB trees in the cache key.
     inputs = git(repo, "rev-parse", f"{head}:fleet")
     include = []
-    for side, ref in (("base", base), ("head", head)):
+    for side, ref, side_slugs in (("base", base, base_selected), ("head", head, head_selected)):
         trees = [git(repo, "rev-parse", f"{ref}:skills/{skill}") for skill in ("loom-port-llm", "loom-kb")]
+        side_shards = max(1, min(shards, len(side_slugs)))
+        buckets = [side_slugs[n::side_shards] for n in range(side_shards)] if side_slugs else []
         for n, slugs in enumerate(buckets):
             digest = hashlib.sha256(json.dumps([1, ref, inputs, trees, slugs], sort_keys=True).encode()).hexdigest()
             include.append({"side": side, "ref": ref, "shard": n, "slugs": ",".join(slugs), "key": digest})
     return {"base": base, "head": head, "changed": paths, "selected": selected,
+            "base_selected": base_selected, "head_selected": head_selected,
+            "base_absent_catalog": {s: "new model: absent from base fleet/manifest.json" for s in selected if s not in base_manifest["models"]},
+            "removed_from_head": removed,
             "unchanged_inputs": sorted(set(manifest["models"]) - set(selected)), "reasons": reasons,
             "matrix": {"include": include}, "builds": len(include)}
 
@@ -99,12 +126,24 @@ def aggregate(plan, builds, output):
     sys.path.insert(0, str(HERE))
     import diff_fleet
     selected = plan["selected"]
+    base_selected = plan.get("base_selected", selected)
+    head_selected = plan.get("head_selected", selected)
+    absent = plan.get("base_absent_catalog", {})
+    if (not isinstance(selected, list) or len(set(selected)) != len(selected)
+            or not isinstance(base_selected, list) or not isinstance(head_selected, list)
+            or set(head_selected) != set(selected) or not set(base_selected) <= set(selected)
+            or set(absent) != set(selected) - set(base_selected)):
+        raise SystemExit("refusing invalid impact plan model accounting")
     base, head = Path(builds) / "base", Path(builds) / "head"
+    base.mkdir(parents=True, exist_ok=True)
+    head.mkdir(parents=True, exist_ok=True)
     if selected:
-        # Keep per-shard failure/skip evidence. In particular, a newly introduced source
-        # format may be absent from the base kit and must remain a reported new model.
+        # Keep per-shard failure/skip evidence. Only the validated catalog comparison
+        # above may mark a BASE model absent; build-reported skips remain fatal.
         for side in ("base", "head"):
-            merged = {"models": {}, "failures": {}, "skipped": {}}
+            merged = {"models": {}, "failures": {}, "skipped": dict(absent) if side == "base" else {},
+                      "catalog_absent": dict(absent) if side == "base" else {}}
+            expected = set(plan.get(f"{side}_selected", selected))
             for job in plan["matrix"]["include"]:
                 if job["side"] != side:
                     continue
@@ -113,28 +152,37 @@ def aggregate(plan, builds, output):
                     raise SystemExit(f"refusing incomplete impact shards: missing {summary}")
                 data = json.loads(summary.read_text())
                 if (data.get("ref") != job["ref"] or data.get("rdna4") != "1"
-                        or set(data.get("models", {})) != set(job["slugs"].split(","))):
+                        or set(data.get("models", {})) != (set(job["slugs"].split(",")) if job["slugs"] else set())):
                     raise SystemExit(f"refusing incomplete impact shards: wrong revision/model set in {summary}")
-                if data.get("failures") or (side == "head" and data.get("skipped")):
+                if data.get("failures") or data.get("skipped"):
                     raise SystemExit(f"refusing failed impact shard: {summary}")
                 for key in merged:
                     merged[key].update(data.get(key, {}))
-            if set(merged["models"]) != set(selected):
+            if set(merged["models"]) != expected:
                 raise SystemExit(f"refusing incomplete impact shards: missing models on {side}")
+            (Path(builds) / side).mkdir(parents=True, exist_ok=True)
             (Path(builds) / side / "summary.json").write_text(json.dumps(merged))
-        problems = [problem for d in (base, head) for problem in diff_fleet.check_complete(str(d), selected)]
+        problems = diff_fleet.check_complete(str(base), list(base_selected) + sorted(absent))
+        problems += diff_fleet.check_complete(str(head), head_selected)
         if problems:
             raise SystemExit("refusing incomplete impact shards:\n" + "\n".join(problems))
-        report = diff_fleet.report(str(base), str(head), set(selected))
+        report = diff_fleet.report(str(base), str(head), set(selected), set(plan.get("removed_from_head", [])))
+    elif plan.get("removed_from_head"):
+        report = diff_fleet.report(str(base), str(head), set(), set(plan["removed_from_head"]))
     else:
         report = {"base": plan["base"], "head": plan["head"], "models": {}, "untouched": [], "by_family": {},
                   "summary": {"models": 0, "touched": 0, "untouched": 0, "gpus": [], "rows": [], "strata": []}}
     report["selection"] = {k: plan[k] for k in ("selected", "unchanged_inputs", "reasons")}
-    total = len(selected) + len(plan["unchanged_inputs"])
-    coverage = (f"\nBuild coverage: {len(selected)}/{total} models built at both revisions; "
-                f"{len(plan['unchanged_inputs'])} have unchanged build inputs.\n" +
+    removed = len(plan.get("removed_from_head", []))
+    total = len(selected) + len(plan["unchanged_inputs"]) + removed
+    base_count = len(plan.get("base_selected", selected))
+    head_count = len(plan.get("head_selected", selected))
+    additions = len(plan.get("base_absent_catalog", {}))
+    coverage = (f"\nBuild coverage: {base_count}/{total} models built at BASE; "
+                f"{head_count}/{total} built at HEAD; {additions} selected models are new and absent from the BASE catalog; "
+                f"{len(plan['unchanged_inputs'])} have unchanged build inputs; {removed} removed models are identified from the HEAD catalog.\n" +
                 "\n".join(f"- {reason}" for reason in plan["reasons"]) + "\n")
-    markdown = diff_fleet.markdown(report) if selected else "## Fleet program diff: no build inputs changed\n"
+    markdown = diff_fleet.markdown(report) if selected or plan.get("removed_from_head") else "## Fleet program diff: no build inputs changed\n"
     out = Path(output)
     out.mkdir(parents=True, exist_ok=True)
     (out / "impact.json").write_text(json.dumps(report, indent=2) + "\n")
