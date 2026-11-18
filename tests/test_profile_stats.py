@@ -1,4 +1,5 @@
-import importlib.util, json, os, tempfile, unittest
+import contextlib, importlib.util, io, json, os, sys, tempfile, unittest
+from unittest.mock import patch
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 spec = importlib.util.spec_from_file_location("profile_stats", os.path.join(HERE, "..", "skills", "loom-benchmark", "scripts", "profile_stats.py"))
@@ -19,6 +20,25 @@ class ProfileStats(unittest.TestCase):
         self.assertEqual(rows["g_gemm_mxfp4s_store_f8_m256_rdna4"], [4, 1.0])
         self.assertAlmostEqual(rows["g_gdn_recurrence"][1], 0.5)
         self.assertAlmostEqual(rows["g_row_scale_f16_live"][1], 0.001)
+
+    def test_full_perf_warmup_is_counted_in_profile_totals(self):
+        with tempfile.TemporaryDirectory() as work:
+            log, req, result = (os.path.join(work, name) for name in ('serve.log', 'req.json', 'out.json'))
+            with open(log, 'w') as stream:
+                stream.write(LOG)
+            data = {'scenario': 'dec', 'warmup_mode': 'perf-essay',
+                    'warmup': {'completion_tokens': 300, 'total_s': 7, 'ttft_s': .1},
+                    'requests': [{'completion_tokens': 300, 'total_s': 8, 'ttft_s': .2}]}
+            with open(req, 'w') as stream:
+                json.dump(data, stream)
+            with patch.object(sys, 'argv', ['profile_stats.py', log, req, '--json', result]), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                P.main()
+            with open(result) as stream:
+                out = json.load(stream)
+            self.assertEqual(out['tokens'], 600)
+            self.assertEqual(out['wall_ms'], 15000)
+            self.assertTrue(out['includes_warmup'])
 
     def test_families_shipped(self):
         fams = json.load(open(os.path.join(HERE, "..", "skills", "loom-benchmark", "scripts", "profile_families.json")))

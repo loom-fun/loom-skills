@@ -7,6 +7,7 @@ version. Write-ups for the SDK team are built from this file.
 
 ## Contents
 - hrx-loom 0.2.0: rewritten chat history
+- hrx-loom 0.2.0: development-build ABI and comparison pins
 - hrx-loom 0.1.0: tools (compile, test, profile)
 - hrx-loom 0.1.0: language and lowering
 - hrx-loom 0.1.0: runtime (load-time preparation, scratch, first load)
@@ -27,6 +28,21 @@ version. Write-ups for the SDK team are built from this file.
   to replay rewritten history. Unlock: generated-token prefix checkpoints or a correct common-prefix restore/replay path, preserving
   the model's output and the template. A passing agent gate excuses verified template rewrites and does **not** mean this performance
   target was achieved. Issue #40 remains open; do not replace generated tokens or change the template merely to obtain a cache hit.
+
+## hrx-loom 0.2.0: development-build ABI and comparison pins
+
+- **A development version string does not identify a compatible export ABI.** Flash-Next programs built for source
+  `314238a81c0f` (`0.2.0.dev0`, CI artifact 13628412621) fail registration on released source `0cd370f2baaa`:
+  `text_publish_epoch_v1` declares 12 arguments but the runtime requires 13; the old image export also has 3 rather than 5 arguments.
+  A failed arm is not a performance result ([diagnostic run](https://github.com/loom-fun/loom-skills/actions/runs/44164029861)).
+  Use the exact source/wheel pin with historical programs, or regenerate against the current SDK and revalidate. Unused-argument
+  adapters can isolate catalog arithmetic diagnostically; they do not prove package correctness or justify a production rollback.
+  The original generator recreated the published program hash while sharing one checkpoint in the
+  [valid old/current comparison](https://github.com/loom-fun/loom-skills/actions/runs/44188965599).
+  Unlock: an explicit export-ABI revision in package metadata and an early compatibility check.
+- **Keep the CI selector separate from its installation directory.** Selectors such as `ci:13628412621` must reach the installer
+  unchanged, but Python venv rejects colons in Linux root paths. This was a DevLab tooling bug, fixed by normalizing only the
+  directory name ([PR 1245](https://github.com/loom-fun/loom-skills/pull/1245)); implicit card pins already choose safe sibling roots.
 
 ## hrx-loom 0.1.0: tools (compile, test, profile)
 

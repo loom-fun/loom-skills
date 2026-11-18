@@ -12,6 +12,7 @@
 #    "llama_spec": "matched" (default),   the llama.cpp servers' drafting = the card's own (see below); or an explicit override
 #                  "--spec-type draft-dflash --spec-draft-model {drafter} ...",   ({drafter}: the card's drafter GGUF;
 #                                                                     {hf:OWNER/REPO/FILE}: that Hub file, e.g. a drafter llama.cpp loads and the card doesn't ship; also in build_args)
+#   Immutable external file: {hf:OWNER/REPO@40HEX/FILE#64HEXSHA256}; revision-specific cache, checksum checked on every use.
 #    "jobs": [{"name": "j", "variants": [V, ...], "steps": [S, ...]}]}
 #   BENCHMARK RULE (skills/loom-benchmark/reference/methodology.md): one drafting choice per model, identical on Loom and llama.cpp (ROCm, Vulkan), from
 #   data/drafting_classification.json (MTP head in the GGUF > exact-model DFlash/assistant drafter > none; never ngram): "matched"
@@ -65,6 +66,8 @@
 #                               its samples); one run per session = perf:V:1 repeated (a round each). Job "repeat_rows": R (fast models: 3) adds --repeat-rows R
 #          profile:V[:LIST]     per-kernel device time of one prefill (pf2k, pf8k) and one drafted decode (dec): V served per scenario with --print_device_statistics
 #                               (the HAL's per-function dispatch statistics at shutdown), profile_requests.py + profile_stats.py: out/profile_V_<scenario>.{md,json,serve.log}
+#          observe:V[:LIST]     diagnostic trace plus bounded Linux CPU/thread/wait/IO snapshots (observer; never a primary perf input)
+#          trace:V[:LIST]       same diagnostic requests as profile without HAL timestamps (default: dec); observer-effect control
 #          c4:V[:N]             c4_steady.py N (default 4) streams on V
 #          llama:N[:long|-][:M] llama.cpp (card build + llama_spec, n-max M) perf.py N times, llama_decode.py tokens/step
 #          llamac4[:M]          c4_steady.py on llama.cpp
@@ -308,10 +311,32 @@ slug_arg() {   # slug_arg BUILD_PY CARD_REPO -> "--slug <repo name>" when that b
   grep -q -- '"--slug"' "$1" && echo "--slug ${2##*/}"
   return 0
 }
-hf_sub() {   # hf_sub TEXT -> TEXT with each {hf:OWNER/REPO/FILE} replaced by that Hub file's path, fetched once per runner
+hf_sub() {   # {hf:OWNER/REPO/FILE}, or immutable {hf:OWNER/REPO@40HEX/FILE#64HEXSHA256}; pinned cache bytes are always verified
   local t=$1 h
   for h in $(echo "$t" | grep -oE '\{hf:[^}]+\}' | sort -u); do
     local f=${h#\{hf:}; f=${f%\}}; local dst=$WORK/hf/$f r=${f%/*}
+    if [[ "$r" == *@* || "$f" == *#* ]]; then
+      local rev name digest actual part
+      if [[ ! "$f" =~ ^([A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9][A-Za-z0-9_.-]*)@([0-9a-f]{40})/([A-Za-z0-9][A-Za-z0-9_.-]*)#([0-9a-f]{64})$ ]]; then
+        echo "FAIL: invalid pinned HF marker (need OWNER/REPO@40HEX/FILE#64HEXSHA256): $f" >&2; return 1
+      fi
+      r=${BASH_REMATCH[1]}; rev=${BASH_REMATCH[2]}; name=${BASH_REMATCH[3]}; digest=${BASH_REMATCH[4]}
+      dst=$WORK/hf-pinned/$r/$rev/$name
+      if [ ! -f "$dst" ]; then
+        mkdir -p "${dst%/*}" && part=$(mktemp "$dst.part.XXXXXX") || return 1
+        curl -fsSL --retry 3 ${HF_TOKEN:+-H "Authorization: Bearer $HF_TOKEN"} \
+          "https://huggingface.co/$r/resolve/$rev/$name" -o "$part" || { rm -f "$part"; echo "FAIL: fetch $f" >&2; return 1; }
+        actual=$(sha256sum "$part") || { rm -f "$part"; return 1; }
+        if [ "${actual%% *}" != "$digest" ]; then
+          rm -f "$part"; echo "FAIL: checksum mismatch for pinned HF download $f" >&2; return 1
+        fi
+        mv "$part" "$dst" || return 1
+      else
+        actual=$(sha256sum "$dst") || return 1
+        [ "${actual%% *}" = "$digest" ] || { echo "FAIL: checksum mismatch for pinned HF cache $f" >&2; return 1; }
+      fi
+      t=${t//"$h"/$dst}; continue
+    fi
     [ -f "$dst" ] || { mkdir -p "${dst%/*}" && curl -fsSL --retry 3 ${HF_TOKEN:+-H "Authorization: Bearer $HF_TOKEN"} \
       "https://huggingface.co/${r}/resolve/main/${f##*/}" -o "$dst.part" && mv "$dst.part" "$dst"; } || { echo "FAIL: fetch $f" >&2; return 1; }
     t=${t//"$h"/$dst}
@@ -600,21 +625,49 @@ while [ "$qi" -lt "${#queue[@]}" ]; do
 import json,statistics as st; r=[json.loads(l) for l in open('$out/perf_$p1.jsonl')]
 k='decode_tps_32k' if '${p3:-}' else 'decode_tps'
 print('$p1', k, [x.get(k) for x in r if x.get(k)], 'median', round(st.median(v), 2) if (v := [x[k] for x in r if x.get(k)]) else 'n/a (no row served: beyond the served context)')");;
-    profile)   # profile:V[:SCENARIOS] (comma list of probe,pf2k,pf8k,dec; default all but probe): V served alone per scenario with --print_device_statistics (the HAL's
+    profile|trace|observe)   # profile:V[:SCENARIOS] (comma list of probe,pf2k,pf8k,dec; default all but probe): V served alone per scenario with --print_device_statistics (the HAL's
                # per-function dispatch statistics, printed at shutdown); one session per scenario, so each table holds only that scenario's requests
-      for sc in $(echo "${p2:-pf2k,pf8k,dec}" | tr ',' ' '); do
-        PROFILE_SA="--device_profiling_mode=dispatch-events,executable-metadata --device_profiling_flush_interval_ms=5 --print_device_statistics" serve_alone "$p1" || { res[$s]=ERROR; break; }
-        step "profile $p1 $sc"
-        ( cd "$B" && "$T" profile_requests.py "$url" "$cardid" "$sc" ) > "$out/profile_${p1}_$sc.req.json" 2> "$out/profile_${p1}_$sc.req.err"; tail -c 600 "$out/profile_${p1}_$sc.req.json"; tail -3 "$out/profile_${p1}_$sc.req.err"
+      capture_kind=$kind   # trace uses the same requests without device profiling (observer-effect control)
+      capture_failed=0
+      capture_scenarios=${p2:-pf2k,pf8k,dec}
+      [ "$capture_kind" = profile ] || capture_scenarios=${p2:-dec}
+      for sc in $(echo "$capture_scenarios" | tr ',' ' '); do
+        profile_flags=""
+        [ "$capture_kind" != profile ] || profile_flags="--device_profiling_mode=dispatch-events,executable-metadata --device_profiling_flush_interval_ms=5 --print_device_statistics"
+        PROFILE_SA="$profile_flags" serve_alone "$p1" || { capture_failed=1; break; }
+        step "$capture_kind $p1 $sc"
+        capture_request_ok=1
+        observer_pid=; observer_stop="$out/observe_${p1}_$sc.stop"
+        if [ "$capture_kind" = observe ]; then
+          rm -f "$observer_stop"
+          "$T" "$B/thread_snapshot.py" "$(cat "$LOOM_SERVE_STATE/perf-$p1.pid")" --duration 120 --interval 0.2 --stacks \
+            --stop-file "$observer_stop" --output "$out/observe_${p1}_$sc.threads.jsonl" > "$out/observe_${p1}_$sc.sampler.log" 2>&1 &
+          observer_pid=$!
+        fi
+        ( cd "$B" && "$T" profile_requests.py "$url" "$cardid" "$sc" ) > "$out/${capture_kind}_${p1}_$sc.req.json" 2> "$out/${capture_kind}_${p1}_$sc.req.err" || capture_request_ok=0; tail -c 600 "$out/${capture_kind}_${p1}_$sc.req.json"; tail -3 "$out/${capture_kind}_${p1}_$sc.req.err"
+        if [ -n "$observer_pid" ]; then
+          touch "$observer_stop"
+          wait "$observer_pid" || capture_request_ok=0
+          "$T" -c 'import json,sys; rows=[json.loads(line) for line in open(sys.argv[1])]; assert any(row.get("event")=="sample" for row in rows), "no process/thread samples"' \
+            "$out/observe_${p1}_$sc.threads.jsonl" || capture_request_ok=0
+        fi
         "$SV/stop.sh" "perf-$p1" | tail -1; sleep 2   # a graceful stop: the statistics are printed at shutdown
-        cp "$LOOM_SERVE_STATE/perf-$p1.log" "$out/profile_${p1}_$sc.serve.log" 2>/dev/null
-        grep -c "dispatch " "$out/profile_${p1}_$sc.serve.log" | sed "s/^/dispatch rows: /"; grep -A6 "IREE HAL device statistics" "$out/profile_${p1}_$sc.serve.log" | head -8
+        cp "$LOOM_SERVE_STATE/perf-$p1.log" "$out/${capture_kind}_${p1}_$sc.serve.log" 2>/dev/null
+        [ "$capture_request_ok" = 1 ] || { capture_failed=1; break; }
+        [ "$capture_kind" = profile ] || continue
+        grep -c "dispatch " "$out/${capture_kind}_${p1}_$sc.serve.log" | sed "s/^/dispatch rows: /"; grep -A6 "IREE HAL device statistics" "$out/${capture_kind}_${p1}_$sc.serve.log" | head -8
         [ "$sc" = probe ] || { steps_n=0; [ "$sc" = dec ] && steps_n=$(python3 -c "
-import json; r=json.loads(open('$out/profile_${p1}_$sc.req.json').read().splitlines()[-1]); d=r.get('draft') or {}; print(round(d.get('draft_proposed_tokens', 0) / ${depth:-3}))" 2>/dev/null || echo 0)
-          "$T" "$B/profile_stats.py" "$out/profile_${p1}_$sc.serve.log" "$out/profile_${p1}_$sc.req.json" --steps "$steps_n" --families "$B/profile_families.json" \
-            --md "$out/profile_${p1}_$sc.md" --json "$out/profile_${p1}_$sc.json" > "$out/profile_${p1}_$sc.table.txt" 2>&1; head -14 "$out/profile_${p1}_$sc.table.txt" | cut -c1-200; }
+import json; r=json.loads(open('$out/${capture_kind}_${p1}_$sc.req.json').read().splitlines()[-1]); d=r.get('draft') or {}; w=r.get('warmup_draft') or {}; print(round((d.get('draft_proposed_tokens', 0) + w.get('draft_proposed_tokens', 0)) / ${depth:-3}))" 2>/dev/null || echo 0)
+          "$T" "$B/profile_stats.py" "$out/${capture_kind}_${p1}_$sc.serve.log" "$out/${capture_kind}_${p1}_$sc.req.json" --steps "$steps_n" --families "$B/profile_families.json" \
+            --md "$out/${capture_kind}_${p1}_$sc.md" --json "$out/${capture_kind}_${p1}_$sc.json" > "$out/${capture_kind}_${p1}_$sc.table.txt" 2>&1; head -14 "$out/${capture_kind}_${p1}_$sc.table.txt" | cut -c1-200; }
       done
-      res[$s]="$(ls "$out"/profile_${p1}_*.md 2>/dev/null | wc -l) tables";;
+      if [ "$capture_failed" = 1 ]; then
+        res[$s]="ERROR: diagnostic request failed"
+      elif [ "$capture_kind" = profile ]; then
+        res[$s]="$(ls "$out"/profile_${p1}_*.md 2>/dev/null | wc -l) tables"
+      else
+        res[$s]="$(ls "$out"/${capture_kind}_${p1}_*.req.json 2>/dev/null | wc -l) $capture_kind captures"
+      fi;;
     probe)   # probe:V: stall_probe.py (when does a prefill stall? TTFT + GPU clocks per request)
       serve_alone "$p1" || { res[$s]=ERROR; continue; }
       step "stall probe $p1"
