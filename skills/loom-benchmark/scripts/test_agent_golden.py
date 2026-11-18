@@ -138,4 +138,41 @@ for name, tops, want in tie_cases:
     got = bool(whitespace_ties(FakeP, "x", [], RAW, True, tops_at=fn))
     bad += got != want
     print(("ok  " if got == want else "FAIL"), name, "->", got)
+# Raw spellings already admitted by the parser-reconstruction rules. In the real
+# Gemma tool turn, a four-token empty reasoning block is absent from the parsed
+# content; both its channel marker and the plain answer diverge at token zero.
+from agent_golden import choose_rebuild, near_at  # noqa: E402
+from types import SimpleNamespace  # noqa: E402
+
+
+class CharP:
+    ids = staticmethod(lambda s: list(map(ord, s)))
+    tok = SimpleNamespace(decode=lambda ids, skip_special_tokens=False: "".join(map(chr, ids)),
+                          encode=lambda s, add_special_tokens=False: SimpleNamespace(ids=list(map(ord, s))))
+
+
+def probs(*rows):
+    return [{"top_logprobs": [{"id": ord(t), "logprob": p} for t, p in row.items()]} for row in rows]
+
+
+rebuild_cases = [
+    # C stands for the omitted channel marker. Both spellings part at zero;
+    # C is within the unchanged one-nat rule, whereas '(' is far below it.
+    ("equal-position valid alternative", "(answer", ["C(answer"], "The", probs({"T": -.69, "C": -.735, "(": -4.03}), "C(answer", True),
+    ("confident rejection unchanged", "(answer", ["C(answer"], "The", probs({"T": -.01, "C": -4., "(": -5.}), "(answer", False),
+    ("unlisted alternative rejected", "(answer", ["C(answer"], "The", probs({"T": -.01, "(": -5.}), "(answer", False),
+    ("no eligible alternative", "(answer", [], "The", probs({"T": -.69, "C": -.735, "(": -4.03}), "(answer", False),
+    ("already-near canonical preserved", "(answer", ["C(answer"], "The", probs({"T": -.69, "C": -.735, "(": -.9}), "(answer", True),
+    ("exact canonical preserved", "The", ["C(answer"], "The", probs({"T": -.69, "C": -.735}), "The", True),
+    ("exact alternative selected", "(answer", ["The"], "The", probs({"T": -.69, "(": -4.03}), "The", True),
+    ("later divergence still preferred", "(answer", ["ThX"], "The", probs({"T": -.69, "(": -4.03}, {"h": 0.}, {"e": -.01, "X": -4.}), "ThX", False),
+    ("earlier divergence cannot replace", "ThX", ["C(answer"], "The", probs({"T": -.69, "C": -.735}, {"h": 0.}, {"e": -.01, "X": -4.}), "ThX", False),
+]
+for name, raw, alts, gold, tops, want, passes in rebuild_cases:
+    gids = CharP.ids(gold)
+    chosen, ids, d = choose_rebuild(CharP, raw, alts, gids, tops)
+    accepted = d is None or near_at(gids, tops, d[1], d[0])
+    ok = chosen == want and ids == CharP.ids(want) and accepted == passes
+    bad += not ok
+    print(("ok  " if ok else "FAIL"), name, "->", chosen, accepted)
 sys.exit(1 if bad else 0)

@@ -30,7 +30,11 @@ jobs:
         id: plan
         env:
           BASE_REF: ${{ github.event.pull_request.base.ref }}
-        run: python3 fleet/impact_plan.py plan --base "origin/$BASE_REF" --out impact-plan.json --github-output "$GITHUB_OUTPUT"
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          printf '%s' "$PR_BODY" > "$RUNNER_TEMP/impact-pr-body.md"
+          python3 fleet/impact_plan.py plan --base "origin/$BASE_REF" --pr-body "$RUNNER_TEMP/impact-pr-body.md" \
+            --out impact-plan.json --github-output "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@v4
         with:
           name: impact-plan
