@@ -16,9 +16,9 @@
    "set": {
     "exec.context_capacity": 10240,
     "exec.context_cap": 10240,
-    "exec.prefill_capacity": 1024
+    "exec.prefill_capacity": 512
    },
-   "evidence": "Gemma4 QAT DevLab run 44208046899, exact staged programs and hrx-loom 0.2.0: R9700 at context 10240, prefill 1024, rows 4, target-only. Cold fixed/preloaded load, completed logical full-limit and SDK stored-limit requests, structured over-limit rejection and health passed. All six full model gates passed. Cold fixed storage 31354945536 bytes including workspace; sampled VRAM maximum 31458902016 of 34208743424 bytes (100 ms samples, not an instantaneous peak). Context frozen for final sampled qualification; no higher context is claimed."
+   "evidence": "Drafted package (exact-QAT assistant, depth 3, int8 Q4_0 programs of #1273): at prefill 1024 the 10240 context is RESOURCE_EXHAUSTED on the R9700 (drafted workspace 5.9 GB). Prefill 512 fits: cold-capacity run 44366652644 (fixed storage 32.5 GB of 34.2 GB at depth 1 and 3, exact full-limit completion, structured overflow rejection); prefill 1k/2k/8k cost 2-3 % vs prefill 1024 (run 44368594253). Earlier target-only evidence: run 44208046899."
   }
  ]
 }
