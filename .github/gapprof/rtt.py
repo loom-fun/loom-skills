@@ -24,14 +24,17 @@ def loom(n, path):
 
 
 files = {"rtt": loom(4096, os.path.join(OUT, "rtt.loom")), "bw": loom(4194304, os.path.join(OUT, "bw.loom"))}
-args = {"rtt": ["--batch-size=1", "--input-ring-count=1"], "bw": ["--batch-size=64"]}
+LONG = ["--min-time-ms=4000", "--warmup-time-ms=1000", "--max-batches=10000000"]
+args = {"rtt": ["--batch-size=1", "--input-ring-count=1"] + LONG, "bw": ["--batch-size=64"] + LONG,
+        "bw1": ["--batch-size=1", "--input-ring-count=1"] + LONG}   # bw1: one 48 MiB kernel per submit+wait
+files["bw1"] = files["bw"]
 devices = {"spin": "amdgpu://?completion_spin_ns=4294967295", "nospin": "amdgpu"}
 res = []
 for load in (0, 1, 4):
     ps = [subprocess.Popen([sys.executable, "-c", "while True: pass"]) for _ in range(load)]
     time.sleep(2)
     for dk, dev in devices.items():
-        for kind in ("rtt", "bw"):
+        for kind in ("rtt", "bw", "bw1"):
             tag = f"{kind}_{dk}_load{load}"
             adl = None
             if WIN:
@@ -64,6 +67,7 @@ for load in (0, 1, 4):
                         for k, v in json.loads(l)["a"].get("0", {}).items():
                             vals.setdefault(k, []).append(v)
                     row["adl_median"] = {k: statistics.median(v) for k, v in vals.items() if k in ("1", "2", "3", "34")}
+                    row["adl_p10"] = {k: sorted(v)[len(v) // 10] for k, v in vals.items() if k in ("1", "2", "3")}
                 except Exception as e:
                     row["adl_error"] = str(e)
             print(json.dumps(row), flush=True)
