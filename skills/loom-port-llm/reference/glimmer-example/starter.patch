@@ -210,7 +210,7 @@
      main()
 --- a/make_kernel_tests.py
 +++ b/make_kernel_tests.py
-@@ -189,6 +189,29 @@
+@@ -233,6 +233,29 @@
          kern = f"g_mv_{fmt}_k{K}" + ("_t4" if tg == 4 else "")
          _R = pick_r(n, K, tg)   # the variant the model launches (gen_llm uses the same rule)
          if _R != 16: kern += f"_r{_R}"
@@ -238,5 +238,5 @@
 +                print("swiglu case:", skern); continue
 +            print("skip (kernel not emitted):", kern); continue
          wt = ty(raw(name))
+         sd, sa, st = split_w(name, tag)
          cases.append(f"""check.case public @mv_{tag} {{
-   %n = check.literal value({n}) : index

@@ -3,7 +3,7 @@
 usage: python make_kernel_tests.py CONFIG.json OUTDIR      (tools venv: gguf, numpy)
        run_kernel_tests.sh PACKAGE OUTDIR                  (loom-test on the GPU)
 Covers g_embed, the decode matvecs (1- and 4-token variants; with ACT_Q8, the default, g_quant_q8 + the
-int8-activation 1-/4-/8-/16-token variants for formats.ICODES) for one tensor of each (format, K), the QK-norm + RoPE kernel (incl. head_dim 256 / partial
+int8-activation 1-/4-/8-/16-token variants for formats.ICODES) for one tensor of each (format, K) of the trunk and the MTP block, the QK-norm + RoPE kernel (incl. head_dim 256 / partial
 RoPE, q/k/v biases), and for hybrid models the whole gated delta-net chain on a span that
 continues a stored recurrent state (conv, history commit, q/k norms,
 recurrence, gated norm, published state). Extend it
@@ -49,6 +49,16 @@ else:
     def raw(name): return np.asarray(T[name].data).view(np.int8).reshape(-1)
     def deq(name):
         t = T[name]; return dequantize(np.asarray(t.data), t.tensor_type).reshape(int(t.shape[1]), int(t.shape[0])) if len(t.shape) == 2 else np.asarray(t.data, dtype=np.float32)
+# The layers whose projections get matvec / GEMM cases: the trunk, then the MTP (NextN) block (cfg["mtp"]["layers"]), whose
+# matrices can have formats or shapes no trunk layer has (bartowski Qwen3.8-27B: a Q4_0 block on a Q6_K / Q8_0 trunk, and the
+# 2*hidden-wide eh_proj): its proposals launch those kernels on every drafted step.
+KT_LAYERS = list(range(cfg["layers"])) + [li for li in (cfg.get("mtp") or {}).get("layers", []) if li >= cfg["layers"]]
+def layer_ffn(li):
+    f = cfg["ffn"]
+    return (f[li] if li < len(f) else max(f)) if isinstance(f, list) else f
+def layer_heads(li):
+    lh = cfg.get("layer_heads") or []
+    return lh[li] if li < len(lh) else cfg["heads"]
 def raw_scale(name): return np.asarray(T[name].scale).view(np.int8).reshape(-1)   # the scale plane of a split-plane format (formats.SPLIT)
 def split_w(name, tag, key="w"):
     """(file decl, launch arg, launch type) of a split-plane weight's scale operand, saved as <tag>_<key>s; empty for other formats."""
@@ -203,10 +213,10 @@ if VIS:   # a media epoch: 8-word records, token 1 carries a feature row (copied
 # 2. matvec per (tensor) for t=1 and t=4 variants
 seen = set(); todo = []
 VD = cfg["gdn"]["inner"] if cfg.get("gdn") else 0
-for li in range(cfg["layers"]):
-    for nm_, K in [("attn_q", H), ("attn_k", H), ("attn_v", H), ("ffn_down", cfg["ffn"][li] if isinstance(cfg["ffn"], list) else cfg["ffn"]), ("attn_output", (cfg.get("layer_heads") or [QH] * cfg["layers"])[li] * D), ("ffn_gate", H),
+for li in KT_LAYERS:
+    for nm_, K in [("attn_q", H), ("attn_k", H), ("attn_v", H), ("ffn_down", layer_ffn(li)), ("attn_output", layer_heads(li) * D), ("ffn_gate", H),
                    ("attn_qkv", H), ("attn_gate", H), ("ssm_alpha", H), ("ssm_out", VD),
-                   ("ffn_gate_shexp", H), ("ffn_down_shexp", (cfg.get("moe") or {}).get("shared_ffn", 0))]:
+                   ("ffn_gate_shexp", H), ("ffn_down_shexp", (cfg.get("moe") or {}).get("shared_ffn", 0)), ("nextn.eh_proj", 2 * H)]:
         name = f"blk.{li}.{nm_}.weight"
         if name not in T:
             continue
@@ -369,26 +379,31 @@ if cfg.get("attn_gate") == "per_head":
 }}
 """)
 # 2b. int8 gate/up (swiglu) matvec: the 8/16-token variants (BFLY_PERM, 32 rows) equal the 1-token kernel bit for bit
-_g = next((li for li in range(cfg["layers"]) if f"blk.{li}.ffn_gate.weight" in T and f"blk.{li}.ffn_up.weight" in T), None)
-if ACT_Q8 and _g is not None:
+# (one layer per gate format: the trunk's, then an MTP block's of another format, whose cases get the suffix _l<layer>)
+_gl = {}
+for li in KT_LAYERS:
+    if f"blk.{li}.ffn_gate.weight" in T and f"blk.{li}.ffn_up.weight" in T:
+        _gl.setdefault(T[f"blk.{li}.ffn_gate.weight"].tensor_type, li)
+for _gi, _g in enumerate(_gl.values() if ACT_Q8 else ()):
+    _sx = "" if _gi == 0 else f"_l{_g}"
     gn, un = f"blk.{_g}.ffn_gate.weight", f"blk.{_g}.ffn_up.weight"
     fmt = T[gn].tensor_type.name.lower(); n = int(T[gn].shape[1])
     if fmt in IQ_FMTS and T[un].tensor_type.name.lower() == fmt:
-        save("sw_g", raw(gn)); save("sw_u", raw(un)); gt, ut = ty(raw(gn)), ty(raw(un))
+        save(f"sw{_sx}_g", raw(gn)); save(f"sw{_sx}_u", raw(un)); gt, ut = ty(raw(gn)), ty(raw(un))
         for tg in (8, 16):
-            save(f"sw_x{tg}", rng.standard_normal((tg, H)).astype(np.float32))
+            save(f"sw{_sx}_x{tg}", rng.standard_normal((tg, H)).astype(np.float32))
             R1, Rt = iq_r(n, H, 1, True), iq_r(n, H, tg, True)
             k1 = f"g_mv_{fmt}_k{H}_swiglu_q8" + (f"_r{R1}" if R1 != 16 else "")
             kt = f"g_mv_{fmt}_k{H}_swiglu_t{tg}_q8" + (f"_r{Rt}" if Rt != 16 else "")
             sig = f"[index, index](index, index, i32, tensor<{tg}x{2 * H}xi8>, {gt}, {ut}, tensor<{tg}x{n}xf32>)"
-            cases.append(f"""check.case public @mvsw_same_t{tg} {{
+            cases.append(f"""check.case public @mvsw_same_t{tg}{_sx} {{
   %n = check.literal value({n}) : index
   %t = check.literal value({tg}) : index
   %k = check.literal value({H}) : index
   %acc = check.literal value(0) : i32
-  %w = check.file.read.npy path("sw_g.npy") : {gt}
-  %wu = check.file.read.npy path("sw_u.npy") : {ut}
-  %x = check.file.read.npy path("sw_x{tg}.npy") : tensor<{tg}x{H}xf32>
+  %w = check.file.read.npy path("sw{_sx}_g.npy") : {gt}
+  %wu = check.file.read.npy path("sw{_sx}_u.npy") : {ut}
+  %x = check.file.read.npy path("sw{_sx}_x{tg}.npy") : tensor<{tg}x{H}xf32>
   %xq = check.generate.fill value(0) : tensor<{tg}x{2 * H}xi8>
   %y = check.generate.fill value(0.0) : tensor<{tg}x{n}xf32>
   %y1 = check.generate.fill value(0.0) : tensor<{tg}x{n}xf32>
@@ -402,18 +417,18 @@ if ACT_Q8 and _g is not None:
         # the 1-token kernel against numpy: act(gate) * up on the int8 activations (SwiGLU, or GEGLU for ffn_act gelu)
         xs = rng.standard_normal((1, H)).astype(np.float32); xq = q8_ref(xs).astype(np.float64)
         ysw = ffn_act(xq @ deq(gn).T.astype(np.float64)) * (xq @ deq(un).T.astype(np.float64))
-        save("sw_x1", xs); save("sw_y1", ysw.astype(np.float32))
+        save(f"sw{_sx}_x1", xs); save(f"sw{_sx}_y1", ysw.astype(np.float32))
         R1 = iq_r(n, H, 1, True)
         k1 = f"g_mv_{fmt}_k{H}_swiglu_q8" + (f"_r{R1}" if R1 != 16 else "")
-        cases.append(f"""check.case public @mvsw_ref_t1 {{
+        cases.append(f"""check.case public @mvsw_ref_t1{_sx} {{
   %n = check.literal value({n}) : index
   %t = check.literal value(1) : index
   %k = check.literal value({H}) : index
   %acc = check.literal value(0) : i32
-  %w = check.file.read.npy path("sw_g.npy") : {gt}
-  %wu = check.file.read.npy path("sw_u.npy") : {ut}
-  %x = check.file.read.npy path("sw_x1.npy") : tensor<1x{H}xf32>
-  %e = check.file.read.npy path("sw_y1.npy") : tensor<1x{n}xf32>
+  %w = check.file.read.npy path("sw{_sx}_g.npy") : {gt}
+  %wu = check.file.read.npy path("sw{_sx}_u.npy") : {ut}
+  %x = check.file.read.npy path("sw{_sx}_x1.npy") : tensor<1x{H}xf32>
+  %e = check.file.read.npy path("sw{_sx}_y1.npy") : tensor<1x{n}xf32>
   %xq = check.generate.fill value(0) : tensor<1x{2 * H}xi8>
   %y = check.generate.fill value(0.0) : tensor<1x{n}xf32>
   kernel.launch @g_quant_q8[%t, %k](%t, %k, %x, %xq) : [index, index](index, index, tensor<1x{H}xf32>, tensor<1x{2 * H}xi8>)
@@ -442,31 +457,35 @@ if cfg.get("ffn_act") == "gelu" and any(f"blk.{li}.ffn_gate.weight" in T and f"b
 """)
 # 2c. int8 pair matvecs (gen_llm PAIR_PROJ: attention q + gate, k + v of one format and shape): at 8 and 16 tokens
 # each output equals the 1-token single-weight kernel on that weight bit for bit
-_a = next((li for li in range(cfg["layers"]) if f"blk.{li}.attn_q.weight" in T), None)
-for pa, pb in (("attn_q", "attn_gate"), ("attn_k", "attn_v")):
-    if not ACT_Q8 or _a is None:
+_al = {}   # one layer per attention format (the trunk's, then an MTP block's of another format: cases suffixed _l<layer>)
+for li in KT_LAYERS:
+    if f"blk.{li}.attn_q.weight" in T:
+        _al.setdefault(T[f"blk.{li}.attn_q.weight"].tensor_type, li)
+for _ai, _a, pa, pb in [(i, l, x, y) for i, l in enumerate(_al.values()) for x, y in (("attn_q", "attn_gate"), ("attn_k", "attn_v"))]:
+    if not ACT_Q8:
         break
+    _px = "" if _ai == 0 else f"_l{_a}"
     an, bn = f"blk.{_a}.{pa}.weight", f"blk.{_a}.{pb}.weight"
     if bn not in T or T[an].tensor_type != T[bn].tensor_type or tuple(T[an].shape) != tuple(T[bn].shape):
         continue
     fmt = T[an].tensor_type.name.lower(); n = int(T[an].shape[1])
     if fmt not in IQ_FMTS or H // 32 > 1024:
         continue
-    save(f"pr_{pa}_a", raw(an)); save(f"pr_{pa}_b", raw(bn)); at, bt = ty(raw(an)), ty(raw(bn))
+    save(f"pr{_px}_{pa}_a", raw(an)); save(f"pr{_px}_{pa}_b", raw(bn)); at, bt = ty(raw(an)), ty(raw(bn))
     for tg in (8, 16):
-        save(f"pr_{pa}_x{tg}", rng.standard_normal((tg, H)).astype(np.float32))
+        save(f"pr{_px}_{pa}_x{tg}", rng.standard_normal((tg, H)).astype(np.float32))
         R1, Rt = iq_r(n, H, 1), iq_r(n, H, tg, 2)
         k1 = f"g_mv_{fmt}_k{H}_q8" + (f"_r{R1}" if R1 != 16 else "")
         kt = f"g_mv_{fmt}_k{H}_pair_t{tg}_q8" + (f"_r{Rt}" if Rt != 16 else "")
         s1 = f"[index, index](index, index, i32, tensor<{tg}x{2 * H}xi8>, {at}, tensor<{tg}x{n}xf32>)"
-        cases.append(f"""check.case public @mvpair_{pa}_t{tg} {{
+        cases.append(f"""check.case public @mvpair_{pa}_t{tg}{_px} {{
   %n = check.literal value({n}) : index
   %t = check.literal value({tg}) : index
   %k = check.literal value({H}) : index
   %acc = check.literal value(0) : i32
-  %wa = check.file.read.npy path("pr_{pa}_a.npy") : {at}
-  %wb = check.file.read.npy path("pr_{pa}_b.npy") : {bt}
-  %x = check.file.read.npy path("pr_{pa}_x{tg}.npy") : tensor<{tg}x{H}xf32>
+  %wa = check.file.read.npy path("pr{_px}_{pa}_a.npy") : {at}
+  %wb = check.file.read.npy path("pr{_px}_{pa}_b.npy") : {bt}
+  %x = check.file.read.npy path("pr{_px}_{pa}_x{tg}.npy") : tensor<{tg}x{H}xf32>
   %xq = check.generate.fill value(0) : tensor<{tg}x{2 * H}xi8>
   %ya = check.generate.fill value(0.0) : tensor<{tg}x{n}xf32>
   %yb = check.generate.fill value(0.0) : tensor<{tg}x{n}xf32>
@@ -1670,8 +1689,8 @@ if os.environ.get("GEMM_TESTS", "1") == "1":
 from formats import DECODES as _GEMM_FMTS  # noqa: E402
 def gemm_cases():
     seen_g = set()
-    for li in range(cfg["layers"]):
-        for nm_ in ("ffn_gate", "ffn_up", "ffn_down", "attn_qkv", "attn_gate", "attn_q", "attn_k", "attn_output", "ssm_out"):
+    for li in KT_LAYERS:
+        for nm_ in ("ffn_gate", "ffn_up", "ffn_down", "attn_qkv", "attn_gate", "attn_q", "attn_k", "attn_output", "ssm_out", "nextn.eh_proj"):
             name = f"blk.{li}.{nm_}.weight"
             if name not in T or (nm_ == "attn_gate" and cfg.get("attn_gate") == "per_head"):   # per head: matvec only
                 continue
