@@ -1656,7 +1656,7 @@
   "unsloth-gemma-4-26B-A4B-it-qat-loom": {
    "staging": {
     "repo": "loom-fun-staging/unsloth-gemma-4-26B-A4B-it-qat-loom",
-    "revision": "8ac71dbdd2dc0608bed6ea3fed09cbf50033b595"
+    "revision": "2350dda5595f74f259907b75e94eaf08f7c39f87"
    },
    "model_id": "google/gemma-4-26B-A4B-it-qat-q4_0-unquantized",
    "kit": "gemma4",
@@ -1727,7 +1727,7 @@
   "unsloth-gemma-4-31B-it-qat-loom": {
    "staging": {
     "repo": "loom-fun-staging/unsloth-gemma-4-31B-it-qat-loom",
-    "revision": "849df3f0fa133606d51cf671d8acfacc5542a8ed"
+    "revision": "30769169ced16628e04b85b11f3aa4bf3f5c6b75"
    },
    "model_id": "google/gemma-4-31B-it-qat-q4_0-unquantized",
    "kit": "gemma4",
