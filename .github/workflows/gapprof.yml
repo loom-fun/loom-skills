@@ -55,6 +55,7 @@ jobs:
           sparse-checkout: |
             .github/gapprof
             skills/loom-benchmark
+            skills/loom-port-llm/starter
       - name: gapprof
         run: |
           $slug = "${{ matrix.repo }}".Split("/")[1]
@@ -92,6 +93,7 @@ jobs:
           sparse-checkout: |
             .github/gapprof
             skills/loom-benchmark
+            skills/loom-port-llm/starter
       - name: gapprof
         env:
           REPO: ${{ matrix.repo }}
