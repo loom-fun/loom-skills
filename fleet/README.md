@@ -12,7 +12,7 @@ published model, without a GPU and without any weights.
 | `gguf_stub.py` | `dump` a GGUF (file or URL, HTTP range reads) / `stub` a sparse header-only file `inspect_gguf.py` and `build.py` accept |
 | `st_stub.py` | `dump` an HF safetensors checkpoint (directory or repo, HTTP range reads of the headers) into `<slug>/safetensors/<file>.json.gz`: tensor table, config.json, generation_config, tokenizer_config, chat template, added tokens; `build_fleet.py` builds such a model with `inspect_safetensors.py` from the dump (manifest `files.<name>.kind: safetensors`) |
 | `add_model.py` | add or refresh a model from its package directory (reads only small files) |
-| `build_fleet.py` | `--ref REF` / `--tree PATH` `--out DIR`: programs-only build of the fleet, CPU only, both targets |
+| `build_fleet.py` | `--ref REF` / `--tree PATH` `--out DIR`: programs-only build of the fleet, CPU only, both targets; `--own-inputs` (with `--ref`, the impact base side): a model whose inputs changed since REF is built from REF's own inputs |
 | `impact_plan.py` | CI input-based selection, independent base/head CPU shards, and fail-closed aggregation; scope lint always runs |
 | `diff_fleet.py` | `BASE_DIR HEAD_DIR --json --md`: per model changed files, blocks, GPU target, card rows, strata, model.json |
 | `scope_lint.py` | `--base REF --pr-body FILE [--impact IMPACT.json]`: does a PR stay inside its `loom-scope` block (files per kind, scope leak, protected files, registry legacy values, kb lint); `--local` builds the impact itself |
