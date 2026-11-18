@@ -49,7 +49,9 @@ class NoDraftReason(unittest.TestCase):
         data = json.load(open(ROOT / "skills/loom-benchmark/data/drafting_classification.json"))
         for repo, c in data.items():
             reason = render_card.no_draft_reason(repo)
-            if c["choice"] != "none" or c["evidence"].startswith("no MTP head in the GGUF; no drafter from the model maker"):
+            if c["choice"] != "none":
+                self.assertIn(f"classified {c['choice']} drafter", reason, repo)
+            elif c["evidence"].startswith("no MTP head in the GGUF; no drafter from the model maker"):
                 self.assertEqual(reason, render_card.NO_DRAFTER, repo)
             else:
                 self.assertNotEqual(reason, render_card.NO_DRAFTER, repo)

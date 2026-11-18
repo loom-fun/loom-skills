@@ -218,8 +218,11 @@ def main():
     if a.own_inputs and a.ref:
         rfleet = os.path.join(tree, "fleet")
         rman = json.load(open(os.path.join(rfleet, "manifest.json")))["models"]
+        changed = {p.split("/")[1] for p in subprocess.run(["git", "diff", "--name-only", sha, "--", "fleet/"], cwd=repo, capture_output=True,
+                                                            text=True, check=True).stdout.split() if p.count("/") >= 2}
+        build_keys = lambda e: {k: v for k, v in e.items() if k != "staging"}   # a staging re-pin alone changes no build input
         for s in slugs:
-            if s in rman and (rman[s] != manifest[s] or subprocess.run(["git", "diff", "--quiet", sha, "--", f"fleet/{s}"], cwd=repo).returncode):
+            if s in rman and (build_keys(rman[s]) != build_keys(manifest[s]) or s in changed):
                 own[s] = (rman[s], rfleet)
         if own:
             print(f"own inputs of {a.ref} for {', '.join(sorted(own))}", flush=True)

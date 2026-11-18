@@ -181,9 +181,10 @@ all_gates() {
     return
   fi
   # SPEC_ONLY=1: just the speculative-decoding equivalence gate at this level (a drafter/depth sweep on DevLab: every
-  # candidate checked without re-running the reference gates; the chosen package still runs the full level)
+  # candidate checked without re-running the reference gates; the chosen package still runs the full level). gates.json
+  # records the level as "<level>-spec-only", so it never stands in for a full run; a package without drafting fails.
   if [ -n "${SPEC_ONLY:-}" ]; then
-    [ -n "$drafting" ] && run spec spec_gate
+    if [ -n "$drafting" ]; then run spec spec_gate; else echo "SPEC_ONLY: the package does not draft"; result[spec]=1; order+=(spec); secs[spec]=0; done[spec]=1; fi
     return
   fi
   [ "$level" = dev ] && { dev_gates; return; }
@@ -233,7 +234,7 @@ if [ "$level" = quick ] || [ "$level" = full ]; then
 fi
 args=()
 for n in "${order[@]}"; do args+=("$n" "${result[$n]}" "${secs[$n]}"); done
-"$T" - "$level" "$pkg_hash" $(( $(date +%s) - t_start )) "${args[@]}" <<'EOF'
+"$T" - "$level${SPEC_ONLY:+-spec-only}" "$pkg_hash" $(( $(date +%s) - t_start )) "${args[@]}" <<'EOF'
 import json, os, sys, time
 level, pkg_hash, total, rest = sys.argv[1], sys.argv[2], int(sys.argv[3]), sys.argv[4:]
 gates = {rest[i]: {"pass": rest[i + 1] == "0", "log": f"gates_{rest[i]}.log", "seconds": int(rest[i + 2])}

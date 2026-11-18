@@ -256,9 +256,11 @@ def no_draft_reason(repo):
     except (KeyError, OSError, ValueError):
         c = {}
     ev = (c.get("evidence") or "").strip().rstrip(".")
-    if c.get("choice", "none") != "none" or not ev or ev.startswith("no MTP head in the GGUF; no drafter from the model maker"):
+    if c.get("choice", "none") != "none":   # a card measured before its package adopted the classified drafter
+        return f"this package does not use the classified {c['choice']} drafter yet"
+    if not ev or ev.startswith("no MTP head in the GGUF; no drafter from the model maker"):
         return NO_DRAFTER
-    return ev if ev[1:2].isupper() else ev[0].lower() + ev[1:]   # mid-sentence: "Target-only ..." -> "target-only ..."
+    return ev
 
 
 def methodology(base, extra, spec, drafter, values, runs_c4, machine=False, cross=None, measured=True, repo=None):

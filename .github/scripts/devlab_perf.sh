@@ -351,7 +351,7 @@ hf_sub() {   # {hf:OWNER/REPO/FILE}, or immutable {hf:OWNER/REPO@40HEX/FILE#64HE
       t=${t//"$h"/$dst}; continue
     fi
     [ -f "$dst" ] || { mkdir -p "${dst%/*}" && curl -fsSL --retry 3 ${HF_TOKEN:+-H "Authorization: Bearer $HF_TOKEN"} \
-      "https://huggingface.co/${r}/resolve/main/${f##*/}" -o "$dst.part" && mv "$dst.part" "$dst"; } || { echo "FAIL: fetch $f" >&2; return 1; }
+      "https://huggingface.co/$(echo "$f" | cut -d/ -f1-2)/resolve/main/$(echo "$f" | cut -d/ -f3-)" -o "$dst.part" && mv "$dst.part" "$dst"; } || { echo "FAIL: fetch $f" >&2; return 1; }
     t=${t//"$h"/$dst}
   done
   printf '%s\n' "$t"

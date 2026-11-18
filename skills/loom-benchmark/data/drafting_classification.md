@@ -1,6 +1,6 @@
-# Drafting classification of all 52 cards (final benchmark rule)
+# Drafting classification of all 54 cards (final benchmark rule)
 
-Choice per model, identical on Loom and llama.cpp ROCm+Vulkan: MTP head in the card's own GGUF > DFlash/assistant drafter published for this exact model (maker or Z-Lab, GGUF = faithful conversion) > no drafting. No ngram. Counts: {'mtp': 6, 'dflash': 17, 'assist': 2, 'none': 27}; Loom rebuilds needed: 20.
+Choice per model, identical on Loom and llama.cpp ROCm+Vulkan: MTP head in the card's own GGUF > DFlash/assistant drafter published for this exact model (maker or Z-Lab, GGUF = faithful conversion) > no drafting. No ngram. Counts: {'mtp': 4, 'dflash': 18, 'assist': 4, 'none': 28}; Loom rebuilds needed: 20.
 
 Evidence for MTP: the checkpoint GGUF header was read (`nextn_predict_layers`, nextn tensors; `work/baselines/nextn.json`). Drafter provenance: HF repo + its upstream release (`classify_data.json`). llama.cpp n-max: the drafter README's stated value (GGUF repo `--spec-draft-n-max`, else upstream `num_speculative_tokens` / block size - 1), else llama.cpp's default (flag omitted). Loom keeps its tuned depth. MTP GGUF variants published separately upstream (e.g. unsloth/Qwen3.5-9B-MTP-GGUF) are different checkpoints and are NOT used (the card's GGUF has no NextN head) - noted as a possible follow-up.
 
