@@ -57,6 +57,17 @@ def _base(k, defined):
     return k[:-len(dual_target.SUFFIX)] if k.endswith(dual_target.SUFFIX) and k[:-len(dual_target.SUFFIX)] in defined else k
 
 
+# Launched kernels hrx-loom 0.2.0's loom-test cannot run as a case root (loom-kb topic sdk, "kernel tests"): reported apart.
+UNTESTABLE = {
+    r"_listed$": "indirect dispatch (the launch config reads its count from a buffer)",
+    r"^g_silu_mul(_lv)?$": "SwiGLU g_silu_mul: the vector bound is proven only for the program's constant width",
+}
+
+
+def untestable(name):
+    return next((why for pat, why in UNTESTABLE.items() if re.search(pat, name)), None)
+
+
 def coverage(lib, selected):
     """(launched, untested): the kernels the library's programs launch (command, template and func bodies; a K / K_rdna4 pair
     counts once) and those of them no selected case launches."""
@@ -65,7 +76,7 @@ def coverage(lib, selected):
     for d in re.split(r'(?m)^(?=\S+\.(?:def|decl) )', lib):
         if d.startswith(("command.def", "template.def", "func.def")):
             launched |= {_base(k, defined) for k in re.findall(r'kernel\.launch @([\w.]+)', d)}
-    tested = {_base(k, defined) for k in re.findall(r'kernel\.launch @([\w.]+)', selected)}
+    tested = {_base(k[3:] if k.startswith("kt_") else k, defined) for k in re.findall(r'kernel\.launch @([\w.]+)', selected)}   # kt_K: a copy of K
     return sorted(launched), sorted(launched - tested)
 
 
@@ -77,4 +88,7 @@ if __name__ == "__main__":
     open(sys.argv[3], "w", newline="\n").write(text)
     print(*skipped, sep="\n") if skipped else None
     launched, untested = coverage(open(sys.argv[1]).read(), text)
-    print(f"COVERAGE {len(launched) - len(untested)}/{len(launched)} launched kernels have a case" + (": untested " + ", ".join(untested) if untested else ""))
+    sdk = [k for k in untested if untestable(k)]
+    rest = [k for k in untested if not untestable(k)]
+    print(f"COVERAGE {len(launched) - len(untested)}/{len(launched)} launched kernels have a case"
+          + (f"; untested {', '.join(rest)}" if rest else "") + (f"; not runnable by loom-test (SDK) {', '.join(sdk)}" if sdk else ""))
