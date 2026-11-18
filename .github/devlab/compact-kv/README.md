@@ -62,10 +62,12 @@ this adapter and the source fix:
 Use the existing `devlab-experiment.yml` workflow with experiment input
 `.github/devlab/gemma-e4b-compact-kv.json` at the exact reviewed branch/head. The
 workflow permits explicit dispatch only, validates the one frozen variant, and
-invokes the entrypoint below. Its 30-minute job limit includes upload/cleanup;
-the experiment step has a 1610-second TERM plus 10-second KILL limit, leaving up
+invokes the entrypoint below. Its 28-minute job limit includes upload/cleanup;
+the experiment step has a 1490-second TERM plus 10-second KILL limit, leaving up
 to three minutes for checkout and artifact handling. Other experiments keep
-their existing route and timeout.
+their existing route and timeout. This permits exactly one corrective pilot:
+the first job's 83 seconds plus at most 1680 seconds is 1763 seconds, below the
+1800-second aggregate cap. No third attempt is authorized.
 The compact checkout is shallow. Inside the experiment deadline, `bounded_job.sh`
 explicitly fetches only the full pinned ordinary commit with a 55-second TERM
 plus 5-second KILL cap, verifies that commit object, and records the command and
@@ -78,7 +80,8 @@ GEMMA_E4B_DEVLAB_ACK=1 GITHUB_SHA=<reviewed-full-head> \
 
 The entire entrypoint, including materialization, SDK setup, one official-cache
 checkpoint fetch/hash, CPU fixture generation, GPU checks and both model arms, is
-bounded by 1790 seconds TERM plus 10 seconds KILL. The kernel process has a 420-second
+internally bounded by 1790 seconds TERM plus 10 seconds KILL, subordinate to the
+workflow's tighter 1490-second TERM plus 10-second KILL cap. The kernel process has a 420-second
 sub-budget. Failure or timeout means incomplete, never a RAM win or retry request.
 Candidate runs first. The inherited stable-idle and inter-arm settle requirements
 must pass before baseline starts. Exact short/long/reset outputs must agree.
