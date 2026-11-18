@@ -384,7 +384,7 @@ for v in $variants; do
     # time minus the layer-proportional part is the per-step fixed cost; outputs are garbage, only timing counts)
     vcfg=$(qv "$v" "print(json.dumps(v.get('config') or {}))")
     vcfg=$(hf_sub "$vcfg") || exit 1   # {hf:...} in a config value: e.g. {"assistant": {"gguf": "{hf:...}"}}, a Gemma-4 assistant the card does not ship
-    "$T" -"$D/cfg.json" "$D/$v/cfg.json" "$vcfg" <<'EOF2'
+    "$T" - "$D/cfg.json" "$D/$v/cfg.json" "$vcfg" <<'EOF2'
 import json, sys
 c = json.load(open(sys.argv[1])); c.update(json.loads(sys.argv[3])); json.dump(c, open(sys.argv[2], "w"), indent=1)
 EOF2
