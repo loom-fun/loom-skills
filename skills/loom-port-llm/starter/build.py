@@ -62,6 +62,9 @@ ap.add_argument("--model-id", default=None, help="model id clients send (visible
 a = ap.parse_args()
 
 cfg = json.load(open(a.config))
+import compact_kv  # noqa: E402
+if compact_kv.enabled():
+    compact_kv.validate_config(cfg)
 import catalog  # noqa: E402  (a kit with a catalog package: hand-written programs instead of generated ones)
 if (_cdir := catalog.find(HERE)):
     catalog.build(a, cfg, _cdir, a.tokenizer)
@@ -95,6 +98,7 @@ RESOLVED = kb_choices.apply(cfg, DRAFT["kind"] if DRAFT else None, slug=a.slug)
 if a.prefill is None:
     _prune_shared = RESOLVED["choices"].get("prefill.prune_shared", {}).get("value", False)
     a.prefill = cfg.get("prefill_capacity") or (4096 if cfg.get("moe") else 2048 if cfg.get("arch") == "gemma4" and cfg.get("kv_shared_from") and _prune_shared else 1024)
+COMPACT_KV = compact_kv.for_build(cfg, a, DRAFT)
 if DRAFT and DRAFT["kind"] == "dflash":
     sys.path.insert(0, os.path.join(HERE, "draft"))
     import gen_dflash  # noqa: E402
@@ -112,6 +116,8 @@ pos_bytes = 2 * max(cfg["kv_heads"] * (cfg.get("head_dim_swa") or cfg["head_dim"
                     (cfg.get("kv_heads_global") or cfg["kv_heads"]) * cfg["head_dim"])
 kv_layers = cfg.get("kv_layers", cfg["layers"])
 kv_per_position = pos_bytes * 2 * kv_layers
+if COMPACT_KV:
+    kv_per_position = COMPACT_KV.pool_position_bytes
 if DRAFT and DRAFT["kind"] == "mtp":   # the MTP block's K/V shares the pool's pages
     kv_per_position += pos_bytes * 2 * len(cfg["mtp"]["layers"])
 if DRAFT and DRAFT["kind"] == "dflash":   # so does the drafter's context K/V
@@ -143,6 +149,9 @@ recurrent_bytes = gdn_geometry(cfg)["slot_bytes"] if cfg.get("recurrent_layers")
 if cfg.get("shortconv_layers"):  # LFM2 short-conv history lives in the recurrent slots too (reference/lfm2moe-example)
     from gen_sconv import sconv_geometry  # noqa: E402
     recurrent_bytes += sconv_geometry(cfg)["slot_bytes"]
+if COMPACT_KV:
+    recurrent_bytes = COMPACT_KV.slot_bytes
+recurrent_total = (1 if COMPACT_KV else 2 * a.rows) * recurrent_bytes
 def program_scratch(path, tokens, spans):
     """Bytes of scratch (buffer.alloca<global>) of the largest command program in an llm.loom, for an invocation of
     `tokens` tokens in `spans` spans. loom-serve charges the largest program's workspace against --memory_bytes at
@@ -214,7 +223,7 @@ if os.path.exists(os.path.join(gen, "phead_main")):   # draft.propose.head_piece
 # gated delta-net inputs for the replay: 7 GB for 30 such layers at a 4096-token prefill), plus 3 GiB for the state
 # storage, slab rounding and the workspace's own rounding. A fixed 3 GiB alone refused such a card's full-context
 # request (503) at the memory_bytes printed here, on a fresh server.
-workspace = program_scratch(os.path.join(pkg, "program", "llm.loom"), a.prefill, a.rows) + 3 * 2**30
+workspace = program_scratch(os.path.join(pkg, "program", "llm.loom"), a.prefill, a.prefill if COMPACT_KV else a.rows) + 3 * 2**30
 
 native = cfg.get("context_length") or 32768
 if native > KERNEL_CONTEXT and not a.context:
@@ -225,12 +234,12 @@ if a.memory_gib == "auto":
     if cap is not None and cap <= 0:
         sys.exit(f"the memory cap ({what}) leaves no memory")
     want_pool = context + max(65536, context // 4)
-    need = weights_bytes + workspace + 2**30 + 2 * a.rows * recurrent_bytes + want_pool * kv_per_position
+    need = weights_bytes + workspace + 2**30 + recurrent_total + want_pool * kv_per_position
     a.memory_gib = round(min(need, cap) / 2**30, 1) if cap else 56.0
     print(f"memory budget {a.memory_gib} GiB (a {want_pool}-position pool needs {need / 2**30:.0f} GiB"
           + (f"; cap {what} = {cap / 2**30:.0f} GiB)" if cap else "; RAM unknown)"))
 a.memory_gib = float(a.memory_gib)
-budget = int(a.memory_gib * 2**30) - weights_bytes - workspace - 2 * a.rows * recurrent_bytes  # workspace, activations, recurrent state
+budget = int(a.memory_gib * 2**30) - weights_bytes - workspace - recurrent_total  # workspace, activations, recurrent state
 if budget < (context + min(context // 4, 65536)) * kv_per_position:
     # A capped budget leaves the pool no headroom over the context, and a full-context request is charged the whole
     # pool plus ~0.5-1.7 GB more than this estimate (Gemma-4 26B/31B, capped at pool = context: refused with 503 on a
@@ -241,6 +250,8 @@ if context * kv_per_position > budget:
     fit = max(4096, (budget // kv_per_position) // 1024 * 1024)
     print(f"WARNING: context {context} needs {context * kv_per_position / 2**30:.1f} GiB of KV; {a.memory_gib} GiB budget fits {fit}")
     context = fit
+if COMPACT_KV and context != a.context:
+    sys.exit("compact E4B KV: insufficient memory budget for the requested context; refusing to shrink it")
 # One full-context request plus headroom for other rows' retained history (2x for short contexts, 1.25x at 262k:
 # a 2x pool at 262k was ~40 GiB of KV for a 27B, more than most single-user machines should reserve).
 pool = a.pool or min(POOL_MAX, max(context, min(context + max(65536, context // 4), budget // kv_per_position)))
@@ -248,7 +259,7 @@ pool = max(pool, context)
 # loom-serve rejects a pool its paged cache geometry can't represent ("source cache geometry cannot
 # represent this pool", e.g. 43352): keep it a multiple of 1024 positions.
 pool = max(pool // 1024 * 1024, -(-context // 1024) * 1024)
-if pool < min(1.25 * context, context + 65536):
+if not COMPACT_KV and pool < min(1.25 * context, context + 65536):
     print(f"WARNING: KV pool {pool} < 1.5x context {context}: a full-context request can fail with 503 while other rows "
           f"retain history (the full-context gate did on flint). Raise --memory-gib (a pool of context + 64k needs "
           f"~{(weights_bytes + (context + 65536) * kv_per_position) / 2**30 + 6:.0f} GiB) or lower --context.")
@@ -758,7 +769,7 @@ CALL_FORMATS = {"none": 0, "hermes": 1, "qwen_xml": 2, "glm": 3, "pythonic": 4, 
 custom_chat = os.path.join(HERE, "chat", chat["call_format"] + ".loom")
 custom_chat = custom_chat if chat["call_format"] not in CALL_FORMATS and os.path.exists(custom_chat) else None
 subs = {
-    "@@POS_BYTES@@": str(pos_bytes), "@@PLANES@@": str(2 * kv_layers), "@@BLOCK_BYTES@@": str(16 * pos_bytes),
+    "@@POS_BYTES@@": str(pos_bytes), "@@PLANES@@": str(COMPACT_KV.global_planes if COMPACT_KV else 2 * kv_layers), "@@BLOCK_BYTES@@": str(16 * pos_bytes),
     "@@RECURRENT_BYTES@@": str(recurrent_bytes or 4),
     "@@LOGIT_REGION@@": "32768", "@@LOGIT_ROW_BYTES@@": str(((cfg["vocab"] + 127) // 128) * 512),   # gen_llm.LOGITS_OFFSET / CHUNKS * 512
     "@@MAX_CONTEXT@@": str(a.context), "@@TERMINAL@@": chat["terminal"], "@@HEX_TERMINAL@@": hx(chat["terminal"]),
@@ -849,6 +860,8 @@ for name in ("prepare", "control", "storage", "service"):
         text = re.sub(r"(?s)\n?[ ]*// logits:begin\n.*?// logits:end\n", "\n", text)
     for k, v in subs.items():
         text = text.replace(k, v)
+    if COMPACT_KV:
+        text = compact_kv.template(name, text)
     assert "@@" not in text, (name, [l for l in text.splitlines() if "@@" in l])
     open(os.path.join(pkg, "program", name + ".loom"), "w", encoding="utf-8", newline="\n").write(text)
 # the weight policy: a safetensors checkpoint's bf16 norms / A_log / dt_bias / conv1d are converted to f32 at load (gen_llm.py writes it)
@@ -973,6 +986,8 @@ for dev, n in chunks.items():
 # Dual-target (RDNA3 + RDNA4) programs: every program file that has a `K_rdna4` twin kernel selects it per device
 # (dual_target.py; LOOM_RDNA4=0 turns it off, and files without twins are left as they are).
 dual_target.apply_dir(os.path.join(pkg, "program"))
+if COMPACT_KV:
+    compact_kv.card_execution(card)
 json.dump(card, open(os.path.join(pkg, "model.json"), "w"), indent=1)
 # The benchmark scripts read the chat format and model id from here.
 bench = {k: v for k, v in cfg.items() if k != "tensors"}
@@ -988,9 +1003,9 @@ if RESOLVED["dirty"]:   # registered choices the caller set in the environment: 
 bench["resolved"] = {k: v for k, v in RESOLVED.items() if k != "dirty"}
 json.dump(bench, open(os.path.join(pkg, "llm_config.json"), "w"), indent=1)
 kv = a.pool * kv_per_position
-need = weights_bytes + kv + workspace + 2 * a.rows * recurrent_bytes
+need = weights_bytes + kv + workspace + recurrent_total
 if a.sizing_json:
-    json.dump({"weights_bytes": weights_bytes, "workspace_bytes": workspace, "recurrent_bytes": 2 * a.rows * recurrent_bytes,
+    json.dump({"weights_bytes": weights_bytes, "workspace_bytes": workspace, "recurrent_bytes": recurrent_total,
                "scratch_bytes": max(0, workspace - 3 * 2**30),
                "mmproj_bytes": os.path.getsize(cfg["vision"]["mmproj"]) if os.path.isfile((cfg.get("vision") or {}).get("mmproj") or "") else 0,
                "kv_bytes_per_position": kv_per_position, "context": a.context, "native_context": native, "pool": a.pool,

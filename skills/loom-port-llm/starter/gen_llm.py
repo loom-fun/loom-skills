@@ -6041,6 +6041,8 @@ if __name__ == "__main__":
             V, CHUNKS = _V, _CH
             _pk.append(f"// head pieces: {_prefix} rows={_rows} piece={_sizes[0]} n={len(_sizes)} fmt={_pfmt} suffix={_suf} on {_root}\n")
         text += "\n" + "".join(_pk)
+    import compact_kv
+    text = compact_kv.specialize(text, CFG)
     out = os.path.join(out_dir, "model.loom")
     open(out, "w", newline="\n").write(text)
     print("wrote", out)

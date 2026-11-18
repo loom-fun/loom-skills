@@ -1708,11 +1708,13 @@
      parts.append(program)
      text = "\n".join(parts)
      if "_attention_flash2_partial\")" in text:   # the blocks a run covers in part: their kernel after each launch
-@@ -6038,6 +6460,7 @@
+@@ -6038,8 +6460,9 @@
              V, CHUNKS = _V, _CH
              _pk.append(f"// head pieces: {_prefix} rows={_rows} piece={_sizes[0]} n={len(_sizes)} fmt={_pfmt} suffix={_suf} on {_root}\n")
          text += "\n" + "".join(_pk)
 +    text = prune_shared_rows(text)
+     import compact_kv
+     text = compact_kv.specialize(text, CFG)
      out = os.path.join(out_dir, "model.loom")
      open(out, "w", newline="\n").write(text)
      print("wrote", out)

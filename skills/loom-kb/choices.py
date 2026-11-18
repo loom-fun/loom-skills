@@ -111,6 +111,11 @@ def CHOICE(key, type, legacy, env, **kw):
     return Choice(key, type, legacy, env, **kw)
 
 
+CHOICE("memory.kv.compact_gemma4_e4b", "bool", False, "GEMMA4_COMPACT_KV", kits=["gemma4"], experiment=True,
+       kernels=["g_qk_rope_store*", "*attention*"], rows=ROWS_ALL, devices=["rdna3"],
+       doc="Experimental E4B Q4_K_M text-only compact KV: one session, caches off, <=1024 prefill, <=64k context.")
+
+
 def EXEC(key, type, doc, rows=(), from_pr=None):
     """An execution choice (see the module docstring): a per-(model, device) serving setting; legacy None = the preset keeps what the
     package's default preset (or the device's fit) says."""
