@@ -1,11 +1,13 @@
 {
  "models": [
-  "loom-fun/ggml-org-gemma-3-1b-it-loom"
+  "loom-fun/ggml-org-gemma-3-1b-it-loom",
+  "loom-fun/unsloth-Qwen3-30B-A3B-Instruct-2507-loom"
  ],
  "os": [
-  "windows"
+  "windows",
+  "linux"
  ],
  "variants": "card,card_cpuload",
- "profile": "pf2k,dec",
- "reps": 8
+ "profile": "dec,dec@card_cpuload",
+ "reps": 6
 }
