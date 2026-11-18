@@ -8,7 +8,12 @@ from pathlib import Path
 import subprocess
 import sys
 import unittest
-import numpy as np
+try:
+    import numpy as np
+except ModuleNotFoundError as exc:
+    if exc.name != 'numpy':
+        raise
+    np = None
 
 ROOT=Path(__file__).resolve().parents[1]
 ADAPTER=ROOT/'.github/devlab/compact-kv'
@@ -17,7 +22,8 @@ def module(name):
     spec=importlib.util.spec_from_file_location(name,ADAPTER/(name+'.py'))
     m=importlib.util.module_from_spec(spec);sys.modules[name]=m;spec.loader.exec_module(m);return m
 
-g=module('generate_checks');gate=module('run_checks');runner=module('materialize_runner')
+g=module('generate_checks') if np is not None else None
+gate=module('run_checks');runner=module('materialize_runner')
 
 
 class AdapterTests(unittest.TestCase):
@@ -38,6 +44,7 @@ class AdapterTests(unittest.TestCase):
             with self.subTest(field=field),self.assertRaises(ValueError):gate.validate_positive(d,['good'])
         with self.assertRaises(ValueError):gate.validate_positive(self.report(),['good'],{'good':4})
 
+    @unittest.skipIf(np is None, 'numpy not installed (numeric qualification uses the SDK tools environment)')
     def test_float64_oracle_matches_scalar_full_history(self):
         c=g.Case('tiny',2,2);rng=np.random.default_rng(7)
         q=rng.normal(0,.1,(2,8,256));h=rng.normal(0,.1,(4,2,2,256)).astype(np.float16)
@@ -50,6 +57,7 @@ class AdapterTests(unittest.TestCase):
                 expected=np.array([sum(float(weights[p])*float(h[p,1,kv,d]) for p in range(n)) for d in range(256)])
                 np.testing.assert_allclose(got[token,head],expected,atol=1e-8,rtol=1e-6)
 
+    @unittest.skipIf(np is None, 'numpy not installed (numeric qualification uses the SDK tools environment)')
     def test_safe_negative_controls_have_comparator_sensitivity(self):
         for c in g.NEGATIVES:
             with self.subTest(case=c.name):
@@ -81,6 +89,10 @@ class AdapterTests(unittest.TestCase):
                 self.assertNotIn('check.expect.equal',text)
 
     def test_real_runner_contracts_preserved(self):
+        # Compatibility CI has only its shallow PR checkout. The DevLab job
+        # explicitly fetches this frozen cross-branch source before materializing.
+        if subprocess.run(['git','-C',str(ROOT),'cat-file','-e',runner.PIN+'^{commit}'],capture_output=True).returncode:
+            self.skipTest('frozen ordinary-runner commit not in this checkout (shallow clone)')
         source={name:subprocess.check_output(['git','-C',str(ROOT),'show',runner.PIN+':'+runner.PREFIX+name]).decode() for name in runner.FILES}
         changed=runner.patch_sources(source,'a'*40,'b'*64,'c'*64)
         def functions(text):
@@ -97,6 +109,7 @@ class AdapterTests(unittest.TestCase):
         self.assertIn('"$SDK_ROOT/.tools/bin/python" "$ADAPTER/generate_checks.py"',changed['run_frontier.sh'])
         with self.assertRaises(ValueError):runner.replace_once('ambiguous ambiguous','ambiguous','x')
 
+    @unittest.skipIf(np is None, 'numpy not installed (numeric qualification uses the SDK tools environment)')
     def test_flash_launches_respect_native_multiple_and_pair_split_counts(self):
         for c in g.CASES:
             if 'flash' in g.variants(c):self.assertEqual(c.tokens%16,0)
