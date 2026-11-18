@@ -3,10 +3,9 @@
   "loom-fun/ggml-org-gemma-3-1b-it-loom"
  ],
  "os": [
-  "windows",
-  "linux"
+  "windows"
  ],
- "variants": "",
- "profile": "dec,dec@card#2",
+ "variants": "card,card_cpuload4,card_cpuload16",
+ "profile": "dec,dec@card_cpuload,dec@card_cpuload4,dec@card_cpuload16,dec@card#2",
  "reps": 8
 }

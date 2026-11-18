@@ -401,8 +401,16 @@ def summarize_typeperf(path, marks):
     return out
 
 
-def cpuload_proc():
-    return subprocess.Popen([sys.executable, "-c", "while True: pass"])
+class cpuload_proc:
+    """N busy-spinning processes (variant suffix cpuload or cpuloadN)."""
+    def __init__(self, variant="cpuload"):
+        m = re.search(r"cpuload(\d*)$", variant)
+        n = int(m.group(1) or 1) if m else 1
+        self.ps = [subprocess.Popen([sys.executable, "-c", "while True: pass"]) for _ in range(n)]
+
+    def kill(self):
+        for p in self.ps:
+            p.kill()
 
 
 # -- baseline: background CPU on the runner before any GPU work -------------------------------------------------------
@@ -435,7 +443,7 @@ for v in [x for x in a.variants.split(",") if x]:
         srv.stop()
         continue
     step(f"serve_{v}", True, seconds=round(time.time() - srv.t0), model=mid)
-    load = cpuload_proc() if v.endswith("cpuload") else None
+    load = cpuload_proc(v) if re.search(r"cpuload\d*$", v) else None
     tel = Telemetry(srv.p.pid, os.path.join(OUT, f"telemetry_{v}.jsonl"))
     time.sleep(3)
     idle = (time.time() - 2.5, time.time(), "idle")
@@ -469,7 +477,7 @@ for spec_ in [x for x in a.profile.split(",") if x]:
         step(f"profile_{key}", False, tail=tail(srv.log, 30))
         srv.stop()
         continue
-    load = cpuload_proc() if pv.endswith("cpuload") else None
+    load = cpuload_proc(pv) if re.search(r"cpuload\d*$", pv) else None
     tel = Telemetry(srv.p.pid, os.path.join(OUT, f"telemetry_profile_{key}.jsonl"))
     t0 = time.time()
     req = os.path.join(OUT, f"profile_{key}.req.json")
