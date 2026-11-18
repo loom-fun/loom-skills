@@ -119,6 +119,8 @@ POST_NORM = CFG.get("post_norms", False)
 POST_EPS = CFG.get("post_norm_eps", 1e-8)
 EMBED_NORM = CFG.get("embed_norm", False)
 _LS = CFG.get("logit_scale") or 1.0; _SC = CFG.get("logit_softcap") or 0.0
+if not _SC and os.environ.get("FINAL_SOFTCAP", "0") not in ("", "0"):   # choice sampling.final_softcap: gemma4 configs name the cap final_softcap
+    _SC = CFG.get("final_softcap") or 0.0
 if _SC:  # sampling sees llama.cpp's logits: softcap * tanh(scale * z / softcap) (argmax unaffected)
     SOFTCAP_STORE = (f"            %sc_y = scalar.mulf %best, %sc_k : f32\n            %sc_y2 = scalar.addf %sc_y, %sc_y : f32\n"
                      f"            %sc_e = scalar.expf<afn> %sc_y2 : f32\n            %sc_one = scalar.constant 1.0 : f32\n            %sc_two = scalar.constant 2.0 : f32\n"

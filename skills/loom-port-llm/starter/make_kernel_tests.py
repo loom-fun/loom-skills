@@ -666,6 +666,8 @@ lm[4 + 18 + 6] = 1; lm[4 + 18 + 7] = (1 << 30) | 40                  # span 2: f
 region = 32768 // 4
 exp_out = np.zeros(region + LS * CH * 128, np.float32)
 _sc = cfg.get("logit_softcap") or 0.0
+if not _sc and os.environ.get("FINAL_SOFTCAP", "0") not in ("", "0"):   # gen_llm.py's (choice sampling.final_softcap)
+    _sc = cfg.get("final_softcap") or 0.0
 if _sc:
     _ls = cfg.get("logit_scale") or 1.0
     row = np.where(np.arange(CH * 128) < cfg["vocab"], _sc * np.tanh(lg[0] * (_ls / _sc)), lg[0])

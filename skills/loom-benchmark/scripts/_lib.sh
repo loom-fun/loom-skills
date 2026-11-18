@@ -7,7 +7,6 @@ S=$(cd "$(dirname "${BASH_SOURCE[0]}")" && native_pwd); root=${LOOM_ROOT:-$HOME/
 bin=$root/.tools/bin; [ -d "$bin" ] || bin=$root/.tools/Scripts; T=$bin/python   # Windows venvs use Scripts/
 export PYTHONDONTWRITEBYTECODE=1 LLAMACPP_STATE=${LLAMACPP_STATE:-$bench/llamacpp-state}
 model=$("$T" -c "import json;print(json.load(open('$pkg/llm_config.json'))['model_id'])")
-ctx=$("$T" -c "import json;print(next(iter(json.load(open('$pkg/model.json'))['presets'].values()))['execution']['context_capacity'])")
 step() { echo "== $* ($(date +%T))"; }
 # The gates render prompts and raw replies with the chat_probe.py the package was built with. port.sh leaves an
 # example kit it applied (gemma4, glimmer: chat formats the starter can't model) at WORKDIR/kit next to PKG;
@@ -19,6 +18,18 @@ step() { echo "== $* ($(date +%T))"; }
 # line; loom_up starts that command again (same models, same --memory_bytes), updates serve.sh's
 # pid file and waits for registration. No-ops when no loom-serve owns the port (or without /proc).
 loom_port=${url##*:}; loom_port=${loom_port%%/*}
+# The preset the server on $url serves: LOOM_PRESET, else the --preset of the loom-serve listening on its port (Linux), else the
+# package's first preset. $ctx is THAT preset's context: the long golden prompts, the reference's slot and the context admission
+# probe must fit the served context (a device preset such as <first>-r9700 serves less than the first preset's).
+served_preset() {
+  [ -n "${LOOM_PRESET:-}" ] && { echo "$LOOM_PRESET"; return 0; }
+  local pid; pid=$(ss -ltnpH "sport = :$loom_port" 2>/dev/null | grep -o 'pid=[0-9]*' | head -1 | cut -d= -f2)
+  [ -n "$pid" ] && [ -r "/proc/$pid/cmdline" ] && tr '\0' '\n' < "/proc/$pid/cmdline" | awk 'p {print; exit} /^--preset=/ {sub(/^--preset=/, ""); print; exit} /^--preset$/ {p = 1}'
+  return 0
+}
+preset=$(served_preset)
+ctx=$("$T" -c "import json,sys; p=json.load(open(sys.argv[1]))['presets']; print((p[sys.argv[2]] if sys.argv[2] in p else next(iter(p.values())))['execution']['context_capacity'])" "$pkg/model.json" "$preset")
+[ -n "$preset" ] && export LOOM_PRESET=$preset   # ctx_admit.py reads it
 loom_argv=()
 loom_down() {
   if command -v cygpath >/dev/null; then  # Windows Git Bash: preserve the actual server argv.

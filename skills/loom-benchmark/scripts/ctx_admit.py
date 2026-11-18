@@ -28,13 +28,15 @@ def main():
     ap.add_argument("pkg")
     ap.add_argument("url")
     ap.add_argument("--out", default=None)
+    ap.add_argument("--preset", default=os.environ.get("LOOM_PRESET") or None, help="the preset the server serves (default: LOOM_PRESET, else the first)")
     ap.add_argument("--tokens", type=int, default=None, help="prompt tokens (default: the native context minus the answer)")
     ap.add_argument("--wait", type=float, default=120, help="seconds to wait for an admission or a refusal")
     ap.add_argument("--complete", type=float, nargs="?", const=1800, default=None, help="wait this long (default 1800 s) for the request to finish instead of cancelling it")
     a = ap.parse_args()
     P = Package(a.pkg)
     card = json.load(open(os.path.join(a.pkg, "model.json")))
-    context = next(iter(card["presets"].values()))["execution"]["context_capacity"]
+    presets = card["presets"]   # the served preset (--preset, else LOOM_PRESET as _lib.sh exports it), else the first
+    context = (presets.get(a.preset) or next(iter(presets.values())))["execution"]["context_capacity"]
     thinking = False if P.chat.get("thinking") == "toggle" else None
     extra = {"chat_template_kwargs": {"enable_thinking": False}} if thinking is False else {}
     overhead = len(P.ids(P.render_messages([{"role": "user", "content": "x"}], None, thinking)))

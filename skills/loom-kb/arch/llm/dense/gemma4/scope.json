@@ -24,6 +24,12 @@
     "prefill.prune_shared": true
    },
    "evidence": "Issue #554: corrected Bolt boundary preserves DFlash taps. E2B/E4B held after strict concurrent-output divergence; PRUNE_SHARED=1 remains experimental opt-in."
+  },
+  {
+   "set": {
+    "sampling.final_softcap": true
+   },
+   "evidence": "Every gemma4 config names its final logit softcap final_softcap (30.0), which the kit never read: temperature sampling and the host logits readback used uncapped logits (logits gate on E2B/E4B/12B/31B/26B, runs 43709383032 / 43712511169: top-5 log-probs about 2x llama.cpp's, e.g. 'You' -19.55 vs -9.12). llama.cpp applies the cap (gemma4 graph). Greedy output is unchanged."
   }
  ]
 }
