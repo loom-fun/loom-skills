@@ -29,7 +29,7 @@ Narrow changes inside a campaign are [targeted fixes](targeted-fix.md).
 
 ## Model selection and dispatch
 
-Use the owner's exact model-family mapping; catalog descriptions such as “strongest available,” “complex coding,” or “fast and affordable” do
+Use the owner's exact model-family mapping; catalog descriptions such as "strongest available," "complex coding," or "fast and affordable" do
 not change it:
 
 | Work | Codex | Claude |
