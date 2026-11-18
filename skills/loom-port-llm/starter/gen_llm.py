@@ -1065,6 +1065,15 @@ def bfly_setup(TG):
 # projections keep plain slots: the permuted activation loads are uncoalesced, and that cost more than the selects
 # (down 19968x6656 t16 +9 %). MV_BFLY_PERM=0 turns it off.
 BFLY_PERM = os.environ.get("MV_BFLY_PERM", "1") == "1"
+# Choice decode.mv.q8_live_slots: an int8 matvec of 8+ tokens launched for fewer tokens (a depth-4 verify: 5 tokens on the 8-token
+# kernel) skips the dot products of the token slots past the epoch's tokens (a wave-uniform branch; those slots are never stored, so
+# every stored value is unchanged). Off: every slot computes (zero activations).
+MV_Q8_LIVE = os.environ.get("MV_Q8_LIVE", "0") == "1"
+# Choice decode.mv.q8_t4_upto: epochs of up to N tokens (N in 4..8) run the 4-token int8 matvecs and head (ceil(t / 4) token groups per
+# row group: a depth-4 verify's 5th token in a second workgroup that re-reads the rows through the cache) instead of the 8-token
+# kernels, whose 8 token slots cost ~5 ms per 31B step on Strix Halo. Every variant rounds a token as the 1-token kernel does: exact.
+MV_Q8_T4_UPTO = int(os.environ.get("MV_Q8_T4_UPTO", "4"))
+assert 4 <= MV_Q8_T4_UPTO <= 8, "MV_Q8_T4_UPTO: 4..8"
 
 
 def bfly_slot(j, TG, base, name, perm):
@@ -1251,6 +1260,10 @@ kernel.def export("{name}") @{name}(%n: index, %tokens: index) {{
             # integer codes once per row; per token one dot4 contraction against the int8 activations
             L.append(iq_decode(fmt, wi, w, "%ok", "%o", "%within"))
             for j in range(CHK):
+                if MV_Q8_LIVE and CHK >= 8 and j > 0:   # choice decode.mv.q8_live_slots: a token slot past the epoch's tokens skips its dot
+                    L.append(f"    %pa{wi}_{j} = scf.if %live{j} -> (f32) {{\n" + iq_dot(fmt, wi, j, f"%pl{wi}_{j}")
+                             + f"\n      scf.yield %pl{wi}_{j} : f32\n    }} else {{\n      scf.yield %zero_f : f32\n    }}")
+                    continue
                 L.append(iq_dot(fmt, wi, j, f"%pa{wi}_{j}"))
             L.append(bfly_store([f"%pa{wi}_{j}" for j in range(CHK)], f"b{wi}",
                                 lambda v: f"view.store {v}, %pv[{wi}, %wave, %rb, %bt_store] : f32, view<{nw}x{waves}x{R}x{TG}xf32>", presorted=PERM))
@@ -2563,6 +2576,11 @@ def allreduce(vals, p, outs):
 # work in one wave measured ~3 % slower drafted decode at short context on Qwen3-8B). attn_rules.multi_token decides.
 
 
+# Choice decode.attn.span.head_dims: head dims d whose per-dim decode split kernel gd<d>_* (kits with mixed head dims, Gemma 4)
+# takes the verify-span path of multi_token_split in drafting packages (the plain g_attention_split always may). Empty: none.
+ATTN_MT_DIMS = {int(x) for x in os.environ.get("ATTN_MT_DIMS", "").replace(",", " ").split()}
+
+
 def multi_token_split(text, P, U, T, until=None):
     """`P`_attention_split with a multi-token path: when the T epoch tokens of this token's aligned group are live,
     of one row and at consecutive positions (a verify span), the group's first workgroup computes all T (one K/V
@@ -3171,7 +3189,8 @@ kernel.def export("{P}_attention_combine") @{P}_attention_combine(%tokens: index
     gqa_on = P == "g" and attn_rules.gqa(gen_draft.enabled(), seg_tokens(), D, twin) and attn_rules.paged(U) and attn_rules.butterfly(U)
     if gqa_on:
         text = gqa_split(text, P, S)
-    if P == "g" and attn_rules.multi_token(U, KVH) and (not gqa_on or gen_draft.enabled()):   # nodraft + K/V-once body: no spans
+    span_p = P == "g" or (P.startswith("gd") and P[2:].isdigit() and int(P[2:]) in ATTN_MT_DIMS and gen_draft.enabled())
+    if span_p and attn_rules.multi_token(U, KVH) and (not gqa_on or gen_draft.enabled()):   # nodraft + K/V-once body: no spans
         text = multi_token_split(text, P, U, ATTN_MT, attn_rules.ATTN_GQA_FROM - 1 if gqa_on else None)   # gqa body from visible = ATTN_GQA_FROM, i.e. position FROM - 1
     if P == "g" and D == 64 and pa and ILP == 1 and not gqa_on and not attn_rules.multi_token(U, KVH):
         text = full_blocks(text, f"{P}_attention_split", U, twin=twin)
@@ -4103,7 +4122,7 @@ def mv_wide_tokens(fmt, kval, sw, n, mv_args):
     exactly as the 1-token kernel does."""
     _LIN[0] += 1
     k = _LIN[0]
-    return (f"""%c4_l{k} = index.constant 4 : index
+    return (f"""%c4_l{k} = index.constant {MV_Q8_T4_UPTO} : index
         %le4_l{k} = index.cmp ule, %t, %c4_l{k} : index
         %c8_l{k} = index.constant 8 : index
         %le8_l{k} = index.cmp ule, %t, %c8_l{k} : index
@@ -4603,7 +4622,7 @@ def head_wiring(program):
         return (f"{i}%hq{k}_b = index.constant {2 * H} : offset\n{i}%hq{k}_s = index.scale {t}, %hq{k}_b : index, offset -> offset\n"
                 f"{i}%hq{k} = buffer.alloca<global> align(256) %hq{k}_s : buffer\n{i}%hq{k}_w = index.constant {H} : index\n"
                 f"{i}kernel.launch @g_quant_q8[{t}, %hq{k}_w]({t}, %hq{k}_w, {h}, %hq{k}) : [index, index](index, index, buffer, buffer)\n"
-                f"{i}{m.group('c')} = index.cmp eq, {sp}, %c1 : index\n{i}%hq{k}_c4 = index.constant 4 : index\n"
+                f"{i}{m.group('c')} = index.cmp eq, {sp}, %c1 : index\n{i}%hq{k}_c4 = index.constant {MV_Q8_T4_UPTO} : index\n"
                 f"{i}%hq{k}_le4 = index.cmp ule, {sp}, %hq{k}_c4 : index\n"
                 f"{i}scf.if {m.group('c')} {{\n{launch('g_head_mv_q8', i + '  ')}\n{i}}} else {{\n"
                 f"{i}  scf.if %hq{k}_le4 {{\n{launch('g_head_mv_t4_q8', i + '    ')}\n{i}  }} else {{\n"
@@ -4686,7 +4705,7 @@ def lin2(fmt, x, s, wa, wb, wsize, ya, yb, k, n, kval, width=None):
       {gemm(wa, ya)}
       {gemm(wb, yb)}
     }} else {{
-      %c4_p{c} = index.constant 4 : index
+      %c4_p{c} = index.constant {MV_Q8_T4_UPTO} : index
       %le4_p{c} = index.cmp ule, %t, %c4_p{c} : index
       scf.if %le4_p{c} {{
         scf.if %single {{

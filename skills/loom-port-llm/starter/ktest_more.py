@@ -133,6 +133,54 @@ def as_argmax_case(save, rng, k):
     return c.text()
 
 
+def _argmax_ties(rng, T, V, C):
+    """Logits with the row maximum held twice: row 0 in two parts (the lower part's index wins), row 1 twice inside one part,
+    row 2 at the last index (a short last part), row 3 all equal (index 0)."""
+    lg = rng.standard_normal((T, V)).astype(np.float32)
+    top = np.float32(lg.max() + 1.0)
+    lg[0, min(3 * C + 5, V - 1)] = lg[0, min(C + 17, V - 1)] = top
+    lg[1, C + 9] = lg[1, C + 2] = top
+    lg[2, V - 1] = top
+    lg[3, :] = np.float32(0.25)
+    return lg
+
+
+def as_argmax_part_case(save, rng, k):
+    """g_as_argmax_part: per (row, part) the slice's maximum and the lowest index holding it."""
+    V, C, P = int(_const(k, "cv")), int(_const(k, "cc")), int(_const(k, "cparts"))
+    T = 4
+    lg = _argmax_ties(rng, T, V, C)
+    pm = np.full((T, P), -3.0e38, np.float32)
+    pi = np.full((T, P), V, np.int32)
+    for p in range(P):
+        s = lg[:, p * C:min((p + 1) * C, V)]
+        if s.shape[1]:
+            pm[:, p] = s.max(1)
+            pi[:, p] = p * C + s.argmax(1)
+    c = _Case("as_argmax_part", save)
+    c.launch("g_as_argmax_part", ["%t"], [c.lit("t", T), c.inp("lg", lg), c.out("pm", pm), c.out("pi", pi)])
+    return c.text()
+
+
+def as_argmax_fin_case(save, rng, k, lib):
+    """g_as_argmax_fin: the lowest part index among the parts holding the row maximum = np.argmax of the whole row."""
+    P = int(_const(k, "cparts"))
+    V = int(_const(_def(lib, "g_as_argmax_part"), "cv"))
+    C = -(-V // P)
+    T = 4
+    lg = _argmax_ties(rng, T, V, C)
+    pm = np.full((T, P), -3.0e38, np.float32)
+    pi = np.full((T, P), V, np.int32)
+    for p in range(P):
+        s = lg[:, p * C:min((p + 1) * C, V)]
+        if s.shape[1]:
+            pm[:, p] = s.max(1)
+            pi[:, p] = p * C + s.argmax(1)
+    c = _Case("as_argmax_fin", save)
+    c.launch("g_as_argmax_fin", ["%t"], [c.lit("t", T), c.inp("pm", pm), c.inp("pi", pi), c.out("o", lg.argmax(1).astype(np.int32))])
+    return c.text()
+
+
 def as_embed_case(save, rng, k):
     """g_as_embed: the token's Q4_0 row of the table (ids clamped to the vocabulary), times the embedding scale."""
     if "@g_q4_0_values" not in k:
@@ -256,6 +304,8 @@ def cases(lib, save, rng, ks=""):
                      ("g_moe_wscale", lambda k: moe_wscale_case(save, rng, k)),
                      ("g_moe_combine", lambda k: moe_combine_case(save, rng, k)),
                      ("g_as_argmax", lambda k: as_argmax_case(save, rng, k)),
+                     ("g_as_argmax_part", lambda k: as_argmax_part_case(save, rng, k)),
+                     ("g_as_argmax_fin", lambda k: as_argmax_fin_case(save, rng, k, lib)),
                      ("g_as_embed", lambda k: as_embed_case(save, rng, k)),
                      ("g_as_visible", lambda k: as_visible_case(save, rng, k)),
                      ("g_as_norm", lambda k: as_norm_cases(save, rng, k))):
