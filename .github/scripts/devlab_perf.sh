@@ -25,6 +25,8 @@
 #   "llama_spec_vulkan": a Vulkan-only override, for a drafter the Vulkan build cannot run (record it with --differs).
 #   A job may override card, kit, memory_bytes, llamacpp, llamacpp_vulkan, vulkan_kv and llama_spec: one experiment can
 #   measure several cards.
+#   "llama_kv_vulkan": positive integer tokens per slot (or total tokens with unified KV); optional, keeps the
+#   selected Vulkan slot policy and changes only its capacity when the default does not fit beside the weights.
 #   "llamacpp_vulkan": "b12211": the official ggml-org Vulkan release (sha256-pinned in skills/loom-benchmark/data) that the
 #   steps llama@vulkan, llamac4@vulkan and the other llama.cpp steps with @vulkan run, with the SAME llama_spec and workloads as
 #   the ROCm "llamacpp" build (fetch_llamacpp.sh / llamacpp_server.sh LLAMACPP_BACKEND=vulkan). A server that cannot run a
@@ -140,6 +142,7 @@ steps=$(q "print(' '.join(j['steps']))")
 vtag=$(q "print(j.get('llamacpp_vulkan') or e.get('llamacpp_vulkan') or '-')")
 vkv=$(q "print(j.get('vulkan_kv') or e.get('vulkan_kv') or 'auto')")
 lkv=$(q "print(j.get('llama_kv_rocm') or '')")   # ROCm llama.cpp KV pool tokens when 65536 does not fit the GPU (r9700_jobs.py sets it)
+lvkv=$(q "v=j.get('llama_kv_vulkan'); assert v is None or (type(v) is int and v > 0), 'llama_kv_vulkan must be a positive integer'; print(v if v is not None else '')") || exit 1
 # "repeat_rows": 3 on a job (a fast model, published decode > 100 tok/s: methodology rule 5): every perf.py run measures decode_2k,
 # decode_32k and prefill_8k that many times (perf.py --repeat-rows); a session's value is the median of its samples
 rrows=$(q "print(j.get('repeat_rows') or e.get('repeat_rows') or 1)")
@@ -563,6 +566,7 @@ llama_up() {   # llama_up [N_MAX]: llama.cpp with the experiment's llama_spec (n
     elif [[ $MODS == *perslot* ]]; then kv=(36864)
     # auto: per-slot unless the server drafts with DFlash (b12211 aborts a DFlash server with 4 concurrent streams on per-slot caches)
     elif [ "$vkv" = per-slot ] || { [ "$vkv" = auto ] && [[ "$LLAMA_SPEC" != *draft-dflash* ]]; }; then kv=(36864); fi
+    [ -z "$lvkv" ] || kv[0]=$lvkv
   fi
   LLAMACPP_BACKEND=$BK LLAMACPP_DIR=$dir LLAMACPP_ARGS_FILE=$out/llamacpp_args$bkt.txt "$B/llamacpp_server.sh" "$gguf" "$LLAMA_PORT" $np "${kv[@]}" | tail -1
   sed -i -e "s#$WORK/hf/#hf:#g" -e "s#$card/#card:#g" "$out/llamacpp_args$bkt.txt" 2>/dev/null   # runner paths out of the recorded arguments
