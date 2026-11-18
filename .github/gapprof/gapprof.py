@@ -133,6 +133,18 @@ if not WIN:
             E[f] = sh(f"cat {GPUDEV}/{f} 2>/dev/null")
 save()
 
+# -- counter catalog only (REPO "counters"): which built-in Windows counter sets could expose fabric/memory clocks --------
+if a.repo == "counters":
+    if WIN:
+        q = sh(["typeperf", "-qx"], timeout=300)
+        open(os.path.join(OUT, "typeperf_qx.txt"), "w", encoding="utf-8").write(q)
+        sets = sorted({l.split("(")[0].split("\\")[1] for l in q.splitlines() if l.startswith("\\") and "\\" in l[1:]})
+        R["counter_sets"] = sets
+        R["counter_hits"] = [l for l in q.splitlines() if re.search(r"(?i)fclk|fabric|uclk|memory controller|amd|dram|bandwidth", l)][:200]
+        R["wmi_amd"] = pwsh("Get-CimClass -Namespace root/wmi | ? { $_.CimClassName -match 'AMD|Fabric|ACPI_Perf|Power' } | % CimClassName")[:4000]
+    save()
+    sys.exit(0)
+
 # -- microbenchmarks only (REPO "rtt") ----------------------------------------------------------------------------------
 if a.repo == "rtt":
     venv = os.path.join(WORK, "venv")
