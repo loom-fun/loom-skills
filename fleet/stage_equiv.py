@@ -9,8 +9,8 @@ Command programs have no offline compile product (loom-compile: "command-program
 proof runs loom-opt's folding pipeline (canonicalize, cse, dce, symbol-dce) over each package's program/llm.loom with the stage configs
 bound (two epoch shapes: a decode shape and a prefill shape; the drafting configs too), renumbers the SSA names, splits the result into
 top-level symbols and compares them by name. A package PASSES when every command program (stage) and every kernel/function/template of
-BASE exists in HEAD with identical text after folding, and what HEAD adds is only the allowed symbols (default: the logits readback's
-kernel g_logits_export and its config symbols, which no default stage reaches). `llm.logits` is left at its default (off): this is
+BASE exists in HEAD with identical text after folding, and what HEAD adds or changes is only the allowed symbols (default: the logits
+readback's kernel g_logits_export and its config symbols, which no default stage reaches). `llm.logits` is left at its default (off): this is
 the property that lets BASE's card evidence carry over to HEAD. Both targets: a dual-target build (the fleet default) holds the gfx11
 and gfx12 twins in the one text, so the comparison covers both; --compile also compiles every added kernel for gfx1151 and gfx1201.
 The json holds, per package and shape, the sha256 of every stage's folded text, base and head.
@@ -116,7 +116,10 @@ def check(slug, base, head, allow, do_compile):
         added = sorted(set(h) - set(b))
         added_all.update(added)
         res["shapes"][shape] = {"stages": stages, "symbols_base": len(b), "removed": removed, "changed": changed, "added": added}
-        for what, items in (("removed", removed), ("changed", changed)):
+        # an allowed symbol (the logits readback, which no default stage reaches) may also CHANGE, e.g. a fix inside g_logits_export
+        changed_ok = [k for k in changed if any(a in k for a in allow)]
+        added_all.update(changed_ok)
+        for what, items in (("removed", removed), ("changed", [k for k in changed if k not in changed_ok])):
             if items:
                 res["problems"].append(f"{shape}: {what} {items[:5]}")
         extra = [k for k in added if not any(a in k for a in allow)]
