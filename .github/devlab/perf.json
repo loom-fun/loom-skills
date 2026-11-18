@@ -1,47 +1,631 @@
 {
- "_comment": "R9700 per-model measurement (r9700_jobs.py): one job per model on one R9700 runner; loom-fun-staging card, llama.cpp ROCm b1375 + Vulkan b12211 with the matched drafting, reduced-context models served at served_context. Does not fit: none",
- "runner": "r9700",
- "memory_bytes": 34000000000,
- "llama_spec": "matched",
+ "_comment": "Gemma 4 QAT drafter sweep (experiment only, never merged): exact-QAT assistant depth 1-4 and Anbeeld DFlash 1/3/5 vs no drafting; perf short (+long on Strix) per variant and the spec gate alone (SPEC_ONLY=1) per drafted variant.",
  "jobs": [
   {
-   "name": "unsloth-qwen3-0-6b-loom",
-   "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
-   "kit": null,
+   "name": "qat-31b-strix-draftsweep",
+   "runner": "strix",
+   "card": "loom-fun/unsloth-gemma-4-31B-it-qat-loom@320701ea8ce656f87c612910a08beb192807da96",
+   "memory_bytes": 110000000000,
+   "kit": "gemma4",
    "llamacpp": "b1375",
-   "llamacpp_vulkan": "b12211",
-   "memory_bytes_r9700": 17000000000,
+   "sdk": "0.2.0",
+   "thinking": "off",
+   "llama_spec": "",
+   "env": {
+    "SPEC_ONLY": "1"
+   },
    "variants": [
     {
-     "name": "card",
-     "build": {}
-    },
-    {
-     "name": "nodraft",
-     "build": {},
+     "name": "base",
      "execution": {
       "draft_depth": 0
      }
+    },
+    {
+     "name": "as1",
+     "build": {},
+     "config": {
+      "assistant": {
+       "gguf": "{hf:unsloth/gemma-4-31B-it-qat-GGUF@43cc1aeb31adf47ec06a854507ce552cd9862e6f/mtp-gemma-4-31B-it.gguf#3a5e99fd8d0b23afb1fccd1ee0c9ebd1f571d00399c2dae2292d217feeec0f6b}"
+      }
+     },
+     "build_args": [
+      "--draft",
+      "assist",
+      "--draft-depth",
+      "1"
+     ]
+    },
+    {
+     "name": "as2",
+     "build": {},
+     "config": {
+      "assistant": {
+       "gguf": "{hf:unsloth/gemma-4-31B-it-qat-GGUF@43cc1aeb31adf47ec06a854507ce552cd9862e6f/mtp-gemma-4-31B-it.gguf#3a5e99fd8d0b23afb1fccd1ee0c9ebd1f571d00399c2dae2292d217feeec0f6b}"
+      }
+     },
+     "build_args": [
+      "--draft",
+      "assist",
+      "--draft-depth",
+      "2"
+     ]
+    },
+    {
+     "name": "as3",
+     "build": {},
+     "config": {
+      "assistant": {
+       "gguf": "{hf:unsloth/gemma-4-31B-it-qat-GGUF@43cc1aeb31adf47ec06a854507ce552cd9862e6f/mtp-gemma-4-31B-it.gguf#3a5e99fd8d0b23afb1fccd1ee0c9ebd1f571d00399c2dae2292d217feeec0f6b}"
+      }
+     },
+     "build_args": [
+      "--draft",
+      "assist",
+      "--draft-depth",
+      "3"
+     ]
+    },
+    {
+     "name": "as4",
+     "build": {},
+     "config": {
+      "assistant": {
+       "gguf": "{hf:unsloth/gemma-4-31B-it-qat-GGUF@43cc1aeb31adf47ec06a854507ce552cd9862e6f/mtp-gemma-4-31B-it.gguf#3a5e99fd8d0b23afb1fccd1ee0c9ebd1f571d00399c2dae2292d217feeec0f6b}"
+      }
+     },
+     "build_args": [
+      "--draft",
+      "assist",
+      "--draft-depth",
+      "4"
+     ]
+    },
+    {
+     "name": "df1",
+     "build": {},
+     "build_args": [
+      "--draft",
+      "dflash",
+      "--drafter",
+      "{hf:Anbeeld/gemma-4-31B-it-DFlash-GGUF@16e51736d898d460e527acebd5aaa31f72cf7ff7/gemma4-31b-it-dflash-Q4_K_M.gguf#859f365b1e3cf8e2c0791fae6b5d5e74af4eb7411f6d440f8126dd9765af83da}",
+      "--draft-depth",
+      "1"
+     ]
+    },
+    {
+     "name": "df3",
+     "build": {},
+     "build_args": [
+      "--draft",
+      "dflash",
+      "--drafter",
+      "{hf:Anbeeld/gemma-4-31B-it-DFlash-GGUF@16e51736d898d460e527acebd5aaa31f72cf7ff7/gemma4-31b-it-dflash-Q4_K_M.gguf#859f365b1e3cf8e2c0791fae6b5d5e74af4eb7411f6d440f8126dd9765af83da}",
+      "--draft-depth",
+      "3"
+     ]
+    },
+    {
+     "name": "df5",
+     "build": {},
+     "build_args": [
+      "--draft",
+      "dflash",
+      "--drafter",
+      "{hf:Anbeeld/gemma-4-31B-it-DFlash-GGUF@16e51736d898d460e527acebd5aaa31f72cf7ff7/gemma4-31b-it-dflash-Q4_K_M.gguf#859f365b1e3cf8e2c0791fae6b5d5e74af4eb7411f6d440f8126dd9765af83da}",
+      "--draft-depth",
+      "5"
+     ]
     }
    ],
    "steps": [
-    "func:card",
-    "ktest:card",
-    "gates:card:dev",
-    "perf:card:3",
-    "perf:card:3:long",
-    "c4:nodraft",
-    "llama@rocm.np1:3",
-    "llama@rocm.np1:3:long",
-    "llamac4@rocm.nodraft",
-    "llama@vulkan.np1:3",
-    "llama@vulkan.np1:3:long",
-    "llamac4@vulkan.perslot.nodraft"
+    "perf:base:1",
+    "perf:base:1:long",
+    "perf:as1:1",
+    "perf:as1:1:long",
+    "gates:as1:quick",
+    "perf:as2:1",
+    "perf:as2:1:long",
+    "gates:as2:quick",
+    "perf:as3:1",
+    "perf:as3:1:long",
+    "gates:as3:quick",
+    "perf:as4:1",
+    "perf:as4:1:long",
+    "gates:as4:quick",
+    "perf:df1:1",
+    "perf:df1:1:long",
+    "gates:df1:quick",
+    "perf:df3:1",
+    "perf:df3:1:long",
+    "gates:df3:quick",
+    "perf:df5:1",
+    "perf:df5:1:long",
+    "gates:df5:quick",
+    "c4:base"
+   ]
+  },
+  {
+   "name": "qat-26b-strix-draftsweep",
+   "runner": "strix",
+   "card": "loom-fun/unsloth-gemma-4-26B-A4B-it-qat-loom@ed23a7de30b5d3323787342814b34e09dd6f2d37",
+   "memory_bytes": 110000000000,
+   "kit": "gemma4",
+   "llamacpp": "b1375",
+   "sdk": "0.2.0",
+   "thinking": "off",
+   "llama_spec": "",
+   "env": {
+    "SPEC_ONLY": "1"
+   },
+   "variants": [
+    {
+     "name": "base",
+     "execution": {
+      "draft_depth": 0
+     }
+    },
+    {
+     "name": "as1",
+     "build": {},
+     "config": {
+      "assistant": {
+       "gguf": "{hf:unsloth/gemma-4-26B-A4B-it-qat-GGUF@7b92b5b28818151e8669af2e45e88d6086f490dd/mtp-gemma-4-26B-A4B-it.gguf#7272d97595f0d4c74bd7b623492b7dbdaafd8b7c72f329a8270ba4eca68f768a}"
+      }
+     },
+     "build_args": [
+      "--draft",
+      "assist",
+      "--draft-depth",
+      "1"
+     ]
+    },
+    {
+     "name": "as2",
+     "build": {},
+     "config": {
+      "assistant": {
+       "gguf": "{hf:unsloth/gemma-4-26B-A4B-it-qat-GGUF@7b92b5b28818151e8669af2e45e88d6086f490dd/mtp-gemma-4-26B-A4B-it.gguf#7272d97595f0d4c74bd7b623492b7dbdaafd8b7c72f329a8270ba4eca68f768a}"
+      }
+     },
+     "build_args": [
+      "--draft",
+      "assist",
+      "--draft-depth",
+      "2"
+     ]
+    },
+    {
+     "name": "as3",
+     "build": {},
+     "config": {
+      "assistant": {
+       "gguf": "{hf:unsloth/gemma-4-26B-A4B-it-qat-GGUF@7b92b5b28818151e8669af2e45e88d6086f490dd/mtp-gemma-4-26B-A4B-it.gguf#7272d97595f0d4c74bd7b623492b7dbdaafd8b7c72f329a8270ba4eca68f768a}"
+      }
+     },
+     "build_args": [
+      "--draft",
+      "assist",
+      "--draft-depth",
+      "3"
+     ]
+    },
+    {
+     "name": "as4",
+     "build": {},
+     "config": {
+      "assistant": {
+       "gguf": "{hf:unsloth/gemma-4-26B-A4B-it-qat-GGUF@7b92b5b28818151e8669af2e45e88d6086f490dd/mtp-gemma-4-26B-A4B-it.gguf#7272d97595f0d4c74bd7b623492b7dbdaafd8b7c72f329a8270ba4eca68f768a}"
+      }
+     },
+     "build_args": [
+      "--draft",
+      "assist",
+      "--draft-depth",
+      "4"
+     ]
+    },
+    {
+     "name": "df1",
+     "build": {},
+     "build_args": [
+      "--draft",
+      "dflash",
+      "--drafter",
+      "{hf:Anbeeld/gemma-4-26B-A4B-it-DFlash-GGUF@d5262e1db8fc07d80f41ef2d0f333eac7978e97a/gemma4-26b-a4b-it-dflash-Q4_K_M.gguf#8fbc00b801a41cad25f1fd9e0edaef2258acd6eb16b9ff90dac8422cff076f39}",
+      "--draft-depth",
+      "1"
+     ]
+    },
+    {
+     "name": "df3",
+     "build": {},
+     "build_args": [
+      "--draft",
+      "dflash",
+      "--drafter",
+      "{hf:Anbeeld/gemma-4-26B-A4B-it-DFlash-GGUF@d5262e1db8fc07d80f41ef2d0f333eac7978e97a/gemma4-26b-a4b-it-dflash-Q4_K_M.gguf#8fbc00b801a41cad25f1fd9e0edaef2258acd6eb16b9ff90dac8422cff076f39}",
+      "--draft-depth",
+      "3"
+     ]
+    },
+    {
+     "name": "df5",
+     "build": {},
+     "build_args": [
+      "--draft",
+      "dflash",
+      "--drafter",
+      "{hf:Anbeeld/gemma-4-26B-A4B-it-DFlash-GGUF@d5262e1db8fc07d80f41ef2d0f333eac7978e97a/gemma4-26b-a4b-it-dflash-Q4_K_M.gguf#8fbc00b801a41cad25f1fd9e0edaef2258acd6eb16b9ff90dac8422cff076f39}",
+      "--draft-depth",
+      "5"
+     ]
+    }
+   ],
+   "steps": [
+    "perf:base:1",
+    "perf:base:1:long",
+    "perf:as1:1",
+    "perf:as1:1:long",
+    "gates:as1:quick",
+    "perf:as2:1",
+    "perf:as2:1:long",
+    "gates:as2:quick",
+    "perf:as3:1",
+    "perf:as3:1:long",
+    "gates:as3:quick",
+    "perf:as4:1",
+    "perf:as4:1:long",
+    "gates:as4:quick",
+    "perf:df1:1",
+    "perf:df1:1:long",
+    "gates:df1:quick",
+    "perf:df3:1",
+    "perf:df3:1:long",
+    "gates:df3:quick",
+    "perf:df5:1",
+    "perf:df5:1:long",
+    "gates:df5:quick",
+    "c4:base"
+   ]
+  },
+  {
+   "name": "qat-31b-r9700-draftsweep",
+   "runner": "r9700",
+   "card": "loom-fun/unsloth-gemma-4-31B-it-qat-loom@320701ea8ce656f87c612910a08beb192807da96",
+   "memory_bytes": 34000000000,
+   "kit": "gemma4",
+   "llamacpp": "b1375",
+   "sdk": "0.2.0",
+   "thinking": "off",
+   "llama_spec": "",
+   "env": {
+    "SPEC_ONLY": "1"
+   },
+   "variants": [
+    {
+     "name": "base",
+     "execution": {
+      "draft_depth": 0,
+      "context_capacity": 10240,
+      "prefill_capacity": 1024
+     },
+     "serve_args": [
+      "--parameter_mode=preload"
+     ]
+    },
+    {
+     "name": "as1",
+     "build": {},
+     "config": {
+      "assistant": {
+       "gguf": "{hf:unsloth/gemma-4-31B-it-qat-GGUF@43cc1aeb31adf47ec06a854507ce552cd9862e6f/mtp-gemma-4-31B-it.gguf#3a5e99fd8d0b23afb1fccd1ee0c9ebd1f571d00399c2dae2292d217feeec0f6b}"
+      }
+     },
+     "build_args": [
+      "--draft",
+      "assist",
+      "--draft-depth",
+      "1"
+     ],
+     "context": 10240,
+     "serve_args": [
+      "--parameter_mode=preload"
+     ]
+    },
+    {
+     "name": "as2",
+     "build": {},
+     "config": {
+      "assistant": {
+       "gguf": "{hf:unsloth/gemma-4-31B-it-qat-GGUF@43cc1aeb31adf47ec06a854507ce552cd9862e6f/mtp-gemma-4-31B-it.gguf#3a5e99fd8d0b23afb1fccd1ee0c9ebd1f571d00399c2dae2292d217feeec0f6b}"
+      }
+     },
+     "build_args": [
+      "--draft",
+      "assist",
+      "--draft-depth",
+      "2"
+     ],
+     "context": 10240,
+     "serve_args": [
+      "--parameter_mode=preload"
+     ]
+    },
+    {
+     "name": "as3",
+     "build": {},
+     "config": {
+      "assistant": {
+       "gguf": "{hf:unsloth/gemma-4-31B-it-qat-GGUF@43cc1aeb31adf47ec06a854507ce552cd9862e6f/mtp-gemma-4-31B-it.gguf#3a5e99fd8d0b23afb1fccd1ee0c9ebd1f571d00399c2dae2292d217feeec0f6b}"
+      }
+     },
+     "build_args": [
+      "--draft",
+      "assist",
+      "--draft-depth",
+      "3"
+     ],
+     "context": 10240,
+     "serve_args": [
+      "--parameter_mode=preload"
+     ]
+    },
+    {
+     "name": "as4",
+     "build": {},
+     "config": {
+      "assistant": {
+       "gguf": "{hf:unsloth/gemma-4-31B-it-qat-GGUF@43cc1aeb31adf47ec06a854507ce552cd9862e6f/mtp-gemma-4-31B-it.gguf#3a5e99fd8d0b23afb1fccd1ee0c9ebd1f571d00399c2dae2292d217feeec0f6b}"
+      }
+     },
+     "build_args": [
+      "--draft",
+      "assist",
+      "--draft-depth",
+      "4"
+     ],
+     "context": 10240,
+     "serve_args": [
+      "--parameter_mode=preload"
+     ]
+    },
+    {
+     "name": "df1",
+     "build": {},
+     "build_args": [
+      "--draft",
+      "dflash",
+      "--drafter",
+      "{hf:Anbeeld/gemma-4-31B-it-DFlash-GGUF@16e51736d898d460e527acebd5aaa31f72cf7ff7/gemma4-31b-it-dflash-Q4_K_M.gguf#859f365b1e3cf8e2c0791fae6b5d5e74af4eb7411f6d440f8126dd9765af83da}",
+      "--draft-depth",
+      "1"
+     ],
+     "context": 10240,
+     "serve_args": [
+      "--parameter_mode=preload"
+     ]
+    },
+    {
+     "name": "df3",
+     "build": {},
+     "build_args": [
+      "--draft",
+      "dflash",
+      "--drafter",
+      "{hf:Anbeeld/gemma-4-31B-it-DFlash-GGUF@16e51736d898d460e527acebd5aaa31f72cf7ff7/gemma4-31b-it-dflash-Q4_K_M.gguf#859f365b1e3cf8e2c0791fae6b5d5e74af4eb7411f6d440f8126dd9765af83da}",
+      "--draft-depth",
+      "3"
+     ],
+     "context": 10240,
+     "serve_args": [
+      "--parameter_mode=preload"
+     ]
+    },
+    {
+     "name": "df5",
+     "build": {},
+     "build_args": [
+      "--draft",
+      "dflash",
+      "--drafter",
+      "{hf:Anbeeld/gemma-4-31B-it-DFlash-GGUF@16e51736d898d460e527acebd5aaa31f72cf7ff7/gemma4-31b-it-dflash-Q4_K_M.gguf#859f365b1e3cf8e2c0791fae6b5d5e74af4eb7411f6d440f8126dd9765af83da}",
+      "--draft-depth",
+      "5"
+     ],
+     "context": 10240,
+     "serve_args": [
+      "--parameter_mode=preload"
+     ]
+    }
+   ],
+   "steps": [
+    "perf:base:1",
+    "perf:as1:1",
+    "gates:as1:quick",
+    "perf:as2:1",
+    "gates:as2:quick",
+    "perf:as3:1",
+    "gates:as3:quick",
+    "perf:as4:1",
+    "gates:as4:quick",
+    "perf:df1:1",
+    "gates:df1:quick",
+    "perf:df3:1",
+    "gates:df3:quick",
+    "perf:df5:1",
+    "gates:df5:quick",
+    "c4:base"
+   ]
+  },
+  {
+   "name": "qat-26b-r9700-draftsweep",
+   "runner": "r9700",
+   "card": "loom-fun/unsloth-gemma-4-26B-A4B-it-qat-loom@ed23a7de30b5d3323787342814b34e09dd6f2d37",
+   "memory_bytes": 34000000000,
+   "kit": "gemma4",
+   "llamacpp": "b1375",
+   "sdk": "0.2.0",
+   "thinking": "off",
+   "llama_spec": "",
+   "env": {
+    "SPEC_ONLY": "1"
+   },
+   "variants": [
+    {
+     "name": "base",
+     "execution": {
+      "draft_depth": 0,
+      "context_capacity": 36864,
+      "prefill_capacity": 4096
+     },
+     "serve_args": [
+      "--parameter_mode=preload"
+     ]
+    },
+    {
+     "name": "as1",
+     "build": {},
+     "config": {
+      "assistant": {
+       "gguf": "{hf:unsloth/gemma-4-26B-A4B-it-qat-GGUF@7b92b5b28818151e8669af2e45e88d6086f490dd/mtp-gemma-4-26B-A4B-it.gguf#7272d97595f0d4c74bd7b623492b7dbdaafd8b7c72f329a8270ba4eca68f768a}"
+      }
+     },
+     "build_args": [
+      "--draft",
+      "assist",
+      "--draft-depth",
+      "1"
+     ],
+     "context": 36864,
+     "serve_args": [
+      "--parameter_mode=preload"
+     ]
+    },
+    {
+     "name": "as2",
+     "build": {},
+     "config": {
+      "assistant": {
+       "gguf": "{hf:unsloth/gemma-4-26B-A4B-it-qat-GGUF@7b92b5b28818151e8669af2e45e88d6086f490dd/mtp-gemma-4-26B-A4B-it.gguf#7272d97595f0d4c74bd7b623492b7dbdaafd8b7c72f329a8270ba4eca68f768a}"
+      }
+     },
+     "build_args": [
+      "--draft",
+      "assist",
+      "--draft-depth",
+      "2"
+     ],
+     "context": 36864,
+     "serve_args": [
+      "--parameter_mode=preload"
+     ]
+    },
+    {
+     "name": "as3",
+     "build": {},
+     "config": {
+      "assistant": {
+       "gguf": "{hf:unsloth/gemma-4-26B-A4B-it-qat-GGUF@7b92b5b28818151e8669af2e45e88d6086f490dd/mtp-gemma-4-26B-A4B-it.gguf#7272d97595f0d4c74bd7b623492b7dbdaafd8b7c72f329a8270ba4eca68f768a}"
+      }
+     },
+     "build_args": [
+      "--draft",
+      "assist",
+      "--draft-depth",
+      "3"
+     ],
+     "context": 36864,
+     "serve_args": [
+      "--parameter_mode=preload"
+     ]
+    },
+    {
+     "name": "as4",
+     "build": {},
+     "config": {
+      "assistant": {
+       "gguf": "{hf:unsloth/gemma-4-26B-A4B-it-qat-GGUF@7b92b5b28818151e8669af2e45e88d6086f490dd/mtp-gemma-4-26B-A4B-it.gguf#7272d97595f0d4c74bd7b623492b7dbdaafd8b7c72f329a8270ba4eca68f768a}"
+      }
+     },
+     "build_args": [
+      "--draft",
+      "assist",
+      "--draft-depth",
+      "4"
+     ],
+     "context": 36864,
+     "serve_args": [
+      "--parameter_mode=preload"
+     ]
+    },
+    {
+     "name": "df1",
+     "build": {},
+     "build_args": [
+      "--draft",
+      "dflash",
+      "--drafter",
+      "{hf:Anbeeld/gemma-4-26B-A4B-it-DFlash-GGUF@d5262e1db8fc07d80f41ef2d0f333eac7978e97a/gemma4-26b-a4b-it-dflash-Q4_K_M.gguf#8fbc00b801a41cad25f1fd9e0edaef2258acd6eb16b9ff90dac8422cff076f39}",
+      "--draft-depth",
+      "1"
+     ],
+     "context": 36864,
+     "serve_args": [
+      "--parameter_mode=preload"
+     ]
+    },
+    {
+     "name": "df3",
+     "build": {},
+     "build_args": [
+      "--draft",
+      "dflash",
+      "--drafter",
+      "{hf:Anbeeld/gemma-4-26B-A4B-it-DFlash-GGUF@d5262e1db8fc07d80f41ef2d0f333eac7978e97a/gemma4-26b-a4b-it-dflash-Q4_K_M.gguf#8fbc00b801a41cad25f1fd9e0edaef2258acd6eb16b9ff90dac8422cff076f39}",
+      "--draft-depth",
+      "3"
+     ],
+     "context": 36864,
+     "serve_args": [
+      "--parameter_mode=preload"
+     ]
+    },
+    {
+     "name": "df5",
+     "build": {},
+     "build_args": [
+      "--draft",
+      "dflash",
+      "--drafter",
+      "{hf:Anbeeld/gemma-4-26B-A4B-it-DFlash-GGUF@d5262e1db8fc07d80f41ef2d0f333eac7978e97a/gemma4-26b-a4b-it-dflash-Q4_K_M.gguf#8fbc00b801a41cad25f1fd9e0edaef2258acd6eb16b9ff90dac8422cff076f39}",
+      "--draft-depth",
+      "5"
+     ],
+     "context": 36864,
+     "serve_args": [
+      "--parameter_mode=preload"
+     ]
+    }
+   ],
+   "steps": [
+    "perf:base:1",
+    "perf:as1:1",
+    "gates:as1:quick",
+    "perf:as2:1",
+    "gates:as2:quick",
+    "perf:as3:1",
+    "gates:as3:quick",
+    "perf:as4:1",
+    "gates:as4:quick",
+    "perf:df1:1",
+    "gates:df1:quick",
+    "perf:df3:1",
+    "gates:df3:quick",
+    "perf:df5:1",
+    "gates:df5:quick",
+    "c4:base"
    ]
   }
- ],
- "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
- "kit": null,
- "llamacpp": "b1375",
- "llamacpp_vulkan": "b12211"
+ ]
 }
