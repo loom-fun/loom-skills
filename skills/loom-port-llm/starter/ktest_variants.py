@@ -117,24 +117,24 @@ def width_copy(lib, name, n):
 
 
 def listed_cases(cases, lib, untested, save, ks=""):
-    """kt_ copies of the untested X_listed kernels and one case that launches them where the first case launching every direct
-    analogue did, over the list of every token (the same outputs)."""
+    """kt_ copies of the untested X_listed kernels, and for each a case that launches them where a case launching their direct
+    analogues did (every direct kernel of that case with a listed twin), over the list of every token: the same outputs."""
     listed = sorted(k for k in untested if k.endswith("_listed"))
     if not listed:
         return []
-    pairs = {re.sub(r"^g\d+_", "g_", k[:-len("_listed")]): k for k in listed}
-    helpers = [listed_copy(lib, k) for k in listed]
-    if not all(helpers):
-        return []
+    pairs = {re.sub(r"^g16", "g", k[:-len("_listed")]): k for k in listed}   # g16[d256]_X_listed <- g[d256]_X
+    helpers = {k: listed_copy(lib, k) for k in listed}
+    out, covered = [h for h in helpers.values() if h], set()
     for c in cases:
-        if not set(pairs) <= set(re.findall(r"kernel\.launch @([\w.]+)\[", c)):
+        used = set(re.findall(r"kernel\.launch @([\w.]+)\[", c)) & set(pairs)
+        if not used or {pairs[d] for d in used} <= covered or not all(helpers[pairs[d]] for d in used):
             continue
         decl = []
 
         def sub(m):
-            if m["k"] not in pairs:
+            if m["k"] not in used:
                 return m.group(0)
-            args = [a.strip() for a in m["args"].split(",")]
+            args = [a_.strip() for a_ in m["args"].split(",")]
             types = _types(m["types"])
             n = _literal(c, args[0])
             if n is None:
@@ -146,9 +146,10 @@ def listed_cases(cases, lib, untested, save, ks=""):
             types.insert(1, f"tensor<{n}xi32>")
             return f"{m['ind']}kernel.launch @kt_{pairs[m['k']]}[{m['grid']}]({', '.join(args)}) : [{m['gt']}]({', '.join(types)})"
         try:
-            out = LAUNCH.sub(sub, c)
+            cl = LAUNCH.sub(sub, c)
         except ValueError:
             continue
         if decl:
-            return helpers + [_rename_case(out, "_listed").replace("{\n", "{\n" + decl[0], 1)]
-    return []
+            out.append(_rename_case(cl, "_listed").replace("{\n", "{\n" + decl[0], 1))
+            covered |= {pairs[d] for d in used}
+    return out if covered else []

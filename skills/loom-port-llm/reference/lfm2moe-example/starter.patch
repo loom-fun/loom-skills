@@ -372,7 +372,7 @@
  RD = cfg.get("rope_dims") or D
  qn = deq(f"blk.{A0}.attn_q_norm.weight") if cfg["qk_norm"] else np.ones(D, np.float32)
  kn = deq(f"blk.{A0}.attn_k_norm.weight") if cfg["qk_norm"] else np.ones(D, np.float32)
-@@ -2932,274 +2932,106 @@
+@@ -2939,276 +2939,106 @@
      cases += [invariance_case(s, st) for s in ((0, 1) if WIN else (0,)) for st in (5, 0, 'zero')]
      cases += [order_case(s) for s in ((0, 1) if WIN else (0,))]
  
@@ -499,6 +499,8 @@
 -        done.add((fd, gun))
 -        MQ = (ACT_Q8 and os.environ.get("MOE_Q8", "1") == "1" and fg == fu and fg in IQ_FMTS and fd in IQ_FMTS
 -              and H // 32 <= 1024 and FE // 32 <= 1024 and not EB)   # gen_llm.moe_iq
+-        # gen_llm.moe_iq also needs the router input as the experts' input (gemma4's experts read %h2): the package says which it built
+-        MQ = MQ and (_pkg_llm_text() is None or f'"g_moe_gu_{gun}_q8_k{H}_' in _pkg_llm_text())
 -        Wr, wr_raw = f32w(b + "ffn_gate_inp.weight"); Wr = Wr.reshape(E_, H)
 -        bias = (np.asarray(T[b + "exp_probs_b.bias"].data, np.float32) if M["probs_bias"] else
 -                np.asarray(T[b + "ffn_gate_inp.bias"].data, np.float32) if M.get("router_bias") else np.zeros(E_, np.float32))

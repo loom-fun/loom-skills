@@ -573,16 +573,23 @@ if cfg.get("sliding_layers") and (cfg.get("head_dim_swa") or D) == D and ((RD_SW
 t = 3
 head_name = "output.weight" if "output.weight" in T else "token_embd.weight"
 Wh = deq(head_name).astype(np.float64)
+_PKG_TEXT = []
+
+
 def _pkg_llm_text():
     """The generated llm.loom of the package under test (next to the config, or in a build dir beside it), or None."""
+    if _PKG_TEXT:
+        return _PKG_TEXT[0]
     import glob
     d = os.path.dirname(os.path.abspath(sys.argv[1]))
     cands = [os.path.join(d, g) for g in ("pkg/program/llm.loom", "*/pkg/program/llm.loom")] \
         + [os.path.join(os.path.dirname(d), g) for g in ("pkg/program/llm.loom", "*/pkg/program/llm.loom")]
+    text = None
     for c in cands:
         for f in glob.glob(c) if c else []:
-            return open(f, errors="replace").read()
-    return None
+            text = text or open(f, errors="replace").read()
+    _PKG_TEXT.append(text)
+    return text
 
 
 import re as _re_hp  # noqa: E402
@@ -3010,6 +3017,8 @@ if cfg.get("moe") and os.environ.get("MOE_TESTS", "1") == "1":
         done.add((fd, gun))
         MQ = (ACT_Q8 and os.environ.get("MOE_Q8", "1") == "1" and fg == fu and fg in IQ_FMTS and fd in IQ_FMTS
               and H // 32 <= 1024 and FE // 32 <= 1024 and not EB)   # gen_llm.moe_iq
+        # gen_llm.moe_iq also needs the router input as the experts' input (gemma4's experts read %h2): the package says which it built
+        MQ = MQ and (_pkg_llm_text() is None or f'"g_moe_gu_{gun}_q8_k{H}_' in _pkg_llm_text())
         Wr, wr_raw = f32w(b + "ffn_gate_inp.weight"); Wr = Wr.reshape(E_, H)
         bias = (np.asarray(T[b + "exp_probs_b.bias"].data, np.float32) if M["probs_bias"] else
                 np.asarray(T[b + "ffn_gate_inp.bias"].data, np.float32) if M.get("router_bias") else np.zeros(E_, np.float32))
@@ -3442,6 +3451,30 @@ def cases_launched():
     return got
 
 
+_COVER_SRC = []
+
+
+def cover_sources():
+    """(tensor source, layers) the coverage matvecs look in: the model (trunk + MTP block), then a drafter GGUF of the package (DFlash,
+    the Gemma 4 assistant: cfg drafter / draft / assistant "gguf", as given or next to the config) with every layer."""
+    if not _COVER_SRC:
+        _COVER_SRC.append(({"T": T, "raw": raw, "deq": deq, "split": split_w}, KT_LAYERS))
+        for key in ("drafter", "draft", "assistant"):
+            g = (cfg.get(key) or {}).get("gguf") if isinstance(cfg.get(key), dict) else None
+            if not g:
+                continue
+            g = g if os.path.exists(g) else os.path.join(os.path.dirname(os.path.abspath(sys.argv[1])), g)
+            if not os.path.exists(g):
+                continue
+            DTT = {t_.name: t_ for t_ in GGUFReader(g).tensors}
+            _COVER_SRC.append(({"T": DTT, "raw": lambda nm, D=DTT: np.asarray(D[nm].data).view(np.int8).reshape(-1),
+                                "deq": lambda nm, D=DTT: dequantize(np.asarray(D[nm].data), D[nm].tensor_type).reshape(int(D[nm].shape[1]), int(D[nm].shape[0])),
+                                "split": lambda nm, tag, key="w": ("", "", "")},
+                               sorted({int(n_.split(".")[1]) for n_ in DTT if n_.startswith("blk.")})))
+            break
+    return _COVER_SRC
+
+
 def mv_cover_case(kern, m, crng):
     """A case for matvec KERN (MV_NAME match M) on a model tensor whose shape the rows rule maps to it, or None."""
     fmt, K, kind, q8 = m["fmt"], int(m["K"]), m["kind"] or "", bool(m["q8"])
@@ -3452,50 +3485,55 @@ def mv_cover_case(kern, m, crng):
     def rule(n):
         return iq_r(n, K, tg, sw) if q8 else pick_r(n, K, tg)
     pairs = {"_swiglu": (("ffn_gate", "ffn_up"),), "_pair": (("attn_q", "attn_gate"), ("attn_k", "attn_v"))}
-    cands = []
-    for li in KT_LAYERS:
-        pre = f"blk.{li}."
-        if sw:
-            for a_, b_ in pairs[kind]:
-                an, bn = pre + a_ + ".weight", pre + b_ + ".weight"
-                if an in T and bn in T and T[an].tensor_type == T[bn].tensor_type and tuple(T[an].shape) == tuple(T[bn].shape):
-                    cands.append((an, bn))
-        else:
-            cands += [(nm, None) for nm in T if nm.startswith(pre) and nm.endswith(".weight")]
-    if not sw:
-        cands += [(nm, None) for nm in T if nm.endswith(".weight") and not nm.startswith("blk.")]
     pick = fallback = None
-    for an, bn in cands:
-        t_ = T[an]
-        if t_.tensor_type.name.lower() != fmt or len(t_.shape) != 2 or int(t_.shape[0]) != K:
-            continue
-        n = int(t_.shape[1])
-        if rule(n) == R:
-            pick = (an, bn, n)
+    for src, layers in cover_sources():
+        TT = src["T"]
+        cands = []
+        for li in layers:
+            pre = f"blk.{li}."
+            if sw:
+                for a_, b_ in pairs[kind]:
+                    an, bn = pre + a_ + ".weight", pre + b_ + ".weight"
+                    if an in TT and bn in TT and TT[an].tensor_type == TT[bn].tensor_type and tuple(TT[an].shape) == tuple(TT[bn].shape):
+                        cands.append((an, bn))
+            else:
+                cands += [(nm, None) for nm in TT if nm.startswith(pre) and nm.endswith(".weight")]
+        if not sw:
+            cands += [(nm, None) for nm in TT if nm.endswith(".weight") and not nm.startswith("blk.")]
+        for an, bn in cands:
+            t_ = TT[an]
+            if t_.tensor_type.name.lower() != fmt or len(t_.shape) != 2 or int(t_.shape[0]) != K:
+                continue
+            n = int(t_.shape[1])
+            if rule(n) == R:
+                pick = (src, an, bn, n)
+                break
+            fallback = fallback or (src, an, bn, n)
+        if pick:
             break
-        fallback = fallback or (an, bn, n)
     pick = pick or fallback   # a launch whose width is symbolic (gen_llm NVAL, e.g. the GDN heads) keeps the default rows
     if pick is None:
         return None
-    an, bn, n = pick
+    src, an, bn, n = pick
+    sraw, sdeq, ssplit = src["raw"], src["deq"], src["split"]
     tag = f"cov_{kern}"
     xs = crng.standard_normal((tg, K)).astype(np.float32)
     xa = q8_ref(xs).astype(np.float64) if q8 else xs.astype(np.float64)
-    Wa = deq(an).astype(np.float64)
-    save(tag + "_x", xs); save(tag + "_wa", raw(an))
-    wt = ty(raw(an)); sd, sa, st = split_w(an, tag, "wa")
+    Wa = sdeq(an).astype(np.float64)
+    save(tag + "_x", xs); save(tag + "_wa", sraw(an))
+    wt = ty(sraw(an)); sd, sa, st = ssplit(an, tag, "wa")
     decl = f'  %wa = check.file.read.npy path("{tag}_wa.npy") : {wt}\n' + sd
     wargs, wtys = "%wa" + sa, wt + st
     if sw == 1:
-        Wb = deq(bn).astype(np.float64)
+        Wb = sdeq(bn).astype(np.float64)
         ys = [ffn_act(xa @ Wa.T) * (xa @ Wb.T)]
     elif sw == 2:
-        Wb = deq(bn).astype(np.float64)
+        Wb = sdeq(bn).astype(np.float64)
         ys = [xa @ Wa.T, xa @ Wb.T]
     else:
         ys = [xa @ Wa.T]
     if sw:
-        save(tag + "_wb", raw(bn)); bt = ty(raw(bn)); sd2, sa2, st2 = split_w(bn, tag, "wb")
+        save(tag + "_wb", sraw(bn)); bt = ty(sraw(bn)); sd2, sa2, st2 = ssplit(bn, tag, "wb")
         decl += f'  %wb = check.file.read.npy path("{tag}_wb.npy") : {bt}\n' + sd2
         wargs += ", %wb" + sa2; wtys += ", " + bt + st2
     yt = f"tensor<{tg}x{n}xf32>"
@@ -3534,34 +3572,11 @@ if os.environ.get("KTEST_COVER", "1") == "1":
         else:
             print(f"coverage: no {_m['fmt']} tensor with K={_m['K']} maps to {_k}")
     import ktest_spec  # noqa: E402  speculative-decoding bookkeeping (token info, spec rows / acceptance, the MTP drafter's kernels)
-    cases += ktest_spec.cases(_pkg_llm_text(), H, eps, save, np.random.default_rng(13), KS)
+    cases += ktest_spec.cases(_pkg_llm_text(), save, np.random.default_rng(13), KS)
     _todo = pkg_launched() - cases_launched()
     _brng = np.random.default_rng(17)
-    if "g_post_add_norm" in _todo or "g_post_add_norm_lv" in _todo:
-        # g_post_add_norm: x += (rmsnorm(y) * w_post with post norms, else y); h = rmsnorm(x) * w_next (rows of very different scale)
-        _y = (_brng.standard_normal((3, H)) * np.array([[1e-2], [1.0], [30.0]])).astype(np.float32)
-        _x = (_brng.standard_normal((3, H)) * np.array([[1.0], [1e2], [1e-3]])).astype(np.float32)
-        _wp = (1 + 0.1 * _brng.standard_normal(H)).astype(np.float32); _wn = (1 + 0.1 * _brng.standard_normal(H)).astype(np.float32)
-        def _rms64(v, e): return v / np.sqrt((v.astype(np.float64) ** 2).mean(-1, keepdims=True) + e)
-        _xe = (_x + ((_rms64(_y, cfg.get("post_norm_eps", 1e-8)) * _wp) if cfg.get("post_norms") else _y)).astype(np.float32)
-        _he = (_rms64(_xe, eps) * _wn).astype(np.float32)
-        for _n, _a in [("pan_y", _y), ("pan_x", _x), ("pan_wp", _wp), ("pan_wn", _wn), ("pan_xe", _xe), ("pan_he", _he)]:
-            save(_n, _a)
-        cases.append(f"""check.case public @post_add_norm {{
-  %rows = check.literal value(3) : index
-  %y = check.file.read.npy path("pan_y{KS}.npy") : tensor<3x{H}xf32>
-  %wp = check.file.read.npy path("pan_wp{KS}.npy") : tensor<{H}xf32>
-  %x = check.file.read.npy path("pan_x{KS}.npy") : tensor<3x{H}xf32>
-  %wn = check.file.read.npy path("pan_wn{KS}.npy") : tensor<{H}xf32>
-  %ex = check.file.read.npy path("pan_xe{KS}.npy") : tensor<3x{H}xf32>
-  %eh = check.file.read.npy path("pan_he{KS}.npy") : tensor<3x{H}xf32>
-  %h = check.generate.fill value(0.0) : tensor<3x{H}xf32>
-  kernel.launch @g_post_add_norm[%rows](%rows, %y, %wp, %x, %wn, %h) : [index](index, tensor<3x{H}xf32>, tensor<{H}xf32>, tensor<3x{H}xf32>, tensor<{H}xf32>, tensor<3x{H}xf32>)
-  check.expect.close actual(%x) expected(%ex) atol(1.0e-5) rtol(1.0e-5) nan(different) : tensor<3x{H}xf32>
-  check.expect.close actual(%h) expected(%eh) atol(1.0e-4) rtol(1.0e-4) nan(different) : tensor<3x{H}xf32>
-  check.return
-}}
-""")
+    import ktest_more  # noqa: E402  norms, MoE router / combine / inputs, the Gemma 4 assistant's kernels, read off the package's kernels
+    cases += ktest_more.cases(_pkg_llm_text(), save, np.random.default_rng(19), KS)
     if "g_row_scale_f16_live" in _todo or "g_row_scale_f16_live_lv" in _todo:
         # g_row_scale_f16_live: g_row_scale_f16 (the GEMM A operand) whose padding rows (info word 2 = 0) get scale 0 and a zero f16 row
         _rk = cfg["ffn"] if isinstance(cfg.get("ffn"), int) else H
