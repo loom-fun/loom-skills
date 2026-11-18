@@ -51,11 +51,18 @@ their upstream filenames end in `UD-Q4_K_XL`. The dense31B path uses existingQ4_
 matrix kernels; the26B-A4B path additionally needs Q4_0 expert decode and grouped
 prefill. Expert staging preserves the signed half-scale and centered nibble codes.
 
-Baseline scope is text/chat/tools with thinking toggle, target-only. Existing
-non-QAT packages and their evidence are separate. Exact QAT assistants are published
-but require per-layer KV metadata, discovery and format support; vision also needs
-QAT-specific integration. Neither is advertised as implemented by these registrations.
-Existing non-QAT DFlash needs independent compatibility assessment and qualification.
+Scope is text/chat/tools with thinking toggle; vision still needs QAT-specific
+integration. Existing non-QAT packages and their evidence are separate.
+
+Drafting: the exact-QAT assistant (Google's `gemma-4-<M>-it-qat-q4_0-unquantized-assistant`,
+Unsloth's GGUF `mtp-gemma-4-<M>-it.gguf` at the root of the target repo, = `MTP/...-Q4_0.gguf`)
+runs on the `assist` path (`draft/gen_assist.py`). Unlike E2B/E4B's it lists
+`head_count_kv` per layer (31B [16,16,16,4], 26B-A4B [8,8,8,2]: sliding layers read target
+layer L-2 with `kv_heads`, the full layer reads L-1 with `kv_heads_global`), so the head
+grouping is per layer kind; its weights are Q4_0; `find_drafter.py` finds it in the target's
+own repo first. It is the classification's choice (rule 1: exact-model drafter). The Anbeeld
+DFlash drafters are trained for the non-QAT targets: measured for comparison only, never a
+card choice.
 
 Initial fleet sizing is a CPU-generated input, not measured device fit or native
 context support. Device-specific settings and four model/device qualification records
