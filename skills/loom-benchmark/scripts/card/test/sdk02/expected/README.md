@@ -24,7 +24,9 @@ loom-serve --model=Qwen3-0.6B '--device=amdgpu://?completion_spin_ns=4294967295'
 - `--pool_backing=fixed` commits the preset's memory pool up front instead of growing elastic backing.
 - `--parameter_mode=preload` only changes how the weights are loaded on the host, so the performance rows were measured without it unless their job served with it.
 
-In another terminal, send a request (optional thinking is turned off):
+## Send a request
+
+In another terminal (optional thinking is turned off):
 
 ```bash
 curl http://127.0.0.1:8080/v1/chat/completions \
@@ -33,8 +35,6 @@ curl http://127.0.0.1:8080/v1/chat/completions \
 ```
 
 hrx-loom 0.2.0rc1 is a pre-release published on its [GitHub release](https://github.com/ROCm/hrx-system/releases/tag/v0.2.0rc1), not on PyPI (the command above checks the wheel's sha256). On Windows install `hrx_loom-0.2.0rc1-py3-none-win_amd64.whl` from the same release.
-
-The server listens on `127.0.0.1:8080` and answers OpenAI-style `/v1/chat/completions` requests.
 
 AMD Radeon AI PRO R9700 (gfx1201, 32 GB): this package does not fit its 32 GB (it needs about 82 GB).
 

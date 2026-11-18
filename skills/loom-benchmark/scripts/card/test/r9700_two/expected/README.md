@@ -30,14 +30,6 @@ loom-serve --model=Qwen3-0.6B/model.json '--device=amdgpu://?completion_spin_ns=
 - `--pool_backing=fixed` commits the preset's memory pool up front instead of growing elastic backing.
 - `--parameter_mode=preload` only changes how the weights are loaded on the host, so the performance rows were measured without it unless their job served with it.
 
-In another terminal, send a request (optional thinking is turned off):
-
-```bash
-curl http://127.0.0.1:8080/v1/chat/completions \
-  -H 'Content-Type: application/json' \
-  -d '{"model": "Qwen/Qwen3-0.6B", "messages": [{"role": "user", "content": "Hello"}], "chat_template_kwargs": {"enable_thinking": false}}'
-```
-
 </details>
 
 <details>
@@ -54,17 +46,17 @@ loom-serve --model=Qwen3-0.6B/model.json '--device=amdgpu://?completion_spin_ns=
 - `--pool_backing=fixed` commits the preset's memory pool up front instead of growing elastic backing.
 - `--parameter_mode=preload` only changes how the weights are loaded on the host, so the performance rows were measured without it unless their job served with it.
 
-In another terminal, send a request (optional thinking is turned off):
+</details>
+
+## Send a request
+
+In another terminal (optional thinking is turned off):
 
 ```bash
 curl http://127.0.0.1:8080/v1/chat/completions \
   -H 'Content-Type: application/json' \
   -d '{"model": "Qwen/Qwen3-0.6B", "messages": [{"role": "user", "content": "Hello"}], "chat_template_kwargs": {"enable_thinking": false}}'
 ```
-
-</details>
-
-The server listens on `127.0.0.1:8080` and answers OpenAI-style `/v1/chat/completions` requests.
 
 ## Performance vs llama.cpp
 
