@@ -1,6 +1,6 @@
 --- a/gen_llm.py
 +++ b/gen_llm.py
-@@ -63,6 +63,11 @@
+@@ -101,6 +101,11 @@
  GELU = CFG.get("ffn_act") == "gelu"      # GEGLU FFN (gelu-tanh, llama.cpp LLM_FFN_GELU) instead of SwiGLU
  RECUR = set(CFG.get("recurrent_layers", []))  # gated delta-net layers (hybrid models)
  GDN = gdn_geometry(CFG) if RECUR else None
@@ -10,9 +10,9 @@
 +MOE_LAYERS = set(range(MOE["leading_dense"], CFG["layers"])) if MOE else set()
 +OUT_NORM = CFG.get("output_norm_tensor", "output_norm.weight")
  FFN_NORM = CFG.get("ffn_norm_tensor", "ffn_norm")
- MOE = CFG.get("moe")                      # MoE FFN (gen_moe.py: router + top-k experts, optional shared experts)
- MOE_LAYERS = set(range(MOE["leading_dense"], CFG["layers"])) | ({MTP_LAYER} if MTP_LAYER is not None else set()) if MOE else set()
-@@ -4024,7 +4029,7 @@
+ # The R9700 (gfx12) prefill stack of #656 is opt-in per model (llm_config rdna4_f16_ffn, or GEMM_F16O=swiglu): the f16-output
+ # swiglu group, the gen_flash2s.py flash-twin trims and the split-dims sliding twin; other packages keep the default twins.
+@@ -4558,7 +4563,7 @@
  
  USED_MV = set()      # (fmt, K, swiglu, TG) default-row (R=16) decode matrix-vector kernels the model launches
  USED_MV_R = set()    # (fmt, K, swiglu, R, TG) adaptive-row variants
@@ -21,7 +21,7 @@
  NVAL.update({f"%nQ{h}": h * D for h in NARROW} | {f"%nQH{h}": h for h in NARROW})   # narrower layer_heads layers
  if GDN:
      NVAL.update({"%nC": GDN["C"], "%nVD": GDN["VD"], "%nHV": GDN["HV"]})
-@@ -4779,6 +4784,55 @@
+@@ -5413,6 +5418,55 @@
  
  
  MODEL_PARTS = {}   # model() records its pieces here for the speculative-decoding programs (draft/gen_draft.py)
@@ -77,7 +77,7 @@
  
  
  def rope_bias(block, tag, ind="  "):
-@@ -4867,7 +4921,8 @@
+@@ -5539,7 +5593,8 @@
    %pml_size = index.scale %t, %pml_bytes : index, offset -> offset
    %pacc = buffer.alloca<global> align(256) %pacc_size : buffer
    %pml = buffer.alloca<global> align(256) %pml_size : buffer
@@ -87,7 +87,7 @@
    %single = index.cmp eq, %t, %c1 : index
    %big = index.cmp uge, %t, %c128 : index
    %scale_entry = index.constant 8 : offset
-@@ -4911,9 +4966,51 @@
+@@ -5592,9 +5647,51 @@
          L_.append(f"  %nC = index.constant {g['C']} : index\n  %nVD = index.constant {g['VD']} : index\n  %nHV = index.constant {g['HV']} : index\n")
      if not QK_NORM:
          L_.append("  %no_norm = buffer.alloca<global> align(256) %row_bytes : buffer\n")
@@ -142,7 +142,7 @@
    %list_entry = index.constant 4 : offset
    %list_size = index.scale %t, %list_entry : index, offset -> offset
    %count_size = index.constant 256 : offset
-@@ -4926,10 +5023,11 @@
+@@ -5607,10 +5704,11 @@
    %embedding = command.parameter %weights, "token_embd.weight" : view<{esize}xi8>
    %first_norm = command.parameter %weights, "blk.0.attn_norm.weight" : view<{H}xf32>
    kernel.launch @g_embed[%t](%t, %tokens{", %metadata, %info" if VISION else ""}, %embedding, %first_norm, %x, %h) : [index](index, buffer{", buffer, buffer" if VISION else ""}, view<{esize}xi8>, view<{H}xf32>, buffer, buffer)
@@ -156,7 +156,7 @@
      gdn_ordinal = {i: n for n, i in enumerate(sorted(RECUR))}
      def layer_text(i, ordinal=None, last_norm=None, kind_note=None):
          """Text of trunk layer i (tensors blk.i.*). ordinal overrides its attention KV-plane ordinal and
-@@ -4941,7 +5039,7 @@
+@@ -5622,7 +5720,7 @@
          nq, nqh, qd = ("%nQ", "%nQH", QD) if LH[i] == QH else (f"%nQ{LH[i]}", f"%nQH{LH[i]}", LH[i] * D)
          kind = kind_note or (" (gated delta-net)" if i in RECUR else (" (sliding)" if i in sliding else "") + (" (no RoPE)" if i in nope else ""))
          T = [f"  // ---- layer {i}{kind}\n  scf.if %gemm {{\n    kernel.launch @g_row_scale_f16[%t](%t, %nH, %h, %s_h, %h16) : [index](index, index, buffer, buffer, buffer)\n  }}\n",
@@ -165,7 +165,7 @@
          if i not in MOE_LAYERS:
              T += [par("w_gate", "ffn_gate"), par("w_up", "ffn_up"), par("w_down", "ffn_down")]
          T += [par("ffn_norm", FFN_NORM, f"view<{H}xf32>")]
-@@ -4949,27 +5047,31 @@
+@@ -5630,27 +5728,31 @@
              T.append(par("sinks", "attn_sinks", f"view<{QH}xf32>"))
          if i in RECUR:
              T.append(gdn_layer(i, b, nm, sz, par))
@@ -203,7 +203,7 @@
              pass
          elif QKV_FUSED:
              T.append("  " + lin(fmt_of(nm("attn_qkv")), "%h", "%s_h", f"%wqkv_{i}", sz("attn_qkv"), "%qkv", "%nH", "%nQKV", H) + "\n")
-@@ -4978,22 +5080,22 @@
+@@ -5659,22 +5761,22 @@
              T.append("  " + lin2(fmt_of(nm("attn_q")), "%h", "%s_h", f"%wq_{i}", f"%wg_{i}", sz("attn_q"), "%q", "%gate", "%nH", "%nQ", H) + "\n")
          else:
              T.append("  " + lin(fmt_of(nm("attn_q")), "%h", "%s_h", f"%wq_{i}", sz("attn_q"), "%q", "%nH", nq, H) + "\n")
@@ -229,8 +229,8 @@
 +        if i not in NONATT:
            rope_k = "g_qk_rope_store_swa" if SWA_ROPE and i in sliding else "g_qk_rope_store"
            T.append(f"""  kernel.launch @{rope_k}[%t](%t, %layer_{i}, %rope_{i}, %context, %pool, %q, %k, %v, {qn}, {kn}, %info, %origins, %arena{", %metadata, %tokens" if MROPE else ""}{bias_args}) : [index](index, index, i32, index, index, buffer, buffer, buffer, {nty}, {nty}, buffer, buffer, buffer{", buffer, buffer" if MROPE else ""}{bias_types})
-   scf.if {"%c_false" if "attn" in DIAG else "%gemm"} {{
-@@ -5009,7 +5111,7 @@
+   scf.if %gemm {{
+@@ -5690,7 +5792,7 @@
    }}
  """)
  
@@ -239,7 +239,7 @@
            T.append("  " + lin(fmt_of(nm("attn_output")), "%o", "%s_o", f"%wo_{i}", sz("attn_output"), "%y", nq, "%nH", qd) + "\n")
            if OUT_BIAS:   # attention output projection bias (gpt-oss attn_output.bias)
              T.append(f'  %bo_{i} = command.parameter %weights, "{b}attn_output.bias" : view<{H}xf32>\n'
-@@ -5018,7 +5120,7 @@
+@@ -5699,7 +5801,7 @@
          T.append(f"  kernel.launch @g_post_add_norm[%t](%t, %y, {pa}, %x, %ffn_norm_{i}, %h) : [index](index, buffer, view<{H}xf32>, buffer, view<{H}xf32>, buffer)\n")
          T.append(f"  scf.if %gemm {{\n    kernel.launch @g_row_scale_f16[%t](%t, %nH, %h, %s_h, %h16) : [index](index, index, buffer, buffer, buffer)\n  }}\n")
          if i in MOE_LAYERS:
@@ -248,7 +248,7 @@
          else:
            fg, fu = fmt_of(nm("ffn_gate")), fmt_of(nm("ffn_up"))
            if fg == fu:
-@@ -5204,13 +5306,30 @@
+@@ -5952,13 +6054,30 @@
          parts.append(spec_kernels)
      if MIXED_FFN:   # GEGLU: gelu(gate) * up, on 4-value groups (bounds provable without the launch: kernel-testable)
          parts.append(gelu_vectors(geglu_mul()) if GELU else SILU_MUL)
@@ -278,8 +278,8 @@
 +                _txt = _txt.replace(_a, "workgroups(%out_tiles, %row_tiles, %c1)").replace(_b, "  %row_group_id = kernel.workgroup.id<y> : index\n  %out_group_id = kernel.workgroup.id<x> : index")
 +            parts.append(_txt)
      env = dict(os.environ, GEMM_FORMATS=",".join(f"{f}:{'+'.join(sorted(m))}" for f, m in sorted(USED_GEMM.items())))
-     # Prefill GEMM switches, ON by default; set GEMM_N_FASTEST=0 / GEMM_SKIP_PADDING=0 to A/B them off.
-     env.setdefault("GEMM_SKIP_PADDING", "1"); env.setdefault("GEMM_N_FASTEST", "1")
+     from gen_gemm_rdna4 import f16o_swiglu as _f16o_env
+     if _f16o_env(CFG):
 --- a/inspect_gguf.py
 +++ b/inspect_gguf.py
 @@ -289,45 +289,29 @@
@@ -349,19 +349,21 @@
      i = tpl.rfind("add_generation_prompt")
 --- a/make_kernel_tests.py
 +++ b/make_kernel_tests.py
-@@ -185,9 +185,9 @@
+@@ -213,10 +213,10 @@
+ # 2. matvec per (tensor) for t=1 and t=4 variants
  seen = set(); todo = []
  VD = cfg["gdn"]["inner"] if cfg.get("gdn") else 0
- for li in range(cfg["layers"]):
--    for nm_, K in [("attn_q", H), ("attn_k", H), ("attn_v", H), ("ffn_down", cfg["ffn"][li] if isinstance(cfg["ffn"], list) else cfg["ffn"]), ("attn_output", (cfg.get("layer_heads") or [QH] * cfg["layers"])[li] * D), ("ffn_gate", H),
+-for li in KT_LAYERS:
+-    for nm_, K in [("attn_q", H), ("attn_k", H), ("attn_v", H), ("ffn_down", layer_ffn(li)), ("attn_output", layer_heads(li) * D), ("ffn_gate", H),
++for li in range(cfg["layers"]):
 +    for nm_, K in [("attn_q", H), ("attn_k", H), ("attn_v", H), ("ffn_down", cfg["ffn"][li] if isinstance(cfg["ffn"], list) else cfg["ffn"]), ("attn_output", (cfg.get("layer_heads") or [QH] * cfg["layers"])[li] * D),
                     ("attn_qkv", H), ("attn_gate", H), ("ssm_alpha", H), ("ssm_out", VD),
--                   ("ffn_gate_shexp", H), ("ffn_down_shexp", (cfg.get("moe") or {}).get("shared_ffn", 0))]:
+-                   ("ffn_gate_shexp", H), ("ffn_down_shexp", (cfg.get("moe") or {}).get("shared_ffn", 0)), ("nextn.eh_proj", 2 * H)]:
 +                   ("shortconv.in_proj", H), ("shortconv.out_proj", H), ("ffn_gate", H)]:
          name = f"blk.{li}.{nm_}.weight"
          if name not in T:
              continue
-@@ -390,7 +390,7 @@
+@@ -502,7 +502,7 @@
  """)
  # 3. qk norm + rope on q (live = 0: no KV store)
  t = 4; pos = np.array([0, 1, 7, 300])
@@ -370,7 +372,7 @@
  RD = cfg.get("rope_dims") or D
  qn = deq(f"blk.{A0}.attn_q_norm.weight") if cfg["qk_norm"] else np.ones(D, np.float32)
  kn = deq(f"blk.{A0}.attn_k_norm.weight") if cfg["qk_norm"] else np.ones(D, np.float32)
-@@ -1766,274 +1766,106 @@
+@@ -2932,274 +2932,106 @@
      cases += [invariance_case(s, st) for s in ((0, 1) if WIN else (0,)) for st in (5, 0, 'zero')]
      cases += [order_case(s) for s in ((0, 1) if WIN else (0,))]
  
