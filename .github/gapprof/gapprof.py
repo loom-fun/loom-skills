@@ -136,7 +136,7 @@ save()
 # -- counter catalog only (REPO "counters"): which built-in Windows counter sets could expose fabric/memory clocks --------
 if a.repo == "counters":
     if WIN:
-        q = sh(["typeperf", "-qx"], timeout=300)
+        q = subprocess.run(["typeperf", "-qx"], capture_output=True, timeout=600).stdout.decode("mbcs", errors="replace")
         open(os.path.join(OUT, "typeperf_qx.txt"), "w", encoding="utf-8").write(q)
         sets = sorted({l.split("(")[0].split("\\")[1] for l in q.splitlines() if l.startswith("\\") and "\\" in l[1:]})
         R["counter_sets"] = sets
