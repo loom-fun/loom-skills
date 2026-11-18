@@ -92,8 +92,9 @@ def real_inputs(slug, m, work, real):
     shutil.copy(os.path.join(real, slug, "tokenizer.json"), os.path.join(work, "tokenizer_min.json"))
 
 
-def build_one(slug, m, skills, out, rdna4, keep, real=None, with_gen=False, inp=HERE):
+def build_one(slug, m, skills, out, rdna4, keep, real=None, with_gen=False, inp=None):
     """inp: the fleet input root (dumps, llm_config.json, tokenizer_min.json): this checkout's, or the ref's own (--own-inputs)."""
+    inp = inp or HERE
     t0 = time.time()
     work = os.path.join(out, "_work", slug)
     shutil.rmtree(work, ignore_errors=True)
@@ -226,7 +227,7 @@ def main():
     try:
         with cf.ProcessPoolExecutor(a.jobs) as ex:
             futs = [ex.submit(build_one, s, own.get(s, (manifest[s],))[0], skills, out, a.rdna4, a.keep_work, a.real, a.with_gen,
-                              own.get(s, (None, HERE))[1]) for s in slugs]
+                              own.get(s, (None, None))[1]) for s in slugs]
             for f in cf.as_completed(futs):
                 s, err, dt = f.result()
                 res[s] = round(dt, 1)
