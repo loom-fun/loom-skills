@@ -1,8 +1,8 @@
 {
- "_comment": "Gemma QAT Strix split qualification (31B checks / Loom+ROCm / Vulkan jobs, each well under the DevLab budget) and exact-package kernel tests on both devices. Experiment only; not for merge.",
+ "_comment": "Fallback split of qat31-strix-rocm (Loom and ROCm in separate jobs). Experiment only.",
  "jobs": [
   {
-   "name": "qat31-strix-checks",
+   "name": "qat31-strix-loom",
    "runner": "strix",
    "card": "loom-fun-staging/unsloth-gemma-4-31B-it-qat-loom@849df3f0fa133606d51cf671d8acfacc5542a8ed",
    "memory_bytes": 110000000000,
@@ -27,10 +27,15 @@
     }
    ],
    "steps": [
-    "func:final",
-    "determinism:final:1:5",
-    "determinism:final:4:5",
-    "ktest:final"
+    "perf:final:1",
+    "perf:final:1:long",
+    "c4:final",
+    "perf:final:1",
+    "perf:final:1:long",
+    "c4:final",
+    "perf:final:1",
+    "perf:final:1:long",
+    "c4:final"
    ],
    "env": {
     "KTEST_GEMM_ALL": "1"
@@ -38,7 +43,7 @@
    "repeat_rows": 1
   },
   {
-   "name": "qat31-strix-rocm",
+   "name": "qat31-strix-rocmonly",
    "runner": "strix",
    "card": "loom-fun-staging/unsloth-gemma-4-31B-it-qat-loom@849df3f0fa133606d51cf671d8acfacc5542a8ed",
    "memory_bytes": 110000000000,
@@ -63,21 +68,12 @@
     }
    ],
    "steps": [
-    "perf:final:1",
-    "perf:final:1:long",
-    "c4:final",
     "llama@rocm.np1:1",
     "llama@rocm.np1:1:long",
     "llamac4@rocm.nodraft",
-    "perf:final:1",
-    "perf:final:1:long",
-    "c4:final",
     "llama@rocm.np1:1",
     "llama@rocm.np1:1:long",
     "llamac4@rocm.nodraft",
-    "perf:final:1",
-    "perf:final:1:long",
-    "c4:final",
     "llama@rocm.np1:1",
     "llama@rocm.np1:1:long",
     "llamac4@rocm.nodraft"
@@ -85,150 +81,6 @@
    "env": {
     "KTEST_GEMM_ALL": "1"
    },
-   "repeat_rows": 1
-  },
-  {
-   "name": "qat31-strix-vulkan",
-   "runner": "strix",
-   "card": "loom-fun-staging/unsloth-gemma-4-31B-it-qat-loom@849df3f0fa133606d51cf671d8acfacc5542a8ed",
-   "memory_bytes": 110000000000,
-   "kit": "gemma4",
-   "llamacpp": "b1375",
-   "llamacpp_vulkan": "b12211",
-   "sdk": "0.2.0",
-   "llama_spec": "matched",
-   "thinking": "off",
-   "variants": [
-    {
-     "name": "final",
-     "sdk": "0.2.0",
-     "execution": {
-      "context_capacity": 65536,
-      "prefill_capacity": 1024,
-      "draft_depth": 0
-     },
-     "serve_args": [
-      "--parameter_mode=preload"
-     ]
-    }
-   ],
-   "steps": [
-    "llama@vulkan.np1:1",
-    "llama@vulkan.np1:1:long",
-    "llamac4@vulkan.perslot.nodraft",
-    "llama@vulkan.np1:1",
-    "llama@vulkan.np1:1:long",
-    "llamac4@vulkan.perslot.nodraft",
-    "llama@vulkan.np1:1",
-    "llama@vulkan.np1:1:long",
-    "llamac4@vulkan.perslot.nodraft"
-   ],
-   "env": {
-    "KTEST_GEMM_ALL": "1"
-   },
-   "repeat_rows": 1
-  },
-  {
-   "name": "qat26-strix-ktest",
-   "runner": "strix",
-   "card": "loom-fun-staging/unsloth-gemma-4-26B-A4B-it-qat-loom@8ac71dbdd2dc0608bed6ea3fed09cbf50033b595",
-   "memory_bytes": 110000000000,
-   "kit": "gemma4",
-   "llamacpp": "b1375",
-   "llamacpp_vulkan": "b12211",
-   "sdk": "0.2.0",
-   "llama_spec": "matched",
-   "thinking": "off",
-   "variants": [
-    {
-     "name": "final",
-     "sdk": "0.2.0",
-     "execution": {
-      "context_capacity": 262144,
-      "prefill_capacity": 4096,
-      "draft_depth": 0
-     },
-     "serve_args": [
-      "--parameter_mode=preload"
-     ]
-    }
-   ],
-   "steps": [
-    "ktest:final"
-   ],
-   "env": {
-    "KTEST_GEMM_ALL": "1"
-   },
-   "repeat_rows": 1
-  },
-  {
-   "name": "qat31-r9700-ktest",
-   "runner": "r9700",
-   "card": "loom-fun-staging/unsloth-gemma-4-31B-it-qat-loom@849df3f0fa133606d51cf671d8acfacc5542a8ed",
-   "memory_bytes": 34000000000,
-   "kit": "gemma4",
-   "llamacpp": "b1375",
-   "llamacpp_vulkan": "b12211",
-   "sdk": "0.2.0",
-   "llama_spec": "matched",
-   "thinking": "off",
-   "variants": [
-    {
-     "name": "final",
-     "sdk": "0.2.0",
-     "execution": {
-      "context_capacity": 10240,
-      "prefill_capacity": 1024,
-      "draft_depth": 0
-     },
-     "serve_args": [
-      "--parameter_mode=preload"
-     ]
-    }
-   ],
-   "steps": [
-    "ktest:final"
-   ],
-   "env": {
-    "KTEST_GEMM_ALL": "1"
-   },
-   "require_preset_r9700": true,
-   "repeat_rows": 1,
-   "llama_kv_rocm": 10240,
-   "llama_kv_vulkan": 10240
-  },
-  {
-   "name": "qat26-r9700-ktest",
-   "runner": "r9700",
-   "card": "loom-fun-staging/unsloth-gemma-4-26B-A4B-it-qat-loom@8ac71dbdd2dc0608bed6ea3fed09cbf50033b595",
-   "memory_bytes": 34000000000,
-   "kit": "gemma4",
-   "llamacpp": "b1375",
-   "llamacpp_vulkan": "b12211",
-   "sdk": "0.2.0",
-   "llama_spec": "matched",
-   "thinking": "off",
-   "variants": [
-    {
-     "name": "final",
-     "sdk": "0.2.0",
-     "execution": {
-      "context_capacity": 36864,
-      "prefill_capacity": 4096,
-      "draft_depth": 0
-     },
-     "serve_args": [
-      "--parameter_mode=preload"
-     ]
-    }
-   ],
-   "steps": [
-    "ktest:final"
-   ],
-   "env": {
-    "KTEST_GEMM_ALL": "1"
-   },
-   "require_preset_r9700": true,
    "repeat_rows": 1
   }
  ]
