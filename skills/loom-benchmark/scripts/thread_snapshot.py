@@ -32,7 +32,7 @@ def stat_fields(text):
             'processor': int(fields[36])}
 
 
-def snapshot(pid, include_stacks=False, max_threads=128):
+def snapshot(pid, include_stacks=False, max_threads=128, include_host_io=False):
     proc = Path('/proc') / str(pid)
     now = time.monotonic_ns()
     stat, err = read_text(proc / 'stat')
@@ -66,6 +66,9 @@ def snapshot(pid, include_stacks=False, max_threads=128):
             thread['kernel_stack'] = stack
             thread['errors']['kernel_stack'] = stack_error
         result['threads'].append(thread)
+    if include_host_io:
+        from file_backing_snapshot import host_io
+        result['host_io'] = host_io()
     result['collection_ns'] = time.monotonic_ns() - now
     return result
 
@@ -76,6 +79,7 @@ def main():
     ap.add_argument('--output', type=Path, required=True)
     ap.add_argument('--duration', type=float, default=90)
     ap.add_argument('--interval', type=float, default=.2)
+    ap.add_argument('--host-io', action='store_true', help='include global memory/IO-pressure counters, not per-file IO latency')
     ap.add_argument('--stop-file', type=Path, help='exit gracefully when this path appears')
     ap.add_argument('--stacks', action='store_true', help='best effort; permission failures remain explicit')
     a = ap.parse_args()
@@ -85,7 +89,7 @@ def main():
     start_time = None
     with a.output.open('w') as out:
         while time.monotonic() < deadline and not (a.stop_file and a.stop_file.exists()):
-            row = snapshot(a.pid, a.stacks)
+            row = snapshot(a.pid, a.stacks, include_host_io=a.host_io)
             if row['event'] == 'sample':
                 current_start = row['process_stat']['start_time_ticks']
                 if start_time is None:

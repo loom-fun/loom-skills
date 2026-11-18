@@ -17,7 +17,7 @@ ESSAY = 'Write a detailed 300-word essay about the history of the printing press
 
 
 class ProfileRequests(unittest.TestCase):
-    def run_profile(self, *args):
+    def run_profile(self, *args, fail_timed=False):
         calls = []
 
         def stream(url, model, messages, tokens, **kwargs):
@@ -25,7 +25,7 @@ class ProfileRequests(unittest.TestCase):
             if kwargs.get('on_token'):
                 for arrival in (1.0, 1.02, 4.02):
                     kwargs['on_token'](arrival)
-            return dict(status=200, prompt_tokens=32, tokens=tokens, ttft=.2,
+            return dict(status=503 if fail_timed and len(calls) == 2 else 200, prompt_tokens=32, tokens=tokens, ttft=.2,
                         decode_tps=40, total=8, text='fixture')
 
         counters = iter({'draft_proposed_tokens': value} for value in (3, 9, 15))
@@ -36,16 +36,17 @@ class ProfileRequests(unittest.TestCase):
         with patch.dict(sys.modules, {'bench_common': bench}), patch.object(sys, 'argv',
                 [str(SCRIPT), 'http://fixture', 'model', 'dec', *args]), \
                 patch.dict(os.environ, {k: '' for k in ('LOOM_PROFILE_LITERAL_DECODE',
-                    'LOOM_PROFILE_TRACE_GAPS', 'LOOM_PROFILE_PROCESS_IO', 'LOOM_PROFILE_PERF_WARMUP')}, clear=False), \
+                    'LOOM_PROFILE_TRACE_GAPS', 'LOOM_PROFILE_PROCESS_IO', 'LOOM_PROFILE_PERF_WARMUP', 'LOOM_PROFILE_OUTPUT_DIGEST')}, clear=False), \
                 contextlib.redirect_stdout(output):
             runpy.run_path(str(SCRIPT), run_name='__main__')
         return calls, json.loads(output.getvalue())
 
     def test_literal_reproduces_perf_request_and_records_stream_stall(self):
-        calls, result = self.run_profile('--literal-decode', '--tokens', '300', '--trace-gaps', '--timeout', '120')
+        calls, result = self.run_profile('--literal-decode', '--tokens', '300', '--trace-gaps', '--timeout', '120', '--output-digest')
         self.assertTrue(calls[0][0].startswith('[warm-up '))
         self.assertEqual(calls[1], (ESSAY, 300, 120.0))
         self.assertEqual(result['prompt_mode'], 'literal-perf')
+        self.assertEqual(result['requests'][0]['output_sha256'], 'f16d05ec6b29248d2c61adb1e9263f78e4f7bace1b955014a2d17872cfe4064d')
         self.assertEqual(result['requests'][0]['max_stream_chunk_gap_s'], 3.0)
         self.assertEqual(result['requests'][0]['stream_chunk_gaps_s'], [.02, 3.0])
         self.assertEqual(result['requests'][0]['stream_chunk_arrivals_monotonic_ns'], [1000000000, 1020000000, 4020000000])
@@ -59,6 +60,17 @@ class ProfileRequests(unittest.TestCase):
         self.assertEqual(calls[1][0], ESSAY)
         self.assertEqual(result['warmup_mode'], 'perf-essay')
         self.assertEqual(result['warmup_draft']['draft_proposed_tokens'], 6)
+
+    def test_partial_progress_survives_a_failed_timed_request(self):
+        with tempfile.TemporaryDirectory() as work:
+            log = Path(work) / 'partial.jsonl'
+            with patch.dict(os.environ, {'LOOM_PROFILE_PROGRESS_LOG': str(log)}):
+                with self.assertRaises(SystemExit):
+                    self.run_profile('--perf-warmup', fail_timed=True)
+            rows = [json.loads(line) for line in log.read_text().splitlines()]
+        self.assertEqual([(r['event'], r['phase']) for r in rows],
+                         [('request_start', 'warmup'), ('request_complete', 'warmup'), ('request_start', 'timed')])
+        self.assertEqual(rows[1]['result']['completion_tokens'], 300)
 
     def test_default_keeps_nonced_profile_prompt(self):
         calls, result = self.run_profile()

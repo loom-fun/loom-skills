@@ -9,6 +9,7 @@ usage: profile_requests.py URL MODEL SCENARIO [--reps K] [--depth D] [--tokens N
 Prints one JSON line: scenario, requests (prompt/completion tokens, ttft, decode tok/s), draft counter deltas."""
 import argparse
 import json
+import hashlib
 import os
 from pathlib import Path
 import time
@@ -25,6 +26,7 @@ ap.add_argument("--literal-decode", action="store_true", default=os.environ.get(
                 help="profile perf.py's exact short-decode prompt without a nonce (diagnostic only)")
 ap.add_argument("--perf-warmup", action="store_true", default=os.environ.get("LOOM_PROFILE_PERF_WARMUP") == "1",
                 help="use perf.py's nonced 300-token essay warmup")
+ap.add_argument("--output-digest", action="store_true", default=os.environ.get("LOOM_PROFILE_OUTPUT_DIGEST") == "1")
 ap.add_argument("--process-io", action="store_true", default=os.environ.get("LOOM_PROFILE_PROCESS_IO") == "1")
 ap.add_argument("--trace-gaps", action="store_true", default=os.environ.get("LOOM_PROFILE_TRACE_GAPS") == "1")
 ap.add_argument("--timeout", type=float, default=float(os.environ.get("LOOM_PROFILE_TIMEOUT", "300")),
@@ -63,7 +65,15 @@ def counter_delta(before, after):
             for pid, counters in after.items() if pid in before}
 
 
-def go(content, n):
+def progress(event, **fields):
+    path = os.environ.get("LOOM_PROFILE_PROGRESS_LOG")
+    if path:
+        with open(path, "a") as out:
+            out.write(json.dumps({"event": event, "monotonic_ns": time.monotonic_ns(), **fields}) + "\n")
+
+
+def go(content, n, phase="timed"):
+    progress("request_start", phase=phase, max_tokens=n)
     arrivals = []
     process_before = process_snapshot()
     s = stream(a.url, a.model, [{"role": "user", "content": content}], n, extra=TH, timeout=a.timeout,
@@ -72,6 +82,8 @@ def go(content, n):
         raise SystemExit(f"HTTP {s['status']}: {s.get('error')}")
     result = {"prompt_tokens": s["prompt_tokens"], "completion_tokens": s["tokens"], "ttft_s": round(s["ttft"], 4),
             "decode_tps": s["decode_tps"] and round(s["decode_tps"], 2), "total_s": round(s["total"], 3)}
+    if a.output_digest:
+        result["output_sha256"] = hashlib.sha256(s["text"].encode("utf-8")).hexdigest()
     if a.process_io:
         result["process_counter_delta"] = counter_delta(process_before, process_snapshot())
     if a.trace_gaps:
@@ -79,6 +91,7 @@ def go(content, n):
         result["stream_chunk_arrivals_monotonic_ns"] = [round(value * 1e9) for value in arrivals]
         result["stream_chunk_gaps_s"] = gaps
         result["max_stream_chunk_gap_s"] = max(gaps, default=0)
+    progress("request_complete", phase=phase, result=result)
     return result
 
 
@@ -86,7 +99,7 @@ ESSAY = "Write a detailed 300-word essay about the history of the printing press
 warmup = f"[warm-up {nonce}] " + (ESSAY if a.perf_warmup else "Say hi.")
 before_warmup = server_draft_counters(a.url) if a.perf_warmup else {}
 out = {"scenario": a.scenario, "warmup_mode": "perf-essay" if a.perf_warmup else "tiny",
-       "warmup": go(warmup, 300 if a.perf_warmup else 2)}
+       "warmup": go(warmup, 300 if a.perf_warmup else 2, phase="warmup")}
 if a.scenario != "probe":
     before = server_draft_counters(a.url)
     if a.perf_warmup:

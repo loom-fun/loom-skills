@@ -57,6 +57,7 @@
 #            The single-server `ab` step hosts all its variants in one loom-serve, so it refuses variants whose SDKs differ.
 # Job "require_preset_r9700": true (r9700_jobs.py, a package with a fit-row r9700_execution): serving fails unless the card has its <first>-r9700 preset.
 #            serve_args: extra loom-serve flags; execution: model.json overrides (every preset); double: ablation (each kernel.launch in PROGRAM matching REGEX twice).
+#            {"name": "posix", "disable_io_uring": true}: process-scoped ENOSYS filter selects the SDK POSIX fallback (diagnostic).
 #            {"name": "parked", "active_wait": false}: the card's programs served with the SDK's default completion wait
 #            (LOOM_ACTIVE_WAIT=0 in serve.sh) instead of the active wait every other variant gets.
 # Job/experiment "env": {"NAME": "value"}: environment for every step.
@@ -130,7 +131,7 @@ WORK=${WORK:-$HOME/devlab-perf}; mkdir -p "$WORK"; WORK=$(cd "$WORK" && pwd)
 D=$WORK/$job; out=$D/out; rm -rf "$D"; mkdir -p "$out"
 export LOOM_SERVE_STATE=$D/state LLAMACPP_STATE=$D/llstate PYTHONDONTWRITEBYTECODE=1
 PORT=${LOOM_PORT:-8161}; LLAMA_PORT=${LLAMA_PORT:-8131}; url=http://127.0.0.1:$PORT; lurl=http://127.0.0.1:$LLAMA_PORT
-t0=$(date +%s); step() { echo "== $* ($(date +%T), +$(( $(date +%s) - t0 ))s)"; }
+t0=$(date +%s); step() { echo "== $* ($(date +%T), +$(( $(date +%s) - t0 ))s)" | tee -a "$out/progress.log"; }
 q() { python3 -c "import json,sys; e=json.load(open('$exp')); j=next(j for j in e['jobs'] if j['name']=='$job'); $1"; }
 qv() { python3 -c "import json,sys; e=json.load(open('$exp')); j=next(j for j in e['jobs'] if j['name']=='$job'); v=next(v for v in j['variants'] if v['name']=='$1'); $2"; }
 # a card reference is ORG/REPO or ORG/REPO@REV (job "card" and variant "card"): REV pins the commit fetched instead of main
@@ -253,6 +254,14 @@ EOF
     rm -rf "$WORK/fetch-cache" "$WORK/hf-home"; echo "$rv" > "$CARD_DIR/.fetched"
   fi
 }
+# Verify the process-only fallback BEFORE any checkpoint materialization.
+if [ "$(q "print(any(v.get('disable_io_uring') is True for v in j['variants']))")" = True ]; then
+  step "io backend preflight (no weights fetched)"
+  cp "$troot/loom-install.json" "$out/sdk_tools_preflight.json" || exit 1
+  "$T" "$B/file_backing_snapshot.py" "$$" --output "$out/io_backend_environment-before-fetch.json" || exit 1
+  "$T" "$SV/no_uring_exec.py" --self-test "$out/io_backend_preflight.json" --require-distinct-baseline \
+    > "$out/io_backend_preflight.log" 2>&1 || { cat "$out/io_backend_preflight.log"; echo "FAIL: backend preflight; no checkpoint fetched"; exit 1; }
+fi
 fetch_card "$repo_ref"; card=$CARD_DIR; base=$CARD_BASE
 echo "$repo@$CARD_REV" > "$out/card_revision.txt"   # the commit of the job's card this job fetched (a pinned REV resolved to the full sha)
 python3 - "$card" <<'EOF' || { echo "FAIL: the fetched card's model.json and llm_config.json disagree (a stale fetch?)"; exit 1; }
@@ -498,7 +507,8 @@ serve_alone() { # serve_alone VARIANT
     [ -f "$CAPACITY_MONITOR_DIR/monitor.ready" ] || { echo "FAIL: cold capacity monitor has no baseline"; coldcapacity_stop; return 1; }
     printf '%s\n' "${rp:-}" > "$CAPACITY_MONITOR_DIR/preset.txt"
   fi
-  step "serve $1 (SDK root $vroot)"; LOOM_MEMNEED=$memneed LOOM_ACTIVE_WAIT=$aw "$SV/serve.sh" "perf-$1" "$PORT" amdgpu "$vmem" "$D/$1/pkg/model.json" ${sa:+-- $sa} > "$out/serve_$1.out" 2>&1; tail -2 "$out/serve_$1.out"
+  local no_uring; no_uring=$(qv "$1" "print(1 if v.get('disable_io_uring', False) is True else 0)")
+  step "serve $1 (SDK root $vroot)"; LOOM_MEMNEED=$memneed LOOM_ACTIVE_WAIT=$aw LOOM_NO_IO_URING=$no_uring LOOM_IO_BACKEND_PROVENANCE="$out/io_backend_$1.json" LOOM_SERVE_COMMAND_LOG="$out/serve_command_$1.json" "$SV/serve.sh" "perf-$1" "$PORT" amdgpu "$vmem" "$D/$1/pkg/model.json" ${sa:+-- $sa} > "$out/serve_$1.out" 2>&1; tail -2 "$out/serve_$1.out"
   grep -q '^FAILED' "$out/serve_$1.out" && { echo "REGISTRATION FAILED on $RUNNER for variant $1 (fast fail, see serve_$1.out):"; grep -m6 -E 'AMDGPU|error|ERROR' "$out/serve_$1.out" | cut -c1-300; return 1; }
   curl -sf "$url/v1/models" >/dev/null || return 1
   # "ready" is the compiled registration; the weights load on the FIRST request, and until then every request is refused. Wait for that
@@ -617,6 +627,7 @@ while [ "$qi" -lt "${#queue[@]}" ]; do
   BK=rocm; bkt=; MODS=; case $kind in *@*) bkt=-${kind#*@}; BK=${kind#*@}; MODS=${BK#"${BK%%.*}"}; BK=${BK%%.*}; kind=${kind%@*};; esac   # llama@vulkan: the other backend's build
   [ "$BK" = rocm ] || [ "$vtag" != - ] || { echo "$s: set llamacpp_vulkan"; res[$s]=ERROR; continue; }
   [ "${p2:-}" = - ] && p2=""
+  printf '%s\tRUNNING\n' "$s" >> "$out/results.partial.tsv"
   case $kind in
     ab)
       abr=(); for v in $variants; do sdk_root "$v" >/dev/null 2>&1; abr+=("${SDKR:-?}"); done
@@ -660,14 +671,23 @@ print('$p1', k, [x.get(k) for x in r if x.get(k)], 'median', round(st.median(v),
         PROFILE_SA="$profile_flags" serve_alone "$p1" || { capture_failed=1; break; }
         step "$capture_kind $p1 $sc"
         capture_request_ok=1
+        if [ "${LOOM_PROFILE_FILE_BACKING:-0}" = 1 ]; then
+          "$T" "$B/file_backing_snapshot.py" "$(cat "$LOOM_SERVE_STATE/perf-$p1.pid")" \
+            --require-files --output "$out/${capture_kind}_${p1}_$sc.backing-before.json" || capture_request_ok=0
+        fi
+        observer_extra=(); [ "${LOOM_PROFILE_HOST_IO:-0}" != 1 ] || observer_extra=(--host-io)
         observer_pid=; observer_stop="$out/observe_${p1}_$sc.stop"
         if [ "$capture_kind" = observe ]; then
           rm -f "$observer_stop"
-          "$T" "$B/thread_snapshot.py" "$(cat "$LOOM_SERVE_STATE/perf-$p1.pid")" --duration 120 --interval 0.2 --stacks \
+          "$T" "$B/thread_snapshot.py" "$(cat "$LOOM_SERVE_STATE/perf-$p1.pid")" --duration 120 --interval 0.2 --stacks "${observer_extra[@]}" \
             --stop-file "$observer_stop" --output "$out/observe_${p1}_$sc.threads.jsonl" > "$out/observe_${p1}_$sc.sampler.log" 2>&1 &
           observer_pid=$!
         fi
-        ( cd "$B" && "$T" profile_requests.py "$url" "$cardid" "$sc" ) > "$out/${capture_kind}_${p1}_$sc.req.json" 2> "$out/${capture_kind}_${p1}_$sc.req.err" || capture_request_ok=0; tail -c 600 "$out/${capture_kind}_${p1}_$sc.req.json"; tail -3 "$out/${capture_kind}_${p1}_$sc.req.err"
+        ( cd "$B" && LOOM_PROFILE_PROGRESS_LOG="$out/${capture_kind}_${p1}_$sc.progress.jsonl" "$T" profile_requests.py "$url" "$cardid" "$sc" ) > "$out/${capture_kind}_${p1}_$sc.req.json" 2> "$out/${capture_kind}_${p1}_$sc.req.err" || capture_request_ok=0; tail -c 600 "$out/${capture_kind}_${p1}_$sc.req.json"; tail -3 "$out/${capture_kind}_${p1}_$sc.req.err"
+        if [ "${LOOM_PROFILE_FILE_BACKING:-0}" = 1 ]; then
+          "$T" "$B/file_backing_snapshot.py" "$(cat "$LOOM_SERVE_STATE/perf-$p1.pid")" \
+            --require-files --output "$out/${capture_kind}_${p1}_$sc.backing-after.json" || capture_request_ok=0
+        fi
         if [ -n "$observer_pid" ]; then
           touch "$observer_stop"
           wait "$observer_pid" || capture_request_ok=0
@@ -933,6 +953,7 @@ PY
     *) echo "unknown step $s"; res[$s]=ERROR;;
   esac
   echo "RESULT $job $s: ${res[$s]}"
+  printf '%s\t%s\n' "$s" "${res[$s]}" >> "$out/results.partial.tsv"
 done
 for s in "${queue[@]}"; do echo "$s	${res[$s]:-}"; done > "$out/results.tsv"
 "$T" - "$job" "$out" <<'EOF'

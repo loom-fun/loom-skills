@@ -13,10 +13,11 @@ SOURCE = ROOT / 'skills/loom-setup/scripts/serve.sh'
 
 @unittest.skipUnless(os.name == 'posix' and shutil.which('bash'), 'POSIX shell fixture')
 class ServeMemoryGuard(unittest.TestCase):
-    def probe(self, device, active_wait='1', budget='none', bound='115000049320'):
+    def probe(self, device, active_wait='1', budget='none', bound='115000049320', no_uring='0'):
         with tempfile.TemporaryDirectory() as temp:
             work = Path(temp)
             shutil.copyfile(SOURCE, work / 'serve.sh')
+            shutil.copyfile(SOURCE.with_name('no_uring_exec.py'), work / 'no_uring_exec.py')
             for name in ('sdk/bin', 'bin', 'state'):
                 (work / name).mkdir(parents=True)
             events = work / 'events'
@@ -33,7 +34,7 @@ class ServeMemoryGuard(unittest.TestCase):
             (work / 'sdk/bin/python').symlink_to(sys.executable)
             env = dict(os.environ, VENV=str(work / 'sdk'), REC=str(events),
                        LOOM_SERVE_STATE=str(work / 'state'), LOOM_MEMNEED=bound,
-                       LOOM_ACTIVE_WAIT=active_wait, PATH=str(work / 'bin') + ':' + os.environ['PATH'])
+                       LOOM_ACTIVE_WAIT=active_wait, LOOM_NO_IO_URING=no_uring, PATH=str(work / 'bin') + ':' + os.environ['PATH'])
             result = subprocess.run(['bash', str(work / 'serve.sh'), 'fixture', '48196', device,
                                      budget, str(work / 'missing-model.json')], env=env,
                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=10)
@@ -46,6 +47,11 @@ class ServeMemoryGuard(unittest.TestCase):
 
     def test_explicit_uri_still_checks_elastic_budget(self):
         result, events = self.probe('amdgpu://?queue_family=0', budget='97000000000', bound='')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(events, ['guard'], result.stdout + result.stderr)
+
+    def test_rejecting_guard_runs_before_optional_backend_filter(self):
+        result, events = self.probe('amdgpu', no_uring='1')
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(events, ['guard'], result.stdout + result.stderr)
 

@@ -44,7 +44,12 @@ jobs:
           for j in e["jobs"]:
               r = j.get("runner") or e.get("runner") or "strix"
               assert r in labels, f"job {j['name']}: unknown runner {r!r} ({' | '.join(labels)})"
-              inc.append({"job": j["name"], "labels": json.dumps(labels[r])})
+              timeout = j.get("timeout_minutes", e.get("timeout_minutes", 240))
+              experiment_timeout = j.get("experiment_timeout_minutes", timeout)
+              assert type(timeout) is int and 5 <= timeout <= 240, "timeout_minutes must be an integer in [5,240]"
+              assert type(experiment_timeout) is int and 1 <= experiment_timeout <= timeout, "experiment_timeout_minutes must fit the job cap"
+              inc.append({"job": j["name"], "labels": json.dumps(labels[r]),
+                          "timeout_minutes": timeout, "experiment_timeout_minutes": experiment_timeout})
           print("matrix=" + json.dumps({"include": inc}))
           builds = {json.dumps(j["bundle"]["build"], sort_keys=True) for j in e["jobs"] if (j.get("bundle") or {}).get("build")}
           assert len(builds) <= 1, f"jobs ask for different Gufo bundles to build: {sorted(builds)}"
@@ -124,7 +129,7 @@ jobs:
       matrix: ${{ fromJSON(needs.jobs.outputs.matrix) }}
     name: ${{ matrix.job }}
     runs-on: ${{ fromJSON(matrix.labels) }}
-    timeout-minutes: 240
+    timeout-minutes: ${{ matrix.timeout_minutes }}
     env:
       HF_TOKEN: ${{ secrets.HF_TOKEN }}
       GH_TOKEN: ${{ github.token }}
@@ -159,6 +164,7 @@ jobs:
           rm -rf "$WORK/_gufo-bundle-dl"
           echo "GUFO_BUNDLE=$d" >> "$GITHUB_ENV"
       - name: "experiment: ${{ matrix.job }}"
+        timeout-minutes: ${{ matrix.experiment_timeout_minutes }}
         run: bash .github/scripts/devlab_perf.sh .github/devlab/perf.json "${{ matrix.job }}"
       - name: upload results
         if: always()

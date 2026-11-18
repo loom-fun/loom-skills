@@ -56,7 +56,7 @@ class SnapshotTest(unittest.TestCase):
             out, stop = Path(work) / 'samples.jsonl', Path(work) / 'stop'
             p = subprocess.Popen([sys.executable, str(Path(m.__file__)), str(os.getpid()),
                                   '--output', str(out), '--duration', '10', '--interval', '0.1',
-                                  '--stop-file', str(stop)])
+                                  '--stop-file', str(stop), '--host-io'])
             try:
                 deadline = time.monotonic() + 3
                 while time.monotonic() < deadline and not (out.exists() and out.stat().st_size):
@@ -67,6 +67,7 @@ class SnapshotTest(unittest.TestCase):
                 self.assertTrue(rows)
                 self.assertEqual(rows[0]['event'], 'sample')
                 self.assertEqual(rows[0]['pid'], os.getpid())
+                self.assertIn('MemTotal', rows[0]['host_io']['meminfo_raw'])
             finally:
                 if p.poll() is None:
                     p.kill()

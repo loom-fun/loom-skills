@@ -53,7 +53,17 @@ case "$dev" in
       "$(dirname "$0")/memcheck.sh" "${memneed:-$mem}" "loom-serve ${extra[*]:-} --memory_bytes=${mem}" || exit 1
     fi;;
 esac   # memcheck itself only checks budgets above the cap
-nohup "$bin/loom-serve" --device="$dev" --listen=127.0.0.1:$port "${memflag[@]}" "${waitflag[@]}" --workers=8 "${models[@]}" "${extra[@]}" > $state/$name.log 2>&1 &
+# Same process-scoped ENOSYS filter as the documented systemd-run stock-host
+# workaround. Opt-in only; the SDK then chooses its supported POSIX backend.
+launch=("$bin/loom-serve")
+if [ "${LOOM_NO_IO_URING:-0}" = 1 ]; then
+  launch=("$py" "$(dirname "$0")/no_uring_exec.py" -- "${launch[@]}")
+fi
+serve_command=("${launch[@]}" --device="$dev" --listen=127.0.0.1:$port "${memflag[@]}" "${waitflag[@]}" --workers=8 "${models[@]}" "${extra[@]}")
+if [ -n "${LOOM_SERVE_COMMAND_LOG:-}" ]; then
+  "$py" -c 'import json,sys; json.dump({"launch_argv":sys.argv[2:]},open(sys.argv[1],"w"),indent=1)' "$LOOM_SERVE_COMMAND_LOG" "${serve_command[@]}" || exit 1
+fi
+nohup "${serve_command[@]}" > $state/$name.log 2>&1 &
 echo $! > $state/$name.pid; echo $port > $state/$name.port; start=$(date +%s)
 while kill -0 $(cat $state/$name.pid) 2>/dev/null; do
   st=$(curl -s -m 2 http://127.0.0.1:$port/v1/status | "$py" -c 'import sys,json; d=json.load(sys.stdin)["data"]; print(",".join(x["loom"]["registration"] for x in d) if d else "none")' 2>/dev/null)
