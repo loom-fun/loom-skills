@@ -81,7 +81,8 @@ for _ in range(a.warmup_passes):
     if len(warm) >= a.warmup_min and abs(warm[-1] - warm[-2]) <= a.warmup_tol * max(warm[-1], warm[-2]):
         break
 rate, window, tokens, events, acc = one_pass()
-print(json.dumps({"streams": a.n, "thinking": a.thinking, "window_s": round(window, 2), "agg_tps": round(rate, 1),
+print(json.dumps({"time": time.strftime("%Y-%m-%d %H:%M:%S"), "streams": a.n, "thinking": a.thinking, "window_s": round(window, 2),
+                  "agg_tps": round(rate, 1),
                   "per_stream_events": [len(e) for e in events], "per_stream_tokens": tokens,
                   **({"warmup_agg_tps": warm} if warm else {}),
                   **({"acceptance": acc} if acc is not None else {})}))
