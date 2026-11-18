@@ -3560,7 +3560,7 @@ def mv_cover_case(kern, m, crng):
 """
 
 
-if os.environ.get("KTEST_COVER", "1") == "1":
+if True:   # coverage: a case for every kernel the package launches
     _crng = np.random.default_rng(11)
     for _k in sorted(pkg_launched() - cases_launched()):
         _m = MV_NAME.match(_k)

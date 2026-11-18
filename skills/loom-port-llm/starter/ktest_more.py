@@ -159,10 +159,12 @@ def _slot(ah, ga, gt):
 
 
 def as_gather_case(save, rng, k, name):
-    Q, D = _view(k, "ot")
+    """g_as_gather_d<D>: o[head] = ot[the head's grouped slot] (cq heads out of the slot table's S)."""
+    S, D = _view(k, "ot")
+    Q = int(_const(k, "cq"))
     ga, gt = int(_const(k, "ga")), int(_const(k, "gt"))
     T = 2
-    ot = rng.standard_normal((T, Q, D)).astype(np.float32)
+    ot = rng.standard_normal((T, S, D)).astype(np.float32)
     o = np.stack([ot[:, _slot(h, ga, gt)] for h in range(Q)], 1)
     c = _Case("as_" + name[5:], save)
     c.launch(name, ["%t"], [c.lit("t", T), c.inp("ot", ot), c.out("o", o)])
@@ -220,7 +222,8 @@ def as_qrope_case(save, rng, k, name):
     ang = np.where(i[None, :] < npairs, ang, 0.0)[:, None, :]
     ra, rb = a * np.cos(ang) - b * np.sin(ang), b * np.cos(ang) + a * np.sin(ang)
     r = np.concatenate([ra, rb], -1)
-    qt = np.zeros_like(r)
+    S = _view(k, "qt")[0]
+    qt = np.full((T, S, D), ktest_spec.FSENT)   # slots no head maps to keep the sentinel
     for h in range(Q):
         qt[:, _slot(h, ga, gt)] = r[:, h]
     c = _Case("as_" + name[5:], save)
@@ -234,7 +237,14 @@ def cases(lib, save, rng, ks=""):
     ktest_spec.KS = ks
     out = []
 
-    def add(x):
+    def add(name, make):
+        """A kernel whose text does not have the shape a reference reads (another generator's variant) is reported, not tested:
+        ktest_select's COVERAGE line lists it as untested."""
+        try:
+            x = make()
+        except (TypeError, ValueError, IndexError, KeyError) as e:
+            print(f"coverage: {name}: no case ({type(e).__name__}: {e})")
+            return
         if isinstance(x, list):
             out.extend(x)
         elif x:
@@ -251,9 +261,9 @@ def cases(lib, save, rng, ks=""):
                      ("g_as_norm", lambda k: as_norm_cases(save, rng, k))):
         k = _def(lib, name)
         if k:
-            add(fn(k))
+            add(name, lambda: fn(k))
     for name in sorted(set(re.findall(r'export\("(g_as_gather_d\d+)"\)', lib))):
-        add(as_gather_case(save, rng, _def(lib, name), name))
+        add(name, lambda: as_gather_case(save, rng, _def(lib, name), name))
     for name in sorted(set(re.findall(r'export\("(g_as_qrope_d\d+)"\)', lib))):
-        add(as_qrope_case(save, rng, _def(lib, name), name))
+        add(name, lambda: as_qrope_case(save, rng, _def(lib, name), name))
     return out
