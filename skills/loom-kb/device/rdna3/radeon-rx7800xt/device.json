@@ -1,0 +1,56 @@
+{
+  "schema": "loom-kb/device/1",
+  "device": "radeon-rx7800xt",
+  "order": 2,
+  "family": "rdna3",
+  "gfx": "gfx1101",
+  "aliases": [
+    "gfx1101",
+    "rx7800xt",
+    "7800xt",
+    "radeon-rx7800xt"
+  ],
+  "name": "AMD Radeon RX 7800 XT",
+  "short": "Radeon RX 7800 XT",
+  "memory": "16 GB",
+  "memory_bytes": 15000000000,
+  "memory_note": "16 GB GDDR6 (RX 7800 XT, gfx1101, 60 CUs, 624 GB/s peak). loom-serve gets a 15e9-byte budget (16 GiB board minus ~2 GiB for the desktop session and driver), matching the gfx1201-16gb convention. Measured on a Radeon RX 7800 XT (soulafein83's machine, CachyOS, Linux 7.3.4, ROCm 10.1): VRAM total 17163091968 B (16 GiB), 16.98 GiB free at idle, 6.01 GiB used serving Gemma-4-E4B-it Q4_K_M (ctx 73728, rows 4, draft_depth 3) with --state_slab_bytes=4mib --weight_slab_bytes=64mib. amdf-info (hrx-loom 0.2.0, ABI 20) reports only a system memory pool for this device (Locality unavailable); the budget is an explicit --memory_bytes argument, not derived from an enumerated pool",
+  "card": {
+    "runner": "RX 7800 XT",
+    "tag": "radeon-rx7800xt",
+    "order": 10,
+    "detect": {
+      "pattern": "7800 ?xt|gfx1101",
+      "flags": "i"
+    },
+    "serve_args": [
+      "--memory_bytes=15000000000",
+      "--state_slab_bytes=4mib",
+      "--weight_slab_bytes=64mib"
+    ]
+  },
+  "roofline": {
+    "default": "radeon-rx7800xt",
+    "presets": {
+      "radeon-rx7800xt": {
+        "name": "AMD Radeon RX 7800 XT (gfx1101, 16 GB)",
+        "bw": 624000000000.0,
+        "flops": 37000000000000.0,
+        "note": "bw SPEC (not measured): GDDR6 19.5 Gbps, 256-bit = 624 GB/s peak (AMD spec). flops SPEC: 60 CUs, 37.3 TFLOP/s dense f16 WMMA (AMD spec). A DevLab measurement would replace both. Measured (this session, hrx-loom 0.2.0, 2026-11-18): decode 170.5 tok/s (82.6% of the 206.4 tok/s bandwidth ceiling), prefill 1k/2k/8k/16k/32k = 3934/4482/4227/3947/3270 tok/s, 4 streams 329.1 tok/s aggregate, golden PASS (23 prompts, 16 full match, max gap 0.205, bad=0), spec 16/16 (acceptance 42%), ctx_admit 73653/73728, VRAM 6.01 GB at peak"
+      }
+    }
+  },
+  "runner": {
+    "key": "rx7800xt",
+    "labels": [],
+    "note": "no DevLab runner: results come from a named machine (soulafein83, CachyOS, Linux 7.3.4, RX 7800 XT, 2026-11-18; not a DevLab runner). A card shows this GPU only for a model whose entry has data"
+  },
+  "preset_suffix": "-rx7800xt",
+  "fit_table": null,
+  "prefill_flag": null,
+  "devlab_device_block": {
+    "cpu": "DevLab Dispatch runner {runner}",
+    "gpu": "AMD Radeon RX 7800 XT (gfx1101)",
+    "os": "Linux"
+  }
+}

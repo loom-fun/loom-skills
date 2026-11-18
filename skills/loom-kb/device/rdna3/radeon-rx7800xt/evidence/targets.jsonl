@@ -1,0 +1,2 @@
+{"ts": "2026-11-18T16:06:56", "metric": "decode_tps", "value": 170.53, "commit": "-", "change": "start", "label": "loom", "kept": true}
+{"ts": "2026-11-18T16:07:57", "metric": "c4_steady", "value": 329.1, "commit": "-", "change": "start", "label": "loom", "kept": true}

@@ -1,0 +1,1 @@
+hrx_loom 0.2.0 (wheel_sha256 5148f9e3a264af400ec4bae38bd7b06bf551d28cc33b7a61d67f7bcefa590438)

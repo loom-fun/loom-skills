@@ -1,0 +1,494 @@
+{
+  "schema_version": 1,
+  "platform": "Linux",
+  "library": {
+    "abi_version": 20,
+    "extensions": {
+      "gpu": {
+        "available": true,
+        "version": 6
+      },
+      "xdna": {
+        "available": true,
+        "version": 3
+      }
+    }
+  },
+  "memory_pools": [
+    {
+      "ordinal": 0,
+      "kind": {
+        "value": 0,
+        "name": "system"
+      },
+      "capacity_bytes": "16518057984",
+      "memory_profile_count": 5,
+      "flags": {
+        "value": "0x0000000000000003",
+        "names": [
+          "system_backed",
+          "available_bytes"
+        ]
+      }
+    }
+  ],
+  "endpoints": [
+    {
+      "id": "000000e200000081ed76f88e39ef05c8",
+      "uri": "rdna://id/000000e200000081ed76f88e39ef05c8",
+      "name": "AMD Radeon RX 7800 XT",
+      "enumeration_ordinal": 0,
+      "family_ordinal": 0,
+      "family": "rdna",
+      "engine": {
+        "value": 1,
+        "name": "gpu"
+      },
+      "type_flags": {
+        "value": "0x0000000000000002",
+        "names": [
+          "render"
+        ]
+      },
+      "native_identity": {
+        "type": {
+          "value": 1,
+          "name": "linux_device"
+        },
+        "major": 226,
+        "minor": 129
+      },
+      "pci": {
+        "vendor_id": 4098,
+        "device_id": 29822,
+        "subsystem_vendor_id": 6217,
+        "subsystem_device_id": 21284,
+        "revision_id": 200
+      },
+      "gpu": {
+        "target": "gfx1101",
+        "architecture": {
+          "value": 2,
+          "name": "RDNA"
+        },
+        "gfx_ip": {
+          "major": 11,
+          "minor": 0,
+          "stepping": 1
+        },
+        "asic_revision": 0,
+        "unique_id": "0x91e32cc9a277c478",
+        "compute": {
+          "wavefront_size": 32,
+          "compute_unit_count": 60,
+          "maximum_wave_count_per_compute_unit": 32,
+          "maximum_scratch_wave_count_per_compute_unit": 32,
+          "local_data_share_byte_length": "65536"
+        },
+        "topology": {
+          "xcc_count": 1,
+          "shader_engine_count_per_xcc": 3
+        },
+        "execution_resources": {
+          "compute_units_per_resource": 2,
+          "group_count": 1,
+          "minimum_selected_resources_per_group": 1
+        }
+      },
+      "pci_address": {
+        "domain": 0,
+        "bus": 3,
+        "device": 0,
+        "function": 0
+      },
+      "host_numa_node": null,
+      "queue_families": [
+        {
+          "ordinal": 0,
+          "command_type": {
+            "value": 1,
+            "name": "PM4"
+          },
+          "format_version": 1,
+          "format_features": "0x000000000000000f",
+          "publication_modes": {
+            "value": "0x0000000000000001",
+            "names": [
+              "user"
+            ]
+          },
+          "roles": {
+            "value": "0x000000000000000f",
+            "names": [
+              "compute",
+              "transfer",
+              "atomic",
+              "cache_control"
+            ]
+          },
+          "cache_operations": {
+            "value": "0x0000000000000006",
+            "names": [
+              "release_to_system",
+              "acquire_from_system"
+            ]
+          },
+          "cache_transition_kinds": {
+            "value": "0x0000000000000008",
+            "names": [
+              "global"
+            ]
+          },
+          "user_queue_capabilities": {
+            "value": "0x000000000000000d",
+            "names": [
+              "host_producer",
+              "cooperative_dispatch",
+              "execution_resource_selection"
+            ]
+          },
+          "kernel_queue_capabilities": {
+            "value": "0x0000000000000000",
+            "names": []
+          },
+          "producer_modes": {
+            "value": "0x0000000000000002",
+            "names": [
+              "single"
+            ]
+          },
+          "priority_capabilities": {
+            "value": "0x000000000000000e",
+            "names": [
+              "low",
+              "normal",
+              "high"
+            ]
+          },
+          "atomic_capabilities": {
+            "operations_32": {
+              "value": "0x000000000000007f",
+              "names": [
+                "wait",
+                "store",
+                "add",
+                "subtract",
+                "and",
+                "or",
+                "xor"
+              ]
+            },
+            "operations_64": {
+              "value": "0x000000000000007f",
+              "names": [
+                "wait",
+                "store",
+                "add",
+                "subtract",
+                "and",
+                "or",
+                "xor"
+              ]
+            },
+            "wait_conditions_32": {
+              "value": "0x0000000000000007",
+              "names": [
+                "equal",
+                "not_equal",
+                "unsigned_greater_equal"
+              ]
+            },
+            "wait_conditions_64": {
+              "value": "0x0000000000000007",
+              "names": [
+                "equal",
+                "not_equal",
+                "unsigned_greater_equal"
+              ]
+            },
+            "operations_without_dispatch_32": {
+              "value": "0x000000000000007f",
+              "names": [
+                "wait",
+                "store",
+                "add",
+                "subtract",
+                "and",
+                "or",
+                "xor"
+              ]
+            },
+            "operations_without_dispatch_64": {
+              "value": "0x000000000000007f",
+              "names": [
+                "wait",
+                "store",
+                "add",
+                "subtract",
+                "and",
+                "or",
+                "xor"
+              ]
+            }
+          },
+          "metadata": {
+            "command_type": {
+              "value": 0,
+              "name": "unknown"
+            },
+            "dispatch_version": 0,
+            "barrier_version": 0
+          },
+          "minimum_ring_byte_length": "4096",
+          "maximum_ring_byte_length": "2147483648",
+          "ring_byte_length_alignment": "4096"
+        },
+        {
+          "ordinal": 1,
+          "command_type": {
+            "value": 3,
+            "name": "AQL"
+          },
+          "format_version": 1,
+          "format_features": "0x0000000000000260",
+          "publication_modes": {
+            "value": "0x0000000000000001",
+            "names": [
+              "user"
+            ]
+          },
+          "roles": {
+            "value": "0x000000000000000f",
+            "names": [
+              "compute",
+              "transfer",
+              "atomic",
+              "cache_control"
+            ]
+          },
+          "cache_operations": {
+            "value": "0x0000000000000006",
+            "names": [
+              "release_to_system",
+              "acquire_from_system"
+            ]
+          },
+          "cache_transition_kinds": {
+            "value": "0x0000000000000008",
+            "names": [
+              "global"
+            ]
+          },
+          "user_queue_capabilities": {
+            "value": "0x000000000000001f",
+            "names": [
+              "host_producer",
+              "device_producer",
+              "cooperative_dispatch",
+              "execution_resource_selection",
+              "host_non_temporal_publication"
+            ]
+          },
+          "kernel_queue_capabilities": {
+            "value": "0x0000000000000000",
+            "names": []
+          },
+          "producer_modes": {
+            "value": "0x0000000000000006",
+            "names": [
+              "single",
+              "multi"
+            ]
+          },
+          "priority_capabilities": {
+            "value": "0x000000000000000e",
+            "names": [
+              "low",
+              "normal",
+              "high"
+            ]
+          },
+          "atomic_capabilities": {
+            "operations_32": {
+              "value": "0x000000000000007f",
+              "names": [
+                "wait",
+                "store",
+                "add",
+                "subtract",
+                "and",
+                "or",
+                "xor"
+              ]
+            },
+            "operations_64": {
+              "value": "0x000000000000007f",
+              "names": [
+                "wait",
+                "store",
+                "add",
+                "subtract",
+                "and",
+                "or",
+                "xor"
+              ]
+            },
+            "wait_conditions_32": {
+              "value": "0x0000000000000007",
+              "names": [
+                "equal",
+                "not_equal",
+                "unsigned_greater_equal"
+              ]
+            },
+            "wait_conditions_64": {
+              "value": "0x0000000000000007",
+              "names": [
+                "equal",
+                "not_equal",
+                "unsigned_greater_equal"
+              ]
+            },
+            "operations_without_dispatch_32": {
+              "value": "0x000000000000007f",
+              "names": [
+                "wait",
+                "store",
+                "add",
+                "subtract",
+                "and",
+                "or",
+                "xor"
+              ]
+            },
+            "operations_without_dispatch_64": {
+              "value": "0x000000000000007f",
+              "names": [
+                "wait",
+                "store",
+                "add",
+                "subtract",
+                "and",
+                "or",
+                "xor"
+              ]
+            }
+          },
+          "metadata": {
+            "command_type": {
+              "value": 0,
+              "name": "unknown"
+            },
+            "dispatch_version": 0,
+            "barrier_version": 0
+          },
+          "minimum_ring_byte_length": "4096",
+          "maximum_ring_byte_length": "2147483648",
+          "ring_byte_length_alignment": "4096"
+        },
+        {
+          "ordinal": 2,
+          "command_type": {
+            "value": 2,
+            "name": "SDMA"
+          },
+          "format_version": 1,
+          "format_features": "0x0000000000000039",
+          "publication_modes": {
+            "value": "0x0000000000000001",
+            "names": [
+              "user"
+            ]
+          },
+          "roles": {
+            "value": "0x000000000000000a",
+            "names": [
+              "transfer",
+              "cache_control"
+            ]
+          },
+          "cache_operations": {
+            "value": "0x0000000000000006",
+            "names": [
+              "release_to_system",
+              "acquire_from_system"
+            ]
+          },
+          "cache_transition_kinds": {
+            "value": "0x0000000000000008",
+            "names": [
+              "global"
+            ]
+          },
+          "user_queue_capabilities": {
+            "value": "0x0000000000000003",
+            "names": [
+              "host_producer",
+              "device_producer"
+            ]
+          },
+          "kernel_queue_capabilities": {
+            "value": "0x0000000000000000",
+            "names": []
+          },
+          "producer_modes": {
+            "value": "0x0000000000000002",
+            "names": [
+              "single"
+            ]
+          },
+          "priority_capabilities": {
+            "value": "0x000000000000000e",
+            "names": [
+              "low",
+              "normal",
+              "high"
+            ]
+          },
+          "atomic_capabilities": {
+            "operations_32": {
+              "value": "0x0000000000000000",
+              "names": []
+            },
+            "operations_64": {
+              "value": "0x0000000000000000",
+              "names": []
+            },
+            "wait_conditions_32": {
+              "value": "0x0000000000000000",
+              "names": []
+            },
+            "wait_conditions_64": {
+              "value": "0x0000000000000000",
+              "names": []
+            },
+            "operations_without_dispatch_32": {
+              "value": "0x0000000000000000",
+              "names": []
+            },
+            "operations_without_dispatch_64": {
+              "value": "0x0000000000000000",
+              "names": []
+            }
+          },
+          "metadata": {
+            "command_type": {
+              "value": 0,
+              "name": "unknown"
+            },
+            "dispatch_version": 0,
+            "barrier_version": 0
+          },
+          "minimum_ring_byte_length": "4096",
+          "maximum_ring_byte_length": "2147483648",
+          "ring_byte_length_alignment": "4096"
+        }
+      ]
+    }
+  ],
+  "cleanup_errors": [],
+  "result": {
+    "complete": true,
+    "exit_code": 0
+  }
+}

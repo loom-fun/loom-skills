@@ -1,0 +1,40 @@
+{
+ "verdict": "FAIL",
+ "level": "quick",
+ "pkg_hash": "a538fcb18218",
+ "seconds": 84,
+ "ts": "2026-11-18T15:56:59",
+ "gates": {
+  "consistency": {
+   "pass": false,
+   "log": "gates_consistency.log",
+   "seconds": 4
+  },
+  "spec": {
+   "pass": true,
+   "log": "gates_spec.log",
+   "seconds": 39
+  },
+  "agent": {
+   "pass": false,
+   "log": "gates_agent.log",
+   "seconds": 5
+  },
+  "agent_think_off": {
+   "pass": false,
+   "log": "gates_agent_think_off.log",
+   "seconds": 2
+  },
+  "sampling": {
+   "pass": true,
+   "log": "gates_sampling.log",
+   "seconds": 2
+  }
+ },
+ "context_admit": {
+  "admitted": true,
+  "tokens": 73653,
+  "context": 73728,
+  "detail": "ADMITTED 73653 tokens of a 73728-token context (31.0s, then cancelled)"
+ }
+}

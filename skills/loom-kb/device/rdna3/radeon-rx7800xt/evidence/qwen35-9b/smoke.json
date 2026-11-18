@@ -1,0 +1,1 @@
+{"id":"loom-1","object":"chat.completion","created":1795018157,"model":"nemotron-3.5-bolt-e4b","choices":[{"index":0,"message":{"role":"assistant","content":"Stolicą Francji jest Paryż."},"finish_reason":"stop","logprobs":null}],"usage":{"prompt_tokens":21,"completion_tokens":10,"total_tokens":31,"prompt_tokens_details":{"cached_tokens":0}}}

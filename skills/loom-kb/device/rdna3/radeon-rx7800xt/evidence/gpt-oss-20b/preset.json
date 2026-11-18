@@ -1,0 +1,6 @@
+{
+  "rows": 4,
+  "context_capacity": 38912,
+  "prefill_capacity": 1024,
+  "max_tokens": 4096
+}
