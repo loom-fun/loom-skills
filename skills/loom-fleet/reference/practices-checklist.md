@@ -64,7 +64,7 @@ the repo root; `campaign.md`, `targeted-fix.md` and `architecture.md` are in `sk
 | 30 | Under a goal never pause for a go-ahead; a question is not a request | owner rule | `campaign.md` "Communication" |
 | 31 | Do not retry a denied action; log and move on; forbid likely-denied actions in briefs | brief; owner rule | `campaign.md` "Communication"; `templates/ENG_CONTRACT.md` |
 | 32 | Engineers: task file template, engineer contract, module ownership per wave | brief | `templates/task.md`, `templates/ENG_CONTRACT.md`; `campaign.md` "Branches" |
-| 33 | Subagents run on the cheaper model tier with explicit, self-contained briefs | owner rule | `campaign.md` "Roles" |
+| 33 | Every spawn/resume/nested delegation follows the exact owner model-family mapping; record actual dispatch and verification | owner rule | `campaign.md` "Model selection and dispatch"; `templates/task.md`, `templates/ENG_CONTRACT.md` |
 | 34 | Status page refresh = counts + log + ETA + scope changes | owner rule | `campaign.md` "State files" |
 | 35 | Look up an external project or claim yourself before asking | owner rule | `campaign.md` "Working style" |
 | 36 | Short replies, answer first | owner rule | `campaign.md` "Communication" |
@@ -131,7 +131,7 @@ the repo root; `campaign.md`, `targeted-fix.md` and `architecture.md` are in `sk
 | 66 | Bucket budgets from the leader's number; judge the bucket, not each kernel | owner rule | `skills/loom-optimize/SKILL.md` steps 1 and 3 |
 | 67 | Fuse by default, un-fuse only where measured; price a design against its family's profiled share | owner rule | `skills/loom-optimize/SKILL.md` step 4; `skills/loom-kb/topic/optimize-loop.md` "Pricing a design" |
 | 68 | Perf-only iteration rounds, gates once on the winner, cached reference engines, A/B base pinned to a sha | owner rule | `skills/loom-optimize/SKILL.md` steps 6 and 7; `campaign.md` "DevLab" |
-| 69 | Cost = agent tokens + runner time only, never human effort; strongest model tier for design-heavy lanes, alternative designs in parallel | owner rule | `skills/loom-optimize/SKILL.md` "Cost model"; `campaign.md` "Roles", "Working style" |
+| 69 | Cost = agent tokens + runner time only, never human effort; model family follows the exact campaign mapping, alternative designs in parallel | owner rule | `skills/loom-optimize/SKILL.md` "Cost model"; `campaign.md` "Model selection and dispatch", "Working style" |
 | 70 | Keep going past a losing design: a lane ends when every lever has a measured stop reason; stop rules with numbers | owner rule | `skills/loom-optimize/SKILL.md` "Keep going", "When to stop a metric" |
 | 71 | Every technique tried (win or loss) is a row of the technique log; facts go to the KB node; SDK limits to topic `sdk` | owner rule | `skills/loom-optimize/SKILL.md` step 8; `skills/loom-kb/topic/sdk.md` |
 

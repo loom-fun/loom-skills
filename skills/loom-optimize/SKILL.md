@@ -45,10 +45,11 @@ at the most specific node; route before you design and write what you learn back
   "complexity": agents write the code. The most aggressive design (whole-layer fusion, epilogue/prologue fusion, persistent kernels)
   is a normal candidate, not a last resort. Spend runner time carefully instead: CPU checks, then kernel benches, then one batched
   end-to-end job per round.
-- **Model tiers** (team work, `loom-fleet` reference `campaign.md`, "Roles"): the strongest tier for design-heavy lanes (fused or
-  persistent kernels, register/LDS budgets across fused stages, cross-workgroup sync, open-ended optimization); the cheaper tier for
-  sweeps, plumbing and parallel variants of a design. Run **alternative designs of one lever in parallel lanes**, each with its own
-  worktree, switch and A/B; the bucket's measurement decides, not the first design to land.
+- **Model selection for team work** follows the exact family mapping in `loom-fleet` reference `campaign.md`, "Model selection and dispatch":
+  routine work uses Luna/Sonnet and hard coding (such as difficult kernel design) uses Sol/Opus on Codex/Claude respectively. Catalog labels
+  never authorize another family; Astra and Fable are prohibited, and reasoning effort is separate. Classify each task before delegation.
+  Run **alternative designs of one lever in parallel lanes**, each with its own worktree, switch and A/B; the bucket's measurement decides,
+  not the first design to land.
 - On DevLab (campaigns, no local GPU): job presets, runner rules and the reference store are `campaign.md`, "DevLab".
 
 ## The loop
