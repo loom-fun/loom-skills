@@ -1,12 +1,14 @@
 {
  "models": [
-  "rtt"
+  "loom-fun/unsloth-Qwen3-30B-A3B-Instruct-2507-loom",
+  "loom-fun/ggml-org-gemma-3-1b-it-loom",
+  "loom-fun/bartowski-Qwen2.5-7B-Instruct-loom"
  ],
  "os": [
   "windows",
   "linux"
  ],
  "variants": "",
- "profile": "",
- "reps": 3
+ "profile": "dec,dec@card_cpuload4,dec@nospin",
+ "reps": 4
 }

@@ -530,6 +530,17 @@ for spec_ in [x for x in a.profile.split(",") if x]:
         continue
     load = cpuload_proc(pv) if re.search(r"cpuload\d*$", pv) else None
     tel = Telemetry(srv.p.pid, os.path.join(OUT, f"telemetry_profile_{key}.jsonl"))
+    probe = subprocess.Popen([VPY, os.path.join(HERE, "fclk_probe.py"), os.path.join(OUT, f"probe_{key}.jsonl"), "1000", "30"])
+    time.sleep(3)
+    try:
+        sproc = psutil.Process(srv.p.pid)
+        cs0, th0 = sproc.num_ctx_switches(), sproc.num_threads()
+    except Exception:
+        sproc = None
+    try:
+        open(os.path.join(OUT, f"metrics_{key}_before.txt"), "w").write(urllib.request.urlopen(URL + "/metrics", timeout=10).read().decode())
+    except Exception:
+        pass
     t0 = time.time()
     req = os.path.join(OUT, f"profile_{key}.req.json")
     with open(req, "w") as f:
@@ -537,6 +548,19 @@ for spec_ in [x for x in a.profile.split(",") if x]:
                            cwd=SCRIPTS, env=env,
                            stdout=f, stderr=subprocess.PIPE, text=True, timeout=3600)
     t1 = time.time()
+    ctx = None
+    if sproc:
+        try:
+            cs1 = sproc.num_ctx_switches()
+            ctx = {"voluntary": cs1.voluntary - cs0.voluntary, "involuntary": cs1.involuntary - cs0.involuntary,
+                   "threads": sproc.num_threads()}
+        except Exception:
+            pass
+    try:
+        open(os.path.join(OUT, f"metrics_{key}_after.txt"), "w").write(urllib.request.urlopen(URL + "/metrics", timeout=10).read().decode())
+    except Exception:
+        pass
+    probe.kill()
     tsum = tel.finish([(t0, t1, "requests")])
     if load:
         load.kill()
@@ -548,7 +572,7 @@ for spec_ in [x for x in a.profile.split(",") if x]:
                         capture_output=True, text=True)
     R["profiles"][key] = {"requests_rc": p.returncode, "requests_err": p.stderr[-800:], "wall_s": round(t1 - t0, 2),
                          "stopped": how, "stats_present": stats_present, "stats_rc": ps.returncode,
-                         "stats_err": ps.stderr[-800:], "telemetry": tsum}
+                         "stats_err": ps.stderr[-800:], "telemetry": tsum, "ctx_switches": ctx}
     step(f"profile_{key}", p.returncode == 0 and stats_present, stopped=how)
 
 membw("end")
