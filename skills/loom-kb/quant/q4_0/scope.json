@@ -12,7 +12,7 @@
     "prefill.gemm.q4_0_native": true,
     "decode.q4_0.act_q8": true
    },
-   "evidence": "pending: DevLab A/B of the Gemma 4 QAT packages (Q4_0 dense + experts), see quant/q4_0/README.md"
+   "evidence": "DevLab run 44306088328 (same-job ABBA vs 33c407da): Gemma 4 31B QAT R9700 prefill 1k/2k/8k +54/+60/+57 %, 4 streams 58.5 -> 121.2 tok/s, decode +3 %; 26B-A4B QAT 4 streams +28 % R9700 / +19 % Strix Halo, prefill +8..16 %, decode -1..-3 %; kernel tests pass on both GPUs."
   }
  ]
 }
