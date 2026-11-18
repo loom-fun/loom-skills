@@ -52,6 +52,23 @@ def select(lib, cases, arch=None, rdna4=None):
     return "".join(keep), skipped
 
 
+def _base(k, defined):
+    """K for K and its gfx12 twin K_rdna4 (one kernel identity)."""
+    return k[:-len(dual_target.SUFFIX)] if k.endswith(dual_target.SUFFIX) and k[:-len(dual_target.SUFFIX)] in defined else k
+
+
+def coverage(lib, selected):
+    """(launched, untested): the kernels the library's programs launch (command, template and func bodies; a K / K_rdna4 pair
+    counts once) and those of them no selected case launches."""
+    defined = set(EXPORT.findall(lib)) | set(SYMBOL.findall(lib))
+    launched = set()
+    for d in re.split(r'(?m)^(?=\S+\.(?:def|decl) )', lib):
+        if d.startswith(("command.def", "template.def", "func.def")):
+            launched |= {_base(k, defined) for k in re.findall(r'kernel\.launch @([\w.]+)', d)}
+    tested = {_base(k, defined) for k in re.findall(r'kernel\.launch @([\w.]+)', selected)}
+    return sorted(launched), sorted(launched - tested)
+
+
 if __name__ == "__main__":
     if len(sys.argv) < 4:
         sys.exit(__doc__)
@@ -59,3 +76,5 @@ if __name__ == "__main__":
     text, skipped = select(open(sys.argv[1]).read(), open(sys.argv[2]).read(), arch)
     open(sys.argv[3], "w", newline="\n").write(text)
     print(*skipped, sep="\n") if skipped else None
+    launched, untested = coverage(open(sys.argv[1]).read(), text)
+    print(f"COVERAGE {len(launched) - len(untested)}/{len(launched)} launched kernels have a case" + (": untested " + ", ".join(untested) if untested else ""))
