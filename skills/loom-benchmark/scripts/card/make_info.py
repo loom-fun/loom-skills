@@ -120,7 +120,7 @@ from card_lib import (DEFAULT_GPU, DRAFTED_ROWS, EVIDENCE_ID, GPUS, METRIC_KEYS,
                       HF, RETIRED_GATES, ROOFLINE_METRIC, SCHEMA_ID, build_tag, card_metrics, derived_tags, dumps, gate_applies, gpu_from_device,
                       gpu_view, load_info, load_json, load_package, metric_applies, native_context, over_context, package_facts,
                       programs_sha256, require_valid, fixed_pool_capacity, gpu_preset_execution, gpu_preset_name, with_gpu_preset, served_context, fit_served_context, upstream_facts, with_gate_features, write_json,
-                      SERVE_HEADROOM, registry, fit_rows, non_targets, load_device_results, validate_device_results, with_device_preset, DEVICE_RESULTS_ID, card_serve_args)
+                      SERVE_HEADROOM, registry, fit_rows, non_targets, load_device_results, validate_device_results, with_device_preset, DEVICE_RESULTS_ID, card_serve_args, quick_start, serves)
 
 
 # ---------------------------------------------------------------- sources
@@ -597,6 +597,9 @@ def cmd_build(a):
     info = {"schema": SCHEMA_ID, "repo": a.repo, "card": card,
             "versions": {"card_generator": a.generator_commit, **versions},
             "sources": sources.by_id, "devices": devices}
+    served = package_facts(load_package(a.pkg))   # model.json as written above, with the GPU presets added
+    for gpu in [g for g in devices if serves(info, g)] or [g for g in devices if g == DEFAULT_GPU]:
+        devices[gpu]["quick_start"] = quick_start(info, served, gpu)
     if a.report:
         info["report"] = a.report
     if a.status and a.status != "active":
