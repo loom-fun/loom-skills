@@ -299,6 +299,14 @@
      }
     ]
    },
+   "quick_start": {
+    "args": [
+     "--pool_backing=fixed",
+     "--parameter_mode=preload"
+    ],
+    "device": "amdgpu://?completion_spin_ns=4294967295",
+    "preset": "chat-r9700"
+   },
    "roofline": {
     "checkpoint": "Qwen3-0.6B-Q4_K_M.gguf",
     "device": {
@@ -346,6 +354,14 @@
    "served_context": 20480
   },
   "strix-halo": {
+   "quick_start": {
+    "args": [
+     "--pool_backing=fixed",
+     "--parameter_mode=preload"
+    ],
+    "device": "amdgpu://?completion_spin_ns=4294967295",
+    "preset": "chat"
+   },
    "state": "not_measured"
   }
  },

@@ -107,6 +107,14 @@
       "source": "factory-40842422037"
      }
     ]
+   },
+   "quick_start": {
+    "args": [
+     "--pool_backing=fixed",
+     "--parameter_mode=preload"
+    ],
+    "device": "amdgpu://?completion_spin_ns=4294967295",
+    "preset": "decide"
    }
   }
  },

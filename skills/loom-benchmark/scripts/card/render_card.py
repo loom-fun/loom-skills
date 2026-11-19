@@ -486,7 +486,8 @@ def single_layout(info):
 def serve_command(info, facts, feats, gpu, output, bare=False):
     """bare: SDK 0.2 takes the package directory (it finds model.json in it); 0.1 needs the model.json path."""
     model = f"--model={output}" if bare else f"--model={output}/model.json"
-    return " ".join(["loom-serve", model] + [shlex.quote(a) for a in recorded_quick_start(info, facts, gpu)["args"]])
+    qs = recorded_quick_start(info, facts, gpu)
+    return " ".join(["loom-serve", model] + [shlex.quote(a) for a in [f"--device={qs['device']}"] + qs["args"]])
 
 
 

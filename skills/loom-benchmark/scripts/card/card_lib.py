@@ -824,13 +824,14 @@ def card_serve_args(gpu, weight_bytes=None):
     return gpu_serve_args(gpu) + ([PRELOAD_FLAG] if preload_mode(gpu, weight_bytes) == "preload" else [])
 
 
-QUICK_START_DEVICE = "--device=amdgpu://?completion_spin_ns=4294967295"   # the active wait the card's performance rows are measured with
+QUICK_START_DEVICE = "amdgpu://?completion_spin_ns=4294967295"   # the active wait the card's performance rows are measured with
 
 
 def quick_start(info, facts, gpu):
-    """How the card's Quick start serves the package on a GPU: the preset loom-fetch takes and every loom-serve flag after --model.
-    make_info.py build records it as the GPU's devices entry quick_start, which the README renders and other launchers read."""
-    args = [QUICK_START_DEVICE]
+    """How the card's Quick start serves the package on a GPU: the preset loom-fetch takes, the loom-serve --device URI and every other
+    loom-serve flag after --model. make_info.py build records it as the GPU's devices entry quick_start, which the README renders and other
+    launchers read (a launcher that picks its own device keeps the URI's query)."""
+    args = []
     pkg_serve = (facts.get("serve") or {}).get("args")   # llm_config.json "serve": flags the package must be served with
     gpu_serve = info_serve_args(info, gpu, facts.get("weight_bytes"))
     memory = gpu_memory(info, facts["memory_bytes"], gpu)
@@ -838,7 +839,7 @@ def quick_start(info, facts, gpu):
         args += gpu_serve + [a for a in (pkg_serve or []) if a not in gpu_serve]   # e.g. --pool_backing=fixed, which takes no --memory_bytes
     elif memory:
         args.append(f"--memory_bytes={memory}")
-    return {"preset": gpu_preset(facts, gpu) or (facts.get("presets") or [None])[0], "args": args}
+    return {"preset": gpu_preset(facts, gpu) or (facts.get("presets") or [None])[0], "device": QUICK_START_DEVICE, "args": args}
 
 
 def recorded_quick_start(info, facts, gpu):
