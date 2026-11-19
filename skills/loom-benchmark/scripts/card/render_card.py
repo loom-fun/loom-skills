@@ -24,8 +24,8 @@ import shlex
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from card_lib import (DEFAULT_GPU, FEATURES, GATE_NAMES, GATES, GPUS, HF, gpu_preset, LOOM_URL, METHOD, METRIC_KEYS, METRICS, SCHEMA_ID, SKILLS_URL,  # noqa: E402
-                      TIMED, PRELOAD_FLAG, preload_mode, card_gpus, card_metrics, derived_tags, beyond_context, gate_applies, generator_commit, gpu_context, gpu_memory, gpu_serve_args, info_serve_args, recorded_quick_start, serves,
+from card_lib import (DEFAULT_GPU, FEATURES, GATE_NAMES, GATES, GPUS, HF, LOOM_URL, METHOD, METRIC_KEYS, METRICS, SCHEMA_ID, SKILLS_URL,  # noqa: E402
+                      TIMED, PRELOAD_FLAG, preload_mode, card_gpus, card_metrics, derived_tags, beyond_context, gate_applies, generator_commit, gpu_context, gpu_memory, recorded_quick_start, serves,
                       gpu_view, has_results, has_runner, load_info, load_json, load_package, metric_applies, native_context, over_context,
                       package_facts, programs_sha256, require_valid, stale_metrics, with_gate_features)
 from matched_spec import TIE_BAND, classification  # noqa: E402
@@ -769,16 +769,18 @@ def render(d):
         sc = info["devices"][g].get("served_context")
         if not sc:
             return None
-        gs = info_serve_args(info, g, facts.get("weight_bytes"))
-        bound = (f"the package's preset sizes the memory pool (`{gs[0]}` commits it up front)" if gs and gs[0].startswith("--pool_backing")
-                 else f"`--memory_bytes={gpu_memory(info, facts['memory_bytes'], g)}` bounds the memory pool")
+        qa = recorded_quick_start(info, facts, g)["args"]   # the flags the Quick start serves this GPU with
+        pool = next((a for a in qa if a.startswith("--pool_backing")), None)
+        mem = next((a for a in qa if a.startswith("--memory_bytes=")), f"--memory_bytes={gpu_memory(info, facts['memory_bytes'], g)}")
+        bound = (f"the package's preset sizes the memory pool (`{pool}` commits it up front)" if pool
+                 else f"`{mem}` bounds the memory pool")
         if here:
             return f"On this GPU, {bound}: this package serves up to {sc:,} tokens per request (its native context is {native:,})."
         return (f"On the {GPUS[g]['name']}, {bound}: this package serves up to {sc:,} tokens per request there "
                 f"(its native context is {native:,}); the package files are the same on every GPU.")
 
     def preset_line(g, here):   # a GPU's own preset: what it sets differently from the default preset (same programs, weights, tokenizer)
-        pr = gpu_preset(facts, g)
+        pr = recorded_quick_start(info, facts, g)["preset"]
         if not (pr and pr != facts["preset"] and g != DEFAULT_GPU):
             return None
         pm = load_package(d)["model"]["presets"]
@@ -789,7 +791,8 @@ def render(d):
                 + ", ".join(f"`{k}` {v:,}" if isinstance(v, int) and not isinstance(v, bool) else f"`{k}` {v}" for k, v in sorted(diff.items()))
                 + f" for its {GPUS[g]['memory'] or 'memory'}. The programs, weights and tokenizer are the same.")
     def stock_line(g):   # a GPU whose host copy of the weights does not fit beside its memory keeps the default parameter mode (device.json card.preload_max_weight_bytes)
-        if preload_mode(g, facts.get("weight_bytes")) != "default" or "serve_args" in (info["devices"].get(g) or {}):
+        if (preload_mode(g, facts.get("weight_bytes")) is None or "serve_args" in (info["devices"].get(g) or {})
+                or PRELOAD_FLAG in recorded_quick_start(info, facts, g)["args"]):   # the recorded Quick start preloads: no memlock limit to work around
             return None
         return ("On a stock host (8 MiB memlock) start loom-serve as `systemd-run --user --pty --same-dir -p SystemCallFilter=~io_uring_setup "
                 "-p SystemCallErrorNumber=ENOSYS loom-serve ...` (no root; IREE falls back to its POSIX proactor), or raise `ulimit -l`.")
