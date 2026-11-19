@@ -457,6 +457,7 @@ assert x == dict(r, context_capacity=18432, pool_capacity=18432), (x, r)   # the
 assert g == dict(old['presets']['chat']['execution'], prefill_capacity=512, context_capacity=16384, pool_capacity=16384), g
 assert sorted(i['devices']) == sorted(['strix-halo', 'radeon-r9700', 'gfx1201-16gb', 'gfx1150']), list(i['devices'])
 dv = i['devices']
+qs = dv['gfx1201-16gb'].pop('quick_start'); assert qs['preset'] == 'chat-16gb' and qs['args'] == dv['gfx1201-16gb']['serve_args'], qs
 assert dv['gfx1201-16gb'] == {'state': 'not_measured', 'serve_args': ['--memory_bytes=15000000000', '--state_slab_bytes=4mib', '--weight_slab_bytes=64mib', '--parameter_mode=preload'], 'memory_bytes': 15000000000,
                                  'served_context': 18432, 'shares_section_with': 'radeon-r9700'}, dv['gfx1201-16gb']
 assert dv['gfx1150']['served_context'] == 16384 and dv['gfx1150']['serve_args'] == [] and c.has_results(dv['gfx1150']) and dv['gfx1150']['gates']
@@ -495,7 +496,7 @@ assert two['devices']['strix-halo']['gates'] == old['gates'] and two['devices'][
 assert two['devices']['radeon-r9700']['roofline']['device']['name'].startswith('AMD Radeon AI PRO R9700S'), 'roofline device'
 assert 'memory_bytes' not in two['devices']['radeon-r9700'] and 'served_context' not in two['devices']['radeon-r9700']
 assert none['devices']['radeon-r9700'] == {'state': 'unsupported', 'required_bytes': 82400000000} and c.has_results(none['devices']['strix-halo'])
-assert stg['devices']['strix-halo'] == {'state': 'not_measured'}, stg['devices']['strix-halo']
+assert {k: v for k, v in stg['devices']['strix-halo'].items() if k != 'quick_start'} == {'state': 'not_measured'}, stg['devices']['strix-halo']
 r = stg['devices']['radeon-r9700']
 assert r['memory_bytes'] == 34000000000 and r['served_context'] == 20480 and r['performance']['sessions'][0]['over_context'], r.keys()
 assert set(r['gates']) >= {'golden', 'agent'} and 'performance' in r and 'roofline' in r" \

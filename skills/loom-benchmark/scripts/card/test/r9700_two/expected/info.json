@@ -332,6 +332,14 @@
      }
     ]
    },
+   "quick_start": {
+    "args": [
+     "--pool_backing=fixed",
+     "--parameter_mode=preload"
+    ],
+    "device": "amdgpu://?completion_spin_ns=4294967295",
+    "preset": "chat"
+   },
    "roofline": {
     "checkpoint": "Qwen3-0.6B-Q4_K_M.gguf",
     "device": {
@@ -1122,6 +1130,14 @@
       "source": "devlab-43392598780-job131775918531"
      }
     ]
+   },
+   "quick_start": {
+    "args": [
+     "--pool_backing=fixed",
+     "--parameter_mode=preload"
+    ],
+    "device": "amdgpu://?completion_spin_ns=4294967295",
+    "preset": "chat"
    },
    "roofline": {
     "checkpoint": "Qwen3-0.6B-Q4_K_M.gguf",

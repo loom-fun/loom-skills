@@ -222,11 +222,28 @@
      }
     ]
    },
+   "quick_start": {
+    "args": [
+     "--memory_bytes=17000000000"
+    ],
+    "device": "amdgpu://?completion_spin_ns=4294967295",
+    "preset": "chat-gfx1150"
+   },
    "serve_args": [],
    "served_context": 16384
   },
   "gfx1201-16gb": {
    "memory_bytes": 15000000000,
+   "quick_start": {
+    "args": [
+     "--memory_bytes=15000000000",
+     "--state_slab_bytes=4mib",
+     "--weight_slab_bytes=64mib",
+     "--parameter_mode=preload"
+    ],
+    "device": "amdgpu://?completion_spin_ns=4294967295",
+    "preset": "chat-16gb"
+   },
    "serve_args": [
     "--memory_bytes=15000000000",
     "--state_slab_bytes=4mib",
@@ -473,6 +490,14 @@
      }
     ]
    },
+   "quick_start": {
+    "args": [
+     "--pool_backing=fixed",
+     "--parameter_mode=preload"
+    ],
+    "device": "amdgpu://?completion_spin_ns=4294967295",
+    "preset": "chat-r9700"
+   },
    "roofline": {
     "checkpoint": "Qwen3-0.6B-Q4_K_M.gguf",
     "device": {
@@ -520,6 +545,14 @@
    "served_context": 20480
   },
   "strix-halo": {
+   "quick_start": {
+    "args": [
+     "--pool_backing=fixed",
+     "--parameter_mode=preload"
+    ],
+    "device": "amdgpu://?completion_spin_ns=4294967295",
+    "preset": "chat"
+   },
    "state": "not_measured"
   }
  },

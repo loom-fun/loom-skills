@@ -2,6 +2,7 @@
 import copy
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -143,6 +144,12 @@ class Cards(unittest.TestCase):
         self.assertIn("the package serves here (see Quick start); its performance is not measured yet.", readme)
         self.assertIn("### Radeon 890M (gfx1150)", readme)
         self.assertEqual(list(self.model(pkg)["presets"]), ["chat", "chat-gfx1150"])
+        qs = info["devices"]["gfx1150"]["quick_start"]   # the Quick start as data: the preset and every loom-serve flag the README prints
+        self.assertEqual(qs["preset"], "chat-gfx1150")
+        self.assertEqual(qs["device"], "amdgpu://?completion_spin_ns=4294967295")
+        self.assertFalse(any(a.startswith("--device") for a in qs["args"]))
+        self.assertIn("chat-gfx1150 --materialize=copy", readme)
+        self.assertIn(" ".join(shlex.quote(a) for a in [f"--device={qs['device']}"] + qs["args"]), readme)
 
     def test_from_info_without_device_files_preserves_unmeasured_serve_metadata(self):
         pkg, original, _ = self.build({"gfx1150": fixture("gfx1150")})

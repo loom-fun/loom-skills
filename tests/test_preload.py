@@ -48,7 +48,10 @@ class Render(unittest.TestCase):
     def render(self, weights):
         with tempfile.TemporaryDirectory() as w:
             shutil.copytree(os.path.join(FLINT, "pkg"), w, dirs_exist_ok=True)
-            shutil.copy(os.path.join(FLINT, "expected", "info.json"), w)
+            info = json.load(open(os.path.join(FLINT, "expected", "info.json")))
+            for d in info["devices"].values():
+                d.pop("quick_start", None)   # a card of these weights: make_info.py build would record the Quick start from them
+            json.dump(info, open(os.path.join(w, "info.json"), "w"))
             lock = json.load(open(os.path.join(w, "model.json.lock")))
             lock["files"][0]["size"] = weights
             json.dump(lock, open(os.path.join(w, "model.json.lock"), "w"))
