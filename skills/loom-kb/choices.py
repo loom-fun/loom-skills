@@ -371,7 +371,9 @@ CHOICE("prefill.attn.flash2_vp", "bool", False, "FLASH2_VP", experiment=True, do
        "store per dim pair (flash2_vpack.py); gfx12 twin only.", **_FLR4)
 CHOICE("prefill.attn.flash2_pf", "bool", False, "FLASH2_PF", experiment=True, doc="The next K/V tile's loads in flight during this "
        "tile's math (flash2_prefetch.py); gfx12 twin only.", **_FLR4)
-CHOICE("prefill.attn.flash2_kt256", "int", None, "FLASH2_KT256", experiment=True, doc="Experiment: 16-key tiles at head_dim 256.", **_FL)
+CHOICE("prefill.attn.flash2_kt256", "int", None, "FLASH2_KT256", per_target=True,
+       doc="Keys per tile of the gfx11 head_dim-256 flash2s kernel (None: 32). 16: 208 VGPRs / 33 KB LDS, two 12-wave workgroups per WGP "
+           "instead of one (G = 6): the second workgroup hides the first's exposed K/V load latency (Qwen3.8-27B Strix: kernel -21 % at 32k, prefill 32k +2.8 %).", **_FL)
 CHOICE("prefill.attn.flash2_ng512", "int", None, "FLASH2_NG512", experiment=True,
        doc="Experiment: query-head groups per KV head at head_dim 512.", **_FL)
 CHOICE("prefill.attn.flash512", "bool", True, "FLASH512", kits=["gemma4"], kernels=["*_attention_flash2*"], rows=ROWS_PREFILL,
