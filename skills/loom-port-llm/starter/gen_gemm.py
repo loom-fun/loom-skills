@@ -684,6 +684,127 @@ def _split_dequant(fmt, wsrc, out, col):
     loads = [(_re.match(r"\s*(%\S+) = ", l).group(1), l.split("-> ")[-1].strip()) for l in addr if ".load " in l]
     return lines, addr, loads
 
+G32_FMTS = ("q4_k", "q6_k")
+
+
+def _g32_dequant(fmt, w, out, col):
+    """GEMM_M256_G32 (choice prefill.gemm.m256_g32): the m256 thread's 32 consecutive weights of one K-quant group in one
+    piece (lines, addr, loads as _split_dequant) -> %{out} vector<32xf16>. col (the step's K origin, a multiple of 64) is
+    uniform, so the block, page and shifts are uniform and the thread's own part is only %stage_ks (which 32-group of the
+    64): one header/scale decode instead of two, one 32-byte code load, word-wide bit work on 8 words."""
+    o = out
+    if fmt == "q4_k":
+        text = f'''
+      %{o}_super = index.div {col}, %c256 : index
+      %{o}_within = index.rem {col}, %c256 : index
+      %{o}_page = index.div %{o}_within, %c64 : index
+      %{o}_block_add = index.scale %{o}_super, %block_bytes : index, offset -> offset
+      %{o}_block_origin = index.add %w_row_origin, %{o}_block_add : offset
+      %{o}_header_view = buffer.view %{w}[%{o}_block_origin] : buffer -> view<4xi32>
+      %{o}_payload = index.add %{o}_block_origin, %sixteen : offset
+      %{o}_words = buffer.view %{w}[%{o}_payload] : buffer -> view<32xi32>
+      %{o}_pw = index.mul %{o}_page, %c8 : index
+      %{o}_header = vector.load %{o}_header_view[0] : view<4xi32> -> vector<4xi32>
+      %{o}_packed = vector.load %{o}_words[%{o}_pw] : view<32xi32> -> vector<8xi32>
+      %{o}_gv = index.madd %{o}_page, %c2, %stage_ks : index
+      %{o}_group = index.assume %{o}_gv [range(%{o}_gv, 0, 7)] : index
+      %{o}_scale, %{o}_minimum = func.call {META}(%{o}_header, %{o}_group) : (vector<4xi32>, index) -> (f32, f32)
+      %{o}_shifted = vector.shrui %{o}_packed, %g32_shift : vector<8xi32>
+      %{o}_masked = vector.andi %{o}_shifted, %g32_m15 : vector<8xi32>
+      %{o}_bytes = vector.bitcast %{o}_masked : vector<8xi32> to vector<32xi8>
+      %{o}_codes = vector.uitofp %{o}_bytes : vector<32xi8> to vector<32xf16>
+      %{o}_scale_h = scalar.fptrunc %{o}_scale : f32 to f16
+      %{o}_neg_min = scalar.negf %{o}_minimum : f32
+      %{o}_neg_min_h = scalar.fptrunc %{o}_neg_min : f32 to f16
+      %{o}_scales = vector.splat %{o}_scale_h : vector<32xf16>
+      %{o}_minima = vector.splat %{o}_neg_min_h : vector<32xf16>
+      %{o} = vector.fmaf %{o}_codes, %{o}_scales, %{o}_minima : vector<32xf16>'''
+    elif fmt == "q6_k":
+        # thread group j = 2 * (u % 2) + stage_ks of half u / 2 (u = within / 64): ql bytes half*64 + stage_ks*32 .. +32,
+        # qh bytes 128 + half*32 .. +32 (uniform), ql shift 4 * (u % 2), qh shift 2 * j, scales 192 + half*8 + 2j (+1 for
+        # the upper 16), d at 208.
+        text = f'''
+      %{o}_super = index.div {col}, %c256 : index
+      %{o}_within = index.rem {col}, %c256 : index
+      %{o}_u = index.div %{o}_within, %c64 : index
+      %{o}_half = index.div %{o}_u, %c2 : index
+      %{o}_jh = index.rem %{o}_u, %c2 : index
+      %{o}_j = index.madd %{o}_jh, %c2, %stage_ks : index
+      %{o}_block_add = index.scale %{o}_super, %block_bytes : index, offset -> offset
+      %{o}_block_origin = index.add %w_row_origin, %{o}_block_add : offset
+      %{o}_ql_i = index.madd %{o}_half, %c64, %g32_ks32 : index
+      %{o}_qh_i = index.madd %{o}_half, %c32, %c128 : index
+      %{o}_sc_a = index.madd %{o}_half, %c8, %g32_c192 : index
+      %{o}_sc_i = index.madd %{o}_j, %c2, %{o}_sc_a : index
+      %{o}_ql_off = index.cast %{o}_ql_i : index to offset
+      %{o}_qh_off = index.cast %{o}_qh_i : index to offset
+      %{o}_sc_off = index.cast %{o}_sc_i : index to offset
+      %{o}_ql_o = index.add %{o}_block_origin, %{o}_ql_off : offset
+      %{o}_qh_o = index.add %{o}_block_origin, %{o}_qh_off : offset
+      %{o}_sc_o = index.add %{o}_block_origin, %{o}_sc_off : offset
+      %{o}_d_o = index.add %{o}_block_origin, %g32_d208 : offset
+      %{o}_ql_v = buffer.view %{w}[%{o}_ql_o] : buffer -> view<8xi32>
+      %{o}_qh_v = buffer.view %{w}[%{o}_qh_o] : buffer -> view<8xi32>
+      %{o}_sc_v = buffer.view %{w}[%{o}_sc_o] : buffer -> view<2xi8>
+      %{o}_d_v = buffer.view %{w}[%{o}_d_o] : buffer -> view<1xf16>
+      %{o}_ql = vector.load %{o}_ql_v[0] : view<8xi32> -> vector<8xi32>
+      %{o}_qh = vector.load %{o}_qh_v[0] : view<8xi32> -> vector<8xi32>
+      %{o}_sc2 = vector.load %{o}_sc_v[0] : view<2xi8> -> vector<2xi8>
+      %{o}_dh = view.load %{o}_d_v[0] : view<1xf16> -> f16
+      %{o}_s1 = index.mul %{o}_jh, %c4 : index
+      %{o}_s2 = index.mul %{o}_j, %c2 : index
+      %{o}_s1_32 = index.cast %{o}_s1 : index to i32
+      %{o}_s2_32 = index.cast %{o}_s2 : index to i32
+      %{o}_s1_v = vector.splat %{o}_s1_32 : vector<8xi32>
+      %{o}_s2_v = vector.splat %{o}_s2_32 : vector<8xi32>
+      %{o}_lo_s = vector.shrui %{o}_ql, %{o}_s1_v : vector<8xi32>
+      %{o}_lo = vector.andi %{o}_lo_s, %g32_m15 : vector<8xi32>
+      %{o}_hi_s = vector.shrui %{o}_qh, %{o}_s2_v : vector<8xi32>
+      %{o}_hi_m = vector.andi %{o}_hi_s, %g32_m3 : vector<8xi32>
+      %{o}_hi = vector.shli %{o}_hi_m, %g32_f4 : vector<8xi32>
+      %{o}_qw = vector.ori %{o}_lo, %{o}_hi : vector<8xi32>
+      %{o}_q = vector.bitcast %{o}_qw : vector<8xi32> to vector<32xi8>
+      %{o}_codes = vector.uitofp %{o}_q : vector<32xi8> to vector<32xf16>
+      %{o}_d = scalar.extf %{o}_dh : f16 to f32
+      %{o}_bias32 = scalar.constant -32.0 : f32'''
+        for h in range(2):
+            text += f'''
+      %{o}_sc8_{h} = vector.extract %{o}_sc2[{h}] : vector<2xi8> -> i8
+      %{o}_scf{h} = scalar.sitofp %{o}_sc8_{h} : i8 to f32
+      %{o}_scale{h} = scalar.mulf %{o}_d, %{o}_scf{h} : f32
+      %{o}_offset{h} = scalar.mulf %{o}_scale{h}, %{o}_bias32 : f32
+      %{o}_scale_h{h} = scalar.fptrunc %{o}_scale{h} : f32 to f16
+      %{o}_offset_h{h} = scalar.fptrunc %{o}_offset{h} : f32 to f16
+      %{o}_scales{h} = vector.splat %{o}_scale_h{h} : vector<16xf16>
+      %{o}_offsets{h} = vector.splat %{o}_offset_h{h} : vector<16xf16>
+      %{o}_c{h} = vector.slice %{o}_codes[{16 * h}] : vector<32xf16> -> vector<16xf16>
+      %{o}_v{h} = vector.fmaf %{o}_c{h}, %{o}_scales{h}, %{o}_offsets{h} : vector<16xf16>'''
+    else:
+        raise ValueError(fmt)
+    lines = [l for l in text.strip("\n").split("\n") if l.strip()]
+    last = max(i for i, l in enumerate(lines) if ".load " in l)
+    addr = lines[: last + 1]
+    loads = [(_re.match(r"\s*(%\S+) = ", l).group(1), l.split("-> ")[-1].strip()) for l in addr if ".load " in l]
+    return lines, addr, loads
+
+
+def _g32_stores(fmt, out):
+    """(value, width, column offset) of the LDS stores of _g32_dequant's result"""
+    return [(f"%{out}", 32, 0)] if fmt == "q4_k" else [(f"%{out}_v0", 16, 0), (f"%{out}_v1", 16, 16)]
+
+
+G32_CONSTS = """  %g32_ks = index.rem %workitem, %c2 : index
+  %g32_shift_i = index.mul %g32_ks, %c4 : index
+  %g32_shift_32 = index.cast %g32_shift_i : index to i32
+  %g32_shift = vector.splat %g32_shift_32 : vector<8xi32>
+  %g32_m15 = vector.splati 252645135 : vector<8xi32>
+  %g32_m3 = vector.splati 50529027 : vector<8xi32>
+  %g32_f4 = vector.splati 4 : vector<8xi32>
+  %g32_ks32 = index.mul %g32_ks, %c32 : index
+  %g32_c192 = index.constant 192 : index
+  %g32_d208 = index.constant 208 : offset"""
+
+
 def gemm_big256(fmt, mode):
     """256-row WMMA GEMM: 256 threads (8 waves in a 4 x 2 grid), each wave 64 rows x 64 columns (4 x 4
     16 x 16 accumulators). store/acc: 256 x 128 tiles, swiglu: 256 rows x 64 outputs of each of gate and up.
@@ -797,8 +918,13 @@ def gemm_big256(fmt, mode):
   %wb_off = index.scale %wb_row, %c144_off : index, offset -> offset
   %w_wave_view = buffer.view %w_stage[%wb_off] : buffer -> view<{WVR}x72xf16>''')
     wsrc = "wsel" if two_w else "w"
-    slices = [("dqa", "%wcola", "%stage_col"), ("dqb", "%wcolb", "%stage_col1")]
-    parts = [(out, col, sc) + _split_dequant(fmt, wsrc, out, col) for out, col, sc in slices]
+    g32 = _on("GEMM_M256_G32") and fmt in G32_FMTS
+    if g32:
+        L.append(G32_CONSTS)
+        parts = [("dqg", "%wcolg", "%c0") + _g32_dequant(fmt, wsrc, "dqg", "%wcolg")]
+    else:
+        slices = [("dqa", "%wcola", "%stage_col"), ("dqb", "%wcolb", "%stage_col1")]
+        parts = [(out, col, sc) + _split_dequant(fmt, wsrc, out, col) for out, col, sc in slices]
     def addr_text(sfx, kvar):
         t = []
         for out, col, sc, lines, addr, loads in parts:
@@ -845,7 +971,12 @@ def gemm_big256(fmt, mode):
         for nm, ty in loads:
             text = _re.sub(_re.escape(nm) + r"\b", f"%cr_{nm[1:]}", text)
         L.append(text)
-        L.append(f"    vector.store %{out}, %w_stage_view[%stage_row, {sc}] : vector<16xf16>, view<{TW}x72xf16>")
+        if g32:
+            for v, wd, co in _g32_stores(fmt, out):
+                cc = "%stage_col" if co == 0 else "%stage_col1"
+                L.append(f"    vector.store {v}, %w_stage_view[%stage_row, {cc}] : vector<{wd}xf16>, view<{TW}x72xf16>")
+        else:
+            L.append(f"    vector.store %{out}, %w_stage_view[%stage_row, {sc}] : vector<16xf16>, view<{TW}x72xf16>")
     L.append("    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)")
     L.append("    %k_next_raw = index.add %k_origin, %c64 : index\n    %k_limit = index.sub %k, %c64 : index\n    %k_next = index.min %k_next_raw, %k_limit : index\n    %x_next_step = index.add %step, %c1 : index")
     L.append(addr_text("n", "%k_next"))
@@ -899,6 +1030,259 @@ def gemm_big256(fmt, mode):
             L.append(f"  vector.fragment.store<result> %v{r}{c}, %y_view[{row}, %oc{r}{c}] shape [%c16, %c16] : vector<8xf32>, view<256x{TN}xf32, %y_layout>")
     L.append("  kernel.return\n}\n")
     return "\n".join(L)
+
+
+def _on(k, d="0"):
+    return os.environ.get(k, d).strip().lower() not in ("", "0", "false", "no", "off")
+
+
+def gemm_big256_db(fmt, mode):
+    """GEMM_M256_DB (choice prefill.gemm.m256_db): gemm_big256 with double-buffered LDS stages of 32 K values.
+    Same tile and waves (256 threads, 4 x 2 waves of 64 x 64). Two stage pairs (activations 256 x 40 f16, weights
+    128 x 40; 60 KB, still two workgroups per WGP). One barrier per stage: the dequant and stores of stage s+1 sit in
+    the same barrier interval as the MMAs of stage s (other buffer), so a wave never waits between its stores and
+    its MMAs. Thread t stages activation row t (32 values) and one 16-value weight slice (row t/2, half t%2).
+    The K loop is unrolled by two so each half names its own buffers (no aliasing between the store and read)."""
+    f = FMT[fmt]
+    two_w = mode == "swiglu"
+    NT, TW, KS, ST = 256, 128, 32, 40
+    fence = _on("GEMM_M256_DB_FENCE", "1")
+    TN = TW // 2 if two_w else TW
+    cfr = 2 if two_w else 4
+    RF = 4
+    wave_cols = 16 * cfr
+    WVR = TW - (TN - wave_cols) - 15
+    name = f"{PREFIX}_gemm_{fmt}_{mode}_m256"
+    weights = ["w", "w2"] if two_w else ["w"]
+    k_min = 256 if f["block_values"] == 256 else 64
+    L = []
+    L.append(f'''kernel.def export("{name}") @{name}(%rows: index, %n: index) {{
+  %c1 = index.constant 1 : index
+  %c256 = index.constant 256 : index
+  %cnt = index.constant {NT} : index
+  %tn = index.constant {TN} : index
+  %row_tiles = index.div %rows, %c256 : index
+  %out_tiles = index.div %n, %tn : index
+  kernel.launch.config workgroups(%row_tiles, %out_tiles, %c1) workgroup_size(%cnt, %c1, %c1) : index
+}} launch(%rows_arg: index, %k_arg: index, %n_arg: index, %x: buffer, %scales: buffer, {", ".join(f"%{w}: buffer" for w in weights)}, %y: buffer) {{
+  %rows = index.assume %rows_arg [range(%rows_arg, 256, 8192), multiple_of(%rows_arg, 256)] : index
+  %k = index.assume %k_arg [range(%k_arg, {k_min}, 65536), multiple_of(%k_arg, {k_min})] : index
+  %n = index.assume %n_arg [range(%n_arg, {TN}, 262144), multiple_of(%n_arg, {TN})] : index
+  %origin = index.constant 0 : offset
+  %two = index.constant 2 : offset
+  %sixteen = index.constant 16 : offset
+  %four = index.constant 4 : offset
+  %block_bytes = index.constant {f["block_bytes"]} : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c4 = index.constant 4 : index
+  %c8 = index.constant 8 : index
+  %c16 = index.constant 16 : index
+  %c32 = index.constant 32 : index
+  %c64 = index.constant 64 : index
+  %c128 = index.constant 128 : index
+  %c256 = index.constant 256 : index
+  %tn = index.constant {TN} : index
+  %wrow_off = index.constant {2 * ST} : offset
+  %nibble_mask = vector.splati 252645135 : vector<4xi32>
+  %row_tile_count = index.div %rows, %c256 : index
+  %out_tile_count = index.div %n, %tn : index
+  %row_group_id = kernel.workgroup.id<x> : index
+  %out_group_id = kernel.workgroup.id<y> : index
+  %row_group = index.assume %row_group_id [lt(%row_group_id, %row_tile_count)] : index
+  %out_group = index.assume %out_group_id [lt(%out_group_id, %out_tile_count)] : index
+  %workitem_id = kernel.workitem.id<x> : index
+  %workitem = index.assume %workitem_id [range(%workitem_id, 0, {NT - 1})] : index
+  %subgroup = kernel.subgroup.id : index
+  %bounded_subgroup = index.assume %subgroup [range(%subgroup, 0, {NT // 32 - 1})] : index
+  %lane = kernel.subgroup.lane.id : index
+  %lane_row = index.rem %lane, %c16 : index
+  %wave_row_group = index.div %bounded_subgroup, %c2 : index
+  %wave_col_group = index.rem %bounded_subgroup, %c2 : index
+  %wave_row_value = index.mul %wave_row_group, %c64 : index
+  %wave_row = index.assume %wave_row_value [range(%wave_row_value, 0, 192)] : index''')
+    for r in range(1, RF):
+        L.append(f"  %wave_row{r}_c = index.constant {16 * r} : index\n  %wave_row{r} = index.add %wave_row, %wave_row{r}_c : index")
+    L.append(f'''  %wave_cols = index.constant {wave_cols} : index
+  %wave_col_value = index.mul %wave_col_group, %wave_cols : index
+  %wave_col = index.assume %wave_col_value [range(%wave_col_value, 0, {TN - wave_cols})] : index
+  %row_origin = index.mul %row_group, %c256 : index
+  %out_origin = index.mul %out_group, %tn : index
+  %blocks = index.div %k, %c{f["block_values"]} : index
+  %row_bytes = index.scale %blocks, %block_bytes : index, offset -> offset
+  %x_view = buffer.view %x[%origin] : buffer -> view<[%rows]x[%k]xf16>
+  %s_view = buffer.view %scales[%origin] : buffer -> view<[%rows]x2xf32>
+  %x_bytes = index.constant {256 * ST * 2} : offset
+  %w_bytes = index.constant {TW * ST * 2} : offset''')
+    for b in range(2):
+        L.append(f'''  %x_stage{b} = buffer.alloca<workgroup> align(16) %x_bytes : buffer
+  %x_stage_view{b} = buffer.view %x_stage{b}[%origin] : buffer -> view<256x{ST}xf16>
+  %w_stage{b} = buffer.alloca<workgroup> align(16) %w_bytes : buffer
+  %w_stage_view{b} = buffer.view %w_stage{b}[%origin] : buffer -> view<{TW}x{ST}xf16>''')
+    L.append(f'''  %x_srow = index.div %workitem, %c2 : index
+  %x_srow1 = index.add %x_srow, %c128 : index
+  %x_scol_h = index.rem %workitem, %c2 : index
+  %x_scol = index.mul %x_scol_h, %c16 : index
+  %x_row_value = index.add %row_origin, %x_srow : index
+  %x_row = index.assume %x_row_value [lt(%x_row_value, %rows)] : index
+  %x_row1_value = index.add %x_row, %c128 : index
+  %x_row1 = index.assume %x_row1_value [lt(%x_row1_value, %rows)] : index
+  %stage_row = index.div %workitem, %c2 : index
+  %stage_ks = index.rem %workitem, %c2 : index
+  %stage_col = index.mul %stage_ks, %c16 : index''')
+    if two_w:
+        L.append(f'''  %half_tw = index.constant {TN} : index
+  %w_is_up = index.cmp uge, %stage_row, %half_tw : index
+  %w_local_up = index.sub %stage_row, %half_tw : index
+  %w_local = scf.select %w_is_up, %w_local_up, %stage_row : index
+  %w_out_row_value = index.add %out_origin, %w_local : index
+  %wsel = scf.select %w_is_up, %w2, %w : buffer''')
+    else:
+        L.append("  %w_out_row_value = index.add %out_origin, %stage_row : index")
+    L.append(f'''  %w_out_row = index.assume %w_out_row_value [lt(%w_out_row_value, %n)] : index
+  %w_row_origin = index.scale %w_out_row, %row_bytes : index, offset -> offset
+  %zero8 = vector.splatf 0.0 : vector<8xf32>
+  %init = vector.fragment<init> %zero8 shape [%c16, %c16] : vector<8xf32>
+  %ks32 = index.constant {KS} : index
+  %k_steps = index.div %k, %ks32 : index
+  %k_pairs = index.div %k_steps, %c2 : index
+  %k_last = index.sub %k_steps, %c1 : index
+  %wb_row = index.add %wave_col, %lane_row : index
+  %wb_off = index.scale %wb_row, %wrow_off : index, offset -> offset''')
+    for b in range(2):
+        L.append(f"  %w_wave_view{b} = buffer.view %w_stage{b}[%wb_off] : buffer -> view<{WVR}x{ST}xf16>")
+    wsrc = "wsel" if two_w else "w"
+    out, col = "dq", "%wcol"
+    lines, addr, loads = _split_dequant(fmt, wsrc, out, col)
+
+    def _kc(sfx, svar):
+        """%kc<sfx>: the K offset of stage svar, clamped to the last stage (a stage past the end reloads the last one)"""
+        return (f"    %sm{sfx} = index.min {svar}, %k_last : index\n    %sa{sfx} = index.assume %sm{sfx} [lt(%sm{sfx}, %k_steps)] : index\n"
+                f"    %kc{sfx} = index.mul %sa{sfx}, %ks32 : index")
+
+    def load_text(sfx, kvar):
+        """global loads of the stage at K offset kvar (clamped to the last stage) -> names with suffix sfx"""
+        c2 = col + sfx
+        t = [_kc(sfx, kvar), f"    {c2} = index.add %kc{sfx}, %stage_col : index"]
+        body = "\n".join(addr).replace(col + " ", c2 + " ").replace(col + ",", c2 + ",")
+        t.append(_re.sub(rf"%{out}_", f"%{out}{sfx}_", body))
+        t.append(f"    %xc{sfx} = index.add %kc{sfx}, %x_scol : index")
+        t.append(f"    %x_raw{sfx} = vector.load %x_view[%x_row, %xc{sfx}] : view<[%rows]x[%k]xf16> -> vector<16xf16>")
+        t.append(f"    %x_raw1{sfx} = vector.load %x_view[%x_row1, %xc{sfx}] : view<[%rows]x[%k]xf16> -> vector<16xf16>")
+        return "\n".join(t)
+
+    def store_text(sfx, kvar, buf, cur):
+        """dequantize the carried raw values `cur` (stage at K offset kvar) and store the stage into buffer buf"""
+        c2 = col + sfx
+        t = [_kc(sfx, kvar), f"    {c2} = index.add %kc{sfx}, %stage_col : index"]
+        text = "\n".join(l for l in lines if ".load " not in l).replace(col + " ", c2 + " ").replace(col + ",", c2 + ",")
+        for nm, ty in loads:
+            text = _re.sub(_re.escape(nm) + r"\b", cur[nm], text)
+        text = _re.sub(rf"%{out}_", f"%{out}{sfx}_", text)
+        text = _re.sub(rf"%{out}\b(?!_)", f"%{out}{sfx}", text)
+        t.append(text)
+        t.append(f"    vector.store %{out}{sfx}, %w_stage_view{buf}[%stage_row, %stage_col] : vector<16xf16>, view<{TW}x{ST}xf16>")
+        t.append(f"    vector.store {cur['x']}, %x_stage_view{buf}[%x_srow, %x_scol] : vector<16xf16>, view<256x{ST}xf16>")
+        t.append(f"    vector.store {cur['x1']}, %x_stage_view{buf}[%x_srow1, %x_scol] : vector<16xf16>, view<256x{ST}xf16>")
+        return "\n".join(t)
+
+    carried = [(nm, ty) for nm, ty in loads] + [("x", "vector<16xf16>"), ("x1", "vector<16xf16>")]
+    def names(sfx):
+        return {nm: (f"%{out}{sfx}_" + nm[len(out) + 2:] if nm not in ("x", "x1") else f"%x_raw{nm[1:]}{sfx}") for nm, _ in carried}
+    accs = [f"{wi}r{r}c{c}" for wi in range(len(weights)) for r in range(RF) for c in range(cfr)]
+    rowv = ["%wave_row"] + [f"%wave_row{r}" for r in range(1, RF)]
+
+    def mma_text(buf, sfx, cur):
+        t = []
+        for kk in range(KS // 16):
+            t.append(f"    %fk{sfx}{kk} = index.constant {kk * 16} : index")
+            for r in range(RF):
+                t.append(f"    %l{sfx}{r}_{kk} = vector.fragment.load<lhs> %x_stage_view{buf}[{rowv[r]}, %fk{sfx}{kk}] shape [%c16, %c16] : view<256x{ST}xf16> -> vector<16xf16>")
+            for wi in range(len(weights)):
+                for c in range(cfr):
+                    t.append(f'''    %wr{sfx}{wi}{c}_{kk} = index.constant {wi * TN + c * 16} : index
+    %rv{sfx}{wi}{c}_{kk} = vector.load %w_wave_view{buf}[%wr{sfx}{wi}{c}_{kk}, %fk{sfx}{kk}] : view<{WVR}x{ST}xf16> -> vector<16xf16>
+    %rf{sfx}{wi}{c}_{kk} = vector.fragment<rhs> %rv{sfx}{wi}{c}_{kk} shape [%c16, %c16] : vector<16xf16>''')
+            for wi in range(len(weights)):
+                for c in range(cfr):
+                    for r in range(RF):
+                        a = f"{wi}r{r}c{c}"
+                        t.append(f"    %m{sfx}{a}_{kk} = vector.mma %l{sfx}{r}_{kk}, %rf{sfx}{wi}{c}_{kk}, {cur[a]} : vector<16xf16>, vector<16xf16>, vector<8xf32>")
+                        cur[a] = f"%m{sfx}{a}_{kk}"
+        return "\n".join(t)
+
+    # prologue: stage 0 -> buffer 0; stage 1 raw values in registers
+    L.append(load_text("p0", "%c0").replace("    ", "  ", 1))
+    L.append(store_text("s0", "%c0", 0, names("p0")))
+    L.append(load_text("p1", "%c1"))
+    L.append("  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)")
+    p1 = names("p1")
+    L.append("  " + ", ".join(f"%o{a}" for a in accs) + ", " + ", ".join(f"%unused_{i}" for i in range(len(carried))) +
+             " = scf.for %pair = [%c0 to %k_pairs step %c1](" + ", ".join(f"%i{a} = %init : vector<8xf32>" for a in accs) + ", " +
+             ", ".join(f"%cr{i} = {p1[nm]} : {ty}" for i, (nm, ty) in enumerate(carried)) + ") -> (" +
+             ", ".join("vector<8xf32>" for _ in accs) + ", " + ", ".join(ty for _, ty in carried) + ") {")
+    cr = {nm: f"%cr{i}" for i, (nm, _) in enumerate(carried)}
+    cur = {a: f"%i{a}" for a in accs}
+    L.append("""    %s0 = index.mul %pair, %c2 : index
+    %k1 = index.add %s0, %c1 : index
+    %k2 = index.add %s0, %c2 : index
+    %k3 = index.add %k2, %c1 : index""")
+    # half A: MMAs on buffer 0 (stage 2i); store stage 2i+1 (carried) into buffer 1; load stage 2i+2
+    L.append(store_text("a", "%k1", 1, cr))
+    L.append(load_text("na", "%k2"))
+    L.append(mma_text(0, "a", cur))
+    L.append("    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)")
+    if fence:   # keep half B's dequant (of the raw values loaded in half A) out of half A's MMAs: it would wait on those loads
+        L.append("    scf.schedule.fence")
+    # half B: MMAs on buffer 1 (stage 2i+1); store stage 2i+2 into buffer 0; load stage 2i+3
+    L.append(store_text("b", "%k2", 0, names("na")))
+    L.append(load_text("nb", "%k3"))
+    L.append(mma_text(1, "b", cur))
+    L.append("    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)")
+    if fence:
+        L.append("    scf.schedule.fence")
+    nb = names("nb")
+    L.append("    scf.yield " + ", ".join(cur[a] for a in accs) + ", " + ", ".join(nb[nm] for nm, _ in carried) + " : " +
+             ", ".join("vector<8xf32>" for _ in accs) + ", " + ", ".join(ty for _, ty in carried) + "\n  }")
+    L.append(f'''  %inv_view = buffer.view %x_stage0[%origin] : buffer -> view<256x16xf32>
+  %inv_row_value = index.add %row_origin, %workitem : index
+  %inv_row = index.assume %inv_row_value [lt(%inv_row_value, %rows)] : index
+  %inverse = view.load %s_view[%inv_row, %c1] : view<[%rows]x2xf32> -> f32
+  %inverse16 = vector.splat %inverse : vector<16xf32>
+  vector.store %inverse16, %inv_view[%workitem, %c0] : vector<16xf32>, view<256x16xf32>
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)''')
+    for r in range(RF):
+        L.append(f"  %inv{r} = vector.fragment.load<result> %inv_view[{rowv[r]}, %c0] shape [%c16, %c16] : view<256x16xf32> -> vector<8xf32>")
+    L.append(f'''  %y_layout = encoding.layout.strided [%n, %c1] : encoding<layout>
+  %tile_first = index.madd %row_origin, %n, %out_origin : index
+  %tile_offset = index.scale %tile_first, %four : index, offset -> offset
+  %y_view = buffer.view %y[%tile_offset] : buffer -> view<256x{TN}xf32, %y_layout>''')
+    for r in range(RF):
+        for c in range(cfr):
+            row = rowv[r]
+            L.append(f"  %oc{r}{c}_c = index.constant {c * 16} : index\n  %oc{r}{c} = index.add %wave_col, %oc{r}{c}_c : index")
+            if two_w:
+                L.append(f'''  %g{r}{c} = vector.mulf %o0r{r}c{c}, %inv{r} : vector<8xf32>
+  %u{r}{c} = vector.mulf %o1r{r}c{c}, %inv{r} : vector<8xf32>
+  %sg{r}{c} = vector.siluf<afn> %g{r}{c} : vector<8xf32>
+  %v{r}{c} = vector.mulf %sg{r}{c}, %u{r}{c} : vector<8xf32>''')
+            else:
+                L.append(f"  %v{r}{c}_s = vector.mulf %o0r{r}c{c}, %inv{r} : vector<8xf32>")
+                if mode == "acc":
+                    L.append(f"  %old{r}{c} = vector.fragment.load<result> %y_view[{row}, %oc{r}{c}] shape [%c16, %c16] : view<256x{TN}xf32, %y_layout> -> vector<8xf32>\n  %v{r}{c} = vector.addf %old{r}{c}, %v{r}{c}_s : vector<8xf32>")
+                else:
+                    L.append(f"  %v{r}{c} = vector.addf %v{r}{c}_s, %zero8 : vector<8xf32>")
+            L.append(f"  vector.fragment.store<result> %v{r}{c}, %y_view[{row}, %oc{r}{c}] shape [%c16, %c16] : vector<8xf32>, view<256x{TN}xf32, %y_layout>")
+    L.append("  kernel.return\n}\n")
+    return "\n".join(L)
+
+
+def gemm_m256_variant(fmt, mode):
+    """The gfx11 m256 kernel text the env switches select (None: the default gemm_big256)."""
+    if _on("GEMM_M256_DB"):
+        return gemm_big256_db(fmt, mode)
+    return None
 
 
 def gemm_q8(fmt, mode):
@@ -1228,5 +1612,10 @@ if __name__ == "__main__":
             else:
                 out.append(_rdna4.with_twins(post(gemm_big(fmt, mode))))
                 if on256:
-                    out.append(_rdna4.with_twins(post(gemm_big256(fmt, mode))))
+                    base256 = post(gemm_big256(fmt, mode))
+                    var256 = gemm_m256_variant(fmt, mode)
+                    if var256 is None:
+                        out.append(_rdna4.with_twins(base256))
+                    else:   # gfx11 variant; the gfx12 twin still comes from the default kernel
+                        out.append(post(var256) + _rdna4.with_twins(base256)[len(base256):])
     sys.stdout.write("\n".join(out))
