@@ -1083,7 +1083,43 @@ def gemm_big256(fmt, mode, fmt2=None, g32=None, bal=None, a32_=None):
     carried.append(("%cr_x", "%x_rawp", "%x_rawn", "vector<32xf16>"))
     carried.append(("%cr_x1", "%x_rawp1", "%x_rawn1", "vector<32xf16>"))
     accs = [f"{wi}r{r}c{c}" for wi in range(len(weights)) for r in range(RF) for c in range(cfr)]
-    L.append(addr_text("p", "%c0").replace("    ", "  ", 1))
+    # GEMM_M256_EDQ (choice prefill.gemm.m256_edq): the next step's weights are dequantized right after this step's MMAs (before the
+    # overwrite barrier) and carried as f16, so the window between the overwrite barrier and the publication barrier holds only
+    # the LDS stores.
+    edq = (os.environ.get("GEMM_M256_EDQ", "0").strip().lower() not in ("", "0", "false", "no", "off")) and not (fmt2 and not bal)
+    def dq_block(kvar, sfx, lmap):
+        """dequant of the loads lmap names (original load name -> value) at K origin kvar: (lines, [(value, row, col, width)])"""
+        out_l, st = [], []
+        plist = [(groups[0][2][0], "%stage_row", groups[0]), (groups[1][2][0], "%stage_row_up", groups[1])] if bal else [(pp, "%stage_row", groups[0]) for pp in parts]
+        for (out, col, sc, lines, addr, loads), row, (fm, g, _) in plist:
+            c2 = col + sfx
+            out_l.append(f"    {c2} = index.add {kvar}, {sc} : index")
+            text = "\n".join(l for l in lines if ".load " not in l)
+            text = _re.sub(_re.escape(col) + r"(?![A-Za-z0-9])", c2, text)
+            for nm, ty in loads:
+                text = _re.sub(_re.escape(nm) + r"(?![A-Za-z0-9_])", lmap[nm], text)
+            text = _re.sub(rf"%{out}(?![A-Za-z0-9])", f"%{out}{sfx}", text)
+            out_l.append(text)
+            if g and not bal:
+                for v, wd, co in _g32_stores(fm, out):
+                    st.append((v.replace(f"%{out}", f"%{out}{sfx}", 1), row, "%stage_col" if co == 0 else "%stage_col1", wd))
+            else:
+                st.append((f"%{out}{sfx}", row, sc, 16))
+        return out_l, st
+    if edq:
+        pmap, nmap = {}, {}
+        for out, col, sc, lines, addr, loads in parts:
+            for nm, ty in loads:
+                pmap[nm] = "%" + nm[1:].replace(out + "_", out + "p_", 1)
+                nmap[nm] = "%" + nm[1:].replace(out + "_", out + "n_", 1)
+        L.append(addr_text("p", "%c0").replace("    ", "  ", 1))
+        pl, pst = dq_block("%c0", "e0", pmap)
+        _, nst = dq_block("%k_next", "e", nmap)
+        L += pl
+        edq_st = pst
+        carried = [(f"%cr_dq{i}", v, nst[i][0], f"vector<{wd}xf16>") for i, (v, row, cc, wd) in enumerate(pst)] + carried[-2:]
+    else:
+        L.append(addr_text("p", "%c0").replace("    ", "  ", 1))
     L.append("  " + ", ".join(f"%o{a}" for a in accs) + ", " + ", ".join(f"%unused_{i}" for i in range(len(carried))) + " = scf.for %step = [%c0 to %k_steps step %c1](" +
              ", ".join(f"%i{a} = %init : vector<8xf32>" for a in accs) + ", " + ", ".join(f"{c[0]} = {c[1]} : {c[3]}" for c in carried) + ") -> (" +
              ", ".join("vector<8xf32>" for _ in accs) + ", " + ", ".join(c[3] for c in carried) + ") {")
@@ -1109,7 +1145,9 @@ def gemm_big256(fmt, mode, fmt2=None, g32=None, bal=None, a32_=None):
         v = st[0][0]
         return [f"    {v}_h0 = vector.slice {v}[0] : vector<32xf16> -> vector<16xf16>",
                 f"    {v}_h1 = vector.slice {v}[16] : vector<32xf16> -> vector<16xf16>"], [f"{v}_h0", f"{v}_h1"]
-    if bal:
+    if edq:
+        L += [f"    vector.store %cr_dq{i}, %w_stage_view[{row}, {cc}] : vector<{wd}xf16>, view<{TW}x72xf16>" for i, (v, row, cc, wd) in enumerate(edq_st)]
+    elif bal:
         (fa, ga, pa), (fb, gb, pb) = groups
         L += compute(pa) + [f"    vector.store %{pa[0][0]}, %w_stage_view[%stage_row, %stage_col] : vector<16xf16>, view<{TW}x72xf16>"]
         L += compute(pb) + [f"    vector.store %{pb[0][0]}, %w_stage_view[%stage_row_up, %stage_col] : vector<16xf16>, view<{TW}x72xf16>"]
@@ -1153,6 +1191,8 @@ def gemm_big256(fmt, mode, fmt2=None, g32=None, bal=None, a32_=None):
                     a = f"{wi}r{r}c{c}"
                     L.append(f"    %m{a}_{kk} = vector.mma %l{r}_{kk}, %rf{wi}{c}_{kk}, {cur[a]} : vector<16xf16>, vector<16xf16>, vector<8xf32>")
                     cur[a] = f"%m{a}_{kk}"
+    if edq:
+        L += dq_block("%k_next", "e", nmap)[0]
     L.append("    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)")
     L.append("    scf.yield " + ", ".join(cur[a] for a in accs) + ", " + ", ".join(c[2] for c in carried) + " : " + ", ".join("vector<8xf32>" for _ in accs) + ", " + ", ".join(c[3] for c in carried) + "\n  }")
     L.append(f'''  %inv_view = buffer.view %x_stage[%origin] : buffer -> view<256x16xf32>

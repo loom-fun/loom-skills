@@ -289,6 +289,9 @@ CHOICE("prefill.gemm.m256_a32", "bool", False, "GEMM_M256_A32", from_pr="q38pf-g
        "scalar base instead of 64-bit per-load address arithmetic; every m256 weight tensor must be < 2 GiB), the dequant column split "
        "into the uniform superblock and the thread's slice, and the swiglu gate/up buffer choice from the subgroup id. q6_k store loop "
        "VALU 227 -> 175 per 64 WMMA, q8_0 94 -> 80, mixed 222 -> 177. The gfx12 twins keep the default addressing.", **_PG)
+CHOICE("prefill.gemm.m256_edq", "bool", False, "GEMM_M256_EDQ", from_pr="q38pf-gemm2", devices=["rdna3"],
+       doc="gfx11 m256 GEMM: the next step's weights dequantized right after this step's MMAs (before the overwrite barrier) and "
+       "carried as f16, so only the LDS stores sit between the overwrite and publication barriers (not the mixed branch form).", **_PG)
 CHOICE("prefill.gemm.m256_xg", "int", 0, "GEMM_M256_XG", from_pr="q38pf-gemm2", devices=["rdna3"],
        doc="gfx11 m256 GEMM with A fragments read straight from global memory (gen_gemm_xg): 1 = 256-row tiles, 2 = 512-row "
        "tiles (loses: latency-bound A loads).", **_PG)
