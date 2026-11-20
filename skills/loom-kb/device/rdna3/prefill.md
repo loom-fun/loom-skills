@@ -51,6 +51,29 @@
   - Where the time goes at 123 W (swiglu, 1024 rows): g32 35.8 TFLOP/s; no barriers 37.5 (+4.6 %), no LDS fragment reads 36.4
     (+1.8 %), both 39.0 (+8.9 %). The barriers are the largest in-kernel cost left.
 
+- **Structural m256 levers (q38pf gemm2 lane, Strix Halo 123 W, 2026-11-20; log: campaign lanes/gemm2/LOG.md).** Kernel numbers are
+  local kbench, 1024 rows, real Qwen3.8-27B weights, production tile order:
+  - `GEMM_M256_MIXED_BAL` (`prefill.gemm.m256_mixed_bal`, rdna3): the mixed q4_k/q6_k swiglu with every thread staging 16 gate + 16 up
+    values. The branch form ran at its q6_k waves' pace (production profile 28.6 TFLOP/s vs 38 for the q4_k swiglu): 14.38 -> 10.33 ms
+    (-28 %); prefill +1.9..2.4 % on every row. Lesson: a workgroup barrier makes the stage cost the slowest wave's, so split costly
+    formats across lanes, not across waves.
+  - `GEMM_M256_A32` (`prefill.gemm.m256_a32`, rdna3): a weight row origin proven < 2^31 lets the loads use the buffer's scalar base +
+    a 32-bit offset (no 64-bit v_add_co/v_mul_hi per load) and the dequant column splits into the uniform superblock + the thread's
+    slice: q6_k loop VALU 227 -> 175 per 64 WMMA, q8_0 94 -> 80, mixed 222 -> 177; kernels q6_k -3.4 %, mixed -2 %, q4_k tie.
+  - Lost, with what bound them: activations straight from global into A fragments (`GEMM_M256_XG`; frees LDS for 512-row tiles or a
+    double-buffered weight stage): -7 % at 256 rows, -45 % at 512 (A loads issue one kk ahead, a full step ahead needs 128 VGPRs;
+    x streams from MALL). Early dequant before the overwrite barrier (`GEMM_M256_EDQ`): -24..-30 % (the loads get one MMA phase
+    instead of a step). Wave specialization (`GEMM_M256_WS=1`, 8 WMMA + 4 producer waves, 2-slot 32-K LDS ring, LDS counters):
+    -11 %; producers queue their dequant VALU behind 32-cycle WMMAs of the same SIMD (no `s_setprio`). Software split barrier
+    (`GEMM_M256_WS=2`, every wave fills the next slot and reads the current one, per-wave counters): -33 %; a 2-slot ring is one
+    effective barrier per 32-K step (now polled) and 3 slots do not fit 64 KB. LDS counters work in Loom 0.2.0 on gfx11
+    (`view.atomic.load` acquire / `view.atomic.rmw` release -> ds_load + s_waitcnt + buffer_gl0_inv / waitcnt + ds_add_rtn).
+  - Load-time repacked weights priced, not built: the code expansion already compiles to the magic-number form (v_perm with 0x64
+    bytes, v_pk_add -1024, v_pk_fma: 48 VALU per 32 values), which a pre-arranged layout would also need; pre-expanded f16 scales
+    remove the 27-VALU header decode, measured by ablation at -0.6 % on the q4_k swiglu.
+  - Ablations at 123 W (swiglu, clock sampled): base 15.1 TFLOP/s per GHz; no barriers 15.9; no barriers and no dequant 17.1; register-
+    only WMMA reaches 18.4. No dequant alone is not faster (the dequant VALU also covers the activation loads).
+
 ## WMMA runs on the VALU (why m256 helps)
 
 On RDNA3 WMMA runs on the SIMD's VALU, so the weight dequant serializes with it: the m128 GEMM spends ~190 VALU instructions per 32
