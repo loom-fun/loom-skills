@@ -194,7 +194,7 @@ def gdn_kernels(cfg, eps):
         view.store %val_u{u}, %out_view[%token, %cs{u}] : f32, view<[%tokens]x{C}xf32>
       }}""")
     conv_unrolled = "\n".join(cu_parts + cu_stores)
-    fz_ = _row_lanes(DK, DV) and chunk11_fuse(G)
+    fz_ = _row_lanes(DK, DV) and (chunk11_fuse(G) or fused11_mode(G))
     CONV_SKIP_OPEN = f"    %cv_long = index.constant {PF_SPAN} : index\n    %cv_short = index.cmp ult, %length, %cv_long : index\n    scf.if %cv_short {{\n" if fz_ else ""
     CONV_SKIP_CLOSE = "    }\n" if fz_ else ""
     T.append(f"""
@@ -533,8 +533,16 @@ kernel.def export("g_gdn_recurrence") @g_gdn_recurrence(%spans: index) {{
         elif c11:   # single-form models: g_gdn_recurrence takes spans under PF_SPAN, g_gdn_chunk (launched in GEMM epochs) the rest
             from gen_gdn_chunk import chunk_kernel
             fz, gt = chunk11_fuse(G), chunk11_gate(G)
-            T.append(chunk_kernel(G, NG, LB, guard_open, guard_close, arch="rdna3", fuse=fz, eps=eps, gate=gt))
-            if rdna4_twins() and (fz or gt) and not chunk_mode(G):   # a fused launch has no sequential gfx12 counterpart: the gfx12 chunk kernel
+            if fused11_mode(G):   # the gfx11 fused pair (and its gfx12 twins) on the spans of PF_SPAN+ tokens
+                from gen_gdn_fused import fused_kernels
+                T.append(fused_kernels(G, NG, LB, eps, _V_GROUPED[0], _V_GROUPED[1], guard_open, guard_close, arch="rdna3", span_min=PF_SPAN))
+                if rdna4_twins():
+                    T.append(fused_kernels(G, NG, LB, eps, _V_GROUPED[0], _V_GROUPED[1], guard_open, guard_close, rank=False, span_min=PF_SPAN))
+            else:
+                T.append(chunk_kernel(G, NG, LB, guard_open, guard_close, arch="rdna3", fuse=fz, eps=eps, gate=gt))
+            if fused11_mode(G):
+                pass
+            elif rdna4_twins() and (fz or gt) and not chunk_mode(G):   # a fused launch has no sequential gfx12 counterpart: the gfx12 chunk kernel
                 T.append(chunk_kernel(G, NG, LB, guard_open, guard_close, fuse=fz, eps=eps, gate=gt))
             elif rdna4_twins() and not chunk_mode(G):   # gfx12 twin of g_gdn_chunk: the sequential kernel of the long spans
                 T.append(_as_rdna4(_recurrence_rows(G, NG, LB, *RL, guard_open, guard_close, "long").replace("g_gdn_recurrence", "g_gdn_chunk"),
@@ -599,7 +607,7 @@ kernel.def export("g_gdn_norm_gate") @g_gdn_norm_gate(%tokens: index) {{
   kernel.return
 }}
 """)
-    if chunk11_gate(G):   # the norm-gate of the spans under PF_SPAN beside g_gdn_chunk's gated epilogue
+    if chunk11_gate(G) or fused11_mode(G):   # the norm-gate of the spans under PF_SPAN beside g_gdn_chunk's gated epilogue / g_gdn_fb
         T.append(_norm_gate_s(T[-1]))
     text = "\n".join(T)
     if not RL and os.environ.get("GDN_PREFETCH", "1") not in ("", "0"):
@@ -611,7 +619,10 @@ kernel.def export("g_gdn_norm_gate") @g_gdn_norm_gate(%tokens: index) {{
         text += "\n" + fold_kernels(G, NG, LB)
         if defer_enabled(G):
             text += "\n" + defer_kernels(G, NG)
-    mode = chunk_mode(G)
+    mode = chunk_mode(G) if not fused11_mode(G) else None
+    if fused11_mode(G) and chunk_mode(G) and rdna4_twins():   # the gfx12 sequential twin of the short spans
+        tw = _recurrence_rows(G, NG, LB, *RL, guard_open, guard_close, "short")
+        text = text + "\n" + _as_rdna4(tw, "g_gdn_recurrence")
     if mode:
         from gen_gdn_chunk import chunk_kernel
         ck = chunk_kernel(G, NG, LB, guard_open, guard_close, fuse=chunk11_fuse(G), eps=eps, gate=chunk11_gate(G))
@@ -626,7 +637,7 @@ kernel.def export("g_gdn_norm_gate") @g_gdn_norm_gate(%tokens: index) {{
                 twin += "\n" + rt.replace('kernel.def export("g_gdn_recurrence_rec") @g_gdn_recurrence_rec(', 'kernel.def target(@rdna4) export("g_gdn_recurrence_rec_rdna4") @g_gdn_recurrence_rec_rdna4(', 1)
             ck = twin + "\n" + ck
         text = text + "\n" + ck
-    if fused_mode(G):   # gfx12 fused prefill (gen_gdn_fused.py): g_gdn_fa_rdna4 + g_gdn_fb_rdna4 replace conv .. norm_gate in GEMM-shape epochs
+    if fused_mode(G) and not fused11_mode(G):   # gfx12 fused prefill (gen_gdn_fused.py): g_gdn_fa_rdna4 + g_gdn_fb_rdna4 replace conv .. norm_gate in GEMM-shape epochs
         from gen_gdn_fused import fused_kernels
         text = text + "\n" + fused_kernels(G, NG, LB, eps, _V_GROUPED[0], _V_GROUPED[1], guard_open, guard_close)
     return text
@@ -702,6 +713,16 @@ def _norm_gate_s(text):
     if "%c0 = index.constant 0 : index" not in k:
         k = k.replace(anchor, "  %c0 = index.constant 0 : index\n" + anchor, 1)
     return k
+
+
+def fused11_mode(G):
+    """prefill.gdn.fused11 (GDN_FUSED11, with hybrid.gdn.chunk11 in group mode, 128 x 128 heads, conv 4): the spans of PF_SPAN+ tokens run the
+    gfx11 fused pair g_gdn_fa + g_gdn_fb (gen_gdn_fused.py arch rdna3; gfx12 twins g_gdn_fa_rdna4 / g_gdn_fb_rdna4 restricted the same way):
+    conv, q / k norms, the WY solve and W / U / P in parallel per (head, chunk), then the serial state pass with the norm-gate epilogue.
+    The chain (g_gdn_conv / g_gdn_recurrence / g_gdn_norm_gate_s) keeps the shorter spans of the same epoch."""
+    if os.environ.get("GDN_FUSED11", "") in ("", "0", "off", "no", "false"):
+        return False
+    return chunk11_mode(G) == "group" and G["K"] == 4
 
 
 def fused_mode(G):

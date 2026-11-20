@@ -1417,8 +1417,10 @@ def _chunk_case(cname, pre, spans_, kerns, seed=None):
 if cfg.get("recurrent_layers") and _chunk:
     # the launch of the long spans: gfx11 g_gdn_chunk (its gfx12 twin g_gdn_chunk_rdna4 on gfx12), the pf kernel in "pf" mode, else the gfx12 kernel
     _ck = {"group": "g_gdn_chunk", "pf": "g_gdn_recurrence_pf"}.get(_c11, "g_gdn_chunk_rdna4")
-    from gen_gdn import chunk11_fuse as _cf11, chunk11_gate as _cg11
-    _fz, _gt = _cf11(gdn_geometry(cfg)), _cg11(gdn_geometry(cfg))
+    from gen_gdn import chunk11_fuse as _cf11, chunk11_gate as _cg11, fused11_mode as _f11m
+    _fz, _gt, _f11 = _cf11(gdn_geometry(cfg)), _cg11(gdn_geometry(cfg)), _f11m(gdn_geometry(cfg))
+    if _f11:   # the fused pair takes the long spans (case gdn_chunkf_serve): conv skips them, the norm-gate is g_gdn_norm_gate_s
+        _fz = _gt = True
     if not (_fz or _gt):   # the fused chunk kernel reads the raw projection / writes the gated output (case gdn_chunkf_serve)
         _chunk_case("gdn_chunk_spans", "gc", [(130, 0, False), (64, 10, True), (97, 0, False)], [_ck])
     if _c11 and not (_fz or _gt):
@@ -1471,6 +1473,13 @@ if cfg.get("recurrent_layers") and _chunk and _c11 == "group" and (_fz or _gt):
     IT = f"tensor<{t}x{2 * HK}xf32>"; HT = f"tensor<{t}x{HV}xf32>"; VT = f"tensor<{t}x{VD}xf32>"
     _oscale = float(np.abs(o).max()); _sscale = float(max(np.abs(S).max() for _, S, _ in finals))
     _rec = f"(%t, %spans, %layer, %meta, %orig, %arena, @X@, %inv, %alpha, %beta, %a, %dt, %raw@W@) : [index](index, index, index, {MT}, {OT}, {AT}, {XT}, {IT}, {HT}, {HT}, tensor<{HV}xf32>, tensor<{HV}xf32>, {VT}@WT@)"
+    _F11_LAUNCH = ""
+    if _f11:   # g_gdn_fa + g_gdn_fb in g_gdn_chunk's place (the launch line below is dropped)
+        from gen_gdn_fused import nslots_bytes as _nsb11
+        _WT11 = f"tensor<{((t + 31) // 32 + ns + 1) * _nsb11(gdn_geometry(cfg)) // 4}xf32>"
+        _F11_LAUNCH = (f"%work = check.generate.fill value(0.0) : {_WT11}\n"
+                       f"  kernel.launch @g_gdn_fa[%t, %spans](%t, %spans, %layer, %meta, %orig, %arena, %x, %w, %alpha, %beta, %a, %dt, %work) : [index, index](index, index, index, {MT}, {OT}, {AT}, {XT}, tensor<{C * K}xf32>, {HT}, {HT}, tensor<{HV}xf32>, tensor<{HV}xf32>, {_WT11})\n"
+                       f"  kernel.launch @g_gdn_fb[%spans](%t, %spans, %layer, %meta, %orig, %arena, %x, %work, %nw, %z, %o) : [index](index, index, index, {MT}, {OT}, {AT}, {XT}, {_WT11}, tensor<{DV}xf32>, {VT}, {VT})\n  //")
     cases.append(f"""check.case public @gdn_chunkf_serve {{
   %t = check.literal value({t}) : index
   %spans = check.literal value({ns}) : index
@@ -1496,7 +1505,7 @@ if cfg.get("recurrent_layers") and _chunk and _c11 == "group" and (_fz or _gt):
   kernel.launch @g_gdn_conv[%t](%t, %spans, %layer, %meta, %info, %orig, %arena, %x, %w, %silu) : [index](index, index, index, {MT}, tensor<{t}x4xi32>, {OT}, {AT}, {XT}, tensor<{C * K}xf32>, {XT})
   kernel.launch @g_gdn_qk_norm[%t](%t, %silu, %inv) : [index](index, {XT}, {IT})
   kernel.launch @g_gdn_recurrence[%spans]{_rec.replace("@X@", "%silu").replace("@W@", "").replace("@WT@", "")}
-  kernel.launch @g_gdn_chunk[%spans]{_rec.replace("@X@", "%x" if _fz else "%silu").replace("@W@", (", %w" if _fz else "") + (", %nw, %z, %o" if _gt else "")).replace("@WT@", (f", tensor<{C * K}xf32>" if _fz else "") + (f", tensor<{DV}xf32>, {VT}, {VT}" if _gt else ""))}
+  {_F11_LAUNCH if _f11 else ""}kernel.launch @g_gdn_chunk[%spans]{_rec.replace("@X@", "%x" if _fz else "%silu").replace("@W@", (", %w" if _fz else "") + (", %nw, %z, %o" if _gt else "")).replace("@WT@", (f", tensor<{C * K}xf32>" if _fz else "") + (f", tensor<{DV}xf32>, {VT}, {VT}" if _gt else ""))}
   kernel.launch @g_gdn_conv_commit[%spans](%t, %spans, %layer, %meta, %orig, %arena, %x) : [index](index, index, index, {MT}, {OT}, {AT}, {XT})
   {f"kernel.launch @g_gdn_norm_gate_s[%t](%t, %spans, %meta, %info, %raw, %nw, %z, %o) : [index](index, index, {MT}, tensor<{t}x4xi32>, {VT}, tensor<{DV}xf32>, {VT}, {VT})" if _gt else f"kernel.launch @g_gdn_norm_gate[%t](%t, %info, %raw, %nw, %z, %o) : [index](index, tensor<{t}x4xi32>, {VT}, tensor<{DV}xf32>, {VT}, {VT})"}
   check.expect.close actual(%o) expected(%eo) atol({1e-2 * _oscale:.3e}) rtol(2.0e-2) nan(different) : {VT}
@@ -1504,6 +1513,8 @@ if cfg.get("recurrent_layers") and _chunk and _c11 == "group" and (_fz or _gt):
   check.return
 }}
 """)
+    if _f11:   # the fused pair replaced the g_gdn_chunk launch
+        cases[-1] = "\n".join(l for l in cases[-1].split("\n") if not l.startswith("  //kernel.launch @g_gdn_chunk"))
 # 4d. g_gdn_fa_rdna4 + g_gdn_fb_rdna4 (gfx12 fused prefill, gen_gdn_fused.py) against float64 (conv, norms, recurrence, norm-gate of the whole
 # chain; f16-operand tolerances as gdn_chunk_spans). gdn_fused_spans: four prompt spans packed back to back (fresh 130, continuing 64, fresh 97,
 # continuing 2: the history commit shifts the stored rows). gdn_fused_serve: the serving shape of a mixed epoch: 8 span packets of which 6 are

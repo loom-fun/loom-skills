@@ -435,6 +435,11 @@ CHOICE("hybrid.gdn.chunk11_gate", "bool", False, "GDN_CHUNK11_GATE", devices=["r
        kernels=["g_gdn_chunk", "g_gdn_norm_gate*"], from_pr="q38pf gdn",
        doc="With hybrid.gdn.chunk11 (single-form models): g_gdn_chunk (and its gfx12 twin) run the gated RMSNorm of their rows and write the "
            "mixer output; g_gdn_norm_gate_s (the norm-gate with the span metadata) leaves the rows of spans of 64+ tokens alone.")
+CHOICE("prefill.gdn.fused11", "bool", False, "GDN_FUSED11", devices=["rdna3"], rows=ROWS_PREFILL,
+       kernels=["g_gdn_fa", "g_gdn_fb", "g_gdn_conv", "g_gdn_norm_gate*"], from_pr="q38pf gdn",
+       doc="With hybrid.gdn.chunk11 (single-form models, 128 x 128 heads, conv 4): GEMM-shape epochs run the spans of 64+ tokens through the "
+           "gfx11 fused pair g_gdn_fa + g_gdn_fb (gen_gdn_fused.py arch rdna3; its gfx12 twins restricted the same way) after the chain of the "
+           "shorter spans (g_gdn_conv skips the long ones, g_gdn_norm_gate_s); the history commit runs last.")
 CHOICE("prefill.gdn.fused2", "bool", False, "GDN_FUSED2", devices=["rdna4"], rows=ROWS_PREFILL, kernels=["g_gdn_fa_rdna4", "g_gdn_fb_rdna4"],
        from_pr="mxfp4st olayer",
        doc="gfx12 fused gated delta-net prefill in two launches (gen_gdn_fused.py): g_gdn_fa_rdna4 (conv + SiLU, q/k norms, gates, the WY solve "
