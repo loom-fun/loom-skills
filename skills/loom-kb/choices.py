@@ -292,6 +292,11 @@ CHOICE("prefill.gemm.m256_a32", "bool", False, "GEMM_M256_A32", from_pr="q38pf-g
 CHOICE("prefill.gemm.m256_edq", "bool", False, "GEMM_M256_EDQ", from_pr="q38pf-gemm2", devices=["rdna3"],
        doc="gfx11 m256 GEMM: the next step's weights dequantized right after this step's MMAs (before the overwrite barrier) and "
        "carried as f16, so only the LDS stores sit between the overwrite and publication barriers (not the mixed branch form).", **_PG)
+CHOICE("prefill.gemm.m256_ws", "int", 0, "GEMM_M256_WS", from_pr="q38pf-gemm2", devices=["rdna3"],
+       doc="gfx11 q4_k m256 GEMM through a 2-slot 32-K LDS ring synchronised by LDS counters (gen_gemm_ws): 1 = 8 WMMA + 4 producer "
+       "waves (loses 11 %), 2 = every wave fills the next slot and reads the current one (loses 33 %).", **_PG)
+CHOICE("prefill.gemm.m256_ws_pd", "int", 1, "GEMM_M256_WS_PD", from_pr="q38pf-gemm2", devices=["rdna3"],
+       doc="producer load distance in slots of prefill.gemm.m256_ws=1 (1 or 2).", **_PG)
 CHOICE("prefill.gemm.m256_xg", "int", 0, "GEMM_M256_XG", from_pr="q38pf-gemm2", devices=["rdna3"],
        doc="gfx11 m256 GEMM with A fragments read straight from global memory (gen_gemm_xg): 1 = 256-row tiles, 2 = 512-row "
        "tiles (loses: latency-bound A loads).", **_PG)
