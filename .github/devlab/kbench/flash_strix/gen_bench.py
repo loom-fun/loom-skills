@@ -28,6 +28,7 @@ VARIANTS = {   # name -> environment of gen_flash2s.py
     "kv0": {"FLASH2_G11": "abl=nokld"},
     "trim": {"FLASH2_G11": "lazy,kvh,vtf,hot"},
     "tnl": {"FLASH2_G11": "kvh,vtf,hot"},   # trim without lazy (lazy spills on gfx11)
+    "mt2": {"FLASH2_KT256": "16", "FLASH2_MT256": "2"},   # two 16-token query tiles per workgroup (flash2_mt.py)
     "nostv": {"FLASH2_G11": "abl=nostv"}, "nokld": {"FLASH2_G11": "abl=nokld"}, "nobar": {"FLASH2_G11": "abl=nobar"},
     "noqk": {"FLASH2_G11": "abl=noqk"}, "nopv": {"FLASH2_G11": "abl=nopv"}, "nosm": {"FLASH2_G11": "abl=nosm"},
 }
@@ -83,13 +84,14 @@ def inputs(pfx, ctx, t, rng, perm=False, q_scale=1.0):
     return kk, vv, q, info
 
 
-def launch(name, pfx, ctx, t, gate):
-    AT, OT = f"tensor<{2 * ctx * R}xf16>", f"tensor<{10 + ctx // 16}xi32>"
+def launch(name, pfx, ctx, t, gate, pool=None, olen=None):
+    pool = pool or ctx
+    AT, OT = f"tensor<{2 * pool * R}xf16>", f"tensor<{olen or 10 + ctx // 16}xi32>"
     return f"""  %t = check.literal value({t}) : index
   %layer = check.literal value(0) : index
   %sliding = check.literal value(0) : i32
   %ctx = check.literal value({ctx}) : index
-  %pool = check.literal value({ctx}) : index
+  %pool = check.literal value({pool}) : index
   %q = check.file.read.npy path("{pfx}_q.npy") : tensor<{t}x{QD}xf32>
   %g = {gate} : tensor<{t}x{QD}xf32>
   %info = check.file.read.npy path("{pfx}_info.npy") : tensor<{t}x4xi32>
@@ -124,6 +126,41 @@ def reference(kk, vv, q, pos):
     return o
 
 
+def inputs_rows(pfx, rng, q_scale=6.0):
+    """Two sequences (paged-KV rows) of 256 keys in one 512-position pool (permuted pages); queries: row 0 positions 192..255 (4 tiles),
+    row 1 positions 208..255 (3 tiles), tiles listed interleaved (r0, r1, r0, r1, r0, r1, r0: 7 listed, an odd count) so that
+    consecutive listed tiles belong to different rows. Returns the expected output (before the gate) per token."""
+    ctx, nb = 256, 16
+    pages = rng.permutation(2 * nb)
+    kk = rng.uniform(-1, 1, (2, ctx, KVH, D)).astype(np.float16); vv = rng.uniform(-1, 1, (2, ctx, KVH, D)).astype(np.float16)
+    arena = np.zeros((2, 2 * ctx, R), np.float16)
+    for r in range(2):
+        for b in range(nb):
+            ph = pages[r * nb + b]
+            arena[0, ph * 16:ph * 16 + 16] = kk[r, b * 16:b * 16 + 16].reshape(16, R)
+            arena[1, ph * 16:ph * 16 + 16] = vv[r, b * 16:b * 16 + 16].reshape(16, R)
+    orig = np.zeros(20 + 2 * nb, np.int32); orig[8] = 80; orig[18] = 80 + 4 * nb
+    orig[20:20 + nb] = pages[:nb]; orig[20 + nb:] = pages[nb:]
+    spans = [(0, 192, 64), (1, 208, 48)]
+    t = sum(n for _, _, n in spans)
+    info = np.zeros((t, 4), np.int32); first = {}
+    i = 0
+    for r, p0, n in spans:
+        first[r] = [i + 16 * k for k in range(n // 16)]
+        info[i:i + n, 0] = r; info[i:i + n, 1] = p0 + np.arange(n); info[i:i + n, 2] = 1
+        i += n
+    order = [first[0][0], first[1][0], first[0][1], first[1][1], first[0][2], first[1][2], first[0][3]]
+    tiles = np.zeros(t, np.int32); tiles[0] = len(order); tiles[1:1 + len(order)] = order
+    q = (rng.uniform(-1, 1, (t, QH, D)) * q_scale).astype(np.float32)
+    save(f"{pfx}_arena", arena.reshape(-1)); save(f"{pfx}_orig", orig); save(f"{pfx}_info", info); save(f"{pfx}_tiles", tiles)
+    save(f"{pfx}_q", q.reshape(t, QD))
+    ref = np.zeros((t, QH, D))
+    for r, p0, n in spans:
+        sel = info[:, 0] == r
+        ref[sel] = reference(kk[r], vv[r], q[sel], info[sel, 1])
+    return ref, t, len(orig)
+
+
 def tests(tested):
     rng = np.random.default_rng(3)
     out = []
@@ -134,12 +171,16 @@ def tests(tested):
     kk, vv, q, info = inputs("tA", ctx, t, rng, perm=True, q_scale=6.0)
     gate = rng.standard_normal((t, QD)).astype(np.float32); save("tA_g", gate)
     save("tA_o", (reference(kk, vv, q, info[:, 1]).reshape(t, QD) / (1 + np.exp(-gate.astype(np.float64)))).astype(np.float32))
+    ref_b, tb, olen_b = inputs_rows("tB", rng)
+    gate = rng.standard_normal((tb, QD)).astype(np.float32); save("tB_g", gate)
+    save("tB_o", (ref_b.reshape(tb, QD) / (1 + np.exp(-gate.astype(np.float64)))).astype(np.float32))
     for v in [""] + tested:
-        for c, cx, tc in [("tA", ctx, t), ("tC", 64, 64)]:
+        for c, cx, tc in [("tA", ctx, t), ("tC", 64, 64), ("tB", 256, tb)]:
             name = f"t_{(v or 'base').replace('+', '_')}_{c}"
             out.append(kvo(name))
             out.append(kernel(v, name))
-            out.append(f"check.case public @{name}_case {{\n" + launch(name, c, cx, tc, f'check.file.read.npy path("{c}_g.npy")')
+            kw = dict(pool=512, olen=olen_b) if c == "tB" else {}
+            out.append(f"check.case public @{name}_case {{\n" + launch(name, c, cx, tc, f'check.file.read.npy path("{c}_g.npy")', **kw)
                        + f'  %e = check.file.read.npy path("{c}_o.npy") : tensor<{tc}x{QD}xf32>\n'
                        + f"  check.expect.approximate actual(%o) expected(%e) atol(4.0e-3) rtol(4.0e-3) nan(different) : tensor<{tc}x{QD}xf32>, tensor<{tc}x{QD}xf32>\n  check.return\n}}\n")
     return out

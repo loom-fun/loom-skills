@@ -70,6 +70,13 @@ if D == 256 and B_MODE != "2" and os.environ.get("FLASH2_NG256"):   # experiment
     assert G % NG == 0
 GW = G // NG                      # query heads per workgroup
 WAVES = WPH * GW
+# FLASH2_MT256=2 (gfx11 whole-tile kernel, head_dim 256, 16-key tiles, no sliding window; experiment): two listed 16-token query tiles per
+# workgroup (flash2_mt.py): each staged K/V tile feeds 32 tokens (half the global K/V traffic per token); 2 x WPH x GW waves.
+MT = int(os.environ.get("FLASH2_MT256") or 1) if (D == 256 and B_MODE != "2" and os.environ.get("FLASH2_ROLE") != "partial"
+                                                  and os.environ.get("FLASH2_ARCH") != "rdna4") else 1
+if MT > 1:
+    assert MT == 2 and KT == 16 and WINDOW >= 262144 and WPH == 2, "FLASH2_MT256=2: 16-key tiles (FLASH2_KT256=16), no sliding window"
+    WAVES *= MT
 if B_MODE == "2":   # two heads per wave: a workgroup is the four waves of a head pair
     WAVES = WPH * (3 if WG3 else 1)
 LANES = 32 * WAVES
@@ -604,6 +611,9 @@ if G11:
     if "db" in G11:   # double-buffered K/V staging, one tile ahead (flash2_db.py; 16-key tiles)
         from flash2_db import double_buffer
         text = double_buffer(text, os.environ.get("FLASH2_DB_AT", "end"))
+if MT > 1:   # two query tiles per workgroup (flash2_mt.py)
+    from flash2_mt import two_tiles
+    text = two_tiles(text, WAVES // MT)
 if os.environ.get("FLASH2_PEEL", "1") == "1" and not EDGE_ZERO and B_MODE != "2":   # the masked path only in the last key tile (flash2_peel.py)
     from flash2_peel import peel_last_tile
     _hot = None
