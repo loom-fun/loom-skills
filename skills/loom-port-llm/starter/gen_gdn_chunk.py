@@ -42,7 +42,8 @@ def chunk_kernel(G, NG, LB, guard_open="", guard_close="", target=True, dep=2, a
     alias: K^T exp(G - gc) (written in P3, read in P6) lives in Q's LDS rows (Q is dead after P2): -9 KB LDS, so 3 workgroups fit a WGP.
     opts: "kbo" (P2 kb-outer: one state rhs copy live, -56 VGPR peak), latency options: "scan" (the g prefix sum unrolled over vector loads instead of a loop of dependent LDS loads), "acc4" (the
     solve's dot products in 4 partial sums: a quarter of the dependent FMA chain).
-    abl: timing-only ablations (wrong results): "noscan", "nosolve", "nostage" (no global loads in the staging)."""
+    abl: timing-only ablations (wrong results): "noscan", "nosolve", "nostage" (no global loads in the staging), "nox" (fused staging
+    without the chunk rows' global loads)."""
     CN = cn or globals()["CN"]
     NT = CN // 16
     assert CN in (16, 32)
@@ -163,7 +164,7 @@ def chunk_kernel(G, NG, LB, guard_open="", guard_close="", target=True, dep=2, a
     P(f"    }}")
     bar()
     if fuse:
-        out[p0_start:] = _fused_stage(G, CN, ci, KHS, QAS, VS)
+        out[p0_start:] = _fused_stage(G, CN, ci, KHS, QAS, VS, abl)
     # ---- P1: inclusive scan of g (threads < CN)
     P(f"    %tcn = index.cmp ult, %thread, {ci(CN)} : index")
     P(f"    scf.if %tcn {{")
@@ -580,7 +581,7 @@ kernel.def {tgt}export("{kname}") @{kname}(%spans: index) {{
     return text
 
 
-def _fused_stage(G, CN, ci, KHS, QAS, VS):
+def _fused_stage(G, CN, ci, KHS, QAS, VS, abl=()):
     """Loop-body lines of the fused staging (chunk_kernel fuse=True): g / beta per token (threads < CN); conv1d + SiLU of the chunk's rows of
     q / k channel `thread % 128` of the key head (threads < 128: q, else k) and of value channel `thread` (threads < DV); the q / k L2 norms
     (a subgroup sum per row, the 4 waves' partials through LDS); K, Q (x DK^-0.5) as f16 rows and V as f32 rows in LDS. Rows past the
@@ -635,6 +636,9 @@ def _fused_stage(G, CN, ci, KHS, QAS, VS):
             Q(f"  scf.yield %fpv{u} : f32")
             Q("}")
         for r in range(CN):
+            if "nox" in abl:   # timing ablation: no global loads of the chunk's rows
+                Q(f"%fx{tag}{r}_r = scalar.addf %fw{tag}{r % K}, %zero_f : f32")
+                continue
             Q(f"%fx{tag}{r}_r = view.load %x_view[%ftrow{r}, {chv}] : view<[%tokens]x{C}xf32> -> f32")
 
         def xname(r):
