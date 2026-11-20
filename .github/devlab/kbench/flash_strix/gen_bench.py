@@ -27,6 +27,7 @@ VARIANTS = {   # name -> environment of gen_flash2s.py
     "ng2": {"FLASH2_NG256": "2"}, "ng3": {"FLASH2_NG256": "3"},
     "kv0": {"FLASH2_G11": "abl=nokld"},
     "trim": {"FLASH2_G11": "lazy,kvh,vtf,hot"},
+    "tnl": {"FLASH2_G11": "kvh,vtf,hot"},   # trim without lazy (lazy spills on gfx11)
     "nostv": {"FLASH2_G11": "abl=nostv"}, "nokld": {"FLASH2_G11": "abl=nokld"}, "nobar": {"FLASH2_G11": "abl=nobar"},
     "noqk": {"FLASH2_G11": "abl=noqk"}, "nopv": {"FLASH2_G11": "abl=nopv"}, "nosm": {"FLASH2_G11": "abl=nosm"},
 }
