@@ -16,6 +16,22 @@
   recomputed S per 256-dim output half: gemma-4-26B-A4B prefill 1k/8k/16k/32k 1.11/1.35/1.64/2.17x (local A/B).
 - Test it standalone with real shapes: a flash2 harness (paged arena filled directly, float64 reference with
   the gate) plus a broken variant (partner sum dropped) as the negative control.
+- **gfx11, head_dim 256, G = 6: 16-key tiles (`prefill.attn.flash2_kt256 = 16`, set for Qwen3.8-27B on Strix Halo).** 32-key tiles take 255
+  VGPRs and 61 KB LDS: one 12-wave workgroup per WGP, so every phase's latency is exposed (kbench ablations of the 32-key kernel: no global K/V
+  loads -57..-62 %, no V^T stores -44 %, no barriers -41 % at 8k, exp ~0). 16-key tiles: 208 VGPRs / 33 KB, two workgroups per WGP that
+  overlap each other's loads: kernel (1024-token chunk) -12 / -21 % at 8k / 32k depth locally (123 W), -26 / -27 % on DevLab (85 W);
+  prefill 8k/16k/32k +0.3 / +1.3 / +2.8 % (local, ABBA). The K/V loads are still ~55-60 % of the 16-key kernel.
+  - Not kept (kernel, vs 16-key tiles): two query tiles per 24-wave workgroup (`FLASH2_MT256=2`, half the K/V traffic) +22 % on DevLab,
+    +18 % locally at 8k: halving the traffic made the load phase slower (latency, not bandwidth, bound; one big workgroup loses the
+    cross-workgroup overlap); its double-buffered form needs a 4-half V^T row pad to fit 64 KiB, and that pad alone costs +60 % (LDS
+    conflicts). Double-buffered staging (`FLASH2_G11=db`, at = b2) ties (-2 %). gfx12 trims on gfx11: `lazy` spills (684 B scratch,
+    +120 %); register prefetch `pf` ties (its loads sit behind an scf.if and are waited at once). Query-head groups (`FLASH2_NG256` 2 / 3,
+    6 / 4 waves): -23 % / -5 % at 8k but +218 % / +147 % at 32k on DevLab, +23 % / +168 % locally. Paired-key V^T stores (`FLASH2_G11=vp`, 256 of
+    384 lanes stage two keys each) +26 % at 32k. The non-lazy trims (`FLASH2_G11=kvh,vtf,hot`): kernel -1.4..-3.8 % at 32k, prefill tie
+    (+0.0/+0.2/+0.4 % at 8k/16k/32k).
+  - Ablations of the 16-key kernel (32k / 8k): no global K/V loads -39 / -39 %, no V^T stores -16 / -22 %, no barriers +92 / -21 %: without
+    the barriers the waves drift apart and lose the workgroup's lockstep K/V cache sharing at 32k, so a barrier-free design where every
+    wave reads its own K/V (flash2_g6-style) is expected to lose there.
 
 ## Key-split flash at head_dim 256 / 6 query heads per KV head (`FLASH2_B=2`, `flash2_b2.py`; choice `prefill.attn.flash2_b2`, gfx12 twin only)
 

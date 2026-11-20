@@ -329,6 +329,38 @@
       ],
       "device": "amdgpu://?completion_spin_ns=4294967295",
       "repeats": 3
+    },
+    {
+      "suite": "flash_strix",
+      "dir": "flash_strix",
+      "gen": "flash_strix/gen_bench.py",
+      "gen_variants": [
+        "kt16+tnl",
+        "kt16+tnl+nobar",
+        "kt16+tnl+nokld",
+        "kt16+tnl+nostv",
+        "kt16+tnl+noqk",
+        "kt16+tnl+nopv"
+      ],
+      "files": [
+        "bench_kt16+tnl.loom",
+        "bench_kt16+tnl+nobar.loom",
+        "bench_kt16+tnl+nokld.loom",
+        "bench_kt16+tnl+nostv.loom",
+        "bench_kt16+tnl+noqk.loom",
+        "bench_kt16+tnl+nopv.loom"
+      ],
+      "tests": [
+        "test.loom"
+      ],
+      "config": [],
+      "args": [
+        "--measure=dispatch_complete",
+        "--batch-size=8",
+        "--profile-final-batch=true"
+      ],
+      "device": "amdgpu://?completion_spin_ns=4294967295",
+      "repeats": 3
     }
   ]
 }
