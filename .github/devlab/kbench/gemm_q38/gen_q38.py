@@ -20,6 +20,7 @@ SHAPES = [  # (shape name, fmt, mode, rows, K, N, weight npy names)
     ("up6", "q6_k", "store", 1024, 5120, 17408, ["up_q6k"]),
     ("ssmout6", "q6_k", "store", 1024, 6144, 5120, ["ssmout_q6k"]),
     ("attnout8", "q8_0", "store", 1024, 6144, 5120, ["attnout_q80"]),
+    ("mixed", "q4_k:q6_k", "swiglu", 1024, 5120, 17408, ["gate_q4k", "up_q6k"]),   # gate q4_k + up q6_k in one kernel
 ]
 WB = {"q4_k": (144, 256), "q6_k": (210, 256), "q8_0": (34, 32)}
 
@@ -55,11 +56,16 @@ def kernel(fmt, mode, env):
     old = {k: os.environ.get(k) for k in env}
     os.environ.update(env)
     try:
-        t = G.gemm_m256_variant(fmt, mode) or G.gemm_big256(fmt, mode)
+        f1, _, f2 = fmt.partition(":")
+        t = G.gemm_m256_variant(f1, mode, f2 or None) or G.gemm_big256(f1, mode, f2 or None)
     finally:
         for k, v in old.items():
             if v is None: os.environ.pop(k, None)
             else: os.environ[k] = v
+    if os.environ.get("Q38_NF", "1") != "0":   # production order (gen_gemm GEMM_N_FASTEST, the program default): output tiles fastest
+        t = t.replace("workgroups(%row_tiles, %out_tiles, %c1)", "workgroups(%out_tiles, %row_tiles, %c1)")
+        t = t.replace("  %row_group_id = kernel.workgroup.id<x> : index\n  %out_group_id = kernel.workgroup.id<y> : index",
+                      "  %row_group_id = kernel.workgroup.id<y> : index\n  %out_group_id = kernel.workgroup.id<x> : index")
     return ablate(t, abl) if abl else t
 
 
@@ -73,15 +79,16 @@ def main():
     for sh, fmt, mode, rows, K, N, ws in SHAPES:
         if only and sh not in only.split(","): continue
         rows = int(os.environ.get("Q38_ROWS", rows))
-        bb, bv = WB[fmt]; wb = N * K // bv * bb
+        wbs = [N * K // WB[f][1] * WB[f][0] for f in fmt.split(":")]
+        wbs = wbs * len(ws) if len(wbs) == 1 else wbs
         parts, names = [helpers()], []
         for vn, env in variants:
             t = kernel(fmt, mode, env)
             old = re.search(r'export\("(\w+)"\)', t).group(1)
             kn = f"k_{vn}_{sh}"
             parts.append(t.replace(f'export("{old}") @{old}(', f'export("{kn}") @{kn}('))
-            decl = "".join(f'  %w{i} = check.file.read.npy path("weights/{w}.npy") : tensor<{wb}xi8>\n' for i, w in enumerate(ws))
-            wargs = ", ".join(f"%w{i}" for i in range(len(ws))); wtys = ", ".join([f"tensor<{wb}xi8>"] * len(ws))
+            decl = "".join(f'  %w{i} = check.file.read.npy path("weights/{w}.npy") : tensor<{wbs[i]}xi8>\n' for i, w in enumerate(ws))
+            wargs = ", ".join(f"%w{i}" for i in range(len(ws))); wtys = ", ".join(f"tensor<{wbs[i]}xi8>" for i in range(len(ws)))
             parts.append(f"""check.case public @{kn}_case {{
   %seed = check.literal value(12345) : i64
   %rows = check.literal value({rows}) : index

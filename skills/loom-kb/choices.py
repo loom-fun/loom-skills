@@ -279,6 +279,16 @@ CHOICE("prefill.gemm.m256_mixed", "bool", False, "GEMM_M256_MIXED_F16O", kernels
        doc="A layer whose ffn_gate and ffn_up differ in K-quant format (Q4_K_M: q4_k gate + q6_k up) runs, on whole 256-row "
        "epochs, one f16-output swiglu m256 kernel over both weights (gen_gemm.gemm_big256 fmt2) instead of two f32 GEMMs + "
        "g_silu_mul + the row scale of f.")
+CHOICE("prefill.gemm.m256_mixed_bal", "bool", False, "GEMM_M256_MIXED_BAL", kernels=["g_gemm_*_*_swiglu_m256_f16o"],
+       rows=ROWS_PREFILL, from_pr="q38pf-gemm2", devices=["rdna3"],
+       doc="gfx11 mixed-format swiglu m256 (prefill.gemm.m256_mixed): every thread stages 16 values of a gate row and 16 of the "
+       "matching up row, so all waves do the same q4_k + q6_k dequant (no wave-uniform branch, the barrier does not wait for the "
+       "q6_k waves) and each thread loads only what it dequantizes. The gfx12 twin keeps the branch form.")
+CHOICE("prefill.gemm.m256_xg", "int", 0, "GEMM_M256_XG", from_pr="q38pf-gemm2", devices=["rdna3"],
+       doc="gfx11 m256 GEMM with A fragments read straight from global memory (gen_gemm_xg): 1 = 256-row tiles, 2 = 512-row "
+       "tiles (loses: latency-bound A loads).", **_PG)
+CHOICE("prefill.gemm.m256_xg_db", "bool", False, "GEMM_M256_XG_DB", from_pr="q38pf-gemm2", devices=["rdna3"],
+       doc="double-buffered weight stage of prefill.gemm.m256_xg (one barrier per step).", **_PG)
 CHOICE("prefill.gemm.m256_db", "bool", False, "GEMM_M256_DB", from_pr="q38pf-gemm", doc="m256 GEMM with double-buffered 32-K LDS stages (loses).", **_PG)
 CHOICE("prefill.gemm.m256_db_fence", "bool", True, "GEMM_M256_DB_FENCE", from_pr="q38pf-gemm", doc="fence after the barrier of prefill.gemm.m256_db.", **_PG)
 CHOICE("prefill.gemm.q4_0_native", "bool", False, "GEMM_Q4_0_NATIVE", kernels=["g_gemm_q4_0_*", "g_moe_*q4_0*"], rows=ROWS_PREFILL,
