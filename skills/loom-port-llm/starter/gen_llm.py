@@ -176,7 +176,7 @@ def yarn_constants(y, rd, theta):
     mscale = y.get("attn_factor", 1.0) * (1.0 + 0.1 * math.log(f))
     return low, 1.0 / max(0.001, high - low), 1.0 - 1.0 / f, mscale
 
-from formats import FMT, SB, LOWBIT, ICODES as IQ_FMTS, SPLIT, SCALE_DIV  # noqa: E402  bytes / values per block of each decoded format
+from formats import FMT, SB, LOWBIT, ICODES as IQ_FMTS, SPLIT, SCALE_DIV, ONE_SCALE  # noqa: E402  bytes / values per block of each decoded format
 
 
 def row_bytes(fmt, k):
@@ -892,6 +892,50 @@ func.def inline @g_mxfp4s_values(%w: buffer, %ws: buffer, %origin: offset, %scal
 """
 
 
+# choice decode.iq4.act_q8 (IQ4_Q8): integer codes of IQ4_XS / IQ4_NL groups for the int8 matvecs, as llama.cpp's
+# vec_dot_iq4_xs_q8_1: the kvalues codes (int8, -127..113) and the group's scale (IQ4_NL: d; IQ4_XS: d (ls - 32)).
+# Uses quant_values.loom's @g_iq4_codes16 / @g_iq4_xs_scale (appended for every low-bit file); emitted only when used.
+IQ4_ICODES = r"""
+func.def inline @g_iq4_icodes32(%payload: vector<16xi8>) -> (vector<32xi8>) {
+  %mask = vector.splati 15 : vector<16xi8>
+  %four = vector.splati 4 : vector<16xi8>
+  %lower = vector.andi %payload, %mask : vector<16xi8>
+  %shifted = vector.shrui %payload, %four : vector<16xi8>
+  %upper = vector.andi %shifted, %mask : vector<16xi8>
+  %lo = func.call @g_iq4_codes16(%lower) : (vector<16xi8>) -> (vector<16xi8>)
+  %hi = func.call @g_iq4_codes16(%upper) : (vector<16xi8>) -> (vector<16xi8>)
+  %codes = vector.concat<0> %lo, %hi : vector<16xi8>, vector<16xi8> -> vector<32xi8>
+  func.return %codes : vector<32xi8>
+}
+
+func.def inline @g_iq4_nl_icodes(%w: buffer, %origin: offset, %group: index) -> (vector<32xi8>, f32) {
+  %two = index.constant 2 : offset
+  %scale_view = buffer.view %w[%origin] : buffer -> view<1xf16>
+  %code_origin = index.add %origin, %two : offset
+  %code_view = buffer.view %w[%code_origin] : buffer -> view<16xi8>
+  %d_half = view.load %scale_view[0] : view<1xf16> -> f16
+  %d = scalar.extf %d_half : f16 to f32
+  %payload = vector.load %code_view[0] : view<16xi8> -> vector<16xi8>
+  %codes = func.call @g_iq4_icodes32(%payload) : (vector<16xi8>) -> (vector<32xi8>)
+  func.return %codes, %d : vector<32xi8>, f32
+}
+
+func.def inline @g_iq4_xs_icodes(%w: buffer, %origin: offset, %group: index) -> (vector<32xi8>, f32) {
+  %g = index.assume %group [range(%group, 0, 7)] : index
+  %dl = func.call @g_iq4_xs_scale(%w, %origin, %g) : (buffer, offset, index) -> (f32)
+  %qs_base = index.constant 8 : offset
+  %sixteen = index.constant 16 : offset
+  %qs_add = index.scale %g, %sixteen : index, offset -> offset
+  %qs0 = index.add %origin, %qs_base : offset
+  %qs_origin = index.add %qs0, %qs_add : offset
+  %code_view = buffer.view %w[%qs_origin] : buffer -> view<16xi8>
+  %payload = vector.load %code_view[0] : view<16xi8> -> vector<16xi8>
+  %codes = func.call @g_iq4_icodes32(%payload) : (vector<16xi8>) -> (vector<32xi8>)
+  func.return %codes, %dl : vector<32xi8>, f32
+}
+"""
+
+
 # emitted only when a Q5_0 tensor is used (see main): llama.cpp's Q4_K_M keeps projections whose rows are not a multiple
 # of 256 in Q5_0 (Qwen2.5-0.5B: hidden 896). Integer codes for the int8 matvecs and head (ACT_Q8), values for the rest
 # (embedding, f32 matvecs, the GEMM's dequant16 through gen_gemm.HELPER).
@@ -966,7 +1010,7 @@ func.def inline @g_q5_0_values(%w: buffer, %origin: offset, %group: index) -> (v
 def iq_decode(fmt, wi, w, ok, o, within):
     """ACT_Q8 weight side: integer codes %wq{wi} (+ scale %sc{wi}, and %mn{wi}: Q4_K/Q5_K minimum, Q6_K second
     half scale) of the lane's 32-value group, once per row."""
-    two = fmt not in ("q8_0", "mxfp4s")
+    two = fmt not in ONE_SCALE
     rt = "vector<32xi8>, f32, f32" if two else "vector<32xi8>, f32"
     split = fmt in SPLIT   # split planes: the scale plane's view and the block's scale offset %so (_mv)
     return (f"""    %wq{wi}, %sc{wi}""" + (f", %mn{wi}" if two else "") + f""" = scf.if {ok} -> ({rt}) {{
@@ -1000,7 +1044,7 @@ def iq_dot(fmt, wi, j, out):
         return "\n".join(t)
     t, di = chain(0, 8, "")
     t.append(f"    %df{wi}_{j} = scalar.sitofp {di} : i32 to f32")
-    if fmt in ("q8_0", "mxfp4s"):
+    if fmt in ONE_SCALE:
         t.append(f"""    %wd{wi}_{j} = scalar.mulf %sc{wi}, %da{j} : f32
     {out} = scalar.mulf %wd{wi}_{j}, %df{wi}_{j} : f32""")
     else:
@@ -6412,6 +6456,8 @@ if __name__ == "__main__":
         from gen_mxfp4s import mxfp4s_icodes as _mx_icodes
         COMMON += _mx_icodes()
     if USED_MVQ or USED_MOEQ or PH_ONLY:   # ACT_Q8: int8-activation matvecs, their weight-code helpers and g_quant_q8
+        if {f for f, *_ in USED_MVQ} & {"iq4_xs", "iq4_nl"}:   # choice decode.iq4.act_q8
+            COMMON += IQ4_ICODES
         COMMON += ICODES + "".join(mv(fmt, K, R=R, TG=TG, swiglu=sw == 1, pair=sw == 2, suffix=f"_r{R}" if R != 16 else "", iq=True)
                                    for fmt, K, sw, R, TG in sorted(USED_MVQ))
         program = quant_wiring_mtp_only(program) if MTP_ONLY_Q8 else quant_wiring(program)

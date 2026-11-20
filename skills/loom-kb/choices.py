@@ -355,6 +355,11 @@ CHOICE("decode.q4_0.act_q8", "bool", False, "Q4_0_Q8", kernels=["g_mv_q4_0_*", "
        doc="Q4_0 dense matvecs, head and expert matvecs take int8 activations (ACT_Q8's dot4 path with @g_q4_0_icodes, as llama.cpp's "
            "vec_dot_q4_0_q8_1) instead of f32 values and a per-row subgroup reduction per token, which is ALU-bound at 4 tokens "
            "(quant/q4_0 node).")
+CHOICE("decode.iq4.act_q8", "bool", False, "IQ4_Q8", kernels=["g_mv_iq4_*", "g_quant_q8"],
+       rows=ROWS_DECODE + ROWS_STREAMS, from_pr="q38xl-dec",
+       doc="IQ4_XS / IQ4_NL dense matvecs take int8 activations (ACT_Q8's dot4 path with @g_iq4_<fmt>_icodes: kvalues codes x one "
+           "scale per 32 values, as llama.cpp's vec_dot_iq4_xs_q8_1) instead of f32 values, which are ALU-bound at the 4-token "
+           "verify and re-read weights per 4 tokens at 4 streams. Opt-in per model.")
 CHOICE("decode.verify.fuse", "str", None, "VERIFY_FUSE", kernels=["g_pmv_*"], rows=ROWS_DECODE, from_pr="mxfp4st-ostep",
        doc="Drafted verify epochs of 2-4 tokens on the int8 matvec path run fused layers (starter gen_pstep.py; the layer as generated stays "
            "for every other epoch, every value is the launch chain's: kernel tests compare with equality). swq: gate + up + g_silu_mul + "
