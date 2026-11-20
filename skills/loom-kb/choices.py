@@ -446,21 +446,21 @@ CHOICE("prefill.fuse.silu_mul_rs", "bool", True, "SILU_MUL_RS", doc="g_silu_mul 
        "(GEMM-shape epochs; Qwen3.8-27B Strix: +0.4-0.6 % prefill).", **_PR)
 CHOICE("prefill.fuse.gdn_norm_rs", "bool", True, "GDN_NORM_RS", doc="g_gdn_norm_gate + the f16 row scale of the ssm_out GEMM operand in one kernel.", **_PR)
 CHOICE("prefill.fuse.post_norm_noh", "bool", True, "POST_NORM_NOH", doc="Post-attention norm without the f32 h store no GEMM-branch reader uses.", **_PR)
-CHOICE("prefill.fuse.post_norm_noh_all", "bool", False, "POST_NORM_NOH_ALL", from_pr="q38pf-fuse2", kernels=["g_post_add_norm*"], rows=ROWS_PREFILL,
+CHOICE("prefill.fuse.post_norm_noh_all", "bool", False, "POST_NORM_NOH_ALL", from_pr="q38pf-fuse2", devices=["rdna3"], kernels=["g_post_add_norm*"], rows=ROWS_PREFILL,
        doc="GEMM epochs: every g_post_add_norm_rs_live_lv whose f32 h no GEMM-epoch launch reads (attention-layer inputs; GDN-layer inputs with "
        "prefill.gdn.ab_wmma) runs as the _noh kernel (gen_llm.noh_dead_h).")
-CHOICE("prefill.fuse.resid_epi", "bool", False, "RESID_EPI", from_pr="q38pf-fuse2", kernels=["g_gemm_*_acc_m256", "g_add_norm_rs_live*", "g_post_add_norm*"],
+CHOICE("prefill.fuse.resid_epi", "bool", False, "RESID_EPI", from_pr="q38pf-fuse2", devices=["rdna3"], kernels=["g_gemm_*_acc_m256", "g_add_norm_rs_live*", "g_post_add_norm*"],
        rows=ROWS_PREFILL, doc="Whole 256-row epochs: the output GEMMs (attn o, ssm_out, ffn down) accumulate into the residual x in their m256 "
        "epilogue (g_gemm_<fmt>_acc_m256) and the next norm reads x only (g_add_norm_rs_live[_noh]_lv); gen_llm.resid_epi.")
 CHOICE("prefill.gemm.acc_batch", "int", 16, "GEMM_ACC_BATCH", from_pr="q38pf-fuse2", kernels=["g_gemm_*_acc_m256"], rows=ROWS_PREFILL,
        doc="acc m256 epilogue: fragments whose old values are loaded before the batch's stores (0: per-fragment load/add/store, one DRAM round trip each).")
-CHOICE("prefill.gdn.ab_wmma", "bool", False, "GDN_AB_WMMA", from_pr="q38pf-fuse2", kernels=["g_gemm_ab_f32w", "g_mv_f32_*"], rows=ROWS_PREFILL,
+CHOICE("prefill.gdn.ab_wmma", "bool", False, "GDN_AB_WMMA", from_pr="q38pf-fuse2", devices=["rdna3"], kernels=["g_gemm_ab_f32w", "g_mv_f32_*"], rows=ROWS_PREFILL,
        doc="GEMM epochs: the F32 GDN alpha / beta projections as one WMMA GEMM on %h16 + %s_h (weights rounded to f16 while staging; gen_gdn_ab.py) "
        "instead of two 4-token f32 matvecs.")
-CHOICE("prefill.gdn.o16", "bool", False, "GDN_O16", from_pr="q38pf-fuse2", kernels=["g_gdn_chunk_o16", "g_gdn_norm_gate_s_o16", "g_row_scale*"],
+CHOICE("prefill.gdn.o16", "bool", False, "GDN_O16", from_pr="q38pf-fuse2", devices=["rdna3"], kernels=["g_gdn_chunk_o16", "g_gdn_norm_gate_s_o16", "g_row_scale*"],
        rows=ROWS_PREFILL, doc="GEMM epochs (with the gated chunk kernel): the GDN output written as f16 with unit row scales by its producers; "
        "no g_row_scale_f16_live pass (gen_llm.gdn_o16).")
-CHOICE("prefill.fuse.qg_split", "bool", False, "QG_SPLIT", from_pr="q38pf-fuse2", kernels=["g_gemm_*_store_m256_qgs", "g_split_qgate*"],
+CHOICE("prefill.fuse.qg_split", "bool", False, "QG_SPLIT", from_pr="q38pf-fuse2", devices=["rdna3"], kernels=["g_gemm_*_store_m256_qgs", "g_split_qgate*"],
        rows=ROWS_PREFILL, doc="Whole 256-row epochs: the fused query+gate projection's m256 GEMM stores q and gate directly (gen_gemm.qg_split); "
        "g_split_qgate only in other GEMM epochs.")
 

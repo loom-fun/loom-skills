@@ -106,6 +106,21 @@
     "prefill.gemm.m256_mixed_bal": true
    },
    "evidence": "q38pf gemm2: the 16 mixed-format FFN layers (q4_k gate + q6_k up) run one balanced f16o swiglu m256 (every thread stages 16 gate + 16 up values; the old kernel's q6_k waves set the barrier pace). Kernel (local 123 W, 1024 rows, real weights): 14.38 -> 10.33 ms (-28 %). Local same-job ABBA vs main 9742f6ee (localperf/gemm2/e1): prefill 1k/2k/8k/16k/32k 606.0/615.0/633.7/601.5/546.8 -> 620.0/629.7/645.9/615.1/559.1 tok/s (+2.3/+2.4/+1.9/+2.3/+2.3 %), decode ties. gfx11 only (the gfx12 twin keeps the branch form); keyed on the rdna3 family. DevLab Strix 85 W (run 44732757118, same job vs main): prefill 1k/2k 570.3/577.6 -> 580.6/589.5 (+1.8/+2.1 %), decode tie; func pass, ktest 160/160 (gm_q4_k_q6_k_sw_512_f16o), gates:dev PASS (consistency, spec, agent, agent_think_off, golden, compare, vision, sampling)."
+  },
+  {
+   "when": {
+    "devices": [
+     "rdna3"
+    ]
+   },
+   "set": {
+    "prefill.gdn.ab_wmma": true,
+    "prefill.fuse.post_norm_noh_all": true,
+    "prefill.fuse.resid_epi": true,
+    "prefill.gdn.o16": true,
+    "prefill.fuse.qg_split": true
+   },
+   "evidence": "q38pf fuse2 (PR 1323): GDN alpha/beta as one WMMA GEMM, dead-h input norms (_noh), residual add in the m256 output-GEMM epilogue (acc) with an x-only norm, f16 GDN output without the row-scale pass, q/gate split in the q GEMM epilogue. Local Strix 123 W same-job ABBA vs main 77cdb8a9 (localperf/fuse2/e2): prefill 8k/16k/32k 644.0/613.1/556.4 -> 662.4/628.8/570.5 tok/s (+2.9/+2.6/+2.5 %), decode_32k tie; pf8k busy 1.542 -> 1.523 ms/token. Ablation e4 without resid_epi: 659.0/625.9/567.4 (resid_epi +0.6/+0.6/+0.7 %, norms 36.8 -> 15.5 us/token). Keyed on the rdna3 family; the gfx12 twins only run in this dual-target build's R9700 launches."
   }
  ]
 }
