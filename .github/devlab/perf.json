@@ -8,11 +8,30 @@
   {
    "name": "iq4-g32",
    "variants": [
-    {"name": "base", "build": {}},
-    {"name": "g32", "build": {"GEMM_IQ4_G32": "1"}}
+    {
+     "name": "base",
+     "build": {}
+    },
+    {
+     "name": "g32",
+     "build": {
+      "GEMM_IQ4_G32": "1"
+     }
+    }
    ],
-   "steps": ["ktest:g32", "perf:base:1", "perf:g32:1", "perf:g32:1", "perf:base:1",
-             "perf:base:1:long", "perf:g32:1:long", "perf:g32:1:long", "perf:base:1:long", "profile:g32:pf8k"]
+   "steps": [
+    "ktest:g32",
+    "perf:base:1",
+    "perf:g32:1",
+    "perf:g32:1",
+    "perf:base:1",
+    "perf:base:1:long",
+    "perf:g32:1:long",
+    "perf:g32:1:long",
+    "perf:base:1:long",
+    "profile:base:pf8k",
+    "profile:g32:pf8k"
+   ]
   }
  ]
 }
