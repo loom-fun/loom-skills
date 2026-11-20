@@ -1,32 +1,68 @@
 {
- "_comment": "q38pf lane gdn, round 1: gfx11 chunked WY GDN prefill (GDN_CHUNK11) vs the base rebuild, ABBA short + long, kernel tests, smoke, pf8k profile.",
+ "_comment": "q38pf lane gdn, round 2: ktest fix; GDN_CHUNK11 (c11), + GDN_FUSED11 (f11), + GDN_CHUNK11_FUSE/GATE (cfg) vs the base rebuild, ABBA short + long, pf8k profiles.",
  "runner": "strix",
  "memory_bytes": 52000000000,
  "llama_spec": "matched",
  "jobs": [
   {
-   "name": "q38pf-gdn-r1",
+   "name": "q38pf-gdn-r2",
    "runner": "strix",
    "card": "loom-fun/bartowski-Qwen3.8-27B-loom",
    "memory_bytes": 52000000000,
    "kit": null,
    "llamacpp": "b1374",
    "variants": [
-    {"name": "base", "build": {}, "ref": "550fc117fa1cb45bef8ab2fbdb8fcde9d2e362aa"},
-    {"name": "new", "build": {"GDN_CHUNK11": "1"}}
+    {
+     "name": "base",
+     "build": {},
+     "ref": "550fc117fa1cb45bef8ab2fbdb8fcde9d2e362aa"
+    },
+    {
+     "name": "c11",
+     "build": {
+      "GDN_CHUNK11": "1"
+     }
+    },
+    {
+     "name": "f11",
+     "build": {
+      "GDN_CHUNK11": "1",
+      "GDN_FUSED11": "1"
+     }
+    },
+    {
+     "name": "cfg",
+     "build": {
+      "GDN_CHUNK11": "1",
+      "GDN_CHUNK11_FUSE": "1",
+      "GDN_CHUNK11_GATE": "1"
+     }
+    }
    ],
    "steps": [
-    "ktest:new",
-    "smoke:new",
+    "ktest:c11",
+    "ktest:f11",
+    "ktest:cfg",
+    "smoke:f11",
+    "smoke:cfg",
     "perf:base:1",
-    "perf:new:1",
-    "perf:new:1",
+    "perf:c11:1",
+    "perf:f11:1",
+    "perf:cfg:1",
+    "perf:cfg:1",
+    "perf:f11:1",
+    "perf:c11:1",
     "perf:base:1",
     "perf:base:1:long",
-    "perf:new:1:long",
-    "perf:new:1:long",
+    "perf:c11:1:long",
+    "perf:f11:1:long",
+    "perf:cfg:1:long",
+    "perf:cfg:1:long",
+    "perf:f11:1:long",
+    "perf:c11:1:long",
     "perf:base:1:long",
-    "profile:new:pf8k"
+    "profile:f11:pf8k",
+    "profile:cfg:pf8k"
    ]
   }
  ]
