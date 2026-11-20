@@ -566,6 +566,18 @@
     "draft",
     "thinking-toggle"
    ]
+  },
+  {
+   "repo": "loom-fun/unsloth-Qwen3.8-27B-UD-Q4_K_XL",
+   "slug": "qwen3.8-27b-ud-q4_k_xl",
+   "memory_bytes": 49000000000,
+   "kit": null,
+   "llamacpp": "b1374",
+   "features": [
+    "vision",
+    "draft",
+    "thinking-toggle"
+   ]
   }
  ]
 }

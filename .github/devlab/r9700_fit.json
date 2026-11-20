@@ -551,6 +551,18 @@
   "n_exp": 0
  },
  {
+  "slug": "unsloth-Qwen3.8-27B-UD-Q4_K_XL",
+  "w": 23500846571,
+  "kv": 18253611008,
+  "kv32": 2281701376,
+  "kvpp": 69632,
+  "ctx": 262144,
+  "mem": 49000000000,
+  "need": 43754457579.0,
+  "verdict": "fits (reduced ctx)",
+  "n_exp": 0
+ },
+ {
   "slug": "unsloth-Qwen3.8-Flash-Next-loom",
   "w": 116400000000.0,
   "kv": 0,

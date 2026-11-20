@@ -15,11 +15,11 @@
    },
    "set": {
     "exec.prefill_capacity": 1024,
-    "exec.context_capacity": 120832,
-    "exec.pool_capacity": 120832,
-    "exec.context_cap": 120832
+    "exec.context_capacity": 116736,
+    "exec.pool_capacity": 116736,
+    "exec.context_cap": 116736
    },
-   "evidence": "Carried from the sibling bartowski-Qwen3.8-27B-loom (same architecture and geometry; re-validated on this UD-Q4_K_XL file by this port's gates and local A/B, PR q38xl-port). Sibling evidence: migrated from the R9700 fit table (.github/devlab/r9700_fit.json r9700_execution / ctx_cap, measured on the R9700 DevLab runner; #609 #613 #615 #617 #618 #619 #628 #630); values unchanged; context 124928 -> 120832: with the proposal-head copy (draft.propose.head_rows, +0.24 GB and the load-time staging) the image component is unavailable at 124928 and 122880 (dev gates: vision and spec FAIL, 503) and passes at 120832 and below (phead experiment runs 43754342025, 43755664241, 43757260999)"
+   "evidence": "UD-Q4_K_XL is larger than the sibling (workspace 7.8 GiB at prefill 1024): DevLab R9700 run 44823801006 built context 117760 (34 GiB budget) and refused the preset's 120832 (prepare: context above the built maximum, code 3); 116736 leaves margin. Sibling evidence: migrated from the R9700 fit table (.github/devlab/r9700_fit.json r9700_execution / ctx_cap, measured on the R9700 DevLab runner; #609 #613 #615 #617 #618 #619 #628 #630); values unchanged; context 124928 -> 120832: with the proposal-head copy (draft.propose.head_rows, +0.24 GB and the load-time staging) the image component is unavailable at 124928 and 122880 (dev gates: vision and spec FAIL, 503) and passes at 120832 and below (phead experiment runs 43754342025, 43755664241, 43757260999)"
   },
   {
    "when": {},
