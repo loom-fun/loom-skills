@@ -576,9 +576,32 @@ if R4:
     if not B_MODE == "2" and os.environ.get("FLASH2_PF", "0") == "1":   # the next K/V tile's loads in flight during this tile's math (flash2_prefetch.py); gfx12 twin only
         from flash2_prefetch import prefetch
         text = prefetch(text)
+# FLASH2_G11 (gfx11 kernel only; comma list, default empty = unchanged): the gfx12 twin's text transforms on the gfx11 kernel. lazy / kvh / vtf / hot
+# (flash2_trim.py), pf (flash2_prefetch.py), vp (flash2_vpack.py), abl=<flag>+<flag> (flash2_ablate.py timing ablations: outputs garbage, kbench only).
+G11 = set(x for x in os.environ.get("FLASH2_G11", "").split(",") if x) if not R4 and B_MODE != "2" else set()
+if G11:
+    import flash2_trim as _t
+    for _f in [x for x in G11 if x.startswith("abl=")]:
+        from flash2_ablate import ablate
+        text = ablate(text, _f[4:].replace("+", ","))
+    if "lazy" in G11:
+        text = _t.lazy(text)
+    if "kvh" in G11:
+        text = _t.kvhoist(text)
+    if "vtf" in G11:
+        text = _t.vtflat(text)
+    if "vp" in G11:
+        from flash2_vpack import vpack
+        text = vpack(text)
+    if "pf" in G11:
+        from flash2_prefetch import prefetch
+        text = prefetch(text)
 if os.environ.get("FLASH2_PEEL", "1") == "1" and not EDGE_ZERO and B_MODE != "2":   # the masked path only in the last key tile (flash2_peel.py)
     from flash2_peel import peel_last_tile
     _hot = None
+    if "hot" in G11:
+        from flash2_trim import hot as _trim_hot
+        _hot = lambda ls: _trim_hot(ls, D == 512)
     if R4 and os.environ.get("FLASH2_HOT", os.environ.get("FLASH2_TRIM", "0")) == "1":   # gfx12 twin: the hot copy skips the validity / mask selects (flash2_trim.py)
         from flash2_trim import hot as _trim_hot
         _hot = lambda ls: _trim_hot(ls, D == 512)
