@@ -1,22 +1,29 @@
 {
- "_comment": "Strix Halo A/B of 23c8ef59267bb06c23d6afdfd11ae59e6e730987 (fun) against 23c8ef59267bb06c23d6afdfd11ae59e6e730987 (staging) (ab_jobs.py --base-ref/--head-ref): each variant carries its ref's serving settings",
- "runner": "strix",
- "memory_bytes": 49000000000,
+ "_comment": "R9700 A/B of 23c8ef59267bb06c23d6afdfd11ae59e6e730987 (fun) against 23c8ef59267bb06c23d6afdfd11ae59e6e730987 (staging) (ab_jobs.py --base-ref/--head-ref): each variant carries its ref's serving settings. Does not fit: none",
+ "runner": "r9700",
+ "memory_bytes": 34000000000,
  "llama_spec": "matched",
  "jobs": [
   {
-   "name": "sab-unsloth-qwen3-8-27b-ud-q4_k_xl",
-   "runner": "strix",
+   "name": "rab-unsloth-qwen3-8-27b-ud-q4_k_xl",
+   "runner": "r9700",
    "card": "loom-fun-staging/unsloth-Qwen3.8-27B-UD-Q4_K_XL",
-   "memory_bytes": 49000000000,
+   "memory_bytes_r9700": 34000000000,
+   "served_context": 84992,
    "kit": null,
-   "llamacpp": "b1374",
+   "llamacpp": "b1375",
    "llamacpp_vulkan": "b12211",
    "variants": [
     {
      "name": "staging",
      "build": {},
-     "ref": "23c8ef59267bb06c23d6afdfd11ae59e6e730987"
+     "ref": "23c8ef59267bb06c23d6afdfd11ae59e6e730987",
+     "context": 84992,
+     "cap_pool": 84992,
+     "execution": {
+      "context_capacity": 120832,
+      "prefill_capacity": 1024
+     }
     }
    ],
    "steps": [
@@ -28,5 +35,6 @@
  ],
  "card": "loom-fun-staging/unsloth-Qwen3.8-27B-UD-Q4_K_XL",
  "kit": null,
- "llamacpp": "b1374"
+ "llamacpp": "b1375",
+ "llamacpp_vulkan": "b12211"
 }
