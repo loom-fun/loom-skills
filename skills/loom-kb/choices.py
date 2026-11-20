@@ -271,6 +271,9 @@ CHOICE("prefill.gemm.m256_g32", "bool", False, "GEMM_M256_G32", from_pr="q38pf-g
 CHOICE("prefill.gemm.m256_g32_fmts", "str", "q4_k", "GEMM_M256_G32_FMTS", from_pr="q38pf-gemm", doc="formats prefill.gemm.m256_g32 applies to.", **_PG)
 CHOICE("prefill.gemm.m256_swz", "int", 0, "GEMM_M256_SWZ", from_pr="q38pf-gemm",
        doc="m256 GEMM workgroup order in groups of N output tiles (0: launch order).", **_PG)
+CHOICE("prefill.gemm.m256_xclamp", "bool", False, "GEMM_M256_XCLAMP", from_pr="q38pf-gemm",
+       doc="m256 GEMM: the next step's activation loads at the clamped K, unconditionally (no scf.if: its yielded loads made the "
+       "compiler wait for them right after the barrier on q6_k).", **_PG)
 CHOICE("prefill.gemm.m256_db", "bool", False, "GEMM_M256_DB", from_pr="q38pf-gemm", doc="m256 GEMM with double-buffered 32-K LDS stages (loses).", **_PG)
 CHOICE("prefill.gemm.m256_db_fence", "bool", True, "GEMM_M256_DB_FENCE", from_pr="q38pf-gemm", doc="fence after the barrier of prefill.gemm.m256_db.", **_PG)
 CHOICE("prefill.gemm.q4_0_native", "bool", False, "GEMM_Q4_0_NATIVE", kernels=["g_gemm_q4_0_*", "g_moe_*q4_0*"], rows=ROWS_PREFILL,

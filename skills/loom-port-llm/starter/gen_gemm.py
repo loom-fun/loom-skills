@@ -967,6 +967,15 @@ def gemm_big256(fmt, mode):
             t.append(f"""    %x_colp = index.add {kvar}, %x_stage_col : index
     %x_rawp = vector.load %x_view[%x_row, %x_colp] : view<[%rows]x[%k]xf16> -> vector<32xf16>
     %x_rawp1 = vector.load %x_view[%x_row1, %x_colp] : view<[%rows]x[%k]xf16> -> vector<32xf16>""")
+        elif _on("GEMM_M256_XCLAMP"):   # choice prefill.gemm.m256_xclamp: unconditional loads at the clamped next K (the last step
+            # reloads its own slice): no scf.if, whose yielded loads made the compiler wait for them (vmcnt(0)) and copy them
+            # into the carried registers right after the barrier, before the MMAs (q6_k)
+            t.append(f"""    %x_coln_v = index.add {kvar}, %x_stage_col : index
+    %x_c31 = index.constant 31 : index
+    %x_lim = index.sub %k, %x_c31 : index
+    %x_coln = index.assume %x_coln_v [lt(%x_coln_v, %x_lim)] : index
+    %x_rawn = vector.load %x_view[%x_row, %x_coln] : view<[%rows]x[%k]xf16> -> vector<32xf16>
+    %x_rawn1 = vector.load %x_view[%x_row1, %x_coln] : view<[%rows]x[%k]xf16> -> vector<32xf16>""")
         else:
             t.append(f"""    %x_more = index.cmp ult, %x_next_step, %k_steps : index
     %x_rawn, %x_rawn1 = scf.if %x_more -> (vector<32xf16>, vector<32xf16>) {{
