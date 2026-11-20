@@ -57,6 +57,8 @@ class DeviceRegistry(unittest.TestCase):
             self.assertIn("registry.runner_labels()", txt, wf)
             self.assertNotIn('"devlab-dispatch"', txt, f"{wf}: an inline runner label table")
         self.assertEqual(registry.runner_labels(), {dev["runner"]["key"]: dev["runner"]["labels"] for dev in d.values() if dev["runner"]["labels"]})
+        self.assertEqual(d["gfx1152"]["runner"]["backend"], "xsj")
+        self.assertNotIn("gfx1152", registry.runner_labels())
         out = subprocess.run([sys.executable, str(ROOT / ".github/scripts/runner_device.py"), "--labels"], capture_output=True, text=True, check=True).stdout
         self.assertEqual(json.loads(out), registry.runner_labels())
         prefixes = [(dev["runner"].get("ab_prefix") or dev["runner"]["key"] + "ab-") for dev in d.values() if dev["runner"]["labels"]]
@@ -73,7 +75,7 @@ class DeviceRegistry(unittest.TestCase):
         self.assertEqual(list(g), list(registry.devices()))
         # the card shows its GPUs in this order (device.json card.order, else the registry's): Strix Halo, R9700, gfx1201 16 GB, gfx1150
         self.assertEqual([d for d in card_lib.GPU_ORDER if d != "radeon-rx7900xtx"],
-                         ["strix-halo", "radeon-r9700", "gfx1201-16gb", "gfx1150"])
+                         ["strix-halo", "radeon-r9700", "gfx1201-16gb", "gfx1150", "gfx1152"])
         self.assertEqual({k: v for k, v in g["strix-halo"].items() if k != "detect"},
                          {"name": 'AMD Ryzen AI Max+ 395 "Strix Halo"', "short": "Strix Halo", "arch": "gfx1151", "memory": None,
                           "roofline": "strix-halo", "memory_bytes": None, "runner": "Strix Halo", "tag": "strix-halo",
@@ -88,7 +90,7 @@ class DeviceRegistry(unittest.TestCase):
         self.assertEqual(card_lib.gpu_preset({"presets": ["chat", "chat-r9700"], "preset": "chat"}, "radeon-r9700"), "chat-r9700")
         self.assertEqual(card_lib.gpu_preset({"presets": ["chat", "chat-r9700"], "preset": "chat"}, "strix-halo"), "chat")
         for text, want in (("AMD Strix Halo (DevLab Dispatch runner X)", "strix-halo"), ("AMD Radeon AI PRO R9700S (gfx1201)", "radeon-r9700"),
-                           ("gfx1151", "strix-halo"), ("nothing", None)):
+                           ("gfx1151", "strix-halo"), ("Radeon 860M gfx1152", "gfx1152"), ("nothing", None)):
             self.assertEqual(card_lib.gpu_of({"cpu": text}) if hasattr(card_lib, "gpu_of") else registry.detect(text), want)
 
     def test_roofline_presets(self):
