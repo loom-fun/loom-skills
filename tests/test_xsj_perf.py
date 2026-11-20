@@ -24,7 +24,7 @@ class RunnerTests(unittest.TestCase):
         self.args = SimpleNamespace(package=self.out, preset="chat-gfx1152", loom="loom-serve.exe",
                                     gguf=self.out / "weights.gguf", rocm="llama-server.exe",
                                     vulkan="llama-server.exe", loom_arg=[], port=8160,
-                                    repeat_rows=1, startup_timeout=1, workload_timeout=1)
+                                    repeat_rows=1, startup_timeout=1, workload_timeout=1, memory_bytes=None)
 
     def test_engine_modes_match_context_and_load_drafting_only_for_single_stream(self):
         model = self.out / "model.json"
@@ -48,6 +48,20 @@ class RunnerTests(unittest.TestCase):
         loom = runner.server_argv(self.args, "loom", "single", model, 32768, spec)
         self.assertIn("--device=amdgpu://?completion_spin_ns=4294967295", loom)
         self.assertFalse(any(flag.startswith("--workers") for flag in loom))
+        self.assertIn("--pool_backing=fixed", loom)
+        self.assertFalse(any(flag.startswith("--memory_bytes") for flag in loom))
+
+    def test_elastic_budget_serves_the_exact_configuration_in_both_loom_modes(self):
+        self.args.memory_bytes = 14_000_000_000
+        self.args.loom_arg = ["--parameter_mode=preload"]
+        for mode in ("single", "nodraft"):
+            loom = runner.server_argv(self.args, "loom", mode, self.out / "model.json", 40960, [])
+            self.assertIn("--pool_backing=elastic", loom)
+            self.assertIn("--memory_bytes=14000000000", loom)
+            self.assertIn("--parameter_mode=preload", loom)
+            self.assertNotIn("--pool_backing=fixed", loom)
+        baseline = runner.server_argv(self.args, "rocm", "single", None, 40960, [], "ROCm0")
+        self.assertFalse(any(flag.startswith(("--pool_backing", "--memory_bytes")) for flag in baseline))
 
     def test_baseline_context_is_bounded_on_native_context_models(self):
         for engine, slot, four in (("rocm", "65536", "65536"), ("vulkan", "36864", "147456")):
