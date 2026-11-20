@@ -374,6 +374,19 @@ CHOICE("prefill.attn.flash2_pf", "bool", False, "FLASH2_PF", experiment=True, do
 CHOICE("prefill.attn.flash2_kt256", "int", None, "FLASH2_KT256", per_target=True,
        doc="Keys per tile of the gfx11 head_dim-256 flash2s kernel (None: 32). 16: 208 VGPRs / 33 KB LDS, two 12-wave workgroups per WGP "
            "instead of one (G = 6): the second workgroup hides the first's exposed K/V load latency (Qwen3.8-27B Strix: kernel -21 % at 32k, prefill 32k +2.8 %).", **_FL)
+CHOICE("prefill.attn.flash2_g11", "str", None, "FLASH2_G11", experiment=True,
+       doc="gfx11 flash2s kernel only: comma list of the gfx12 twin's text transforms (lazy, kvh, vtf, hot, pf, vp, db) on the gfx11 kernel; abl=... "
+           "timing ablations (garbage outputs, kbench only).", **_FL)
+CHOICE("prefill.attn.flash2_db_at", "str", "end", "FLASH2_DB_AT", experiment=True,
+       doc="With FLASH2_G11=db: where the next tile's staging stores go (end, or b2: after the S exchange barrier).", **_FL)
+CHOICE("prefill.attn.flash2_ng256", "int", None, "FLASH2_NG256", experiment=True,
+       doc="Experiment: query-head groups per KV head at head_dim 256 (gfx11 flash2s).", **_FL)
+CHOICE("prefill.attn.flash2_ngx", "bool", None, "FLASH2_NGX", experiment=True,
+       doc="Experiment: with FLASH2_NG256 > 1, a tile's head groups adjacent in dispatch order.", **_FL)
+CHOICE("prefill.attn.flash2_mt256", "int", None, "FLASH2_MT256", experiment=True,
+       doc="Experiment (gfx11, head_dim 256, 16-key tiles): 2 = two 16-token query tiles per workgroup (flash2_mt.py).", **_FL)
+CHOICE("prefill.attn.flash2_vtpad", "int", None, "FLASH2_VTPAD", experiment=True,
+       doc="Experiment: the V^T row pad of flash2s in halves (None: 8).", **_FL)
 CHOICE("prefill.attn.flash2_ng512", "int", None, "FLASH2_NG512", experiment=True,
        doc="Experiment: query-head groups per KV head at head_dim 512.", **_FL)
 CHOICE("prefill.attn.flash512", "bool", True, "FLASH512", kits=["gemma4"], kernels=["*_attention_flash2*"], rows=ROWS_PREFILL,
