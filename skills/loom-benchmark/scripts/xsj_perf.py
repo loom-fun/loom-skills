@@ -185,7 +185,7 @@ def spec_args(repo, draft):
 def server_argv(args, engine, mode, model_path, context, spec, device=None):
     if engine == "loom":
         return [str(args.loom), f"--device={DEVICE}", f"--listen=127.0.0.1:{args.port}",
-                f"--model={model_path}", f"--preset={args.preset}", "--pool_backing=fixed", "--workers=8",
+                f"--model={model_path}", f"--preset={args.preset}", "--pool_backing=fixed",
                 *args.loom_arg]
     streams = 4 if mode == "nodraft" else 1
     unified = engine == "rocm" and streams == 4

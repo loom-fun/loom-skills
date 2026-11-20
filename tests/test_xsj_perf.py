@@ -45,6 +45,7 @@ class RunnerTests(unittest.TestCase):
                 self.assertFalse(any(flag.startswith("--spec-") for flag in four))
         loom = runner.server_argv(self.args, "loom", "single", model, 32768, spec)
         self.assertIn("--device=amdgpu://?completion_spin_ns=4294967295", loom)
+        self.assertFalse(any(flag.startswith("--workers") for flag in loom))
 
     def test_alternate_drafter_is_selected_only_by_the_classification(self):
         self.assertEqual(runner.spec_args("loom-fun/unsloth-Qwen3.5-2B-loom", None), [])
