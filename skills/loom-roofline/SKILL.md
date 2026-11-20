@@ -110,7 +110,7 @@ llama.cpp's MMQ prefill uses int8 WMMA (twice the f16 rate), so on prefill it ca
 
 | `--device` | GPU | bw (streaming) | flops (dense f16 WMMA) |
 |---|---|---|---|
-| `strix-halo` (default) | Ryzen AI Max+ 395, gfx1151, LPDDR5X-8000 256-bit | 228 GB/s measured streaming read (256 peak) | 43.8 TFLOP/s @ 85 W (default), 47.1 @ 123 W; spec 59 (40 CU x 512 x 2.9 GHz) |
+| `strix-halo` (default) | Ryzen AI Max+ 395, gfx1151, LPDDR5X-8000 256-bit | 228 GB/s measured streaming read (256 peak) | 43.8 TFLOP/s @ 85 W (default), 48.4 @ 123 W; spec 59 (40 CU x 512 x 2.9 GHz) |
 | `radeon-r9700` | Radeon AI PRO R9700, gfx1201, 32 GB GDDR6 20 Gbps 256-bit | 613 GB/s measured (Loom streaming read on the DevLab R9700S; 640 peak) | 191 TFLOP/s (64 CU x 1024 x 2.92 GHz: RDNA4 doubles the dense f16 WMMA rate per CU; 383 is the sparse figure) |
 | `radeon-r9700s` | R9700S: the DevLab `radeon-r9700` runners (same memory, 2.35 GHz max clock) | 613 GB/s measured | 214 TFLOP/s (measured peak f16 WMMA on the runner, devlab-kbench gemm_r9700) |
 

@@ -30,9 +30,20 @@ Register-only 16x16x16 MMA loop (2560 workgroups x 8 waves x 256 steps x 16 MMAs
 - Consequence for prefill targets: at 85 W the practical WMMA ceiling on real data is ~43 TFLOP/s = 73 % of the
   roofline's 59 TFLOP/s, so a dense model's end-to-end prefill cannot reach 70 % of `roofline.py`'s prefill ceiling
   (Qwen3.8-27B: 49.7 GFLOP/token -> 881 tok/s at 43.8 TFLOP/s with zero non-GEMM time, 76 % of the 8k ceiling).
+  Since 2026-11-20 `roofline.py` uses the 85 W rate as its default compute ceiling (`--power`), so prefill % of roofline is "@ 85 W".
 - **The limit is the BIOS power mode, not the chip.** The local machine (GMKtec NucBox EVO-X2, BIOS EVO-X2 1.05) in its
   BIOS performance mode, same test (2026-11-19): socket power ~123 W sustained (peaks 140 W); random f16 2.56 GHz,
   47.1 TFLOP/s (+12 %); constant f16 2.88 GHz, 54.9. Ubuntu's power profile does not reach it: power-profiles-daemon
   shows only `amd_pstate` (CPU EPP) and a placeholder platform driver; `/sys/firmware/acpi/platform_profile` is absent.
   The hwmon sensor `power1_input` (label `PPT`) is the package power the limit acts on. DevLab Strix Halo runners
   (hostnames X2-*) behave like the 85 W mode: card numbers measured there are 85 W numbers.
+- **Per clock the WMMA pipe tops out at ~91 %, whatever the kernel** (2026-11-20, local, 123 W mode, 25+ s per variant,
+  hwmon PPT/freq1 every 0.1 s, settled part after the ~5 s boost). The base loop has no overhead to remove: per 16 WMMAs
+  5 scalar instructions (s_cmp, s_delay_alu, s_cbranch, s_add, s_branch), no v_mov back-edge copies, no waitcnt.
+  Random f16 at ~122 W, 2.55-2.59 GHz: base 47.4 TFLOP/s (18.46 TFLOP/s/GHz = 90.1 % of 40 x 512); unrolled 4x/16x,
+  4/12/16 waves per workgroup, 8/12/20 accumulators, one shared A/B pair, 4x/16x longer waves: 46.6-47.5 (88.4-90.4 %);
+  80 long-running workgroups (1-4 waves per SIMD): 48.3-48.4 at 2.59 GHz (91.1-91.3 %, the best). Q4_K-dequant B: 47.3
+  (90.1 %). Constant data, not power-bound (2.90 GHz, 107-118 W): 54.7 (92.2 %). The 8-10 % is the hardware (or the
+  reported clock): it does not move with loop overhead, occupancy, operand reuse or the power limit. Best sustained
+  random-data WMMA at 123 W: 48.4 TFLOP/s (`roofline.py --power 123w`); 85 W: 43.8 (`--power 85w`, the default).
+  Variants: gen_peak.py's kernel with the A/B fragment counts, unroll, waves per workgroup and workgroup count varied.
