@@ -96,7 +96,8 @@ Switches (all off by default; off = byte-identical programs): `GDN_CHUNK11` (g_g
 (16 | 32), `GDN_CHUNK11_OPT` (kbo, xpf, scan, acc4), `GDN_SKIP_LONG`, `GDN_FUSED11` (+ `GDN_FUSED11_REGNORM`), `GDN_CHUNK11_ALIAS`.
 - **Winner: CHUNK11 + FUSE + GATE + CN=16 + OPT=kbo + SKIP_LONG**: one launch does conv, norms, the WY recurrence and the gated norm
   of the long spans. Local 123 W, same-job ABBA vs base: prefill 1k/2k/8k/16k/32k +3.0/+3.1/+3.3/+3.2/+2.8 % (8k 588.8 -> 608.5
-  tok/s), decode tie. Kernel tests vs float64 (gdn_chunkf_serve: serving-shaped multi-span epoch) pass.
+  tok/s), decode tie; DevLab 85 W (44691375703) +3.0/+3.2/+3.3/+3.2/+2.8 % (8k 534.7 -> 552.2). GDN bucket at 8k 0.115 -> 0.054
+  ms/token. Kernel tests vs float64 (gdn_chunkf_serve: serving-shaped multi-span epoch) pass. CN=16 alone (plain kernel) +1.2..1.6 %.
 - **Why CN=16 wins on gfx11:** a 27B span has 48 value-head workgroups; CN=32 needs 253 VGPR + 53.7 KB LDS = 2 workgroups per WGP
   (40 slots), so 8 run in a second round (a 40-head ablation was -36 %). CN=16 (+ kbo: one state rhs copy live) is 196-200 VGPR and
   26 KB, 3 per WGP, one round, and the serial solve is 16 rows. Fused kernel per 1024-token span: CN32 3.6 ms, CN16+kbo 1.0 ms; the
