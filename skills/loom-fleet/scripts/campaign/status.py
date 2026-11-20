@@ -8,11 +8,17 @@ usage: status.py [--dir CAMPAIGN_DIR] set PATH.TO.KEY VALUE [PATH VALUE ...]   d
 CAMPAIGN_DIR defaults to $CAMPAIGN_DIR, else the current directory. The schema is in reference/campaign.md (section "State files").
 Only the tech lead writes status.json; engineers use `log` and their mailbox.
 """
-import fcntl
+import errno
 import json
 import os
 import sys
 import time
+from contextlib import contextmanager
+
+if os.name == "nt":
+    import msvcrt
+else:
+    import fcntl
 
 
 def campaign_dir(args):
@@ -21,10 +27,29 @@ def campaign_dir(args):
     return os.environ.get("CAMPAIGN_DIR", "."), args
 
 
+@contextmanager
 def locked(path):
-    fh = open(path + ".lock", "w")
-    fcntl.flock(fh, fcntl.LOCK_EX)
-    return fh
+    with open(path + ".lock", "a+b") as fh:
+        if os.name != "nt":
+            fcntl.flock(fh, fcntl.LOCK_EX)
+            yield
+            return
+
+        # Lock byte zero even in existing empty lock files. Use a retry loop
+        # because the CRT's blocking mode gives up after ten attempts.
+        fh.seek(0)
+        while True:
+            try:
+                msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
+                break
+            except OSError as exc:
+                if exc.errno != errno.EACCES:
+                    raise
+                time.sleep(0.05)
+        try:
+            yield
+        finally:
+            msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
 
 
 def set_path(doc, dotted, value):
