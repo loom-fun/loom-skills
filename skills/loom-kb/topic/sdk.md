@@ -48,7 +48,14 @@ version. Write-ups for the SDK team are built from this file.
 - Workaround (kit): `dual_target.encodings_first` reorders a deep file (estimated depth above 60,000 values, or an encoding-typed line
   past 4 MB) so the leading funcs and every encoding-typed kernel come first, wherever they were; it raises if they alone are too deep.
   Before this fix it reordered only the kernels ahead of the first command program, and Qwen3.8-27B's MTP weight converter
-  (`@llm_prep_q6_k_q4_0`) sits in the middle of its kernels. Every published file is below 60,000 (deepest: Ornith-1.5-35B-A3B 59,399).
+  (`@llm_prep_q6_k_q4_0`) sits in the middle of its kernels.
+- Split (kit, `split_library.py`, choice `target.library.split`, default auto): when the encoding kernels alone are too deep
+  (unsloth Qwen3.8-27B UD-Q4_K_XL: six GEMM formats x tiles x gfx12 twins), build.py moves them (with their twins and the inline
+  helpers they call) into `program/llm_kernels_N.loom` libraries listed BEFORE `program/llm.loom` in the card; llm.loom launches
+  them through `kernel.decl` lines. The limit is per parsed file: loom-serve indexes each library as its own link source and links
+  per-kernel closures. A link that materializes a command's whole closure (loom-link `--root=@llm_advance`) numbers values in
+  library order, so the kernel files go first (llm.loom first fails: `cannot store target value %65545 in a 16-bit SSA encoding
+  reference`). Kernel tests run one loom-test module per library file. Every published file is below 60,000 (deepest: Ornith-1.5-35B-A3B 59,399).
 - Standalone repro (no package): a file with one filler kernel of N `index.constant`s, then
   `kernel.def export("k") @k() {...} launch(%out: buffer) {` ... `%layout = encoding.layout.strided [%c1, %c16] : encoding<layout>`,
   `%v = buffer.view %out[%zero] : buffer -> view<16x16xf32, %layout>`, a `view.store` through `%v`. `loom-compile r.loom --root=@k

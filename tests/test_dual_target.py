@@ -248,5 +248,10 @@ class EncodingsFirstTests(unittest.TestCase):
     def test_too_deep_encodings_raise(self):
         enc = "".join(f"kernel.def export(\"e{j}\") @e{j}() {{\n" + "".join(f"  %v{i} = index.constant 0 : index\n" for i in range(20000))
                       + "  %l = encoding.layout.strided [%a, %b] : encoding<layout>\n}\n" for j in range(4))
-        with self.assertRaisesRegex(ValueError, "16 bits"):
-            dual_target.encodings_first(enc)
+        old = os.environ.get("LOOM_LIBRARY_SPLIT")
+        os.environ["LOOM_LIBRARY_SPLIT"] = "off"   # with the split on (default auto), split_library.py moves them instead
+        try:
+            with self.assertRaisesRegex(ValueError, "16 bits"):
+                dual_target.encodings_first(enc)
+        finally:
+            os.environ.pop("LOOM_LIBRARY_SPLIT") if old is None else os.environ.__setitem__("LOOM_LIBRARY_SPLIT", old)

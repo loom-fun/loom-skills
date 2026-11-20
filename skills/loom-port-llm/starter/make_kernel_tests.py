@@ -18,9 +18,11 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import kb_choices  # noqa: E402  the choices the model's kernels were generated with (resolved.env of the package, else resolved here)
 kb_choices.apply_for_tests(json.load(open(sys.argv[1])))
 from mv_rows import pick_r, iq_r, flash2_deep_from  # noqa: E402
-from gen_gemm import HELPER as GEMM_HELPER, IQ4_NATIVE as _IQ4_NATIVE  # noqa: E402
-_IQ4_NATIVE_FMTS = frozenset({"iq4_xs", "iq4_nl"} if _IQ4_NATIVE else ())   # prefill.gemm.iq4_native: their own 128/256-row GEMMs, tested like the K-quants'
-_MIXED_FMTS = {"q4_k", "q5_k", "q6_k"} | ({"iq4_xs"} if _IQ4_NATIVE else set())   # gen_llm.M256_MIXED_FMTS
+from gen_gemm import HELPER as GEMM_HELPER, IQ4_NATIVE as _IQ4_NATIVE, Q3_K_NATIVE as _Q3_K_NATIVE  # noqa: E402
+_IQ4_NATIVE_FMTS = frozenset(({"iq4_xs", "iq4_nl"} if _IQ4_NATIVE else set()) | ({"q3_k"} if _Q3_K_NATIVE else set()))   # prefill.gemm.iq4_native / q3_k_native: their own 128/256-row GEMMs, tested like the K-quants'
+_MIXED_FMTS = {"q4_k", "q5_k", "q6_k"} | ({"iq4_xs"} if _IQ4_NATIVE else set()) \
+    | ({"iq4_nl"} if _IQ4_NATIVE and os.environ.get("GEMM_M256_MIXED_NL", "0").strip().lower() not in ("", "0", "false", "no", "off") else set()) \
+    | ({"q3_k"} if _Q3_K_NATIVE else set())   # gen_llm.M256_MIXED_FMTS
 from gen_gemm_rdna4 import f16o_swiglu as _f16o_on  # noqa: E402  formats with no 256-row (_m256) GEMM
 ACT_Q8 = os.environ.get("ACT_Q8", "1") == "1"   # gen_llm.py's default: int8 activations for these formats
 from formats import ICODES as IQ_FMTS  # noqa: E402  (gen_llm.py takes int8 activations for these)
@@ -589,7 +591,9 @@ def _pkg_llm_text():
     text = None
     for c in cands:
         for f in glob.glob(c) if c else []:
-            text = text or open(f, errors="replace").read()
+            if text is None:   # a split library (split_library.py): the program file and its kernel files
+                import split_library
+                text = split_library.library_text(os.path.dirname(f), os.path.basename(f))
     _PKG_TEXT.append(text)
     return text
 

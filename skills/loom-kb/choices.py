@@ -166,6 +166,14 @@ CHOICE("target.dual.select", "str", "launch", "LOOM_DUAL_SELECT", kernels=[], ro
            "program = one template.apply per command program that launches a twin (the gfx11 provider is the plain gfx11-only body, as "
            "in a single-target build). No kernel text changes; only the command programs.")
 
+CHOICE("target.library.split", "str", "auto", "LOOM_LIBRARY_SPLIT", kernels=[], rows=ROWS_ALL, devices=["rdna3"], per_target=False,
+       from_pr="split_library.py (q38xl fmt)", generator_defaults=("auto",),
+       doc="Kernel-library split (split_library.py): auto = a program library deeper than hrx-loom's 16-bit encoding value ids "
+           "(encoding kernels beyond ~60,000 values / 4 MB even after dual_target.encodings_first) moves its encoding kernels into "
+           "program/llm_kernels_N.loom libraries, launched through kernel.decl lines; every smaller package is byte-identical; "
+           "always = split any library with an encoding kernel (tests the path on a small model); off = never (a too-deep file "
+           "raises, as before).")
+
 # ======================================================================================================================
 # Execution settings of one (model, device) preset (model.json): resolved per device, never part of a program
 # ======================================================================================================================
@@ -325,6 +333,16 @@ CHOICE("prefill.gemm.iq4_f16lut", "bool", False, "GEMM_IQ4_F16LUT", kernels=["g_
        doc="gen_gemm.iq4_dequant16 (the 16-value IQ4 staging of the 64/128-row tiles, the mixed-format swiglu m256 and the "
            "gfx12 twins) with the unsigned book + 0x64 magic + one f16 fma per value pair instead of sign-extend + F32 "
            "convert/multiply/round (mixed iq4_xs/q5_k loop VALU 409 -> 309 per 64 WMMA).")
+CHOICE("prefill.gemm.m256_mixed_nl", "bool", False, "GEMM_M256_MIXED_NL", kernels=["g_gemm_*_*_swiglu_m256_f16o"], rows=ROWS_PREFILL,
+       from_pr="q38xl-fmt",
+       doc="IQ4_NL (32-value blocks, inline under prefill.gemm.iq4_native) joins the mixed-format swiglu m256 "
+           "(prefill.gemm.m256_mixed) on either side: unsloth UD layers pairing iq4_nl with q5_k / iq4_xs run one f16-output kernel "
+           "instead of two GEMMs + silu_mul; the iq4_nl weight's row bytes come from its own block count.")
+CHOICE("prefill.gemm.q3_k_native", "bool", False, "GEMM_Q3_K_NATIVE", kernels=["g_gemm_q3_k_*", "g_gemm_*_*_swiglu_m256_f16o"],
+       rows=ROWS_PREFILL, from_pr="q38xl-fmt",
+       doc="Dense Q3_K GEMMs stage their 16-value half-group inline (gen_gemm.q3_k_dequant16: the values of @g_q3_k_values + "
+           "fptrunc, loads exposed) and get the 256-row kernels, and q3_k joins the mixed-format swiglu m256 "
+           "(prefill.gemm.m256_mixed); off: the shared value helper and the 64/128-row tiles (unsloth UD: one ffn_up).")
 CHOICE("prefill.gemm.prune", "bool", False, "GEMM_PRUNE", kernels=["g_gemm_*"], rows=ROWS_PREFILL, from_pr="q38xl-port",
        doc="Drop g_gemm_* kernel definitions nothing launches (and their gfx12 twins) from llm.loom: kernels a program rewrite "
            "replaced (plain swiglu m256 under f16o). Keeps a library with many formats under hrx-loom's 16-bit encoding value ids "

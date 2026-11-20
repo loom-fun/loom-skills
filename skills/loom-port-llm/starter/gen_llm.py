@@ -5072,7 +5072,9 @@ USED_GEMM = {}       # fmt -> set of GEMM modes
 # instead of two f32 GEMMs + g_silu_mul + the row scale of f
 M256_MIXED = os.environ.get("GEMM_M256_MIXED_F16O", "0").lower() not in ("", "0", "false", "no", "off")
 # the formats the mixed kernel stages (256-value blocks with an inline dequant): the K-quants, and IQ4_XS under prefill.gemm.iq4_native
-M256_MIXED_FMTS = {"q4_k", "q5_k", "q6_k"} | ({"iq4_xs"} if __import__("gen_gemm").IQ4_NATIVE else set())
+M256_MIXED_FMTS = {"q4_k", "q5_k", "q6_k"} | ({"iq4_xs"} if __import__("gen_gemm").IQ4_NATIVE else set()) \
+    | ({"iq4_nl"} if __import__("gen_gemm").IQ4_NATIVE and os.environ.get("GEMM_M256_MIXED_NL", "0").strip().lower() not in ("", "0", "false", "no", "off") else set()) \
+    | ({"q3_k"} if __import__("gen_gemm").Q3_K_NATIVE else set())
 MIXED_PAIRS = set()  # (gate fmt, up fmt) the mixed kernels are generated for
 USED_MVQ = set()     # (fmt, K, swiglu, R, TG) of the int8-activation matvecs (ACT_Q8); swiglu 2 = pair (PAIR_PROJ)
 
