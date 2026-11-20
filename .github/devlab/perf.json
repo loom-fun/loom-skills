@@ -1,11 +1,11 @@
 {
- "_comment": "q38pf lane gdn, round 2: ktest fix; GDN_CHUNK11 (c11), + GDN_FUSED11 (f11), + GDN_CHUNK11_FUSE/GATE (cfg) vs the base rebuild, ABBA short + long, pf8k profiles.",
+ "_comment": "q38pf lane gdn, round 3: best = CHUNK11 + FUSE + GATE + CN16 + kbo + SKIP_LONG (one fused long-span kernel), c16 = CHUNK11 + CN16, vs base; ABBA short + long; pf8k profile.",
  "runner": "strix",
  "memory_bytes": 52000000000,
  "llama_spec": "matched",
  "jobs": [
   {
-   "name": "q38pf-gdn-r2",
+   "name": "q38pf-gdn-r3",
    "runner": "strix",
    "card": "loom-fun/bartowski-Qwen3.8-27B-loom",
    "memory_bytes": 52000000000,
@@ -18,51 +18,41 @@
      "ref": "550fc117fa1cb45bef8ab2fbdb8fcde9d2e362aa"
     },
     {
-     "name": "c11",
-     "build": {
-      "GDN_CHUNK11": "1"
-     }
-    },
-    {
-     "name": "f11",
+     "name": "c16",
      "build": {
       "GDN_CHUNK11": "1",
-      "GDN_FUSED11": "1"
+      "GDN_CHUNK11_CN": "16"
      }
     },
     {
-     "name": "cfg",
+     "name": "best",
      "build": {
       "GDN_CHUNK11": "1",
       "GDN_CHUNK11_FUSE": "1",
-      "GDN_CHUNK11_GATE": "1"
+      "GDN_CHUNK11_GATE": "1",
+      "GDN_CHUNK11_CN": "16",
+      "GDN_CHUNK11_OPT": "kbo",
+      "GDN_SKIP_LONG": "1"
      }
     }
    ],
    "steps": [
-    "ktest:c11",
-    "ktest:f11",
-    "ktest:cfg",
-    "smoke:f11",
-    "smoke:cfg",
+    "ktest:best",
+    "ktest:c16",
+    "smoke:best",
     "perf:base:1",
-    "perf:c11:1",
-    "perf:f11:1",
-    "perf:cfg:1",
-    "perf:cfg:1",
-    "perf:f11:1",
-    "perf:c11:1",
+    "perf:c16:1",
+    "perf:best:1",
+    "perf:best:1",
+    "perf:c16:1",
     "perf:base:1",
     "perf:base:1:long",
-    "perf:c11:1:long",
-    "perf:f11:1:long",
-    "perf:cfg:1:long",
-    "perf:cfg:1:long",
-    "perf:f11:1:long",
-    "perf:c11:1:long",
+    "perf:c16:1:long",
+    "perf:best:1:long",
+    "perf:best:1:long",
+    "perf:c16:1:long",
     "perf:base:1:long",
-    "profile:f11:pf8k",
-    "profile:cfg:pf8k"
+    "profile:best:pf8k"
    ]
   }
  ]
