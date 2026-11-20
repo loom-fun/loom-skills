@@ -15,7 +15,7 @@
 import json, math, os, subprocess, sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from gen_gdn import gdn_geometry, gdn_kernels, recurrence_pf, split_qgate, chunk_mode, chunk11_mode, chunk11_fuse, fused_mode  # noqa: E402
+from gen_gdn import gdn_geometry, gdn_kernels, recurrence_pf, split_qgate, chunk_mode, chunk11_mode, chunk11_fuse, chunk11_gate, fused_mode  # noqa: E402
 from formats import SPLIT, SCALE_DIV  # noqa: E402
 from attention_masks import full_blocks  # noqa: E402
 
@@ -4943,6 +4943,8 @@ def gdn_layer(i, b, nm, sz, par):
             CH = CH.replace(f"%arena, %gs, %ginv,", f"%arena, %gq, %ginv,", 1).replace(", %graw) : [index](", f", %graw, %conv_{i}) : [index](", 1)
             CH = CH[:-1] + f", view<{C * K}xf32>)"
             assert "%gq" in CH and f"%conv_{i})" in CH, CH
+        if chunk11_gate(g):   # the gated norm of the chunk's rows in its epilogue
+            CH = CH.replace(") : [index](", f", %ssm_norm_{i}, %gz, %o) : [index](", 1)[:-1] + f", view<{DV}xf32>, buffer, buffer)"
         REC = REC + "\n  scf.if %gemm {\n  " + CH + "\n  }"
     elif chunk_mode(g) == "group":   # gfx12: spans of 64+ tokens run the chunked kernel (a gfx11 build launches nothing here: its kernel takes every span)
         REC = REC + "\n  scf.if %gemm {\n  // dual-group: rdna4 " + REC.strip().replace("@g_gdn_recurrence[", "@g_gdn_chunk_rdna4[") + "\n  // dual-group: end\n  }"
@@ -4950,6 +4952,8 @@ def gdn_layer(i, b, nm, sz, par):
   kernel.launch @g_gdn_conv_commit[%spans](%t, %spans, %layer_{i}, %metadata, %origins, %arena, %gq) : [index](index, index, index, buffer, buffer, buffer, buffer)
   kernel.launch @g_gdn_qk_norm[%t](%t, %gs, %ginv) : [index](index, buffer, buffer)"""
     GATE = f"""  kernel.launch @g_gdn_norm_gate[%t](%t, %info, %graw, %ssm_norm_{i}, %gz, %o) : [index](index, buffer, buffer, view<{DV}xf32>, buffer, buffer)"""
+    if chunk11_gate(g):   # g_gdn_chunk wrote the gated rows of the 64+-token spans
+        GATE = f"""  kernel.launch @g_gdn_norm_gate_s[%t](%t, %spans, %metadata, %info, %graw, %ssm_norm_{i}, %gz, %o) : [index](index, index, buffer, buffer, buffer, view<{DV}xf32>, buffer, buffer)"""
     if fused_mode(g):   # gfx12, GEMM-shape epochs: two launches (gen_gdn_fused.py) in place of conv .. norm_gate; gfx11 and short epochs keep the chain
         REC0 = REC.split("\n")[0]
         FA = (f"kernel.launch @g_gdn_fa_rdna4[%t, %spans](%t, %spans, %layer_{i}, %metadata, %origins, %arena, %gq, %conv_{i}, %galpha, %gbeta, %ssm_a_{i}, %dt_bias_{i}, %gs)"

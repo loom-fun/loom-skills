@@ -532,10 +532,10 @@ kernel.def export("g_gdn_recurrence") @g_gdn_recurrence(%spans: index) {{
             T.append(pf.replace("g_gdn_recurrence", "g_gdn_recurrence_pf"))
         elif c11:   # single-form models: g_gdn_recurrence takes spans under PF_SPAN, g_gdn_chunk (launched in GEMM epochs) the rest
             from gen_gdn_chunk import chunk_kernel
-            fz = chunk11_fuse(G)
-            T.append(chunk_kernel(G, NG, LB, guard_open, guard_close, arch="rdna3", fuse=fz, eps=eps))
-            if rdna4_twins() and fz and not chunk_mode(G):   # the fused launch has no sequential gfx12 counterpart: the gfx12 fused chunk kernel
-                T.append(chunk_kernel(G, NG, LB, guard_open, guard_close, fuse=True, eps=eps))
+            fz, gt = chunk11_fuse(G), chunk11_gate(G)
+            T.append(chunk_kernel(G, NG, LB, guard_open, guard_close, arch="rdna3", fuse=fz, eps=eps, gate=gt))
+            if rdna4_twins() and (fz or gt) and not chunk_mode(G):   # a fused launch has no sequential gfx12 counterpart: the gfx12 chunk kernel
+                T.append(chunk_kernel(G, NG, LB, guard_open, guard_close, fuse=fz, eps=eps, gate=gt))
             elif rdna4_twins() and not chunk_mode(G):   # gfx12 twin of g_gdn_chunk: the sequential kernel of the long spans
                 T.append(_as_rdna4(_recurrence_rows(G, NG, LB, *RL, guard_open, guard_close, "long").replace("g_gdn_recurrence", "g_gdn_chunk"),
                                    "g_gdn_chunk"))
@@ -599,6 +599,8 @@ kernel.def export("g_gdn_norm_gate") @g_gdn_norm_gate(%tokens: index) {{
   kernel.return
 }}
 """)
+    if chunk11_gate(G):   # the norm-gate of the spans under PF_SPAN beside g_gdn_chunk's gated epilogue
+        T.append(_norm_gate_s(T[-1]))
     text = "\n".join(T)
     if not RL and os.environ.get("GDN_PREFETCH", "1") not in ("", "0"):
         text = _prefetch_recurrence(text, RK)
@@ -612,7 +614,7 @@ kernel.def export("g_gdn_norm_gate") @g_gdn_norm_gate(%tokens: index) {{
     mode = chunk_mode(G)
     if mode:
         from gen_gdn_chunk import chunk_kernel
-        ck = chunk_kernel(G, NG, LB, guard_open, guard_close, fuse=chunk11_fuse(G), eps=eps)
+        ck = chunk_kernel(G, NG, LB, guard_open, guard_close, fuse=chunk11_fuse(G), eps=eps, gate=chunk11_gate(G))
         if mode == "pf":
             ck = ck.replace("g_gdn_chunk_rdna4", "g_gdn_recurrence_pf_rdna4")
         else:   # the sequential kernel's gfx12 twin runs the spans shorter than the chunk kernel's minimum
@@ -658,6 +660,48 @@ def chunk11_fuse(G):
     SiLU and the q / k norms of their spans (gen_gdn_chunk fuse); g_gdn_conv skips the rows of spans of PF_SPAN+ tokens and the history commit
     runs after the recurrence."""
     return chunk11_mode(G) == "group" and os.environ.get("GDN_CHUNK11_FUSE", "") not in ("", "0", "off", "no", "false")
+
+
+def chunk11_gate(G):
+    """hybrid.gdn.chunk11_gate (GDN_CHUNK11_GATE, with hybrid.gdn.chunk11 in group mode): g_gdn_chunk (and its gfx12 twin) run the gated RMSNorm of
+    their rows (gen_gdn_chunk gate); g_gdn_norm_gate_s (g_gdn_norm_gate + the span metadata) skips the rows of spans of PF_SPAN+ tokens."""
+    return chunk11_mode(G) == "group" and os.environ.get("GDN_CHUNK11_GATE", "") not in ("", "0", "off", "no", "false")
+
+
+def _norm_gate_s(text):
+    """g_gdn_norm_gate_s: g_gdn_norm_gate that leaves the rows of live spans of PF_SPAN+ tokens alone (g_gdn_chunk wrote them)."""
+    a = text.index('kernel.def export("g_gdn_norm_gate")')
+    b = text.index("kernel.return\n}", a) + len("kernel.return\n}")
+    k = text[a:b]
+    k = k.replace('export("g_gdn_norm_gate") @g_gdn_norm_gate(', 'export("g_gdn_norm_gate_s") @g_gdn_norm_gate_s(', 1)
+    k = k.replace("launch(%tokens_arg: index, %info: buffer,", "launch(%tokens_arg: index, %spans_arg: index, %metadata: buffer, %info: buffer,", 1)
+    anchor = "  %live = scalar.cmpi ne, %live32, %c0_i32 : i32\n"
+    assert anchor in k
+    k = k.replace(anchor, anchor + f"""  %spans = index.assume %spans_arg [range(%spans_arg, 1, 8192)] : index
+  %sp_long = scf.if %live -> (i1) {{
+    %span32 = view.load %info_view[%token, 3] : view<[%tokens]x4xi32> -> i32
+    %span_b = scalar.assume %span32 [range(%span32, 0, 8191)] : i32
+    %span = index.cast %span_b : i32 to index
+    %sp_act, %sp_len, %sp_s, %sp_r, %sp_f = func.call @g_gdn_span(%metadata, %spans, %span) : (buffer, index, index) -> (i1, index, i32, index, index)
+    %sp_lim = index.constant {PF_SPAN} : index
+    %sp_l = index.cmp uge, %sp_len, %sp_lim : index
+    scf.yield %sp_l : i1
+  }} else {{
+    %sp_no = index.cmp ne, %c0, %c0 : index
+    scf.yield %sp_no : i1
+  }}
+  %sp_true = index.cmp eq, %c0, %c0 : index
+  %sp_false = index.cmp ne, %c0, %c0 : index
+""", 1)
+    lines = k.split("\n")
+    st = [i for i, l in enumerate(lines) if l.startswith("    view.store %res")]
+    assert st and st == list(range(st[0], st[-1] + 1)), st
+    lines[st[-1]] += "\n  }"
+    lines[st[0]] = "  %sp_keep = scf.select %sp_long, %sp_false, %sp_true : i1\n  scf.if %sp_keep {\n" + lines[st[0]]
+    k = "\n".join(lines)
+    if "%c0 = index.constant 0 : index" not in k:
+        k = k.replace(anchor, "  %c0 = index.constant 0 : index\n" + anchor, 1)
+    return k
 
 
 def fused_mode(G):

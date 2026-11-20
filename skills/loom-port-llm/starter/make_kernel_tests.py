@@ -1417,11 +1417,11 @@ def _chunk_case(cname, pre, spans_, kerns, seed=None):
 if cfg.get("recurrent_layers") and _chunk:
     # the launch of the long spans: gfx11 g_gdn_chunk (its gfx12 twin g_gdn_chunk_rdna4 on gfx12), the pf kernel in "pf" mode, else the gfx12 kernel
     _ck = {"group": "g_gdn_chunk", "pf": "g_gdn_recurrence_pf"}.get(_c11, "g_gdn_chunk_rdna4")
-    from gen_gdn import chunk11_fuse as _cf11
-    _fz = _cf11(gdn_geometry(cfg))
-    if not _fz:   # the fused chunk kernel reads the raw projection (case gdn_chunkf_serve)
+    from gen_gdn import chunk11_fuse as _cf11, chunk11_gate as _cg11
+    _fz, _gt = _cf11(gdn_geometry(cfg)), _cg11(gdn_geometry(cfg))
+    if not (_fz or _gt):   # the fused chunk kernel reads the raw projection / writes the gated output (case gdn_chunkf_serve)
         _chunk_case("gdn_chunk_spans", "gc", [(130, 0, False), (64, 10, True), (97, 0, False)], [_ck])
-    if _c11 and not _fz:
+    if _c11 and not (_fz or _gt):
         # gdn_chunk_mixed: the serving shape of a prompt epoch beside decode/verify spans: both kernels of the split launched on one packet,
         # each span (fresh 130, continuing 5, continuing 64, continuing 1, fresh 97, continuing 63) must be run by exactly one of them
         _chunk_case("gdn_chunk_mixed", "gm", [(130, 0, False), (5, 10, True), (64, 10, True), (1, 7, True), (97, 0, False), (63, 3, True)],
@@ -1429,7 +1429,7 @@ if cfg.get("recurrent_layers") and _chunk:
 # 4c'. hybrid.gdn.chunk11_fuse: the whole GDN chain of a serving-shaped epoch as the program runs it (g_gdn_conv and g_gdn_qk_norm for the spans
 # under 64, g_gdn_recurrence, g_gdn_chunk with its own conv + norms on the raw projection, the history commit, g_gdn_norm_gate) against float64:
 # spans fresh 130, continuing 5, continuing 64, continuing 1, fresh 97, continuing 63 (continuing spans start from a stored state AND conv history).
-if cfg.get("recurrent_layers") and _chunk and _c11 == "group" and _fz:
+if cfg.get("recurrent_layers") and _chunk and _c11 == "group" and (_fz or _gt):
     _sp = [(130, 0, False), (5, 10, True), (64, 10, True), (1, 7, True), (97, 0, False), (63, 3, True)]
     r = np.random.default_rng(53)
     t = sum(L for L, _, _ in _sp); ns = len(_sp)
@@ -1496,9 +1496,9 @@ if cfg.get("recurrent_layers") and _chunk and _c11 == "group" and _fz:
   kernel.launch @g_gdn_conv[%t](%t, %spans, %layer, %meta, %info, %orig, %arena, %x, %w, %silu) : [index](index, index, index, {MT}, tensor<{t}x4xi32>, {OT}, {AT}, {XT}, tensor<{C * K}xf32>, {XT})
   kernel.launch @g_gdn_qk_norm[%t](%t, %silu, %inv) : [index](index, {XT}, {IT})
   kernel.launch @g_gdn_recurrence[%spans]{_rec.replace("@X@", "%silu").replace("@W@", "").replace("@WT@", "")}
-  kernel.launch @g_gdn_chunk[%spans]{_rec.replace("@X@", "%x").replace("@W@", ", %w").replace("@WT@", f", tensor<{C * K}xf32>")}
+  kernel.launch @g_gdn_chunk[%spans]{_rec.replace("@X@", "%x" if _fz else "%silu").replace("@W@", (", %w" if _fz else "") + (", %nw, %z, %o" if _gt else "")).replace("@WT@", (f", tensor<{C * K}xf32>" if _fz else "") + (f", tensor<{DV}xf32>, {VT}, {VT}" if _gt else ""))}
   kernel.launch @g_gdn_conv_commit[%spans](%t, %spans, %layer, %meta, %orig, %arena, %x) : [index](index, index, index, {MT}, {OT}, {AT}, {XT})
-  kernel.launch @g_gdn_norm_gate[%t](%t, %info, %raw, %nw, %z, %o) : [index](index, tensor<{t}x4xi32>, {VT}, tensor<{DV}xf32>, {VT}, {VT})
+  {f"kernel.launch @g_gdn_norm_gate_s[%t](%t, %spans, %meta, %info, %raw, %nw, %z, %o) : [index](index, index, {MT}, tensor<{t}x4xi32>, {VT}, tensor<{DV}xf32>, {VT}, {VT})" if _gt else f"kernel.launch @g_gdn_norm_gate[%t](%t, %info, %raw, %nw, %z, %o) : [index](index, tensor<{t}x4xi32>, {VT}, tensor<{DV}xf32>, {VT}, {VT})"}
   check.expect.close actual(%o) expected(%eo) atol({1e-2 * _oscale:.3e}) rtol(2.0e-2) nan(different) : {VT}
   check.expect.close actual(%arena) expected(%expect) atol({3e-3 * _sscale:.3e}) rtol(1.0e-2) nan(different) : {AT}
   check.return

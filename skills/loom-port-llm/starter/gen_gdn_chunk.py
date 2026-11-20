@@ -27,14 +27,17 @@ NT = CN // 16
 SPAN_MIN = 64   # spans of at least this many tokens (the GEMM epoch shape) run the chunked kernel; shorter ones the sequential twin
 
 
-def chunk_kernel(G, NG, LB, guard_open="", guard_close="", target=True, dep=2, arch="rdna4", fuse=False, eps=None):
+def chunk_kernel(G, NG, LB, guard_open="", guard_close="", target=True, dep=2, arch="rdna4", fuse=False, eps=None, gate=False):
     """arch "rdna4": g_gdn_chunk_rdna4 (gfx12 WMMA layouts). arch "rdna3": g_gdn_chunk, the gfx11 form of the same dataflow (RDNA3 WMMA:
     vector<16xf16> operands holding all 16 k in each lane half, f32 results holding rows 2 i + lane / 16 of column lane % 16): the result ->
     rhs conversions (the state copy, R, d) exchange the other row parity with the partner lane (xor 16; f16 pairs packed in i32) and
     interleave; the per-row scalars and rows of a result fragment are gathered with stride 2.
     fuse: the chunk's staging also runs the conv1d + SiLU of its q / k / v channels (inputs before the span from the stored history) and the
     q / k L2 norms (gen_gdn_fused phase A's staging), so %x is the RAW qkv projection and a last argument %weight holds the conv weights;
-    g_gdn_conv / g_gdn_qk_norm then only serve the spans under SPAN_MIN, and the history commit runs after this kernel."""
+    g_gdn_conv / g_gdn_qk_norm then only serve the spans under SPAN_MIN, and the history commit runs after this kernel.
+    gate: the gated RMSNorm epilogue (g_gdn_norm_gate's out = rmsnorm(o) * w * silu(z)) runs here: each wave's O tile goes to LDS (the V rows
+    it alone read), then wave w normalizes rows 4 w .. 4 w + 3 (lane l: value columns 4 l .. 4 l + 3) and stores the gated output to %o;
+    arguments %norm_w, %z, %o follow (the raw output %out is not written)."""
     R3 = arch == "rdna3"
     FH = "vector<16xf16>" if R3 else "vector<8xf16>"
     from gen_gdn import kh_line, _V_GROUPED
@@ -299,6 +302,9 @@ def chunk_kernel(G, NG, LB, guard_open="", guard_close="", target=True, dep=2, a
             P(f"    %pl{mt}_{kt} = vector.fragment.load<lhs> %p_view[{ci(16 * mt)}, {ci(16 * kt)}] {SH} : view<{CN}x{PS}xf16> -> {FH}")
             P(f"    %oo{mt}_{kt} = vector.mma %pl{mt}_{kt}, %df{kt}, {prev} : {FH}, {FH}, {vec8}")
             prev = f"%oo{mt}_{kt}"
+        if gate:
+            P(f"    vector.fragment.store<result> {prev}, %v_view[{ci(16 * mt)}, %wcol] {SH} : {vec8}, view<{CN}x{VS}xf32>")
+            continue
         for e in range(8):
             P(f"    %olt{mt}_{e}_r = index.add {ci(16 * mt + RS * e)}, {LH} : index")
             P(f"    %olt{mt}_{e} = index.cmp ult, %olt{mt}_{e}_r, %m : index")
@@ -308,6 +314,33 @@ def chunk_kernel(G, NG, LB, guard_open="", guard_close="", target=True, dep=2, a
             P(f"      %orw{mt}_{e} = index.assume %orw{mt}_{e}_a [lt(%orw{mt}_{e}_a, %tokens)] : index")
             P(f"      view.store %ov{mt}_{e}, %out_view[%orw{mt}_{e}, %ocol_l] : f32, view<[%tokens]x{VD}xf32>")
             P(f"    }}")
+    if gate:   # gated RMSNorm of the chunk's O rows (fb's epilogue): rows 4 w + rr, columns 4 l .. 4 l + 3 of this head
+        bar()
+        for rr in range(4):
+            P(f"    %nr{rr}_a = index.mul %wave, {ci(4)} : index")
+            P(f"    %nr{rr}_b = index.add %nr{rr}_a, {ci(rr)} : index")
+            P(f"    %nr{rr} = index.assume %nr{rr}_b [range(%nr{rr}_b, 0, {CN - 1})] : index")
+            P(f"    %olive{rr} = index.cmp ult, %nr{rr}, %m : index")
+            P(f"    %otok{rr}_a = index.add %vbase_tok, %nr{rr} : index")
+            P(f"    %otok{rr}_c = scf.select %olive{rr}, %otok{rr}_a, %vbase_tok : index")
+            P(f"    %otok{rr} = index.assume %otok{rr}_c [lt(%otok{rr}_c, %tokens)] : index")
+            P(f"    %zv{rr} = vector.load %z_view[%otok{rr}, %zcol] : view<[%tokens]x{VD}xf32> -> vector<4xf32>")
+            P(f"    %gov{rr} = vector.load %v_view[%nr{rr}, %lc4] : view<{CN}x{VS}xf32> -> vector<4xf32>")
+            P(f"    %gosq{rr} = vector.mulf %gov{rr}, %gov{rr} : vector<4xf32>")
+            P(f"    %gosr{rr} = vector.reduce<addf> %gosq{rr}, %zero_f : vector<4xf32>, f32")
+            P(f"    %gosum{rr} = kernel.subgroup.reduce<addf> %gosr{rr} : f32")
+            P(f"    %gomean{rr} = scalar.divf %gosum{rr}, %gcount : f32")
+            P(f"    %gost{rr} = scalar.addf %gomean{rr}, %eps : f32")
+            P(f"    %goinv{rr} = scalar.rsqrtf %gost{rr} : f32")
+            P(f"    %goiv{rr} = vector.splat %goinv{rr} : vector<4xf32>")
+            P(f"    %gzs{rr} = vector.siluf<afn> %zv{rr} : vector<4xf32>")
+            P(f"    %gon{rr}_a = vector.mulf %gov{rr}, %goiv{rr} : vector<4xf32>")
+            P(f"    %gon{rr}_b = vector.mulf %gon{rr}_a, %nwv : vector<4xf32>")
+            P(f"    %gon{rr} = vector.mulf %gon{rr}_b, %gzs{rr} : vector<4xf32>")
+        for rr in range(4):
+            P(f"    scf.if %olive{rr} {{")
+            P(f"      vector.store %gon{rr}, %o_view[%otok{rr}, %zcol] : vector<4xf32>, view<[%tokens]x{VD}xf32>")
+            P("    }")
     # ---- P6: S <- exp(G) S + (K exp(G - gc))^T d
     P(f"    %gl2 = view.load %gc_s[%k{CN - 1}] : view<{CN}xf32> -> f32")
     P(f"    %eg_last = scalar.expf<afn> %gl2 : f32")
@@ -329,6 +362,12 @@ def chunk_kernel(G, NG, LB, guard_open="", guard_close="", target=True, dep=2, a
     FUSE_HEAD = (f"  %history_skip = index.constant {G['state_bytes']} : offset\n  %history_at = index.add %reader, %history_skip : offset\n"
                  f"  %hist_view = buffer.view %arena[%history_at] : buffer -> view<{G['K'] - 1}x{C}xf32>\n"
                  f"  %w_view = buffer.view %weight[%zero] : buffer -> view<{C}x{G['K']}xf32>\n  %eps = scalar.constant {eps!r} : f32\n") if fuse else ""
+    GATE_HEAD = (f"  %z_view = buffer.view %z[%zero] : buffer -> view<[%tokens]x{VD}xf32>\n  %o_view = buffer.view %o[%zero] : buffer -> view<[%tokens]x{VD}xf32>\n"
+                 f"  %nw_view = buffer.view %norm_w[%zero] : buffer -> view<{DV}xf32>\n  %gcount = scalar.constant {float(DV)!r} : f32\n"
+                 + ("" if fuse else f"  %eps = scalar.constant {eps!r} : f32\n")) if gate else ""
+    GATE_LANE = ("  %lc4_c = index.constant 4 : index\n  %lc4_v = index.mul %lane, %lc4_c : index\n"
+                 f"  %lc4 = index.assume %lc4_v [range(%lc4_v, 0, {DV - 4})] : index\n  %zcol = index.add %head_cols, %lc4 : index\n"
+                 f"  %nwv = vector.load %nw_view[%lc4] : view<{DV}xf32> -> vector<4xf32>\n") if gate else ""
     R3_CONSTS = ("  %hi_half = index.cmp ne, %lane_half, %k0 : index\n  %exchange = scalar.constant 16 : i32\n  %width = scalar.constant 32 : i32\n"
                  "  %two_i32 = scalar.constant 2 : i32\n") if R3 else ""
     kname = "g_gdn_chunk" if R3 else "g_gdn_chunk_rdna4"
@@ -338,7 +377,7 @@ kernel.def {tgt}export("{kname}") @{kname}(%spans: index) {{
   %heads = index.constant {HV} : index
   %c256 = index.constant 256 : index
   kernel.launch.config workgroups(%heads, %c1, %spans) workgroup_size(%c256, %c1, %c1) : index
-}} launch(%tokens_arg: index, %spans_arg: index, %layer_arg: index, %metadata: buffer, %origins: buffer, %arena: buffer, %x: buffer, %inverse: buffer, %alpha: buffer, %beta: buffer, %ssm_a: buffer, %dt_bias: buffer, %out: buffer{", %weight: buffer" if fuse else ""}) {{
+}} launch(%tokens_arg: index, %spans_arg: index, %layer_arg: index, %metadata: buffer, %origins: buffer, %arena: buffer, %x: buffer, %inverse: buffer, %alpha: buffer, %beta: buffer, %ssm_a: buffer, %dt_bias: buffer, %out: buffer{", %weight: buffer" if fuse else ""}{", %norm_w: buffer, %z: buffer, %o: buffer" if gate else ""}) {{
   %tokens = index.assume %tokens_arg [range(%tokens_arg, 1, 8192)] : index
   %spans = index.assume %spans_arg [range(%spans_arg, 1, 8192)] : index
   %layer = index.assume %layer_arg [range(%layer_arg, 0, {NG - 1})] : index
@@ -373,7 +412,7 @@ kernel.def {tgt}export("{kname}") @{kname}(%spans: index) {{
   %out_view = buffer.view %out[%zero] : buffer -> view<[%tokens]x{VD}xf32>
   %state_view = buffer.view %arena[%reader] : buffer -> view<{NS}xf32>
   %next_view = buffer.view %arena[%writer] : buffer -> view<{NS}xf32>
-{FUSE_HEAD}@CONSTS@
+{FUSE_HEAD}{GATE_HEAD}@CONSTS@
   %a_value = view.load %a_view_g[%vh] : view<{HV}xf32> -> f32
   %dt_bias_value = view.load %bias_view[%vh] : view<{HV}xf32> -> f32
   %qscale_c = scalar.constant {DK ** -0.5!r} : f32
@@ -398,7 +437,7 @@ kernel.def {tgt}export("{kname}") @{kname}(%spans: index) {{
   %head_cols = index.mul %vh, %k_dv : index
   %ocol_l = index.add %head_cols, %dv : index
   %vbase = index.constant {2 * HK * DK} : index
-  %vcol_head = index.add %vbase, %head_cols : index
+{GATE_LANE}  %vcol_head = index.add %vbase, %head_cols : index
   // state tile rows (dk = 16 kb + 8 half + i) of value column dv
   %srow_dv = index.add %head_cols, %dv : index
   %sidx0 = index.mul %srow_dv, %k_dk : index
