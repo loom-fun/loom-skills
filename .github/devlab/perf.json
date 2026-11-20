@@ -1,32 +1,59 @@
 {
- "_comment": "Strix Halo A/B of origin/main (fun) against HEAD (staging) (ab_jobs.py --base-ref/--head-ref): each variant carries its ref's serving settings",
- "runner": "strix",
- "memory_bytes": 52000000000,
+ "_comment": "R9700 final (func, ktest, gates:dev) of PR 1323 HEAD + one ABBA perf round (short, long) vs origin/main: the rdna3-keyed fuse2 switches change the dual-target program, so gfx12 launches run the twins",
+ "runner": "r9700",
+ "memory_bytes": 34000000000,
  "llama_spec": "matched",
  "jobs": [
   {
-   "name": "sab-bartowski-qwen3-8-27b-loom",
-   "runner": "strix",
+   "name": "rab-bartowski-qwen3-8-27b-loom",
+   "runner": "r9700",
    "card": "loom-fun-staging/bartowski-Qwen3.8-27B-loom",
-   "memory_bytes": 52000000000,
+   "memory_bytes_r9700": 34000000000,
+   "served_context": 120832,
    "kit": null,
-   "llamacpp": "b1374",
+   "llamacpp": "b1375",
    "llamacpp_vulkan": "b12211",
    "variants": [
     {
+     "name": "fun",
+     "build": {},
+     "ref": "origin/main",
+     "context": 120832,
+     "cap_pool": 124928,
+     "execution": {
+      "context_capacity": 120832,
+      "prefill_capacity": 1024
+     }
+    },
+    {
      "name": "staging",
      "build": {},
-     "ref": "HEAD"
+     "ref": "HEAD",
+     "context": 120832,
+     "cap_pool": 124928,
+     "execution": {
+      "context_capacity": 120832,
+      "prefill_capacity": 1024
+     }
     }
    ],
    "steps": [
     "func:staging",
     "ktest:staging",
-    "gates:staging:dev"
+    "gates:staging:dev",
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:fun:1",
+    "perf:fun:1:long",
+    "perf:staging:1:long",
+    "perf:staging:1:long",
+    "perf:fun:1:long"
    ]
   }
  ],
  "card": "loom-fun-staging/bartowski-Qwen3.8-27B-loom",
  "kit": null,
- "llamacpp": "b1374"
+ "llamacpp": "b1375",
+ "llamacpp_vulkan": "b12211"
 }
