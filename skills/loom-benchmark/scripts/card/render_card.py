@@ -1026,14 +1026,14 @@ def method_text(gpus, aggs=(None,), engine="llama.cpp", checkpoint="GGUF", local
     "4 are decoding; the card shows the median of the runs.",
     f"- One engine runs at a time on the same machine, with the same {checkpoint}. Loom rates are timed by the client; "
     + ("llama.cpp rates come from its server-side `timings`." if engine == "llama.cpp" else f"{engine} rates are timed by the client the same way."),
-    (f"- Every performance value comes from a `devlab-perf` job (loom-skills) on an AMD DevLab Dispatch {runner} runner: "
+    (f"- {'Every performance value' if not local else 'Every other performance value'} comes from a `devlab-perf` job (loom-skills) on an AMD DevLab Dispatch {runner} runner: "
      f"Loom, served with the active wait (`--device=amdgpu://?completion_spin_ns=4294967295`), and {engine} on the same "
      "runner, with the published programs." if runner else
      f"- Every performance value comes from a measuring session on a named machine (the {', '.join(machines)} has no DevLab runner; "
      "the session below records the device and SDK): Loom, served with the active wait (`--device=amdgpu://?completion_spin_ns=4294967295`), "
      f"and {engine} on the same machine, with the published programs.")
     + (f" The {', '.join(machines)} values come from named machines (the sessions below record them), not DevLab runners." if runner and machines else "")
-    + (f" The {', '.join(GPUS[g]['short'] for g in local)} values come from a local machine at a named power mode instead (the sessions below "
+    + (f" The {', '.join(GPUS[g]['short'] for g in local)} values (Loom and every baseline engine) come from a local machine at a named power mode (the sessions below "
        "record the device, the power mode and each engine's measured power); every engine of that table was re-measured in that job at that "
        "power." if local else ""),
     "- Drafted tokens accepted is the `spec` gate's count: accepted over proposed draft tokens across its requests.",
