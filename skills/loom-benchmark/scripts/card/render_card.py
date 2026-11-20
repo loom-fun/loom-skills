@@ -1090,7 +1090,8 @@ def report_gpu(L, info, facts, g, here, h, single):
     for b, x in (perf.get("baselines") or {}).items():
         xs, xb = x["session"], x["baseline"]
         src = sources[xs["source"]]
-        L += [f"{h} {xb['name']} {b.capitalize()}: {src_text(src)}, {text(xs['date'])}", "",
+        title = xb["name"] if b.lower() == xb["name"].lower() else f"{xb['name']} {b.capitalize()}"
+        L += [f"{h} {title}: {src_text(src)}, {text(xs['date'])}", "",
               f"- Build: {('`' + xb['version'] + '`') if xb['version'] else 'not recorded'}; server arguments "
               + (f"`{xb['args']}`" if xb["args"] else "not recorded") + ".",
               f"- Device: {device_text(src['device'])}."]

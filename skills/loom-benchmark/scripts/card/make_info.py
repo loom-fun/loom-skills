@@ -905,7 +905,16 @@ def cmd_perf(a):
         commands += [line.rstrip("\n") for line in open(a.commands_file, encoding="utf-8") if line.strip()]
     src = source_arg(a)
     if a.power_mode:
-        src.update(power_mode=a.power_mode, power=power_block(a.power_evidence, a.power_mode))
+        sys.path.insert(0, os.path.join(HERE, "..", "..", "..", "loom-roofline"))
+        import roofline as R
+        dev = R.DEVICES[GPUS[a.gpu or DEFAULT_GPU]["roofline"]]
+        if a.power_mode not in dev["power_modes"] or a.power_mode in ("spec", dev["power_default"]):
+            sys.exit(f"--power-mode {a.power_mode}: not a non-default power mode of {dev['name']} "
+                     f"(modes {', '.join(sorted(dev['power_modes']))}; default {dev['power_default']})")
+        pw = power_block(a.power_evidence, a.power_mode)
+        if not pw["engines"]:
+            sys.exit(f"--power-evidence {a.power_evidence}: no per-engine power samples (power_steps.py output of the job)")
+        src.update(power_mode=a.power_mode, power=pw)
     session = {"date": date, "source": src, "runs": runs, "aggregate": "median", "metrics": metrics,
                "programs_sha256": programs_sha256(a.package) if a.package else None}
     if a.fetched_programs and a.package and a.fetched_programs != programs_sha256(a.package):

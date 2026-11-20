@@ -201,7 +201,8 @@ def load_llama_refs(cfg):
         return None   # a reference of another model (same architecture): its llama.cpp numbers are not this card's
     perf = find_reference.primary(find_reference.jfile(ref["repo"], sha, "info.json") or {}).get("performance") or {}
     sets = [s.get("metrics") or {} for s in (perf.get("sessions") or [])[-1:]]
-    sets += [(b.get("session") or {}).get("metrics") or {} for b in (perf.get("baselines") or {}).values()]
+    sets += [(b.get("session") or {}).get("metrics") or {} for b in (perf.get("baselines") or {}).values()
+             if (b.get("baseline") or {}).get("name", "llama.cpp") == "llama.cpp"]   # another engine (Gufo) runs its own model: never the margin
     out = {}
     for k, m in (("decode", "decode"), ("decode_32k", "decode_32k"), ("c4", "streams4")):
         vals = [float(s[m]["baseline"]) for s in sets if (s.get(m) or {}).get("baseline")]
