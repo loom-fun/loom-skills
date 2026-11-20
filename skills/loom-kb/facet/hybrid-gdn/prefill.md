@@ -88,3 +88,23 @@ gated norm 0.007, q/k norm 0.004 (the last three inside the run-to-run noise of 
   - Prefetching the next chunk's global loads across the loop (K, Q, norms, alpha, beta in carried registers): 85 spills, 2k 1662 vs 1685 tok/s: not kept.
 - Not done: fusing the q/k norm and the conv into the chunk kernel's staging (0.004 + 0.011 ms/token, each below the noise of a doubling); CN = 64 with the
   solve split in two 32-row blocks (T = [[T11, 0], [-T22 A21 T11, T22]] with one MMA each); a second chunk kernel for Strix (WMMA gfx11 form).
+
+## gfx11 chunked prefill on Strix Halo (Qwen3.8-27B Q4_K_M, campaign q38pf, lane gdn)
+
+Switches (all off by default; off = byte-identical programs): `GDN_CHUNK11` (g_gdn_chunk, RDNA3 WMMA, spans of 64+ tokens),
+`GDN_CHUNK11_FUSE` (conv1d + SiLU + q/k norms in its staging), `GDN_CHUNK11_GATE` (gated RMSNorm epilogue), `GDN_CHUNK11_CN`
+(16 | 32), `GDN_CHUNK11_OPT` (kbo, xpf, scan, acc4), `GDN_SKIP_LONG`, `GDN_FUSED11` (+ `GDN_FUSED11_REGNORM`), `GDN_CHUNK11_ALIAS`.
+- **Winner: CHUNK11 + FUSE + GATE + CN=16 + OPT=kbo + SKIP_LONG**: one launch does conv, norms, the WY recurrence and the gated norm
+  of the long spans. Local 123 W, same-job ABBA vs base: prefill 1k/2k/8k/16k/32k +3.0/+3.1/+3.3/+3.2/+2.8 % (8k 588.8 -> 608.5
+  tok/s), decode tie. Kernel tests vs float64 (gdn_chunkf_serve: serving-shaped multi-span epoch) pass.
+- **Why CN=16 wins on gfx11:** a 27B span has 48 value-head workgroups; CN=32 needs 253 VGPR + 53.7 KB LDS = 2 workgroups per WGP
+  (40 slots), so 8 run in a second round (a 40-head ablation was -36 %). CN=16 (+ kbo: one state rhs copy live) is 196-200 VGPR and
+  26 KB, 3 per WGP, one round, and the serial solve is 16 rows. Fused kernel per 1024-token span: CN32 3.6 ms, CN16+kbo 1.0 ms; the
+  plain kernel 955 -> 729-800 us.
+- **What does not pay:** the 32-row solve / scan latency (scan unrolled, 4 partial sums: <2 % at CN16), the kdt-in-Q LDS alias
+  (occupancy unchanged), the fa/fb split (`GDN_FUSED11`, = the c11 chain: memory-bound on Strix, fa reads the f32 qkv and writes a
+  ~34 KB-per-chunk workspace that fb reads back), fb's register norm epilogue (3 WG/WGP, -1 %), CN32 fused staging (-3 % e2e).
+- The GDN chain is close to memory-bound on Strix: the f32 qkv projection is 40 KB/token/layer; a chain of separate kernels moves
+  ~220 KB/token/layer, the fused kernel ~88 KB. `g_gdn_norm_gate_s` used to compute every long-span row and drop only the store
+  (.012 ms/token at 8k) and `g_gdn_qk_norm_lv` normalized every row (.004): `GDN_SKIP_LONG` skips them.
+- Timing ablation (fused CN16): no chunk-row global loads -22 % -> loads are exposed per chunk (opt `xpf` prefetches them).
