@@ -49,6 +49,7 @@ def chunk_kernel(G, NG, LB, guard_open="", guard_close="", target=True, dep=2, a
     assert CN in (16, 32)
     RPW = CN // 8   # gate epilogue: rows per wave
     R3 = arch == "rdna3"
+    XPF = fuse and "xpf" in opts   # fused staging: the next chunk's qkv rows loaded during this chunk (loop-carried), history rows carried
     FH = "vector<16xf16>" if R3 else "vector<8xf16>"
     from gen_gdn import kh_line, _V_GROUPED
     chk_def = "" if _V_GROUPED[0] else f"%chk = index.constant {G['HK']} : index\n  "   # kh_line's tiled form reads %chk; the grouped form needs none
@@ -164,7 +165,7 @@ def chunk_kernel(G, NG, LB, guard_open="", guard_close="", target=True, dep=2, a
     P(f"    }}")
     bar()
     if fuse:
-        out[p0_start:] = _fused_stage(G, CN, ci, KHS, QAS, VS, abl)
+        out[p0_start:] = _fused_stage(G, CN, ci, KHS, QAS, VS, abl, XPF)
     # ---- P1: inclusive scan of g (threads < CN)
     P(f"    %tcn = index.cmp ult, %thread, {ci(CN)} : index")
     P(f"    scf.if %tcn {{")
@@ -261,6 +262,14 @@ def chunk_kernel(G, NG, LB, guard_open="", guard_close="", target=True, dep=2, a
     P(f"      vector.fragment.store<result> %pv, %p_view[%tr, %tc] {SH} : {vec8}, view<{CN}x{PS}xf16>")
     P(f"    }}")
     bar()
+    if XPF:   # the next chunk's rows (rows past the span's end load this chunk's first row: in bounds, masked next iteration)
+        for tag, ch in (("a", "%pchqk"), ("b", "%pchv")):
+            for r in range(CN):
+                P(f"    %nxl{tag}{r} = index.cmp ult, {ci(r + CN)}, %rem : index")
+                P(f"    %nxt{tag}{r}_a = index.add %vbase_tok, {ci(r + CN)} : index")
+                P(f"    %nxt{tag}{r}_c = scf.select %nxl{tag}{r}, %nxt{tag}{r}_a, %vbase_tok : index")
+                P(f"    %nxt{tag}{r} = index.assume %nxt{tag}{r}_c [lt(%nxt{tag}{r}_c, %tokens)] : index")
+                P(f"    %nx{tag}{r} = view.load %x_view[%nxt{tag}{r}, {ch}] : view<[%tokens]x{C}xf32> -> f32")
     # ---- P3: waves 0 solves T = (I + A)^-1 (one thread per column), waves 1-4 stage K^T exp(G - gc) as f16 [dk][t]
     P(f"    scf.if %tcn {{")
     P(f"      %cc = index.assume %thread [range(%thread, 0, {CN - 1})] : index")
@@ -415,7 +424,8 @@ def chunk_kernel(G, NG, LB, guard_open="", guard_close="", target=True, dep=2, a
             prev = f"%un{kb}_{kt}"
         P(f"    %sn{kb} = vector.addf {prev}, %zero8 : {vec8}")
     bar()
-    P(f"    scf.yield {', '.join(f'%sn{kb}' for kb in range(8))} : {', '.join([vec8] * 8)}")
+    XC = [f"%nx{t}{r}" for t in "ab" for r in range(CN)] + [f"%cx{t}{CN - k}" for t in "ab" for k in range(1, G["K"])] if XPF else []
+    P(f"    scf.yield {', '.join([f'%sn{kb}' for kb in range(8)] + XC)} : {', '.join([vec8] * 8 + ['f32'] * len(XC))}")
     chunk_text = out
     # ------------------------------------------------------------------------------------------------------------------
     tgt = "target(@rdna4) " if target and not R3 else ""
@@ -567,7 +577,32 @@ kernel.def {tgt}export("{kname}") @{kname}(%spans: index) {{
     nch = [f"  %len_r = index.add %length, {ci(CN - 1)} : index", f"  %nchunks = index.div %len_r, {ci(CN)} : index"]
     carry = ", ".join(f"%s{kb} = %ist{kb} : {vec8}" for kb in range(8))
     outs = ", ".join(f"%fin{kb}" for kb in range(8))
-    loop_head = f"  {outs} = scf.for %ci = [%k0 to %nchunks step %k1]({carry}) -> ({', '.join([vec8] * 8)}) {{"
+    ctys = [vec8] * 8
+    if XPF:   # chunk 0's rows and the stored history, then carried
+        K = G["K"]
+        nch.append(f"  %pisk = index.cmp uge, %thread, {ci(128)} : index")
+        nch.append(f"  %ptq = index.rem %thread, {ci(128)} : index")
+        nch.append("  %pqk_base = scf.select %pisk, %kcol_base, %qcol_base : index")
+        nch.append("  %pchqk_v = index.add %pqk_base, %ptq : index")
+        nch.append(f"  %pchqk = index.assume %pchqk_v [range(%pchqk_v, 0, {C - 1})] : index")
+        nch.append(f"  %pvt = index.rem %thread, {ci(DV)} : index")
+        nch.append("  %pchv_v = index.add %vcol_head, %pvt : index")
+        nch.append(f"  %pchv = index.assume %pchv_v [range(%pchv_v, 0, {C - 1})] : index")
+        for tag, ch in (("a", "%pchqk"), ("b", "%pchv")):
+            for r in range(CN):
+                nch.append(f"  %ixl{tag}{r} = index.cmp ult, {ci(r)}, %length : index")
+                nch.append(f"  %ixt{tag}{r}_a = index.add %first, {ci(r)} : index")
+                nch.append(f"  %ixt{tag}{r}_c = scf.select %ixl{tag}{r}, %ixt{tag}{r}_a, %first : index")
+                nch.append(f"  %ixt{tag}{r} = index.assume %ixt{tag}{r}_c [lt(%ixt{tag}{r}_c, %tokens)] : index")
+                nch.append(f"  %ix{tag}{r} = view.load %x_view[%ixt{tag}{r}, {ch}] : view<[%tokens]x{C}xf32> -> f32")
+            for k in range(1, K):
+                nch += [f"  %ih{tag}{k} = scf.if %fresh -> (f32) {{", "    scf.yield %zero_f : f32", "  } else {",
+                        f"    %ihv{tag}{k} = view.load %hist_view[{ci(K - 1 - k)}, {ch}] : view<{K - 1}x{C}xf32> -> f32",
+                        f"    scf.yield %ihv{tag}{k} : f32", "  }"]
+        carry += "".join(f", %cx{t}{r} = %ix{t}{r} : f32" for t in "ab" for r in range(CN)) + "".join(f", %ch{t}{k} = %ih{t}{k} : f32" for t in "ab" for k in range(1, K))
+        outs += "".join(f", %fx_{t}{r}" for t in "ab" for r in range(CN)) + "".join(f", %fh_{t}{k}" for t in "ab" for k in range(1, K))
+        ctys += ["f32"] * (2 * CN + 2 * (K - 1))
+    loop_head = f"  {outs} = scf.for %ci = [%k0 to %nchunks step %k1]({carry}) -> ({', '.join(ctys)}) {{"
     if R3:
         stores = [f"    %so{kb}_{e} = index.add %sidx_l, {ci(16 * kb + 2 * e)} : index\n    %sov{kb}_{e} = vector.extract %fin{kb}[{e}] : {vec8} -> f32\n"
                   f"    view.store %sov{kb}_{e}, %next_view[%so{kb}_{e}] : f32, view<{NS}xf32>" for kb in range(8) for e in range(8)]
@@ -581,7 +616,7 @@ kernel.def {tgt}export("{kname}") @{kname}(%spans: index) {{
     return text
 
 
-def _fused_stage(G, CN, ci, KHS, QAS, VS, abl=()):
+def _fused_stage(G, CN, ci, KHS, QAS, VS, abl=(), xpf=False):
     """Loop-body lines of the fused staging (chunk_kernel fuse=True): g / beta per token (threads < CN); conv1d + SiLU of the chunk's rows of
     q / k channel `thread % 128` of the key head (threads < 128: q, else k) and of value channel `thread` (threads < DV); the q / k L2 norms
     (a subgroup sum per row, the 4 waves' partials through LDS); K, Q (x DK^-0.5) as f16 rows and V as f32 rows in LDS. Rows past the
@@ -619,7 +654,9 @@ def _fused_stage(G, CN, ci, KHS, QAS, VS, abl=()):
             P(ind + t)
         for j in range(K):
             Q(f"%fw{tag}{j} = view.load %w_view[{chv}, {ci(j)}] : view<{C}x{K}xf32> -> f32")
-        for r in range(-(K - 1), 0):
+        for r in range(-(K - 1), 0) if xpf else []:   # carried: the previous chunk's last rows / the stored history
+            Q(f"%fx{tag}m{-r} = scalar.addf %ch{tag}{-r}, %zero_f : f32")
+        for r in range(-(K - 1), 0) if not xpf else []:
             u = f"{tag}{-r}"
             Q(f"%fx{tag}m{-r} = scf.if %ffirst -> (f32) {{")
             Q(f"  %fhz{u} = scf.if %fresh -> (f32) {{")
@@ -636,6 +673,9 @@ def _fused_stage(G, CN, ci, KHS, QAS, VS, abl=()):
             Q(f"  scf.yield %fpv{u} : f32")
             Q("}")
         for r in range(CN):
+            if xpf:
+                Q(f"%fx{tag}{r}_r = scalar.addf %cx{tag}{r}, %zero_f : f32")
+                continue
             if "nox" in abl:   # timing ablation: no global loads of the chunk's rows
                 Q(f"%fx{tag}{r}_r = scalar.addf %fw{tag}{r % K}, %zero_f : f32")
                 continue
