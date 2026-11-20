@@ -1,32 +1,47 @@
 {
- "_comment": "Strix Halo A/B of origin/main (fun) against 293f41bcf1ad279d64d2dd7f4f7acdcb990196e4 (staging) (ab_jobs.py --base-ref/--head-ref): each variant carries its ref's serving settings",
- "runner": "strix",
- "memory_bytes": 52000000000,
+ "_comment": "R9700 A/B of origin/main (fun) against 3cce23ff7d088037d38fb83d700aa7d893c17d4b (staging) (ab_jobs.py --base-ref/--head-ref): each variant carries its ref's serving settings. Does not fit: none",
+ "runner": "r9700",
+ "memory_bytes": 34000000000,
  "llama_spec": "matched",
  "jobs": [
   {
-   "name": "sab-bartowski-qwen3-8-27b-loom",
-   "runner": "strix",
+   "name": "rab-bartowski-qwen3-8-27b-loom",
+   "runner": "r9700",
    "card": "loom-fun/bartowski-Qwen3.8-27B-loom",
-   "memory_bytes": 52000000000,
+   "memory_bytes_r9700": 34000000000,
+   "served_context": 120832,
    "kit": null,
-   "llamacpp": "b1374",
+   "llamacpp": "b1375",
    "llamacpp_vulkan": "b12211",
    "variants": [
     {
+     "name": "card"
+    },
+    {
      "name": "staging",
      "build": {},
-     "ref": "293f41bcf1ad279d64d2dd7f4f7acdcb990196e4"
+     "ref": "3cce23ff7d088037d38fb83d700aa7d893c17d4b",
+     "context": 120832,
+     "cap_pool": 124928,
+     "execution": {
+      "context_capacity": 120832,
+      "prefill_capacity": 1024
+     }
     }
    ],
    "steps": [
     "func:staging",
     "ktest:staging",
-    "gates:staging:dev"
+    "gates:staging:dev",
+    "perf:card:1:long",
+    "perf:staging:1:long",
+    "perf:staging:1:long",
+    "perf:card:1:long"
    ]
   }
  ],
  "card": "loom-fun/bartowski-Qwen3.8-27B-loom",
  "kit": null,
- "llamacpp": "b1374"
+ "llamacpp": "b1375",
+ "llamacpp_vulkan": "b12211"
 }
