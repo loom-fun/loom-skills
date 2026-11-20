@@ -15,7 +15,7 @@
 import json, math, os, subprocess, sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from gen_gdn import gdn_geometry, gdn_kernels, recurrence_pf, split_qgate, chunk_mode, fused_mode  # noqa: E402
+from gen_gdn import gdn_geometry, gdn_kernels, recurrence_pf, split_qgate, chunk_mode, chunk11_mode, chunk11_fuse, chunk11_gate, fused_mode, fused11_mode, skip_long_whole  # noqa: E402
 from formats import SPLIT, SCALE_DIV  # noqa: E402
 from attention_masks import full_blocks  # noqa: E402
 
@@ -5146,13 +5146,35 @@ def gdn_layer(i, b, nm, sz, par):
         # every span runs in exactly one of the two kernels (by its own length), so the pf kernel is only needed when
         # the epoch can hold a long span
         REC = REC + "\n  scf.if %gemm {\n  " + REC.replace("@g_gdn_recurrence[", "@g_gdn_recurrence_pf[") + "\n  }"
+    elif chunk11_mode(g) == "group":   # gfx11 chunked kernel g_gdn_chunk (and its gfx12 twin g_gdn_chunk_rdna4) takes the spans of 64+ tokens
+        CH = REC.strip().replace("@g_gdn_recurrence[", "@g_gdn_chunk[")
+        if chunk11_fuse(g):   # the fused chunk kernel convolves the raw qkv itself (+ the conv weights)
+            CH = CH.replace(f"%arena, %gs, %ginv,", f"%arena, %gq, %ginv,", 1).replace(", %graw) : [index](", f", %graw, %conv_{i}) : [index](", 1)
+            CH = CH[:-1] + f", view<{C * K}xf32>)"
+            assert "%gq" in CH and f"%conv_{i})" in CH, CH
+        if chunk11_gate(g):   # the gated norm of the chunk's rows in its epilogue
+            CH = CH.replace(") : [index](", f", %ssm_norm_{i}, %gz, %o) : [index](", 1)[:-1] + f", view<{DV}xf32>, buffer, buffer)"
+        REC = REC + "\n  scf.if %gemm {\n  " + CH + "\n  }"
     elif chunk_mode(g) == "group":   # gfx12: spans of 64+ tokens run the chunked kernel (a gfx11 build launches nothing here: its kernel takes every span)
         REC = REC + "\n  scf.if %gemm {\n  // dual-group: rdna4 " + REC.strip().replace("@g_gdn_recurrence[", "@g_gdn_chunk_rdna4[") + "\n  // dual-group: end\n  }"
     FRONT = f"""  kernel.launch @g_gdn_conv[%t](%t, %spans, %layer_{i}, %metadata, %info, %origins, %arena, %gq, %conv_{i}, %gs) : [index](index, index, index, buffer, buffer, buffer, buffer, buffer, view<{C * K}xf32>, buffer)
   kernel.launch @g_gdn_conv_commit[%spans](%t, %spans, %layer_{i}, %metadata, %origins, %arena, %gq) : [index](index, index, index, buffer, buffer, buffer, buffer)
   kernel.launch @g_gdn_qk_norm[%t](%t, %gs, %ginv) : [index](index, buffer, buffer)"""
     GATE = f"""  kernel.launch @g_gdn_norm_gate[%t](%t, %info, %graw, %ssm_norm_{i}, %gz, %o) : [index](index, buffer, buffer, view<{DV}xf32>, buffer, buffer)"""
-    if fused_mode(g):   # gfx12, GEMM-shape epochs: two launches (gen_gdn_fused.py) in place of conv .. norm_gate; gfx11 and short epochs keep the chain
+    if chunk11_gate(g) or fused11_mode(g):   # g_gdn_chunk / g_gdn_fb wrote the gated rows of the 64+-token spans
+        GATE = f"""  kernel.launch @g_gdn_norm_gate_s[%t](%t, %spans, %metadata, %info, %graw, %ssm_norm_{i}, %gz, %o) : [index](index, index, buffer, buffer, buffer, view<{DV}xf32>, buffer, buffer)"""
+    if (chunk11_fuse(g) or fused11_mode(g)) and skip_long_whole(g):   # the fused long-span kernels normalize their own q / k
+        FRONT = FRONT.replace("  kernel.launch @g_gdn_qk_norm[%t](%t, %gs, %ginv) : [index](index, buffer, buffer)",
+                              "  kernel.launch @g_gdn_qk_norm_s[%t](%t, %spans, %metadata, %info, %gs, %ginv) : [index](index, index, buffer, buffer, buffer, buffer)")
+        assert "@g_gdn_qk_norm_s[" in FRONT
+    if fused11_mode(g):   # gfx11 fused pair on the 64+-token spans after the chain of the shorter ones, before the history commit
+        F = FRONT.split("\n")
+        FA = (f"kernel.launch @g_gdn_fa[%t, %spans](%t, %spans, %layer_{i}, %metadata, %origins, %arena, %gq, %conv_{i}, %galpha, %gbeta, %ssm_a_{i}, %dt_bias_{i}, %gs)"
+              f" : [index, index](index, index, index, buffer, buffer, buffer, buffer, view<{C * K}xf32>, buffer, buffer, view<{HV}xf32>, view<{HV}xf32>, buffer)")
+        FB = (f"kernel.launch @g_gdn_fb[%spans](%t, %spans, %layer_{i}, %metadata, %origins, %arena, %gq, %gs, %ssm_norm_{i}, %gz, %o)"
+              f" : [index](index, index, index, buffer, buffer, buffer, buffer, buffer, view<{DV}xf32>, buffer, buffer)")
+        MIX = "\n".join([F[0], F[2], REC.split("\n")[0], f"  scf.if %gemm {{\n    {FA}\n    {FB}\n  }}", F[1], GATE])
+    elif fused_mode(g):   # gfx12, GEMM-shape epochs: two launches (gen_gdn_fused.py) in place of conv .. norm_gate; gfx11 and short epochs keep the chain
         REC0 = REC.split("\n")[0]
         FA = (f"kernel.launch @g_gdn_fa_rdna4[%t, %spans](%t, %spans, %layer_{i}, %metadata, %origins, %arena, %gq, %conv_{i}, %galpha, %gbeta, %ssm_a_{i}, %dt_bias_{i}, %gs)"
               f" : [index, index](index, index, index, buffer, buffer, buffer, buffer, view<{C * K}xf32>, buffer, buffer, view<{HV}xf32>, view<{HV}xf32>, buffer)")
@@ -5172,6 +5194,9 @@ def gdn_layer(i, b, nm, sz, par):
         cond, rest = ("%gemm", f"{FRONT}\n{REC if fold_enabled(g) else REC0}\n{GATE}") if fmin == 64 else ("%big", f"{FRONT}\n{REC}\n{GATE}")
         MIX = (f"  // gdn-fused: %layer_{i}\n  scf.if {cond} {{\n    // gdn-capture: %layer_{i}\n    // dual-group: rdna4 {FA}\n{ind(FRONT)}\n    // dual-group: end\n    // dual-group: rdna4 {FB}\n{ind(REC0)}\n{ind(GATE)}\n    // dual-group: end\n"
                f"  }} else {{\n  // gdn-chain: %layer_{i}\n{rest}\n  }}\n  // gdn-fused-end: %layer_{i}")
+    elif chunk11_fuse(g):   # the history commit after the chunk kernel read the old history
+        F = FRONT.split("\n")
+        MIX = "\n".join([F[0], F[2], REC, F[1], GATE])
     else:
         MIX = f"{FRONT}\n{REC}\n{GATE}"
     T = P + [
@@ -5789,7 +5814,7 @@ command.def public @llm_advance() launch(%weights: buffer, %residual: buffer, %m
     if GDN:
         g = GDN
         for name, width in (("gq", g["C"]), ("gs", g["C"]), ("gz", g["VD"]), ("graw", g["VD"]), ("ginv", 2 * g["HK"]), ("galpha", g["HV"]), ("gbeta", g["HV"])):
-            gw = name == "gs" and fused_mode(g)   # gfx12 fused GDN prefill: %gs (unused there) also holds the chunk workspace, ceil(t / 32) + spans + 1 slots
+            gw = name == "gs" and (fused_mode(g) or fused11_mode(g))   # gfx12 fused GDN prefill: %gs (unused there) also holds the chunk workspace, ceil(t / 32) + spans + 1 slots
             L_.append(f"  %{name}_bytes = index.constant {width * 4} : offset\n  %{name}_size{'_own' if gw else ''} = index.scale %t, %{name}_bytes : index, offset -> offset\n")
             if gw:
                 from gen_gdn_fused import nslots_bytes
