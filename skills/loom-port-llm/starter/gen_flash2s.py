@@ -52,11 +52,11 @@ HALF = D // 4 if B_MODE == "2" else 128   # dims per wave (key-split loop: four 
 NFH = HALF // 16                  # 16-dim fragments per wave (8)
 WPH = D // HALF                   # waves per query head (2, or 4 at head_dim 512)
 KT = 32 if D == 256 and B_MODE != "2" else 16   # keys per tile (head_dim 512: K and V^T of 32 keys exceed 64 KiB; the key-split loop reads K/V from the arena)
-if D == 256 and os.environ.get("FLASH2_KT256"):   # experiment: 16-key tiles at head_dim 256 (one workgroup can then hold all query heads of a KV head)
+if D == 256 and os.environ.get("FLASH2_KT256"):   # 16-key tiles at head_dim 256 (choice prefill.attn.flash2_kt256; gfx11 G = 6: two workgroups per WGP)
     KT = int(os.environ["FLASH2_KT256"])
 KB = KT // 16                     # 16-key blocks per tile
 DP8 = D + 8                       # padded K row
-VTC = KT + 8                      # padded V^T row
+VTC = KT + int(os.environ.get("FLASH2_VTPAD") or 8)   # padded V^T row (FLASH2_VTPAD: experiment, the pad in halves)
 # Query-head groups per KV head: one workgroup per (tile, KV head, group) when the G heads' S partials don't fit
 # next to the K and V^T tiles in 64 KiB of workgroup memory (G = 8: 70 KiB; Qwen3.5/3.6 MoE). Each group stages
 # K/V itself (the staging is repeated per group; the score/softmax/output work is not).
@@ -65,8 +65,18 @@ NG = (1 if WG3 else G // B_HEADS) if B_MODE == "2" else next(n for n in (1, 2, 4
 if D == 512 and os.environ.get("FLASH2_NG512"):   # experiment: query-head groups per KV head at head_dim 512 (more groups: fewer waves per workgroup, cheaper barriers)
     NG = int(os.environ["FLASH2_NG512"])
     assert G % NG == 0
+if D == 256 and B_MODE != "2" and os.environ.get("FLASH2_NG256"):   # experiment: query-head groups per KV head at head_dim 256 (fewer waves per workgroup)
+    NG = int(os.environ["FLASH2_NG256"])
+    assert G % NG == 0
 GW = G // NG                      # query heads per workgroup
 WAVES = WPH * GW
+# FLASH2_MT256=2 (gfx11 whole-tile kernel, head_dim 256, 16-key tiles, no sliding window; experiment): two listed 16-token query tiles per
+# workgroup (flash2_mt.py): each staged K/V tile feeds 32 tokens (half the global K/V traffic per token); 2 x WPH x GW waves.
+MT = int(os.environ.get("FLASH2_MT256") or 1) if (D == 256 and B_MODE != "2" and os.environ.get("FLASH2_ROLE") != "partial"
+                                                  and os.environ.get("FLASH2_ARCH") != "rdna4") else 1
+if MT > 1:
+    assert MT == 2 and KT == 16 and WINDOW >= 262144 and WPH == 2, "FLASH2_MT256=2: 16-key tiles (FLASH2_KT256=16), no sliding window"
+    WAVES *= MT
 if B_MODE == "2":   # two heads per wave: a workgroup is the four waves of a head pair
     WAVES = WPH * (3 if WG3 else 1)
 LANES = 32 * WAVES
@@ -76,6 +86,8 @@ LANES = 32 * WAVES
 SEG_N = 16 if WAVES >= 16 else 8
 if KT == 16:
     SEG_N = 2 * SEG_N
+while KT * SEG_N > LANES and SEG_N > 8 and B_MODE != "2":   # FLASH2_NG256 groups: fewer lanes, wider segments
+    SEG_N //= 2
 SEG_W = D // SEG_N
 assert WPH == 2 or KB == 1, "head_dim 512: 16-key tiles"
 assert LANES >= KT * SEG_N or B_MODE == "2", "need at least 8 waves (head_dim * G >= 1024)"
@@ -576,9 +588,61 @@ if R4:
     if not B_MODE == "2" and os.environ.get("FLASH2_PF", "0") == "1":   # the next K/V tile's loads in flight during this tile's math (flash2_prefetch.py); gfx12 twin only
         from flash2_prefetch import prefetch
         text = prefetch(text)
+if MT > 1:   # two query tiles per workgroup (flash2_mt.py; before the FLASH2_G11 transforms, so db stages inside the pass loop)
+    from flash2_mt import two_tiles
+    text = two_tiles(text, WAVES // MT)
+if NG > 1 and not PARTIAL and os.environ.get("FLASH2_NGX") == "1":   # experiment: a tile's head groups adjacent in dispatch order (x = tile * NG + group)
+    _o = f"""  %tile_id = kernel.workgroup.id<x> : index
+  %tile = index.assume %tile_id [lt(%tile_id, %tile_count)] : index
+  %kv_id = kernel.workgroup.id<y> : index
+  %cng = index.constant {NG} : index
+  %kv_value = index.div %kv_id, %cng : index
+  %kv = index.assume %kv_value [range(%kv_value, 0, {KVH - 1})] : index
+  %hgroup = index.rem %kv_id, %cng : index
+"""
+    _n = f"""  %xg_id = kernel.workgroup.id<x> : index
+  %cng = index.constant {NG} : index
+  %tile_id = index.div %xg_id, %cng : index
+  %tile = index.assume %tile_id [lt(%tile_id, %tile_count)] : index
+  %hgroup = index.rem %xg_id, %cng : index
+  %kv_id = kernel.workgroup.id<y> : index
+  %kv = index.assume %kv_id [range(%kv_id, 0, {KVH - 1})] : index
+"""
+    assert _o in text, "FLASH2_NGX: grid decode not found"
+    text = text.replace(_o, _n, 1)
+    _o2 = f"  %ckv = index.constant {KVH * NG} : index\n"
+    assert _o2 in text
+    text = text.replace(_o2, f"  %ckv = index.constant {KVH} : index\n  %cngx = index.constant {NG} : index\n", 1)
+    text = text.replace("  kernel.launch.config workgroups(%tiles, %ckv, %c1)", "  %tiles_ngx = index.mul %tiles, %cngx : index\n  kernel.launch.config workgroups(%tiles_ngx, %ckv, %c1)", 1)
+# FLASH2_G11 (gfx11 kernel only; comma list, default empty = unchanged): the gfx12 twin's text transforms on the gfx11 kernel. lazy / kvh / vtf / hot
+# (flash2_trim.py), pf (flash2_prefetch.py), vp (flash2_vpack.py), abl=<flag>+<flag> (flash2_ablate.py timing ablations: outputs garbage, kbench only).
+G11 = set(x for x in os.environ.get("FLASH2_G11", "").split(",") if x) if not R4 and B_MODE != "2" else set()
+if G11:
+    import flash2_trim as _t
+    for _f in [x for x in G11 if x.startswith("abl=")]:
+        from flash2_ablate import ablate
+        text = ablate(text, _f[4:].replace("+", ","))
+    if "lazy" in G11:
+        text = _t.lazy(text)
+    if "kvh" in G11:
+        text = _t.kvhoist(text)
+    if "vtf" in G11:
+        text = _t.vtflat(text)
+    if "vp" in G11:
+        from flash2_vpack import vpack
+        text = vpack(text)
+    if "pf" in G11:
+        from flash2_prefetch import prefetch
+        text = prefetch(text)
+    if "db" in G11:   # double-buffered K/V staging, one tile ahead (flash2_db.py; 16-key tiles)
+        from flash2_db import double_buffer
+        text = double_buffer(text, os.environ.get("FLASH2_DB_AT", "end"))
 if os.environ.get("FLASH2_PEEL", "1") == "1" and not EDGE_ZERO and B_MODE != "2":   # the masked path only in the last key tile (flash2_peel.py)
     from flash2_peel import peel_last_tile
     _hot = None
+    if "hot" in G11:
+        from flash2_trim import hot as _trim_hot
+        _hot = lambda ls: _trim_hot(ls, D == 512)
     if R4 and os.environ.get("FLASH2_HOT", os.environ.get("FLASH2_TRIM", "0")) == "1":   # gfx12 twin: the hot copy skips the validity / mask selects (flash2_trim.py)
         from flash2_trim import hot as _trim_hot
         _hot = lambda ls: _trim_hot(ls, D == 512)

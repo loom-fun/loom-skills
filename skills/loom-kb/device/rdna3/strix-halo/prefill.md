@@ -30,3 +30,9 @@ Register-only 16x16x16 MMA loop (2560 workgroups x 8 waves x 256 steps x 16 MMAs
 - Consequence for prefill targets: at 85 W the practical WMMA ceiling on real data is ~43 TFLOP/s = 73 % of the
   roofline's 59 TFLOP/s, so a dense model's end-to-end prefill cannot reach 70 % of `roofline.py`'s prefill ceiling
   (Qwen3.8-27B: 49.7 GFLOP/token -> 881 tok/s at 43.8 TFLOP/s with zero non-GEMM time, 76 % of the 8k ceiling).
+- **The limit is the BIOS power mode, not the chip.** The local machine (GMKtec NucBox EVO-X2, BIOS EVO-X2 1.05) in its
+  BIOS performance mode, same test (2026-11-19): socket power ~123 W sustained (peaks 140 W); random f16 2.56 GHz,
+  47.1 TFLOP/s (+12 %); constant f16 2.88 GHz, 54.9. Ubuntu's power profile does not reach it: power-profiles-daemon
+  shows only `amd_pstate` (CPU EPP) and a placeholder platform driver; `/sys/firmware/acpi/platform_profile` is absent.
+  The hwmon sensor `power1_input` (label `PPT`) is the package power the limit acts on. DevLab Strix Halo runners
+  (hostnames X2-*) behave like the 85 W mode: card numbers measured there are 85 W numbers.

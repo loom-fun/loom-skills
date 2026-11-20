@@ -389,7 +389,22 @@ CHOICE("prefill.attn.flash2_vp", "bool", False, "FLASH2_VP", experiment=True, do
        "store per dim pair (flash2_vpack.py); gfx12 twin only.", **_FLR4)
 CHOICE("prefill.attn.flash2_pf", "bool", False, "FLASH2_PF", experiment=True, doc="The next K/V tile's loads in flight during this "
        "tile's math (flash2_prefetch.py); gfx12 twin only.", **_FLR4)
-CHOICE("prefill.attn.flash2_kt256", "int", None, "FLASH2_KT256", experiment=True, doc="Experiment: 16-key tiles at head_dim 256.", **_FL)
+CHOICE("prefill.attn.flash2_kt256", "int", None, "FLASH2_KT256", per_target=True,
+       doc="Keys per tile of the gfx11 head_dim-256 flash2s kernel (None: 32). 16: 208 VGPRs / 33 KB LDS, two 12-wave workgroups per WGP "
+           "instead of one (G = 6): the second workgroup hides the first's exposed K/V load latency (Qwen3.8-27B Strix: kernel -21 % at 32k, prefill 32k +2.8 %).", **_FL)
+CHOICE("prefill.attn.flash2_g11", "str", None, "FLASH2_G11", experiment=True,
+       doc="gfx11 flash2s kernel only: comma list of the gfx12 twin's text transforms (lazy, kvh, vtf, hot, pf, vp, db) on the gfx11 kernel; abl=... "
+           "timing ablations (garbage outputs, kbench only).", **_FL)
+CHOICE("prefill.attn.flash2_db_at", "str", "end", "FLASH2_DB_AT", experiment=True,
+       doc="With FLASH2_G11=db: where the next tile's staging stores go (end, or b2: after the S exchange barrier).", **_FL)
+CHOICE("prefill.attn.flash2_ng256", "int", None, "FLASH2_NG256", experiment=True,
+       doc="Experiment: query-head groups per KV head at head_dim 256 (gfx11 flash2s).", **_FL)
+CHOICE("prefill.attn.flash2_ngx", "bool", None, "FLASH2_NGX", experiment=True,
+       doc="Experiment: with FLASH2_NG256 > 1, a tile's head groups adjacent in dispatch order.", **_FL)
+CHOICE("prefill.attn.flash2_mt256", "int", None, "FLASH2_MT256", experiment=True,
+       doc="Experiment (gfx11, head_dim 256, 16-key tiles): 2 = two 16-token query tiles per workgroup (flash2_mt.py).", **_FL)
+CHOICE("prefill.attn.flash2_vtpad", "int", None, "FLASH2_VTPAD", experiment=True,
+       doc="Experiment: the V^T row pad of flash2s in halves (None: 8).", **_FL)
 CHOICE("prefill.attn.flash2_ng512", "int", None, "FLASH2_NG512", experiment=True,
        doc="Experiment: query-head groups per KV head at head_dim 512.", **_FL)
 CHOICE("prefill.attn.flash512", "bool", True, "FLASH512", kits=["gemma4"], kernels=["*_attention_flash2*"], rows=ROWS_PREFILL,
@@ -402,6 +417,12 @@ CHOICE("prefill.gemm.min_tokens", "int", 64, "GEMM_MIN_TOKENS", kits=["lfm2moe"]
 # ======================================================================================================================
 # MoE (gen_moe.py, gen_llm.py; lfm2moe and flint-moe reference kits)
 # ======================================================================================================================
+_PR = dict(kernels=["g_silu_mul*", "g_gdn_norm_gate*", "g_post_add_norm*", "g_row_scale*"], rows=ROWS_PREFILL)
+CHOICE("prefill.fuse.silu_mul_rs", "bool", True, "SILU_MUL_RS", doc="g_silu_mul + the f16 row scale of its result in one kernel "
+       "(GEMM-shape epochs; Qwen3.8-27B Strix: +0.4-0.6 % prefill).", **_PR)
+CHOICE("prefill.fuse.gdn_norm_rs", "bool", True, "GDN_NORM_RS", doc="g_gdn_norm_gate + the f16 row scale of the ssm_out GEMM operand in one kernel.", **_PR)
+CHOICE("prefill.fuse.post_norm_noh", "bool", True, "POST_NORM_NOH", doc="Post-attention norm without the f32 h store no GEMM-branch reader uses.", **_PR)
+
 _MO = dict(kernels=["g_moe_*"], rows=ROWS_DECODE + ROWS_PREFILL + ROWS_STREAMS)
 CHOICE("moe.decode.rows_per_wg", "int", None, "MOE_R", dynamic=True, kit_legacy={"lfm2moe": 8},
        doc="Rows of one expert matvec per workgroup; default aims at ~3000 workgroups within 2..8 (Qwen3-30B-A3B decodes "
@@ -440,6 +461,42 @@ CHOICE("hybrid.gdn.chunk", "bool", False, "GDN_CHUNK", devices=["rdna4"], rows=R
        from_pr="q38r9700 gdnpf",
        doc="gfx12 chunked (WY) gated delta-net prefill (gen_gdn_chunk.py): spans of 64+ tokens run g_gdn_chunk_rdna4 (f16 WMMA, f32 state), the "
            "sequential kernel's gfx12 twin the shorter ones; the gfx11 kernels do not change (128 x 128 heads only).")
+CHOICE("hybrid.gdn.chunk11", "bool", False, "GDN_CHUNK11", devices=["rdna3"], rows=ROWS_PREFILL, kernels=["g_gdn_chunk", "g_gdn_recurrence*"],
+       from_pr="q38pf gdn",
+       doc="gfx11 chunked (WY) gated delta-net prefill (gen_gdn_chunk.py arch rdna3): spans of 64+ tokens run g_gdn_chunk (RDNA3 f16 WMMA, f32 "
+           "state), the sequential g_gdn_recurrence the shorter ones (decode, verify); its gfx12 twin is g_gdn_chunk_rdna4 with hybrid.gdn.chunk, "
+           "else the sequential kernel (gfx12 numerics unchanged). 128 x 128 heads only.")
+CHOICE("hybrid.gdn.chunk11_fuse", "bool", False, "GDN_CHUNK11_FUSE", devices=["rdna3"], rows=ROWS_PREFILL,
+       kernels=["g_gdn_chunk", "g_gdn_conv", "g_gdn_recurrence*"], from_pr="q38pf gdn",
+       doc="With hybrid.gdn.chunk11 (single-form models): g_gdn_chunk (and its gfx12 twin) also run the conv1d + SiLU and the q / k norms of their "
+           "spans on the raw qkv projection; g_gdn_conv skips the rows of spans of 64+ tokens and the history commit runs after the recurrence.")
+CHOICE("hybrid.gdn.chunk11_gate", "bool", False, "GDN_CHUNK11_GATE", devices=["rdna3"], rows=ROWS_PREFILL,
+       kernels=["g_gdn_chunk", "g_gdn_norm_gate*"], from_pr="q38pf gdn",
+       doc="With hybrid.gdn.chunk11 (single-form models): g_gdn_chunk (and its gfx12 twin) run the gated RMSNorm of their rows and write the "
+           "mixer output; g_gdn_norm_gate_s (the norm-gate with the span metadata) leaves the rows of spans of 64+ tokens alone.")
+CHOICE("hybrid.gdn.chunk11_cn", "int", 32, "GDN_CHUNK11_CN", devices=["rdna3"], rows=ROWS_PREFILL, kernels=["g_gdn_chunk"], from_pr="q38pf gdn",
+       doc="With hybrid.gdn.chunk11 (plain kernel, not fuse / gate): g_gdn_chunk's chunk length, 16 or 32 (default). 16: 240 VGPR and 25.9 KB "
+           "LDS (32: 253 / 53.7 KB), so 3 workgroups fit a WGP and the 48 head workgroups of a 27B span run in one round; a 16-row serial solve.")
+CHOICE("hybrid.gdn.chunk11_alias", "bool", False, "GDN_CHUNK11_ALIAS", devices=["rdna3"], rows=ROWS_PREFILL, kernels=["g_gdn_chunk"],
+       from_pr="q38pf gdn", doc="With hybrid.gdn.chunk11: K^T exp(G - gc) lives in Q's LDS rows (-9 KB LDS at CN 32).")
+CHOICE("hybrid.gdn.chunk11_opt", "str", "", "GDN_CHUNK11_OPT", devices=["rdna3"], rows=ROWS_PREFILL, kernels=["g_gdn_chunk"], from_pr="q38pf gdn",
+       doc="With hybrid.gdn.chunk11: comma list of g_gdn_chunk options: kbo (K S / Q S kb-outer: one state rhs copy live, -56 VGPR peak), xpf (with fuse: the next chunk's qkv rows loaded during this chunk, loop-carried), scan (the g prefix sum unrolled, independent LDS loads), acc4 "
+           "(the solve's dot products in 4 partial sums).")
+CHOICE("prefill.gdn.fused11", "bool", False, "GDN_FUSED11", devices=["rdna3"], rows=ROWS_PREFILL,
+       kernels=["g_gdn_fa", "g_gdn_fb", "g_gdn_conv", "g_gdn_norm_gate*"], from_pr="q38pf gdn",
+       doc="With hybrid.gdn.chunk11 (single-form models, 128 x 128 heads, conv 4): GEMM-shape epochs run the spans of 64+ tokens through the "
+           "gfx11 fused pair g_gdn_fa + g_gdn_fb (gen_gdn_fused.py arch rdna3; its gfx12 twins restricted the same way) after the chain of the "
+           "shorter spans (g_gdn_conv skips the long ones, g_gdn_norm_gate_s); the history commit runs last.")
+CHOICE("prefill.gdn.fused11_regnorm", "bool", False, "GDN_FUSED11_REGNORM", devices=["rdna3"], rows=ROWS_PREFILL, kernels=["g_gdn_fb"],
+       from_pr="q38pf gdn",
+       doc="With prefill.gdn.fused11: g_gdn_fb's norm-gate epilogue keeps O in registers (row sums of squares by a 16-lane DPP butterfly into a "
+           "[32][8] LDS table) instead of a 32 x 132 f32 LDS tile: 57.5 -> 41.6 KB LDS, 237 VGPR, so 3 workgroups fit a WGP and the 48 head "
+           "workgroups of a 27B span run in one round instead of two.")
+CHOICE("hybrid.gdn.skip_long", "bool", False, "GDN_SKIP_LONG", devices=["rdna3"], rows=ROWS_PREFILL, kernels=["g_gdn_norm_gate_s", "g_gdn_qk_norm_s"],
+       from_pr="q38pf gdn",
+       doc="With hybrid.gdn.chunk11_fuse / chunk11_gate / prefill.gdn.fused11: g_gdn_norm_gate_s and g_gdn_qk_norm_s skip the whole row of a "
+           "64+-token span and padding rows (the fused long-span kernel did that row's work); off, g_gdn_norm_gate_s still loads and computes "
+           "those rows (.012 ms/token at 8k) and g_gdn_qk_norm_lv normalizes every live row (.004).")
 CHOICE("prefill.gdn.fused2", "bool", False, "GDN_FUSED2", devices=["rdna4"], rows=ROWS_PREFILL, kernels=["g_gdn_fa_rdna4", "g_gdn_fb_rdna4"],
        from_pr="mxfp4st olayer",
        doc="gfx12 fused gated delta-net prefill in two launches (gen_gdn_fused.py): g_gdn_fa_rdna4 (conv + SiLU, q/k norms, gates, the WY solve "
@@ -510,6 +567,7 @@ CHOICE("feature.logits_export", "bool", True, "LLM_LOGITS", kernels=["g_logits_e
 # Not choices: everything else the generators and their tools read from the environment
 # ======================================================================================================================
 NOT("kbench experiment options of the gfx12 flash kernels (flash_r9700 suite; the shipped variants are choices)", "FLASH2_B2_OPTS", "FLASH2_G6_OPTS")
+NOT("timing-only ablations of the gfx11 chunked GDN kernel (kbench; wrong results)", "GDN_CHUNK11_ABL")
 NOT("input path or file selection (not a model-affecting knob)", "CATALOG", "LOOM_SKILLS", "LOOM_KB_ROOT", "LOOM_ROOT", "VENV", "HF", "HF_HOME",
     "HF_HUB_CACHE", "LD_LIBRARY_PATH", "LOOM_SERVE_STATE", "VISION_TEST_DIR", "FLASH2_OUT", "LLM_OUT")
 NOT("transport between a generator and its subprocesses (set by the caller from cfg / the build)", "LLM_CONFIG", "LLM_DRAFT",
