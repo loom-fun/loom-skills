@@ -838,7 +838,57 @@ def _swizzle_text():
   %out_group = index.assume %out_group_id [lt(%out_group_id, %out_tile_count)] : index"""
 
 
-def gemm_big256(fmt, mode, fmt2=None, g32=None, bal=None):
+def a32_on():
+    return os.environ.get("GEMM_M256_A32", "0").strip().lower() not in ("", "0", "false", "no", "off")
+
+
+def a32(text):
+    """GEMM_M256_A32 (choice prefill.gemm.m256_a32): cheaper weight addressing in an m256 kernel text.
+    1. The thread's weight row origin is computed as an index proven < 2^31 (every m256 weight tensor of a port is < 2 GiB), so
+       the loads take a 32-bit offset from the buffer's scalar base instead of 64-bit per-load address arithmetic
+       (v_add_co / v_add_co_ci / v_mul_hi pairs).
+    2. A dequant column col = K + S (K the step's origin, a multiple of 64; S < 64 the thread's slice) splits into the uniform
+       superblock / block K / B and the thread's small remainder, instead of a per-thread division of the sum."""
+    for v, bb in (("%w_row_origin", "%row_bytes"), ("%w2_row_origin", "%row_bytes2")):
+        old = f"  {v} = index.scale %w_out_row, {bb} : index, offset -> offset\n"
+        if old not in text:
+            continue
+        n = v[1:]
+        bbv = "%block_bytes" if v == "%w_row_origin" else "%block_bytes2"
+        cst = _re.search(rf"  {_re.escape(bbv)} = index.constant (\d+) : offset", text).group(1)
+        text = text.replace(old, f"""  %{n}_bb = index.constant {cst} : index
+  %{n}_rb = index.mul %blocks, %{n}_bb : index
+  %{n}_ro = index.mul %w_out_row, %{n}_rb : index
+  %{n}_roa = index.assume %{n}_ro [range(%{n}_ro, 0, 2147000000)] : index
+  %{n}_one = index.constant 1 : offset
+  {v} = index.scale %{n}_roa, %{n}_one : index, offset -> offset
+""")
+    # 3. the gate/up weight choice of a swiglu tile is wave-uniform (waves 0-3 stage gate rows 0-63, 4-7 up rows): from the
+    #    subgroup id it stays scalar, so the selected buffer base is an SGPR pair and the loads keep the scalar-base form.
+    up = "  %w_is_up = index.cmp uge, %stage_row, %half_tw : index\n"
+    if up in text and "%stage_row = index.div %workitem, %c2 : index" in text:
+        text = text.replace(up, "  %w_is_up = index.cmp uge, %bounded_subgroup, %c4 : index\n")
+    cols = dict((m.group(1), (m.group(2), m.group(3))) for m in _re.finditer(r"^\s*(%\w+) = index\.add (%\w+), (%\w+) : index$", text, flags=_re.M))
+    def sub_div(m):
+        ind, x, col, c = m.group(1), m.group(2), m.group(3), m.group(4)
+        if col not in cols or cols[col][0] not in ("%k_origin", "%k_next", "%c0") and not cols[col][0].startswith("%k_"):
+            return m.group(0)
+        k, sv = cols[col]
+        return f"{ind}{x}_kq = index.div {k}, {c} : index\n{ind}{x}_sq = index.div {sv}, {c} : index\n{ind}{x} = index.add {x}_kq, {x}_sq : index"
+    def sub_rem(m):
+        ind, x, col, c = m.group(1), m.group(2), m.group(3), m.group(4)
+        if col not in cols or cols[col][0] not in ("%k_origin", "%k_next", "%c0") and not cols[col][0].startswith("%k_"):
+            return m.group(0)
+        k, sv = cols[col]
+        hi = int(c[2:]) - 1
+        return (f"{ind}{x}_kr = index.rem {k}, {c} : index\n{ind}{x}_sr = index.rem {sv}, {c} : index\n"
+                f"{ind}{x}_wv = index.add {x}_kr, {x}_sr : index\n{ind}{x} = index.assume {x}_wv [range({x}_wv, 0, {hi})] : index")
+    text = _re.sub(r"^(\s*)(%\w+) = index\.div (%\w+), (%c256|%c32) : index$", sub_div, text, flags=_re.M)
+    text = _re.sub(r"^(\s*)(%\w+) = index\.rem (%\w+), (%c256|%c32) : index$", sub_rem, text, flags=_re.M)
+    return text
+
+
+def gemm_big256(fmt, mode, fmt2=None, g32=None, bal=None, a32_=None):
     """256-row WMMA GEMM: 256 threads (8 waves in a 4 x 2 grid), each wave 64 rows x 64 columns (4 x 4
     16 x 16 accumulators). store/acc: 256 x 128 tiles, swiglu: 256 rows x 64 outputs of each of gate and up.
     Each staged weight value feeds 256 rows, and each wave reuses an A fragment across 4 B fragments and a
@@ -1135,7 +1185,7 @@ def gemm_big256(fmt, mode, fmt2=None, g32=None, bal=None):
                     L.append(f"  %v{r}{c} = vector.addf %v{r}{c}_s, %zero8 : vector<8xf32>")
             L.append(f"  vector.fragment.store<result> %v{r}{c}, %y_view[{row}, %oc{r}{c}] shape [%c16, %c16] : vector<8xf32>, view<256x{TN}xf32, %y_layout>")
     L.append("  kernel.return\n}\n")
-    return "\n".join(L)
+    return a32("\n".join(L)) if (a32_on() if a32_ is None else a32_) else "\n".join(L)
 
 
 def f16out_m256(text):
@@ -1428,6 +1478,8 @@ def gemm_m256_variant(fmt, mode, fmt2=None):
     if (os.environ.get("GEMM_M256_DB", "0").strip().lower() not in ("", "0", "false", "no", "off")):
         return gemm_big256_db(fmt, mode)
     if (os.environ.get("GEMM_M256_G32", "0").strip().lower() not in ("", "0", "false", "no", "off")) and fmt in _g32_fmts():   # gfx11 only: the gfx12 twin comes from the default kernel
+        return gemm_big256(fmt, mode)
+    if a32_on():   # gfx11 only, like G32
         return gemm_big256(fmt, mode)
     return None
 
@@ -1759,7 +1811,7 @@ if __name__ == "__main__":
             else:
                 out.append(_rdna4.with_twins(post(gemm_big(fmt, mode))))
                 if on256:
-                    base256 = post(gemm_big256(fmt, mode, g32=False))
+                    base256 = post(gemm_big256(fmt, mode, g32=False, a32_=False))
                     var256 = gemm_m256_variant(fmt, mode)
                     if var256 is None:
                         out.append(_rdna4.with_twins(base256))
@@ -1769,5 +1821,5 @@ if __name__ == "__main__":
                         out.append(_with_twin(f16out_m256(base256 if var256 is None else post(var256)), f16out_m256(base256)))
     for pair in filter(None, os.environ.get("GEMM_M256_MIXED", "").split(",")):   # gen_llm sets it (choice prefill.gemm.m256_mixed)
         f1, f2 = pair.split(":")
-        out.append(_with_twin(f16out_m256(post(gemm_big256(f1, "swiglu", f2))), f16out_m256(post(gemm_big256(f1, "swiglu", f2, g32=False, bal=False)))))
+        out.append(_with_twin(f16out_m256(post(gemm_big256(f1, "swiglu", f2))), f16out_m256(post(gemm_big256(f1, "swiglu", f2, g32=False, bal=False, a32_=False)))))
     sys.stdout.write("\n".join(out))

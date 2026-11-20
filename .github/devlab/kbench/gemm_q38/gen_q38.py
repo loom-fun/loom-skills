@@ -45,6 +45,13 @@ def ablate(t, abl):
             t = re.sub(r"^\s*kernel\.barrier<workgroup>[^\n]*\n(?=(?:.|\n)*scf\.yield)", "", t, count=2, flags=re.M)
         elif a.startswith("lds"):   # ldsN: pad the activation stage allocation to make the kernel's LDS N bytes
             t = t.replace("%x_bytes = index.constant 36864 : offset", f"%x_bytes = index.constant {int(a[3:]) - 18432} : offset")
+        elif a == "nometa":   # repack bound: the K-quant group scale/min as ready f16 values (the header's d, dmin), no 6-bit decode
+            t = re.sub(r"(%\S+), (%\S+) = func\.call @g_k_metadata\((%\S+), (%\S+)\) : \(vector<4xi32>, index\) -> \(f32, f32\)",
+                       lambda m: (f"{m.group(1)}_hv = vector.bitcast {m.group(3)} : vector<4xi32> to vector<8xf16>\n"
+                                  f"      {m.group(1)}_h0 = vector.extract {m.group(1)}_hv[0] : vector<8xf16> -> f16\n"
+                                  f"      {m.group(1)}_h1 = vector.extract {m.group(1)}_hv[1] : vector<8xf16> -> f16\n"
+                                  f"      {m.group(1)} = scalar.extf {m.group(1)}_h0 : f16 to f32\n"
+                                  f"      {m.group(2)} = scalar.extf {m.group(1)}_h1 : f16 to f32"), t)
         elif a == "nostore":
             t = re.sub(r"^\s*vector\.store [^\n]*%(?:x|w)_stage_view\[[^\n]*\n", "", t, flags=re.M)
     return t

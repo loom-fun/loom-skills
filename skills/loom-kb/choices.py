@@ -284,6 +284,11 @@ CHOICE("prefill.gemm.m256_mixed_bal", "bool", False, "GEMM_M256_MIXED_BAL", kern
        doc="gfx11 mixed-format swiglu m256 (prefill.gemm.m256_mixed): every thread stages 16 values of a gate row and 16 of the "
        "matching up row, so all waves do the same q4_k + q6_k dequant (no wave-uniform branch, the barrier does not wait for the "
        "q6_k waves) and each thread loads only what it dequantizes. The gfx12 twin keeps the branch form.")
+CHOICE("prefill.gemm.m256_a32", "bool", False, "GEMM_M256_A32", from_pr="q38pf-gemm2", devices=["rdna3"],
+       doc="gfx11 m256 GEMM weight addressing (gen_gemm.a32): the thread's row origin proven < 2^31 (32-bit offsets from the buffer's "
+       "scalar base instead of 64-bit per-load address arithmetic; every m256 weight tensor must be < 2 GiB), the dequant column split "
+       "into the uniform superblock and the thread's slice, and the swiglu gate/up buffer choice from the subgroup id. q6_k store loop "
+       "VALU 227 -> 175 per 64 WMMA, q8_0 94 -> 80, mixed 222 -> 177. The gfx12 twins keep the default addressing.", **_PG)
 CHOICE("prefill.gemm.m256_xg", "int", 0, "GEMM_M256_XG", from_pr="q38pf-gemm2", devices=["rdna3"],
        doc="gfx11 m256 GEMM with A fragments read straight from global memory (gen_gemm_xg): 1 = 256-row tiles, 2 = 512-row "
        "tiles (loses: latency-bound A loads).", **_PG)
