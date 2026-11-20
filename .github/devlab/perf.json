@@ -1,5 +1,5 @@
 {
- "_comment": "R9700 A/B of 61313099a048ebd268486f0efc1ddcc657ddd63d (fun) against 61313099a048ebd268486f0efc1ddcc657ddd63d (staging) (ab_jobs.py --base-ref/--head-ref): each variant carries its ref's serving settings. Does not fit: none",
+ "_comment": "R9700 A/B of 1c68ef26d5faf305e5fe2b4b874b408ff62207f3 (fun) against 1c68ef26d5faf305e5fe2b4b874b408ff62207f3 (staging) (ab_jobs.py --base-ref/--head-ref): each variant carries its ref's serving settings. Does not fit: none",
  "runner": "r9700",
  "memory_bytes": 34000000000,
  "llama_spec": "matched",
@@ -9,7 +9,7 @@
    "runner": "r9700",
    "card": "loom-fun-staging/unsloth-Qwen3.8-27B-UD-Q4_K_XL",
    "memory_bytes_r9700": 34000000000,
-   "served_context": 120832,
+   "served_context": 116736,
    "kit": null,
    "llamacpp": "b1375",
    "llamacpp_vulkan": "b12211",
@@ -17,11 +17,11 @@
     {
      "name": "staging",
      "build": {},
-     "ref": "61313099a048ebd268486f0efc1ddcc657ddd63d",
-     "context": 120832,
+     "ref": "1c68ef26d5faf305e5fe2b4b874b408ff62207f3",
+     "context": 116736,
      "cap_pool": 121856,
      "execution": {
-      "context_capacity": 120832,
+      "context_capacity": 116736,
       "prefill_capacity": 1024
      }
     }
