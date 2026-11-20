@@ -278,7 +278,8 @@ def local_power_line(psrc, g):
     """A local session at a named power mode (card_lib.perf_source_ok): where, at what power, and that every engine ran in that job."""
     pw = psrc.get("power") or {}
     eng = pw.get("engines") or {}
-    per = ", ".join(f"{ENGINE_NAMES.get(k, k)} {v['median_w']:.0f} W / {v['median_ghz']:.2f} GHz" for k, v in eng.items() if v.get("median_w"))
+    order = sorted(eng, key=lambda k: (list(ENGINE_NAMES).index(k) if k in ENGINE_NAMES else len(ENGINE_NAMES), k))
+    per = ", ".join(f"{ENGINE_NAMES.get(k, k)} {eng[k]['median_w']:.0f} W / {eng[k]['median_ghz']:.2f} GHz" for k in order if eng[k].get("median_w"))
     runner = GPUS[g]["runner"]
     out = (f"- Measured on {device_text(psrc['device'])}, a local machine (not an AMD DevLab Dispatch runner), in its "
            f"{psrc['power_mode'].replace('w', ' W')} power mode (BIOS performance mode); the DevLab {runner} runners run at 85 W. "
@@ -604,7 +605,7 @@ def perf_section(L, info, facts, feats, d, g, here, ctx):
     roof = (view.get("roofline") or {}).get("metrics") or {}
     stale = stale_metrics(view, here, kind, feats)
     # further llama.cpp backends (performance.baselines): one column each, after the roofline
-    extra = {b: x for b, x in (perf.get("baselines") or {}).items()}
+    extra = dict(sorted((perf.get("baselines") or {}).items(), key=lambda kv: kv[1]["baseline"]["name"] != "llama.cpp"))   # llama.cpp backends first
     xnames = {b: column_name(b, x) for b, x in extra.items()}
     margin_label = "margin vs best llama.cpp" if bname == "llama.cpp" else "margin"
     L += [f"| metric | {bname} | Loom | {margin_label} | roofline | Loom % of roofline "
