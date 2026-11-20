@@ -32,6 +32,8 @@ if os.environ.get("Q38_SET") == "udxl":
         ("down_nl", "iq4_nl", "acc", 1024, 17408, 5120, ["down_iq4nl"]),
         ("mx_x5", "iq4_xs:q5_k", "swiglu", 1024, 5120, 17408, ["gate_iq4xs7", "up_q5k7"]),
         ("mx_4x", "q4_k:iq4_xs", "swiglu", 1024, 5120, 17408, ["gate_q4k10", "up_iq4xs10"]),
+        ("downst_x", "iq4_xs", "store", 1024, 17408, 5120, ["down_iq4xs"]),       # acc vs store on the same weight
+        ("down_q5", "q5_k", "acc", 1024, 17408, 5120, ["down_q5k3"]),            # control: the q5_k down at ~36 TFLOP/s in production
     ]
 WB = {"q4_k": (144, 256), "q6_k": (210, 256), "q8_0": (34, 32), "iq4_xs": (136, 256), "iq4_nl": (18, 32), "q5_k": (176, 256)}
 
