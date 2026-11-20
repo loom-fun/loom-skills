@@ -1,6 +1,6 @@
 # Running a campaign (a new GPU, many models, a refactor)
 
-A campaign is a goal too big for one agent: a team under one tech lead, state in files, GPU work on DevLab. Start it with
+A campaign is a goal too big for one agent: a team under one tech lead, state in files, and lab GPU work. Start it with
 `scripts/campaign/new_campaign.sh DIR NAME INTEGRATION_BRANCH BASE_BRANCH` (next to this skill's `SKILL.md`), then fill `BRIEF.md`.
 Narrow changes inside a campaign are [targeted fixes](targeted-fix.md).
 
@@ -124,9 +124,11 @@ between the integration branch and its base is empty. Every deliberate change is
 touch exactly the models it declares, (3) A/B'd on DevLab. Refactors prove byte identity first; behaviour changes come later and
 separately. Tools: `fleet/README.md`; process: [targeted-fix.md](targeted-fix.md).
 
+For devices whose only measurement backend is leased XSJ hardware, run `kb.py route --arch <model-arch> --device <device> --topic xsj`.
+
 ## DevLab
 
-- **All GPU work runs on DevLab Dispatch (GitHub Actions self-hosted runners), including every performance number. Never the local
+- **For devices with DevLab runners, all GPU work runs on DevLab Dispatch (GitHub Actions self-hosted runners), including every performance number. Never the local
   GPU** (it is scarce, sequential and shared). Where it must be decided locally, keep the local GPU busy only with agent-in-the-loop
   work, never idle waiting on DevLab; local and DevLab work are decoupled.
 - Runner labels: Strix Halo `[strix-halo, devlab-dispatch, Linux, self-hosted]` (always include `Linux`); Radeon R9700

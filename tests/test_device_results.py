@@ -83,7 +83,7 @@ class Schema(unittest.TestCase):
 
 class Order(unittest.TestCase):
     def test_card_order(self):
-        self.assertEqual([g for g in card_lib.GPU_ORDER if g != "radeon-rx7900xtx"], ["strix-halo", "radeon-r9700", "gfx1201-16gb", "gfx1150"])
+        self.assertEqual([g for g in card_lib.GPU_ORDER if g != "radeon-rx7900xtx"], ["strix-halo", "radeon-r9700", "gfx1201-16gb", "gfx1150", "gfx1152"])
         info = {"devices": {g: {"state": "not_measured"} for g in ("gfx1150", "gfx1201-16gb", "strix-halo", "radeon-r9700")}}
         self.assertEqual(card_lib.card_gpus(info), ["strix-halo", "radeon-r9700", "gfx1201-16gb", "gfx1150"])
         self.assertEqual(card_lib.derived_tags({"speculative_decoding": {"status": "no", "value": None}, "image_input": {"status": "no"}},

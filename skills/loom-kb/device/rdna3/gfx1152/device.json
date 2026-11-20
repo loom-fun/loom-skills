@@ -1,0 +1,43 @@
+{
+  "schema": "loom-kb/device/1",
+  "device": "gfx1152",
+  "order": 3,
+  "family": "rdna3",
+  "gfx": "gfx1152",
+  "aliases": ["gfx1152", "krackan", "radeon-860m", "860m"],
+  "name": "AMD Radeon 860M",
+  "short": "Radeon 860M",
+  "memory": null,
+  "memory_bytes": null,
+  "memory_note": "Shared system memory. Maximum admitted context is measured per package and host.",
+  "card": {
+    "runner": "Radeon 860M",
+    "tag": "gfx1152",
+    "order": 11,
+    "detect": {
+      "pattern": "gfx1152|radeon 860m|krackan",
+      "flags": "i"
+    },
+    "serve_args": ["--pool_backing=fixed"]
+  },
+  "roofline": {
+    "default": "gfx1152",
+    "presets": {
+      "gfx1152": {
+        "name": "AMD Radeon 860M (gfx1152, LPDDR5X-8000 spec)",
+        "bw": 128000000000.0,
+        "flops": 12288000000000.0,
+        "note": "SPEC upper bounds from the Ryzen AI 7 350: two 64-bit memory channels at LPDDR5X-8000 and 8 CUs x 512 dense f16 WMMA FLOP/clock x 3.0 GHz. Actual bandwidth depends on the host RAM."
+      }
+    }
+  },
+  "runner": {
+    "key": "gfx1152",
+    "labels": [],
+    "backend": "xsj",
+    "note": "Measure on leased XSJ lab hosts. Results and their source identities are stored in fleet/devices/gfx1152.json."
+  },
+  "preset_suffix": "-gfx1152",
+  "fit_table": null,
+  "prefill_flag": null
+}
