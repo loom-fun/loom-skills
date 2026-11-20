@@ -241,7 +241,10 @@ fetch_card() {   # fetch_card REF -> sets CARD_DIR, CARD_BASE, CARD_REV: the car
     # to the installed model.json (same variant and programs, so they only name other execution settings): both can then be served
     curl -fsSL --retry 3 "$bs/model.json" -o "$out/model_card.json" || { echo "FAIL: no model.json in $r"; exit 1; }
     pf=$(python3 -c "import json,sys; p=list(json.load(open(sys.argv[1]))['presets']); print('--preset=' + p[0] if len(p) > 1 else '')" "$out/model_card.json")
-    HF_HOME="$WORK/hf-home" HF_HUB_CACHE="$WORK/hf-home/hub" "$root/.venv/bin/loom-fetch" "$bs/model.json" $pf --no-input --materialize=copy --cache "$WORK/fetch-cache" --output="$CARD_DIR" > "$out/fetch.log" 2>&1 || { tail "$out/fetch.log"; echo "FAIL: loom-fetch $r"; exit 1; }
+    # LOCAL_HF_CACHE=1 (a dev machine, not a runner): the weights come from (and stay shared with) the user's own HF cache,
+    # never a second download or copy of a multi-GB GGUF
+    if [ "${LOCAL_HF_CACHE:-0}" = 1 ]; then hfh=${HF_HOME:-$HOME/.cache/huggingface}; mat=share; else hfh=$WORK/hf-home; mat=copy; fi
+    HF_HOME="$hfh" HF_HUB_CACHE="$hfh/hub" "$root/.venv/bin/loom-fetch" "$bs/model.json" $pf --no-input --materialize=$mat --cache "$WORK/fetch-cache" --output="$CARD_DIR" > "$out/fetch.log" 2>&1 || { tail "$out/fetch.log"; echo "FAIL: loom-fetch $r"; exit 1; }
     [ -z "$pf" ] || python3 - "$out/model_card.json" "$CARD_DIR/model.json" <<'EOF' || exit 1
 import json, sys
 src, dst = json.load(open(sys.argv[1])), json.load(open(sys.argv[2]))
