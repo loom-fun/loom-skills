@@ -47,6 +47,13 @@ class RunnerTests(unittest.TestCase):
         self.assertIn("--device=amdgpu://?completion_spin_ns=4294967295", loom)
         self.assertFalse(any(flag.startswith("--workers") for flag in loom))
 
+    def test_baseline_context_is_bounded_on_native_context_models(self):
+        for engine, slot, four in (("rocm", "65536", "65536"), ("vulkan", "36864", "147456")):
+            with self.subTest(engine=engine):
+                for mode, limit in (("single", slot), ("nodraft", four)):
+                    argv = runner.server_argv(self.args, engine, mode, None, 262144, [], "GPU0")
+                    self.assertEqual(argv[argv.index("-c") + 1], limit)
+
     def test_alternate_drafter_is_selected_only_by_the_classification(self):
         self.assertEqual(runner.spec_args("loom-fun/unsloth-Qwen3.5-2B-loom", None), [])
         with self.assertRaisesRegex(runner.RunError, "requires Qwen3.5-4B-DFlash.Q8_0"):
@@ -110,12 +117,10 @@ class RunnerTests(unittest.TestCase):
 
     @unittest.skipUnless(os.name == "nt", "exercises native Windows process ownership")
     def test_native_windows_listener_is_owned_and_released(self):
-        with socket.socket() as sock:
-            sock.bind(("127.0.0.1", 0))
-            port = sock.getsockname()[1]
-        server = """
+        handler = """
 import http.server
 import sys
+import threading
 
 class Handler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
@@ -123,14 +128,26 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(b'{"status":"ok"}')
 
-http.server.HTTPServer(("127.0.0.1", int(sys.argv[1])), Handler).serve_forever()
+with http.server.HTTPServer(("127.0.0.1", int(sys.argv[1])), Handler) as server:
+    timer = threading.Timer(15, server.shutdown)
+    timer.daemon = True
+    timer.start()
+    server.serve_forever()
 """
         evidence = runner.Evidence(self.out)
-        with evidence.server("smoke", [sys.executable, "-c", server, str(port)], port) as proc:
-            runner.wait_ready(evidence, "smoke", proc, "rocm", f"http://127.0.0.1:{port}", port, None, 10)
-            self.assertIsNone(proc.poll())
-        self.assertIsNotNone(proc.poll())
-        self.assertFalse(runner.listener_pids(evidence, "verify", port))
+        wrapper = ("import subprocess, sys; raise SystemExit(subprocess.call("
+                   f"[sys.executable, '-c', {handler!r}, sys.argv[1]]))")
+        for name, code in (("direct", handler), ("child", wrapper)):
+            with self.subTest(name=name):
+                with socket.socket() as sock:
+                    sock.bind(("127.0.0.1", 0))
+                    port = sock.getsockname()[1]
+                with evidence.server(name, [sys.executable, "-c", code, str(port)], port) as server:
+                    runner.wait_ready(evidence, name, server, "rocm", f"http://127.0.0.1:{port}", port, None, 10)
+                    self.assertIsNone(server.process.poll())
+                    self.assertEqual(server.child_listener is not None, name == "child")
+                self.assertIsNotNone(server.process.poll())
+                self.assertFalse(runner.listener_pids(evidence, f"{name}.verify", port))
 
     def test_only_complete_session_reaches_ingest_file(self):
         evidence = runner.Evidence(self.out)

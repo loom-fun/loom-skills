@@ -16,6 +16,7 @@ import sys
 import tempfile
 import time
 from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from urllib.error import URLError
 from urllib.request import ProxyHandler, build_opener
@@ -31,6 +32,7 @@ from matched_spec import classification, violations  # noqa: E402
 ROCM_PIN = "918f16a4657b83925df5a9a1e10485f177b46756a8b17d8c6e2deae58dce0d2a"
 VULKAN_ASSET = "llama-b12211-bin-win-vulkan-x64.zip"
 DEVICE = "amdgpu://?completion_spin_ns=4294967295"
+KV_CONTEXT_LIMITS = {"rocm": 65536, "vulkan": 36864}
 LOGS = {
     "loom": ("perf_loom.jsonl", "c4_loom.txt"),
     "rocm": ("perf_llamacpp-rocm.np1.jsonl", "c4_llamacpp-rocm.nodraft.txt"),
@@ -56,6 +58,12 @@ class RunError(RuntimeError):
 
 class CleanupError(RunError):
     """A subsequent model must not load while the previous listener still exists."""
+
+@dataclass
+class Server:
+    process: subprocess.Popen
+    child_listener: dict | None = None
+
 
 
 def now():
@@ -189,6 +197,7 @@ def server_argv(args, engine, mode, model_path, context, spec, device=None):
                 *args.loom_arg]
     streams = 4 if mode == "nodraft" else 1
     unified = engine == "rocm" and streams == 4
+    context = min(context, KV_CONTEXT_LIMITS[engine])
     total_context = context if unified else context * streams
     draft = spec if mode == "single" else []
     return [str(getattr(args, engine)), "-m", str(args.gguf), "-ngl", "99", "-cram", "0",
@@ -239,9 +248,10 @@ class Evidence:
         self.event(event="start", name=name, argv=argv, cwd=str(cwd), stdout=log, stderr=log)
         with (self.out / log).open("wb") as out:
             proc = subprocess.Popen(argv, cwd=cwd, env=self.env, stdout=out, stderr=subprocess.STDOUT)
+            server = Server(proc)
             try:
                 self.event(event="pid", name=name, pid=proc.pid)
-                yield proc
+                yield server
             finally:
                 if proc.poll() is None:
                     try:
@@ -255,7 +265,19 @@ class Evidence:
                                 raise CleanupError(f"Could not stop owned server PID {proc.pid}: {exc}") from exc
                 try:
                     proc.wait(timeout=30)
-                    if listener_pids(self, f"{name}.port_after", port):
+                    listeners = listener_pids(self, f"{name}.port_after", port)
+                    child = server.child_listener
+                    if child and str(child["pid"]) in listeners:
+                        current = windows_process(self, f"{name}.child_after", child["pid"])
+                        if current == child:
+                            try:
+                                self.command(f"{name}.stop_child", ["taskkill.exe", "/PID", str(child["pid"]), "/T", "/F"],
+                                             timeout=30)
+                            except RunError:
+                                # The child can exit on its own between the identity check and taskkill.
+                                pass
+                            listeners = listener_pids(self, f"{name}.port_after_child", port)
+                    if listeners:
                         raise RunError(f"Port {port} still has a listener after PID {proc.pid} exited")
                 except (subprocess.TimeoutExpired, RunError) as exc:
                     raise CleanupError(f"Server {name} failed to release port {port}: {exc}") from exc
@@ -267,7 +289,41 @@ def listener_pids(evidence, name, port):
     return set(re.findall(rf"(?m)^\s*TCP\s+\S+:{port}\s+\S+\s+LISTENING\s+(\d+)\s*$", listeners))
 
 
-def wait_ready(evidence, name, proc, engine, url, port, model_id, timeout):
+def windows_process(evidence, name, pid):
+    cmd = (f"$p = Get-CimInstance Win32_Process -Filter 'ProcessId = {pid}' -ErrorAction Stop; "
+           "if ($p) { @{pid=$p.ProcessId; parent=$p.ParentProcessId; "
+           "created=$p.CreationDate.ToUniversalTime().ToString('o')} | ConvertTo-Json -Compress } else { 'null' }")
+    return json.loads(evidence.command(name, ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", cmd],
+                                       timeout=30))
+
+
+def verify_listener(evidence, name, server, port):
+    proc = server.process
+    listeners = listener_pids(evidence, f"{name}.listener", port)
+    if listeners == {str(proc.pid)} and proc.poll() is None:
+        return
+    if len(listeners) == 1:
+        root = windows_process(evidence, f"{name}.root_process", proc.pid)
+        owner = int(next(iter(listeners)))
+        child = windows_process(evidence, f"{name}.listener_process", owner)
+        ancestor = child
+        visited = set()
+        while root and ancestor and ancestor["pid"] not in visited and ancestor["created"] >= root["created"]:
+            visited.add(ancestor["pid"])
+            if ancestor["parent"] == proc.pid and proc.poll() is None:
+                server.child_listener = child
+                evidence.event(event="listener_child", name=name, **child)
+                return
+            parent = windows_process(evidence, f"{name}.ancestor_{ancestor['parent']}", ancestor["parent"])
+            # A reused PID can never be the parent of an older process.
+            if not parent or parent["created"] > ancestor["created"]:
+                break
+            ancestor = parent
+    raise RunError(f"{name}: responding listener is outside the live launched process tree (root PID {proc.pid})")
+
+
+def wait_ready(evidence, name, server, engine, url, port, model_id, timeout):
+    proc = server.process
     endpoint = "/v1/status" if engine == "loom" else "/health"
     deadline = time.monotonic() + timeout
     last = "server has not answered"
@@ -290,8 +346,7 @@ def wait_ready(evidence, name, proc, engine, url, port, model_id, timeout):
             else:
                 last = status.get("status")
             if last in ("ready", "ok"):
-                if listener_pids(evidence, f"{name}.listener", port) != {str(proc.pid)}:
-                    raise RunError(f"{name}: responding listener is not owned by PID {proc.pid}")
+                verify_listener(evidence, name, server, port)
                 return
         time.sleep(1)
     raise RunError(f"{name}: not ready after {timeout:g}s ({last}); see {name}.server.log")
@@ -341,8 +396,8 @@ def workloads(evidence, args, engine, mode, name, model_id, url):
 def measure(evidence, args, engine, mode, name, model_path, model_id, context, spec, device):
     url = f"http://127.0.0.1:{args.port}"
     argv = server_argv(args, engine, mode, model_path, context, spec, device)
-    with evidence.server(name, argv, args.port) as proc:
-        wait_ready(evidence, name, proc, engine, url, args.port, model_id, args.startup_timeout)
+    with evidence.server(name, argv, args.port) as server:
+        wait_ready(evidence, name, server, engine, url, args.port, model_id, args.startup_timeout)
         if engine == "loom":
             evidence.command(f"{name}.load", [sys.executable, str(HERE / "wait_model.py"), url,
                                              "--model", model_id, "--wait", str(args.startup_timeout)],
@@ -450,6 +505,9 @@ def run(args, evidence, manifest):
         try:
             engine_ids[engine] = baseline_identity(engine, exe, getattr(args, engine + "_archive"))
             engine_ids[engine]["device"] = probe_backend(evidence, engine, exe)
+            limit = min(context, KV_CONTEXT_LIMITS[engine])
+            engine_ids[engine]["context"] = {"single": limit, "four_stream_total": limit if engine == "rocm" else 4 * limit,
+                                             "four_stream_shared": engine == "rocm"}
         except (RunError, OSError, ValueError) as exc:
             engine_ids.setdefault(engine, {})["error"] = str(exc)
             failed = True
