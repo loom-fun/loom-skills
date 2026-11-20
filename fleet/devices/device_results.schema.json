@@ -26,7 +26,7 @@
    "type": "object", "description": "Serving settings common to the file's models (device flag, memory, backing); a model's own serve_args are what the card prints",
    "properties": {"device": {"type": "string"}}
   },
-  "provenance": {"$ref": "#/$defs/source", "description": "Where the file's results come from: a source block (kind machine; device {cpu, gpu, os} names the machine; hrx_loom the SDK). Evidence documents without a `source` of their own are not allowed: a session carries its own, this is the default a data-collection script copies into them"},
+  "provenance": {"$ref": "#/$defs/source", "description": "Optional source block for the file's results, of kind machine or xsj. Each recorded measurement carries its own source; this is never substituted for missing evidence provenance."},
   "models": {
    "type": "object",
    "description": "Keyed by fleet slug (fleet/<slug>), e.g. bartowski-Qwen2.5-7B-Instruct-loom",
@@ -37,7 +37,7 @@
   "source": {
    "type": "object", "required": ["kind", "run", "url", "device", "hrx_loom"],
    "description": "info_schema.json $defs/source",
-   "properties": {"kind": {"enum": ["machine"]}, "run": {"type": ["string", "null"]}, "url": {"type": ["string", "null"]},
+   "properties": {"kind": {"enum": ["machine", "xsj"]}, "run": {"type": ["string", "null"]}, "url": {"type": ["string", "null"]},
                   "device": {"type": ["object", "null"]}, "hrx_loom": {"type": ["object", "null"]}}
   },
   "model": {
@@ -57,7 +57,7 @@
     "note": {"type": "string", "description": "One factual line for readers of the file (not shown on the card)"},
     "evidence": {
      "type": "array",
-     "description": "loom-card-evidence/2 documents of this GPU for this model, as make_info.py perf / gates / roofline write them (perf: --source-kind machine --gpu <device>); build merges them like any evidence file. Only `performance`, `gates`, `roofline` and `gpu` keys. Not allowed when share_section_with is set",
+     "description": "loom-card-evidence/2 documents from make_info.py perf / gates / roofline. XSJ-enabled runner-free devices require kind xsj and matching explicit gpu for each measurement; other runner-free devices use kind machine for performance. Only `performance`, `gates`, `roofline` and `gpu` keys. Not allowed when share_section_with is set",
      "items": {"type": "object", "required": ["evidence"]}
     }
    }

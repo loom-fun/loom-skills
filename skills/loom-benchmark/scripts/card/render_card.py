@@ -27,7 +27,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from card_lib import (DEFAULT_GPU, FEATURES, GATE_NAMES, GATES, GPUS, HF, LOOM_URL, METHOD, METRIC_KEYS, METRICS, SCHEMA_ID, SKILLS_URL,  # noqa: E402
                       TIMED, PRELOAD_FLAG, preload_mode, card_gpus, card_metrics, derived_tags, beyond_context, gate_applies, generator_commit, gpu_context, gpu_memory, recorded_quick_start, serves,
                       gpu_view, has_results, has_runner, load_info, load_json, load_package, metric_applies, native_context, over_context,
-                      package_facts, programs_sha256, require_valid, stale_metrics, with_gate_features)
+                      package_facts, programs_sha256, require_valid, stale_metrics, with_gate_features, historical_xsj_gate, xsj_enabled)
 from matched_spec import TIE_BAND, classification  # noqa: E402
 
 YES, NO, NA, MISSING = "✅", "❌", "—", "—"
@@ -68,7 +68,7 @@ def short(sha):
 def src_text(s):
     if not s:
         return "not recorded"
-    name = {"local": "local run" + (f" {s['run']}" if s.get("run") and s.get("power_mode") else ""), "devlab": "DevLab Dispatch run", "factory": "loom-factory run", "machine": "named-machine run"}.get(s["kind"], f"{s['kind']} run")
+    name = {"local": "local run" + (f" {s['run']}" if s.get("run") and s.get("power_mode") else ""), "devlab": "DevLab Dispatch run", "factory": "loom-factory run", "machine": "named-machine run", "xsj": "XSJ lab run"}.get(s["kind"], f"{s['kind']} run")
     if s["kind"] in ("local", "machine"):
         return name
     label = f"{name} {s['run']}" if s.get("run") else name
@@ -77,6 +77,14 @@ def src_text(s):
 
 def device_text(d):
     return ", ".join(d[k] for k in ("cpu", "gpu", "os") if d.get(k)) if d else "not recorded"
+
+
+def source_device_text(src):
+    d = src["device"]
+    base = device_text(d)
+    if src["kind"] == "xsj":
+        return f"`{d['host']}` ({d['arch']}), {base}, driver `{d['driver']}`"
+    return base
 
 
 def sdk_text(x):
@@ -290,7 +298,7 @@ def local_power_line(psrc, g):
     return out
 
 
-def methodology(base, extra, spec, drafter, values, runs_c4, machine=False, cross=None, measured=True, repo=None, local=False):
+def methodology(base, extra, spec, drafter, values, runs_c4, machine=False, cross=None, measured=True, repo=None, local=False, xsj=False, loom_timed=True):
     """The card's methodology: the same short template on every card, filled from the card's own data (baseline server
     arguments, drafting setting, runs). Anything that differs between the engines is stated as it is, not smoothed over.
     cross: {"llama": [(date, source)], "loom": (date, source)} when the llama.cpp rows were measured in another job than the Loom rows (a Loom-only
@@ -317,9 +325,13 @@ def methodology(base, extra, spec, drafter, values, runs_c4, machine=False, cros
         depth = ""
     where = ("DevLab runner type, different jobs" if cross else "machine, power mode and job" if local
              else ("machine and session" if machine else "DevLab runner and job"))
-    out = [f"- Compared: Loom against {ver}; the same GGUF, the same {where}, the same prompts; Loom served with "
-           f"the active wait. {values} (4 streams: median of {runs_c4}); Loom is timed by the client, "
-           "llama.cpp by its server.",
+    setup = ("the same GGUF and prompt workloads, with matched measurements from the same XSJ lab run. Loom served with the active wait."
+             if xsj else f"the same GGUF, the same {where}, the same prompts; Loom served with the active wait.")
+    summary = (f"- Compared: Loom against {ver}; {setup} {values} (4 streams: median of {runs_c4}); "
+               "Loom is timed by the client, llama.cpp by its server.")
+    if xsj and not loom_timed:
+        summary = f"- Baseline configuration: {ver}. Loom timings are not recorded for this package."
+    out = [summary,
            "- Out of the box on both engines: Loom serves the preset shipped in this package; llama.cpp runs its build defaults "
            "plus only the server arguments listed below (" + ("offload, context and slots, and on the 1-stream rows the drafting flags "
            "that match Loom's drafting" if any(m for _, m, _ in ll) else "offload, context and slots") + "). No tuning sweep on either engine.",
@@ -390,24 +402,28 @@ def feature_detail(key, f):
     return "supported"
 
 
-def load(d):
+def load(d, programs):
     info = load_info(os.path.join(d, "info.json"))
-    require_valid(info)
+    require_valid(info, programs=programs or "")
     facts = package_facts(load_package(d))
     feats = {k: dict(v) for k, v in facts["features"].items()}
-    feats = with_gate_features(feats, facts["kind"], all_gates(info))
+    gates = all_gates(info, programs)
+    feats = with_gate_features(feats, facts["kind"], gates)
+    historical_sampling = "sampling" not in gates and any(
+        historical_xsj_gate(g, (d.get("gates") or {}).get("sampling"), programs) for g, d in info["devices"].items())
     for k, v in (info["card"].get("features") or {}).items():
-        if k in feats:
+        if k in feats and not (k == "sampling" and historical_sampling):
             feats[k] = {"status": v["status"], "value": v.get("value")}
     return info, facts, feats
 
 
-def all_gates(info):
+def all_gates(info, programs):
     """Every gate's evidence on the card, the first GPU (card order) that has it: what the package's features need."""
     out = {}
     for g in card_gpus(info):
         for n, row in (info["devices"][g].get("gates") or {}).items():
-            out.setdefault(n, row)
+            if not historical_xsj_gate(g, row, programs):
+                out.setdefault(n, row)
     return out
 
 
@@ -686,12 +702,16 @@ def perf_section(L, info, facts, feats, d, g, here, ctx):
         drafter = f"{facts['drafter']['repo']} / {facts['drafter']['file']}"
     machine = bool(psrc) and psrc["kind"] == "machine"   # a GPU with no DevLab runner: a named machine measured it
     local = bool(psrc) and psrc["kind"] == "local" and bool(psrc.get("power_mode"))   # a local machine at a named power mode
+    xsj = xsj_enabled(g)
+    loom_timed = any(k != "spec_acceptance" and m.get("loom") is not None for k, (m, _) in rows.items())
     bfs = sorted({(m["baseline_from"]["date"] or "", m["baseline_from"]["source"]) for m, _ in rows.values() if m.get("baseline_from")})
     cross = {"llama": [(d or None, sources[sid]) for d, sid in bfs],
              "loom": (sessions[primary]["date"], sources[sessions[primary]["source"]])} if bfs and primary is not None else None
     L += ["", "**Methodology**", "", *methodology(base, extra, facts["spec"], drafter, values_of(tps_keys), runs_of(["streams4"], True), machine, cross,
-                                                        has_baseline_values(m for m, _ in (shown[k] for k, _ in METRICS if k in shown)), info.get("repo"), local),
+                                                        has_baseline_values(m for m, _ in (shown[k] for k, _ in METRICS if k in shown)), info.get("repo"), local, xsj, loom_timed),
           (local_power_line(psrc, g) if local else
+           "- Measurement sources record the XSJ lab run ID and leased host."
+           if xsj else
            f"- Measured on {device_text(psrc['device'])}, a named machine (this GPU has no DevLab runner); both engines ran on it."
            if machine else f"- Measured on AMD DevLab Dispatch {GPUS[g]['runner']} runners (`devlab-perf` jobs); runners differ between sessions.")]
     if bname == "llama.cpp":
@@ -699,11 +719,11 @@ def perf_section(L, info, facts, feats, d, g, here, ctx):
                  "tokens/s for each row on this GPU. With only one valid backend, that backend is used; with neither, "
                  "the margin is not measured. Raw backend values and their measurement sources are retained below and in the table.")
     if psrc:
-        L.append(f"- Measured {text(sessions[primary]['date'])}; device {device_text(psrc['device'])}; "
+        L.append(f"- Measured {text(sessions[primary]['date'])}; device {source_device_text(psrc)}; "
                  f"hrx-loom {sdk_text(psrc['hrx_loom'])}; source: {src_text(psrc)}.")
     for i, (sid, date) in enumerate(notes, 1):
         s = sources[sid]
-        L.append(f"- {mark(i)} Measured {text(date)}; device {device_text(s['device'])}; hrx-loom {sdk_text(s['hrx_loom'])}; "
+        L.append(f"- {mark(i)} Measured {text(date)}; device {source_device_text(s)}; hrx-loom {sdk_text(s['hrx_loom'])}; "
                  f"source: {src_text(s)}.")
     rm = view.get("remeasure")
     if rm and rm["programs_sha256"] == here and rm["result"] == "identical":   # the default-path stages equal the measured build's: no re-measure
@@ -717,18 +737,20 @@ def perf_section(L, info, facts, feats, d, g, here, ctx):
         L.extend(remeasure_lines(rm, g, sources, "this package"))
     for b, x in extra.items():
         xb, xs = x["baseline"], x["session"]
+        src = sources[xs["source"]]
+        provenance = (f"; device {source_device_text(src)}; hrx-loom {sdk_text(src['hrx_loom'])}" if xsj else "")
         if xb["name"] != "llama.cpp":   # another engine (Gufo): its own model file, its own drafting; never the margin's baseline
             mdl = xb.get("model") or {}
             L.append(f"- {xnames[b]}: {xb['name']}" + (f" `{xb['version']}`" if xb.get("version") else "")
                      + (f" running its OWN model file `{mdl['file']}`" + (f" (sha256 {short(mdl['sha256'])})" if mdl.get("sha256") else "")
                         + ", not this card's GGUF" if mdl.get("file") else "")
                      + "; timed by the client like Loom" + (f"; server arguments `{xb['args']}`" if xb.get("args") else "")
-                     + f"; measured {text(xs['date'])}; source: {src_text(sources[xs['source']])}. Shown for reference: not in the margin "
+                     + f"; measured {text(xs['date'])}; source: {src_text(src)}{provenance}. Shown for reference: not in the margin "
                      "or the win / tie / loss counts.")
             for u in xb.get("differs") or []:
                 L.append(f"  - {u}")
             continue
-        L.append(f"- {xnames[b]}: measured {text(xs['date'])}; source: {src_text(sources[xs['source']])}."
+        L.append(f"- {xnames[b]}: measured {text(xs['date'])}; source: {src_text(src)}{provenance}."
                  + (f" Archive sha256 {short(xb['sha256'])}." if xb.get("sha256") else ""))
     for sha in sorted(set(stale.values())):
         L.append(f"- {STALE} Measured on programs other than this repository's (sha256 {short(sha)}, this repository's "
@@ -754,7 +776,8 @@ def perf_section(L, info, facts, feats, d, g, here, ctx):
 
 
 def render(d):
-    info, facts, feats = load(d)
+    here = programs_sha256(d)
+    info, facts, feats = load(d, here)
     c, card, kind = facts["checkpoint"], info["card"], facts["kind"]
     sources, versions = info["sources"], info["versions"]
     gpus = card_gpus(info)
@@ -885,7 +908,6 @@ def render(d):
             L += [gpu_line(info, g), ""]
 
     # ---- performance
-    here = programs_sha256(d)
     first = next(iter(live), None)
     bname = ((info["devices"][first].get("performance") or {}).get("baseline") or {}).get("name", "llama.cpp") if first else "llama.cpp"
     L += [f"## Performance vs {bname}", ""]
@@ -942,6 +964,11 @@ def render(d):
         if gsha and gsha != here and gsha in rmg.get("carried_programs", []) and rmg.get("programs_sha256") == here and gt["status"] == "pass":
             gsha = here   # the default path is proven identical to the build this pass ran on (the performance line says so)
         if gsha and gsha != here and gt["status"] == "pass":   # a pass on other programs says nothing about this package
+            if xsj_enabled(g):
+                if key not in ev:
+                    ev.append(key)
+                return (f"{UNKNOWN} not re-run on this package (the last pass was on a previous build, sha256 {short(gsha)}) "
+                        f"{mark(ev.index(key) + 1)}")
             return (f"{UNKNOWN} not re-run on this package (the last pass was on a previous build, sha256 {short(gsha)}; "
                     f"the nightly gates re-run it)")
         if gsha and gsha != here:   # a failure is never hidden
@@ -958,7 +985,7 @@ def render(d):
     for i, (sid, level, date) in enumerate(ev, 1):
         s = sources[sid]
         lv = f", LEVEL={level}" if level else ""
-        L.append(f"- {mark(i)} {src_text(s)}{lv}, {text(date)}; device {device_text(s['device'])}; "
+        L.append(f"- {mark(i)} {src_text(s)}{lv}, {text(date)}; device {source_device_text(s)}; "
                  f"hrx-loom {sdk_text(s['hrx_loom'])}.")
     L += ["- Gates are the loom-benchmark correctness gates (`gates.sh`); a gate without a recorded run shows no evidence.", ""]
 
@@ -1017,7 +1044,28 @@ def method_text(gpus, aggs=(None,), engine="llama.cpp", checkpoint="GGUF", local
              "the card shows, per session, the median over its sessions (\"aggregate\": \"median\") or the mean of its runs (older sessions)")
     dl = [g for g in gpus if has_runner(g)]
     runner = " or ".join(GPUS[g]["runner"] for g in dl) if dl else GPUS[DEFAULT_GPU]["runner"] if not gpus else ""
-    machines = [GPUS[g]["short"] for g in gpus if not has_runner(g)]
+    xsj = [GPUS[g]["short"] for g in gpus if xsj_enabled(g)]
+    machines = [GPUS[g]["short"] for g in gpus if not has_runner(g) and not xsj_enabled(g)]
+    origins = []
+    if runner:
+        subject = "DevLab performance values" if xsj else "Every other performance value" if local else "Every performance value"
+        verb = "come" if xsj else "comes"
+        origins.append(f"- {subject} {verb} from a `devlab-perf` job (loom-skills) on an AMD DevLab Dispatch {runner} runner: "
+                       f"Loom, served with the active wait (`--device=amdgpu://?completion_spin_ns=4294967295`), and {engine} on the same "
+                       "runner, with the published programs.")
+        if machines:
+            origins[-1] += f" The {', '.join(machines)} values come from named machines (the sessions below record them), not DevLab runners."
+    elif machines:
+        subject = f"The {', '.join(machines)} performance values come" if xsj else "Every performance value comes"
+        origins.append(f"- {subject} from a measuring session on a named machine (the {', '.join(machines)} has no DevLab runner; "
+                       "the session below records the device and SDK): Loom, served with the active wait "
+                       f"(`--device=amdgpu://?completion_spin_ns=4294967295`), and {engine} on the same machine, with the published programs.")
+    if local:
+        origins[-1] += (f" The {', '.join(GPUS[g]['short'] for g in local)} values (Loom and every baseline engine) come from a local machine at a named power mode (the sessions below "
+                        "record the device, the power mode and each engine's measured power); every engine of that table was re-measured in that job at that "
+                        "power.")
+    if xsj:
+        origins.append(f"- The {', '.join(xsj)} measurements record the XSJ lab run ID, leased host, hardware, SDK and package program digest.")
     return [
     "- `perf.py` (loom-benchmark) sends real-text requests: a short prompt for decode, decode after 2k and 32k tokens "
     "of context, and prefill of documents of about 1k, 2k, 8k, 16k and 32k tokens. Each run gives one value per "
@@ -1026,16 +1074,7 @@ def method_text(gpus, aggs=(None,), engine="llama.cpp", checkpoint="GGUF", local
     "4 are decoding; the card shows the median of the runs.",
     f"- One engine runs at a time on the same machine, with the same {checkpoint}. Loom rates are timed by the client; "
     + ("llama.cpp rates come from its server-side `timings`." if engine == "llama.cpp" else f"{engine} rates are timed by the client the same way."),
-    (f"- {'Every performance value' if not local else 'Every other performance value'} comes from a `devlab-perf` job (loom-skills) on an AMD DevLab Dispatch {runner} runner: "
-     f"Loom, served with the active wait (`--device=amdgpu://?completion_spin_ns=4294967295`), and {engine} on the same "
-     "runner, with the published programs." if runner else
-     f"- Every performance value comes from a measuring session on a named machine (the {', '.join(machines)} has no DevLab runner; "
-     "the session below records the device and SDK): Loom, served with the active wait (`--device=amdgpu://?completion_spin_ns=4294967295`), "
-     f"and {engine} on the same machine, with the published programs.")
-    + (f" The {', '.join(machines)} values come from named machines (the sessions below record them), not DevLab runners." if runner and machines else "")
-    + (f" The {', '.join(GPUS[g]['short'] for g in local)} values (Loom and every baseline engine) come from a local machine at a named power mode (the sessions below "
-       "record the device, the power mode and each engine's measured power); every engine of that table was re-measured in that job at that "
-       "power." if local else ""),
+    *origins,
     "- Drafted tokens accepted is the `spec` gate's count: accepted over proposed draft tokens across its requests.",
     "- Gates are loom-benchmark's `gates.sh` at the LEVEL shown; DevLab runs are the nightly-gates workflow on AMD "
     "DevLab Dispatch.",
@@ -1062,11 +1101,13 @@ def report_gpu(L, info, facts, g, here, h, single):
         rel = "" if here is None else (", the same as this repository's programs" if sha == here
                                        else ", not the same as this repository's programs")
         return f"sha256 `{sha}`{rel}"
+    if xsj_enabled(g) and base.get("differs"):
+        L += [f"- ROCm / Loom coverage: {u}." for u in base["differs"]] + [""]
     labels = dict(METRICS)
     for i, s in enumerate(perf["sessions"], 1):
         src = sources[s["source"]]
         L += [f"{h} Session {i}: {src_text(src)}, {text(s['date'])}", "",
-              f"- Device: {device_text(src['device'])}.",
+              f"- Device: {source_device_text(src)}.",
               f"- Loom SDK: hrx-loom {sdk_text(src['hrx_loom'])}.",
               f"- Programs measured: {prog(s.get('programs_sha256'))}."]
         if s.get("aggregate") == "median":
@@ -1094,7 +1135,10 @@ def report_gpu(L, info, facts, g, here, h, single):
         L += [f"{h} {title}: {src_text(src)}, {text(xs['date'])}", "",
               f"- Build: {('`' + xb['version'] + '`') if xb['version'] else 'not recorded'}; server arguments "
               + (f"`{xb['args']}`" if xb["args"] else "not recorded") + ".",
-              f"- Device: {device_text(src['device'])}."]
+              f"- Device: {source_device_text(src)}."]
+        if src["kind"] == "xsj":
+            L += [f"- Loom SDK: hrx-loom {sdk_text(src['hrx_loom'])}.",
+                  f"- Package programs: {prog(xs.get('programs_sha256'))}."]
         L += [f"- Differs from {base['name']}: {u}." for u in xb.get("differs") or []]
         L += ["", "| metric | runs | value |", "|---|---|---|"]
         order = [k for k, _ in METRICS]
@@ -1141,7 +1185,7 @@ def report_gpu(L, info, facts, g, here, h, single):
         s = sources[sid]
         L += [f"{'###' if h == '##' else '####'} {src_text(s)}" + (f", LEVEL={level}" if level else "") + f", {text(date)}", "",
               f"- Gates: {', '.join(names)}.",
-              f"- Device: {device_text(s['device'])}.",
+              f"- Device: {source_device_text(s)}.",
               f"- Loom SDK: hrx-loom {sdk_text(s['hrx_loom'])}.",
               f"- Programs: {prog(sha)}.", ""]
     if not groups:
@@ -1149,10 +1193,10 @@ def report_gpu(L, info, facts, g, here, h, single):
 
 
 def render_report(d):
-    info, facts, feats = load(d)
+    here = programs_sha256(d)
+    info, facts, feats = load(d, here)
     versions = info["versions"]
     c = facts["checkpoint"]
-    here = programs_sha256(d)
     gpus = card_gpus(info)
     live = [g for g in gpus if has_results(info["devices"][g])]
     solo = single_layout(info)
