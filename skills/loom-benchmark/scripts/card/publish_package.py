@@ -20,6 +20,8 @@
       the Hub API's model sha): the upload fails if the repo has moved since (another worker published), instead
       of overwriting that card; re-read info.json and rebuild. Needs huggingface_hub and a write token (HF_TOKEN or
       ~/.cache/huggingface/token).
+      XSJ cards require the local package programs even for --card-only and --dry-run. A real card-only upload
+      also checks those programs against the pinned target parent.
       --init-new-repo explicitly creates an absent repo. A nonempty immutable seed SHA, seed-only files and
       one-commit history are required; otherwise stop without uploading. The initial package upload uses that seed
       as its server CAS parent. Writes print JSON {repo,parent_commit,commit,url} from the actual returned CommitInfo;
@@ -166,13 +168,21 @@ def check_card_text(out, repo=None):
     not the one it is published to (its Quick start fetches from info.json's repo)."""
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     import card_lib
-    info = card_lib.load_json(os.path.join(out, "info.json"))
-    card_lib.require_valid(info, os.path.join(out, "info.json"))
+    path = os.path.join(out, "info.json")
+    info = card_lib.load_json(path)
+    card_lib.require_valid(info, path)
+    programs = None
+    if any(src["kind"] == "xsj" for src in info["sources"].values()):
+        programs = card_lib.programs_sha256(out)
+        if not programs:
+            sys.exit(f"{path}: XSJ publication requires the local package's program/*.loom files")
+        card_lib.require_valid(info, path, programs=programs)
     if repo and info.get("repo") != repo:
         sys.exit(f"info.json is the card of {info.get('repo')}, not {repo}: rebuild it with make_info.py build --org "
                  f"{repo.split('/')[0]} (the Quick start fetches from the card's repo)")
     if info.get("report") != "generated":
         sys.exit("info.json: only a generated REPORT.md is published (an attached, hand-written report is narrative)")
+    return programs
 
 
 def card_model(a, api):
@@ -213,7 +223,7 @@ def parse_upload_receipt(output, repo, parent_commit, endpoint=None):
 
 def cmd_upload(a):
     a.repo = target_repo(a.org, a.repo)
-    check_card_text(a.out, a.repo)
+    xsj_programs = check_card_text(a.out, a.repo)
     local = {os.path.relpath(os.path.join(r, f), a.out).replace(os.sep, "/") for r, _, fs in os.walk(a.out) for f in fs}
     if a.dry_run:
         files = sorted(f for f in local if not a.card_only or f in CARD)
@@ -261,6 +271,13 @@ def cmd_upload(a):
             sys.exit(f"{a.repo}: target moved from reviewed {parent} to {current.sha}; refresh, recompose and recheck")
     remote = {s.rfilename for s in current.siblings}
     if a.card_only:
+        if xsj_programs:
+            from card_lib import programs_sha256
+            from huggingface_hub import snapshot_download
+
+            snapshot = snapshot_download(a.repo, revision=parent, allow_patterns=["program/*.loom"])
+            if programs_sha256(snapshot) != xsj_programs:
+                sys.exit(f"{a.repo}@{parent}: target programs differ from the package carrying XSJ evidence")
         files = list(CARD) + card_model(a, api)
     else:
         extras = sorted(remote - local - {".gitattributes"})

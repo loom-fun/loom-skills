@@ -80,11 +80,13 @@ byte-identical files.
       records which ("acceptance_from": session | spec_gate): the gate's text can accept far more or less than the
       row's workload, which moves that row's ceiling by the same factor.
 
-  SOURCE (perf and gates): --source-kind devlab|factory|local|machine (perf: default devlab; gates: default local; machine: a named machine of a GPU with no DevLab runner, fleet/devices) [--run ID --url URL] [--device auto|none|FILE.json]
+  SOURCE (perf and gates): --source-kind devlab|factory|local|machine|xsj (perf: default devlab; gates: default local) [--run ID --url URL] [--device auto|none|FILE.json]
+      xsj: an XSJ-enabled GPU without DevLab labels. Requires --gpu, the lab --run ID, captured --device and --hrx-loom
+      JSON files, and --package with --fetched-programs (the program digest captured on the leased host).
       [--hrx-loom auto|none|FILE.json]. auto records this machine's device and the Loom SDK under $LOOM_ROOT
       (../machine_info.py); on downloaded DevLab job files: --device none --hrx-loom none. Card performance comes
       only from AMD DevLab Dispatch (a devlab-perf job or a scripted DevLab port, kind devlab; the loom-factory
-      workflow, kind factory), or from a named machine for a GPU with no DevLab runner (kind machine). perf refuses --source-kind local
+      workflow, kind factory), or from a named machine or an XSJ lab run for a GPU without a DevLab runner. perf refuses --source-kind local
       unless it names a non-default power mode with its evidence (--power-mode 123w --power-evidence power_steps.json: one local job
       that re-measured every engine at that power, methodology rule 18). Gates may come from any source.
 
@@ -122,13 +124,17 @@ from card_lib import (DEFAULT_GPU, DRAFTED_ROWS, EVIDENCE_ID, GPUS, METRIC_KEYS,
                       HF, RETIRED_GATES, ROOFLINE_METRIC, SCHEMA_ID, build_tag, card_metrics, derived_tags, dumps, gate_applies, gpu_from_device,
                       gpu_view, load_info, load_json, load_package, metric_applies, native_context, over_context, package_facts,
                       programs_sha256, require_valid, fixed_pool_capacity, gpu_preset_execution, gpu_preset_name, with_gpu_preset, served_context, fit_served_context, upstream_facts, with_gate_features, write_json,
-                      SERVE_HEADROOM, registry, fit_rows, non_targets, load_device_results, validate_device_results, with_device_preset, DEVICE_RESULTS_ID, card_serve_args, quick_start, serves)
+                      SERVE_HEADROOM, registry, fit_rows, non_targets, load_device_results, validate_device_results, with_device_preset, DEVICE_RESULTS_ID, card_serve_args, quick_start, serves,
+                      historical_xsj_gate, xsj_enabled, xsj_evidence_errors, xsj_measurement_errors, xsj_vulkan_comparison_errors)
 
 
 # ---------------------------------------------------------------- sources
 
 def source_arg(a):
     """The SOURCE block of a perf/gates evidence file from the command line."""
+    if a.source_kind == "xsj" and (not a.gpu or a.device in (None, "auto", "none") or a.hrx_loom in (None, "auto", "none")):
+        sys.exit("XSJ evidence requires --gpu and both --device and --hrx-loom JSON files captured on the leased host")
+
     def ident(v, auto):
         if v in (None, "auto"):
             return auto()
@@ -158,7 +164,7 @@ def source_id(src):
     base = src["kind"]
     if src.get("run"):
         base += f"-{src['run']}"
-    job = re.search(r"/job/(\d+)", src.get("url") or "")
+    job = re.search(r"/job/(\d+)", src.get("url") or "") if src["kind"] != "xsj" else None
     if job:
         base += f"-job{job.group(1)}"
     return base
@@ -174,6 +180,8 @@ class Sources:
         src = {**{k: src.get(k) for k in ("kind", "run", "url", "device", "hrx_loom")},
                **{k: src[k] for k in ("power_mode", "power") if src.get(k)}}   # a local session at a power mode keeps its evidence
         base = source_id(src)
+        if src["kind"] == "xsj" and base in self.by_id and self.by_id[base] != src:
+            raise SystemExit(f"{base}: conflicting source records for the same XSJ run")
         for n in range(1, 1000):
             sid = base if n == 1 else f"{base}-{n}"
             if sid not in self.by_id:
@@ -329,6 +337,7 @@ def device_meta(gpu, doc, entry, feats, weight_bytes=None):
 
 def cmd_build(a):
     pkg = load_package(a.pkg)
+    measured_programs = programs_sha256(a.pkg) or ""
     upstream = None
     if a.upstream == "probe":
         ckpt = package_facts(pkg)["checkpoint"]
@@ -352,6 +361,9 @@ def cmd_build(a):
             sys.exit(f"{a.from_info} is the card of {old['repo']}, not {a.repo}")
         card = json.loads(json.dumps(old["card"]))
         card_features = {k: v for k, v in card.pop("features", {}).items() if k == "sampling"}   # evidence; the rest is recomputed
+        if any(historical_xsj_gate(g, (d.get("gates") or {}).get("sampling"), measured_programs)
+               for g, d in old["devices"].items()):
+            card_features.pop("sampling", None)
         measured = {g["programs_sha256"] for d in old["devices"].values() for g in (d.get("gates") or {}).values()
                     if g.get("programs_sha256")}
         if card.get("memory_bytes") and a.memory_bytes is None and measured and programs_sha256(a.pkg) not in measured:
@@ -372,7 +384,8 @@ def cmd_build(a):
                 if dropped:
                     print(f"--from-info ({gpu}): dropped {dropped} performance session(s)"
                           + ("" if a.reset_performance else " not measured on DevLab"), file=sys.stderr)
-                st["baselines"] = json.loads(json.dumps(dev["performance"].get("baselines") or {}))
+                if not (a.reset_performance and xsj_enabled(gpu)):
+                    st["baselines"] = json.loads(json.dumps(dev["performance"].get("baselines") or {}))
             for name, g in (dev.get("gates") or {}).items():   # a published gate has a date, not a time: later evidence that day wins
                 if name in RETIRED_GATES or not gate_applies(name, facts["kind"], facts["features"], facts.get("logits", True)):   # e.g. spec after drafting was turned off: shown n/a
                     continue
@@ -420,6 +433,10 @@ def cmd_build(a):
         ev = ev or load_json(path)
         if ev.get("evidence") != EVIDENCE_ID:
             sys.exit(f"{path}: not a {EVIDENCE_ID} file")
+        ps = ((ev.get("performance") or {}).get("session") or {}).get("source")
+        errs = xsj_evidence_errors(ev, evidence_gpu(ev, ps), path, measured_programs)
+        if errs:
+            sys.exit("\n".join(errs))
         c = ev.get("card") or {}
         card.update({k: v for k, v in c.items() if v is not None and k != "features"})
         if c.get("features"):
@@ -450,6 +467,8 @@ def cmd_build(a):
                                     if m.get("baseline_from") else m) for k, m in s["metrics"].items()}
                 st["sessions"].append({k: v for k, v in s.items() if v is not None or k in ("date",)})
         for g in ev.get("gates") or []:
+            if xsj_enabled(g.get("gpu") or evidence_gpu(ev, g.get("source"))):
+                sources.add(g["source"])
             if g["name"] in RETIRED_GATES:   # evidence from before the needle gates were removed
                 continue
             gst = gpu_state(g.get("gpu") or evidence_gpu(ev, g.get("source")))
@@ -474,6 +493,12 @@ def cmd_build(a):
             rst["roofline"], rst["data"] = ev["roofline"], True
         if ev.get("devlab"):
             print(f"{path}: ignored its Loom-only DevLab sweep (card performance is make_info.py perf on a devlab-perf job)", file=sys.stderr)
+    for gpu, state in G.items():
+        vk = state["baselines"].get("vulkan")
+        if xsj_enabled(gpu) and vk and (state["baseline"] or {}).get("name", "llama.cpp") == "llama.cpp":
+            errs = xsj_vulkan_comparison_errors(state["sessions"], vk["session"], f"{gpu}.performance.baselines.vulkan.session")
+            if errs:
+                sys.exit("\n".join(errs))
     if not a.repo:
         sys.exit("make_info.py build: --repo is required without --from-info")
     if a.org:   # the same repo name under another org (the staging flow)
@@ -563,7 +588,8 @@ def cmd_build(a):
     any_gates = {}
     for g in GPUS:
         for n, row in (gate_out.get(g) or {}).items():
-            any_gates.setdefault(n, row)
+            if not historical_xsj_gate(g, row, measured_programs):
+                any_gates.setdefault(n, row)
     if "sampling" in card_features and "sampling" not in any_gates:
         feats["sampling"] = card_features["sampling"]
     card["features"] = {**with_gate_features(feats, facts["kind"], any_gates), **{k: v for k, v in card_features.items() if k != "sampling"}}
@@ -577,7 +603,7 @@ def cmd_build(a):
             d.pop("required_bytes", None)
             d.pop("reason", None)
             d["gates"] = gate_out.get(gpu) or {}
-            if st["sessions"]:
+            if st["sessions"] or (st["baselines"] and xsj_enabled(gpu)):
                 d["performance"] = {"baseline": st["baseline"] or {"name": "llama.cpp", "version": None, "args": None},
                                     "sessions": st["sessions"]}
                 if st["baselines"]:
@@ -620,7 +646,7 @@ def cmd_build(a):
             used |= {r["source"]} | ({r["first_source"]} if r.get("first_source") else set())
             r = r.get("previous")
     info["sources"] = {k: v for k, v in sources.by_id.items() if k in used}
-    require_valid(info)
+    require_valid(info, programs=measured_programs)
     out = dumps(info)
     if a.o == "-":
         sys.stdout.write(out)
@@ -850,6 +876,23 @@ def copy_baselines(metrics, old, gpu):
         sys.exit(f"{old.get('repo')}: no llama.cpp value on {gpu} to copy: a Loom-only job needs the previous card's table")
 
 
+def measurement_identity(a):
+    """Read the recorded source and check the benchmark's program stamp against the package being carded."""
+    src = source_arg(a)
+    digest = programs_sha256(a.package) if a.package else None
+    if a.source_kind == "xsj" and not a.package:
+        sys.exit("XSJ evidence requires --package with the programs measured on the leased host")
+    gpu = gpu_key(a, src).get("gpu")
+    row = {"programs_sha256": a.fetched_programs}
+    errs = xsj_measurement_errors(row, src, gpu, f"{a.cmd} (--run, --device, --hrx-loom, --fetched-programs)", digest or "")
+    if errs:
+        sys.exit("\n".join(errs))
+    if a.fetched_programs and a.package and a.fetched_programs != digest:
+        sys.exit(f"the run fetched programs {a.fetched_programs[:12]}, the package has {digest[:12] if digest else 'no programs'}: "
+                 "the card was republished in between; re-run")
+    return src, digest
+
+
 def cmd_perf(a):
     if a.source_kind == "local" and not (a.power_mode and a.power_evidence):
         sys.exit("perf --source-kind local: a card's performance comes from AMD DevLab Dispatch (a devlab-perf job: loom-fleet "
@@ -859,6 +902,9 @@ def cmd_perf(a):
         sys.exit("--power-mode belongs to a local session (--source-kind local); DevLab runners run at their registered default")
     if a.source_kind not in PERF_SOURCE_KINDS + ("local",):
         sys.exit(f"perf --source-kind {a.source_kind}: not a performance source")
+    if a.source_kind == "xsj" and a.baseline_from_info:
+        sys.exit("XSJ performance requires its own baseline measurements instead of --baseline-from-info")
+    src, psha = measurement_identity(a)
     if a.perf_log:
         loom_rows = perf_rows(a.perf_log, "loom", a.loom_label)
         llama_rows = perf_rows(a.perf_log, "llama", a.llama_label)
@@ -903,7 +949,6 @@ def cmd_perf(a):
     commands = list(a.command or [])
     if a.commands_file:
         commands += [line.rstrip("\n") for line in open(a.commands_file, encoding="utf-8") if line.strip()]
-    src = source_arg(a)
     if a.power_mode:
         dev = registry.roofline_presets()[GPUS[a.gpu or DEFAULT_GPU]["roofline"]]   # the registry row roofline.py reads
         modes, default = dev.get("power_modes") or {}, dev.get("power_default", "spec")
@@ -915,17 +960,14 @@ def cmd_perf(a):
             sys.exit(f"--power-evidence {a.power_evidence}: no per-engine power samples (power_steps.py output of the job)")
         src.update(power_mode=a.power_mode, power=pw)
     session = {"date": date, "source": src, "runs": runs, "aggregate": "median", "metrics": metrics,
-               "programs_sha256": programs_sha256(a.package) if a.package else None}
-    if a.fetched_programs and a.package and a.fetched_programs != programs_sha256(a.package):
-        sys.exit(f"the run fetched programs {a.fetched_programs[:12]}, the package has {programs_sha256(a.package)[:12]}: "
-                 "the card was republished in between; re-run")
+               "programs_sha256": psha}
     if not extra:
         session["commands"] = commands
     over = refused_tokens(loom_rows, a.package, set(ls))
     if over and not extra:   # perf.py: the Loom server refused these documents as over its context (card_lib.over_context)
         session["over_context"] = over
     perf = {"session": session}
-    if a.baseline_version or a.baseline_args or a.baseline_name != "llama.cpp":   # another engine's name alone: no rows of it yet (--differs says why)
+    if a.baseline_version or a.baseline_args or a.baseline_name != "llama.cpp" or (a.source_kind == "xsj" and a.differs):
         perf["baseline"] = {"name": a.baseline_name, "version": baseline_version(a.baseline_version, a.backend) if a.baseline_version else None,
                             "args": a.baseline_args}
     if extra:
@@ -1006,8 +1048,8 @@ def cmd_devices(a):
 
 
 def cmd_gates(a):
-    out, src, spec_date, logs = [], source_arg(a), None, [a.spec_log] if a.spec_log else []
-    psha = programs_sha256(a.package) if a.package else None
+    src, psha = measurement_identity(a)
+    out, spec_date, logs = [], None, [a.spec_log] if a.spec_log else []
     for path in a.files:
         gs, time, level = gates_from_file(path, a.time, a.level)
         if not time:
@@ -1021,7 +1063,7 @@ def cmd_gates(a):
             d = os.path.dirname(os.path.abspath(path))
             logs += [os.path.join(d, "gates_spec.log"), path if path.endswith(".out") else os.path.join(d, "gates.out")]
     ev = {"evidence": EVIDENCE_ID, **gpu_key(a, src), "gates": out}
-    acc = acceptance(logs) if spec_date and a.source_kind in PERF_SOURCE_KINDS else None   # a card statistic: DevLab only
+    acc = acceptance(logs) if spec_date and a.source_kind in PERF_SOURCE_KINDS else None
     if acc is not None:
         ev["performance"] = {"session": {"date": spec_date, "source": src, "runs": {"decode_prefill": None, "streams4": None},
                                          "commands": [], "programs_sha256": psha,
@@ -1260,11 +1302,15 @@ def next_steps_file(path):
         return [re.sub(r"^[-*]\s+", "", ln.strip()) for ln in f if ln.strip()]
 
 
-def add_source_args(p, kind):
-    p.add_argument("--source-kind", default=kind, choices=["devlab", "factory", "local", "machine"])
+def add_source_args(p, kind, xsj=False):
+    kinds = [*PERF_SOURCE_KINDS, "local"]
+    if not xsj:
+        kinds.remove("xsj")
+    p.add_argument("--source-kind", default=kind, choices=kinds)
     p.add_argument("--run")
     p.add_argument("--url")
-    p.add_argument("--device", default="auto", help="auto (this machine), none, or a JSON file with {cpu, gpu, os}")
+    p.add_argument("--device", default="auto", help="auto (this machine), none, or a JSON file with {cpu, gpu, os} "
+                   "(XSJ also requires recorded host, arch and driver)")
     p.add_argument("--hrx-loom", default="auto", help="auto (the SDK under $LOOM_ROOT), none, or a JSON file")
     p.add_argument("--package", help="the package measured (records card_lib.programs_sha256 of its programs)")
     p.add_argument("--gpu", choices=sorted(GPUS), help="the GPU that measured (default: the one the source's device names, "
@@ -1326,21 +1372,22 @@ def main(argv=None):
     p.add_argument("--baseline-model-sha256")
     p.add_argument("--baseline-label", help="the column header of that engine (default its name)")
     p.add_argument("--differs", action="append", help="a server setting that differs from the main baseline's or that this backend could not run, with the reason, one line (repeat)")
-    p.add_argument("--fetched-programs", help="programs_sha256 the DevLab job fetched (its programs_sha256.txt): refused if "
+    p.add_argument("--fetched-programs", help="programs_sha256 captured by the job (its programs_sha256.txt): refused if "
                    "it differs from --package's, i.e. the card was republished after the run fetched it")
     p.add_argument("--baseline-args", help="the baseline server's exact arguments, model path, host and port left out")
     p.add_argument("--metrics", help="comma-separated metrics this session provides (default: all it measured)")
     p.add_argument("--command", action="append", help="a measuring command, for REPORT.md (repeat)")
     p.add_argument("--commands-file", help="measuring commands, one per line")
     p.add_argument("--date", help="YYYY-MM-DD (default: the latest Loom row's time)")
-    add_source_args(p, "devlab")
+    add_source_args(p, "devlab", xsj=True)
     p.add_argument("-o", required=True)
     g = sub.add_parser("gates")
     g.add_argument("files", nargs="+")
     g.add_argument("--time", help="ISO time of the run when the file has none (gates.out, kernel test log)")
     g.add_argument("--level")
     g.add_argument("--spec-log", help="the spec gate's log with 'acceptance N%% of M proposals' (default: next to FILE)")
-    add_source_args(g, "local")
+    g.add_argument("--fetched-programs", help="programs_sha256 captured by the job (required for XSJ)")
+    add_source_args(g, "local", xsj=True)
     g.add_argument("-o", required=True)
     r = sub.add_parser("roofline")
     r.add_argument("--package", required=True, help="the package (model.json, model.json.lock, llm_config.json)")
