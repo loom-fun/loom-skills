@@ -29,6 +29,9 @@
     6 / 4 waves): -23 % / -5 % at 8k but +218 % / +147 % at 32k on DevLab, +23 % / +168 % locally. Paired-key V^T stores (`FLASH2_G11=vp`, 256 of
     384 lanes stage two keys each) +26 % at 32k. The non-lazy trims (`FLASH2_G11=kvh,vtf,hot`): kernel -1.4..-3.8 % at 32k, prefill tie
     (+0.0/+0.2/+0.4 % at 8k/16k/32k).
+  - Ablations of the 16-key kernel (32k / 8k): no global K/V loads -39 / -39 %, no V^T stores -16 / -22 %, no barriers +92 / -21 %: without
+    the barriers the waves drift apart and lose the workgroup's lockstep K/V cache sharing at 32k, so a barrier-free design where every
+    wave reads its own K/V (flash2_g6-style) is expected to lose there.
 
 ## Key-split flash at head_dim 256 / 6 query heads per KV head (`FLASH2_B=2`, `flash2_b2.py`; choice `prefill.attn.flash2_b2`, gfx12 twin only)
 
