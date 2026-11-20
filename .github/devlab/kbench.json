@@ -335,16 +335,20 @@
       "dir": "flash_strix",
       "gen": "flash_strix/gen_bench.py",
       "gen_variants": [
-        "base",
-        "kt16",
         "kt16+tnl",
-        "kt16+vp"
+        "kt16+tnl+nobar",
+        "kt16+tnl+nokld",
+        "kt16+tnl+nostv",
+        "kt16+tnl+noqk",
+        "kt16+tnl+nopv"
       ],
       "files": [
-        "bench.loom",
-        "bench_kt16.loom",
         "bench_kt16+tnl.loom",
-        "bench_kt16+vp.loom"
+        "bench_kt16+tnl+nobar.loom",
+        "bench_kt16+tnl+nokld.loom",
+        "bench_kt16+tnl+nostv.loom",
+        "bench_kt16+tnl+noqk.loom",
+        "bench_kt16+tnl+nopv.loom"
       ],
       "tests": [
         "test.loom"
