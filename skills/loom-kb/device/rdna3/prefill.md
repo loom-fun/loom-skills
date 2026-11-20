@@ -36,6 +36,21 @@
     so occupancy is not the limit either. Sharing one Q4_K scale/min decode between a thread's two 16-value
     slices: tie (not kept). Load-time weight repack: capped at the dequant ablation's 6-8 %; not tried.
 
+- **Epilogue and dequant levers (q38pf campaign, Qwen3.8-27B Q4_K_M, Strix Halo, 2026-11-20).** All opt-in switches:
+  - `GEMM_M256_F16O` (choice `prefill.gemm.m256_f16o`): the m256 swiglu stores f16 + scales (1, 1) / (0, 0) (gen_gemm.f16out_m256,
+    f16o_fuse.fuse gfx11=True), so the f row-scale pass goes (row_scale_f16_live_lv .047 -> .021 ms/token). DevLab +0.8..1.4 % prefill.
+  - `GEMM_M256_G32` (`prefill.gemm.m256_g32`, q4_k only): one 32-weight group dequant per thread, uniform header math; loop VALU
+    184 -> 129 per 64 WMMA, kernel -2..-3 %. With F16O: DevLab +2.0..2.7 % all rows; local 123 W (with MIXED) 8k 590.7 -> 612.0 (+3.6 %),
+    16k +3.6 %, 32k +3.4 %. q6_k G32 loses 5-10 % (an exposed vmcnt wait after the barrier).
+  - `GEMM_M256_MIXED_F16O` (`prefill.gemm.m256_mixed`): q4_k gate + q6_k up layers in one f16o swiglu m256 (every thread loads both
+    rows, wave-uniform branch picks the dequant; 256 VGPR, no spills): kernel -7.4 % vs the two store GEMMs, silu_mul and the f
+    scale go; DevLab +0.4..1.0 % on top of F16O+G32.
+  - Lost / stopped: `GEMM_M256_XCLAMP` (unconditional clamped next-step activation loads; removes q6_k's post-barrier vmcnt(0) +
+    32 v_mov but the scheduler then loses 2 % on q4_k swiglu and q8_0; DevLab -1 %); `GEMM_M256_DB` (32-K double buffer, -13..-30 %);
+    `GEMM_M256_SWZ` (tile order already settled above); `s_setprio` is not expressible in Low asm.
+  - Where the time goes at 123 W (swiglu, 1024 rows): g32 35.8 TFLOP/s; no barriers 37.5 (+4.6 %), no LDS fragment reads 36.4
+    (+1.8 %), both 39.0 (+8.9 %). The barriers are the largest in-kernel cost left.
+
 ## WMMA runs on the VALU (why m256 helps)
 
 On RDNA3 WMMA runs on the SIMD's VALU, so the weight dequant serializes with it: the m128 GEMM spends ~190 VALU instructions per 32
