@@ -17,6 +17,7 @@ def function(name):
     return name + "() {" + text.split("\n}", 1)[0] + "\n}\n"
 
 
+@unittest.skipIf(os.name == "nt", "devlab_perf.sh runs on the Linux DevLab runners only")
 class GufoPath(unittest.TestCase):
     def test_local_cache_pinned_revision(self):
         with tempfile.TemporaryDirectory() as t:
