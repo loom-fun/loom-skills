@@ -12,6 +12,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import dual_target  # noqa: E402
+import split_library  # noqa: E402
 
 EXPORT = re.compile(r'^kernel\.def\b[^\n]*?\bexport\("([^"]+)"\)', re.M)
 SYMBOL = re.compile(r'^kernel\.def\b[^\n]*?\s@([\w.]+)\(', re.M)
@@ -80,14 +81,47 @@ def coverage(lib, selected):
     return sorted(launched), sorted(launched - tested)
 
 
+def split_groups(program_dir, name, selected):
+    """A split library (split_library.py): the selected cases per module they run against, {file name: case text}.
+    A case runs against the kernel file that defines all its launched kernels, else against the program file (whose
+    kernel.decl lines a case does not launch); the shared preamble of the case file goes with every group."""
+    files = [name] + split_library.kernel_files(program_dir)
+    owner = {}
+    for f in files:
+        for k in SYMBOL.findall(open(os.path.join(program_dir, f), encoding="utf-8").read()):
+            owner[k] = f
+    pre, groups, skipped = [], {f: [] for f in files}, []
+    for b in re.split(r'(?m)^(?=check\.case )', selected):
+        if not b.startswith("check.case"):
+            pre.append(b)
+            continue
+        own = {owner[k] for k in re.findall(r'kernel\.launch @([\w.]+)', b) if k in owner}
+        if len(own) > 1:
+            case = re.search(r'@([\w.]+)', b).group(1)
+            skipped.append(f"SKIP {case}: launches kernels of several library files ({', '.join(sorted(own))})")
+            continue
+        groups[own.pop() if own else name].append(b)
+    return {f: "".join(pre + c) for f, c in groups.items() if c}, skipped
+
+
 if __name__ == "__main__":
     if len(sys.argv) < 4:
         sys.exit(__doc__)
     arch = sys.argv[4] if len(sys.argv) > 4 else os.environ.get("DEVICE_ARCH", "")
-    text, skipped = select(open(sys.argv[1]).read(), open(sys.argv[2]).read(), arch)
+    lib_dir, lib_name = os.path.split(os.path.abspath(sys.argv[1]))
+    lib = split_library.library_text(lib_dir, lib_name)   # a split library: the program file and its kernel files
+    text, skipped = select(lib, open(sys.argv[2]).read(), arch)
     open(sys.argv[3], "w", newline="\n").write(text)
+    import glob
+    for old in glob.glob(f"{sys.argv[3][:-len('.loom-test')]}.*.loom-test"):   # a previous run's groups
+        os.remove(old)
+    if split_library.kernel_files(lib_dir):   # one case file per module: OUT.<library file>.loom-test, run against that file
+        groups, more = split_groups(lib_dir, lib_name, text)
+        skipped += more
+        for f, t in groups.items():
+            open(f"{sys.argv[3][:-len('.loom-test')]}.{f[:-len('.loom')]}.loom-test", "w", newline="\n").write(t)
     print(*skipped, sep="\n") if skipped else None
-    launched, untested = coverage(open(sys.argv[1]).read(), text)
+    launched, untested = coverage(lib, text)
     sdk = [k for k in untested if untestable(k)]
     rest = [k for k in untested if not untestable(k)]
     print(f"COVERAGE {len(launched) - len(untested)}/{len(launched)} launched kernels have a case"

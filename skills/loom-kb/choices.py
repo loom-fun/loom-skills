@@ -166,6 +166,14 @@ CHOICE("target.dual.select", "str", "launch", "LOOM_DUAL_SELECT", kernels=[], ro
            "program = one template.apply per command program that launches a twin (the gfx11 provider is the plain gfx11-only body, as "
            "in a single-target build). No kernel text changes; only the command programs.")
 
+CHOICE("target.library.split", "str", "auto", "LOOM_LIBRARY_SPLIT", kernels=[], rows=ROWS_ALL, devices=["rdna3"], per_target=False,
+       from_pr="split_library.py (q38xl fmt)", generator_defaults=("auto",),
+       doc="Kernel-library split (split_library.py): auto = a program library deeper than hrx-loom's 16-bit encoding value ids "
+           "(encoding kernels beyond ~60,000 values / 4 MB even after dual_target.encodings_first) moves its encoding kernels into "
+           "program/llm_kernels_N.loom libraries, launched through kernel.decl lines; every smaller package is byte-identical; "
+           "always = split any library with an encoding kernel (tests the path on a small model); off = never (a too-deep file "
+           "raises, as before).")
+
 # ======================================================================================================================
 # Execution settings of one (model, device) preset (model.json): resolved per device, never part of a program
 # ======================================================================================================================

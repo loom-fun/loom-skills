@@ -10,21 +10,37 @@ arch=${DEVICE_ARCH:-$( (rocminfo 2>/dev/null | grep -o -m1 'gfx[1-9][0-9a-f]*' |
 [ -n "$arch" ] || arch=$( (amd-smi static --asic 2>/dev/null | grep -o -m1 'gfx[1-9][0-9a-f]*' | head -1) || true)
 echo "device arch: ${arch:-unknown}"
 "$bin/python" "$(dirname "$0")/ktest_select.py" "$pkg/program/llm.loom" cases.loom-test cases_used.loom-test "$arch"
-cat "$pkg/program/llm.loom" cases_used.loom-test > combined.loom
-"$bin/loom-test" combined.loom --device=${DEVICE:-amdgpu} > out.json 2> err.txt
-grep -v '^{"format' err.txt | head -20
+# A split library (split_library.py: program/llm_kernels_N.loom): ktest_select.py wrote one case file per library file,
+# cases_used.<file>.loom-test; each runs against its own file (kernel files are separate modules: one combined file
+# would put their encoding kernels past hrx-loom's 16-bit value ids again).
+rm -f combined.loom combined.*.loom out.json out.*.json err.txt err.*.txt
+if ls cases_used.*.loom-test >/dev/null 2>&1; then
+  for c in cases_used.*.loom-test; do g=${c#cases_used.}; g=${g%.loom-test}
+    cat "$pkg/program/$g.loom" "$c" > "combined.$g.loom"
+    "$bin/loom-test" "combined.$g.loom" --device=${DEVICE:-amdgpu} > "out.$g.json" 2> "err.$g.txt"
+    grep -v '^{"format' "err.$g.txt" | head -20
+  done
+else
+  cat "$pkg/program/llm.loom" cases_used.loom-test > combined.loom
+  "$bin/loom-test" combined.loom --device=${DEVICE:-amdgpu} > out.json 2> err.txt
+  grep -v '^{"format' err.txt | head -20
+fi
 "$bin/python" - <<'PY'
-import json, sys
-try:
-    d = json.load(open("out.json"))
-except ValueError:  # loom-test did not get to run the cases: a compile/link error (PARSE, TYPE, SYMBOL...)
-    err = [l for l in open("err.txt", errors="replace") if not l.startswith('{"format')]
-    out = open("out.json", errors="replace").read()
-    print("FAIL compile: loom-test produced no results. Diagnostics (err.txt / out.json):")
-    print("".join(err[-30:]) or out[-3000:])
-    print("(a case launching a kernel the generator no longer emits shows up as a SYMBOL error: regenerate the tests "
-          "with make_kernel_tests.py after changing the generator)")
-    sys.exit(1)
+import glob, json, sys
+samples = []
+for o in sorted(glob.glob("out.json") + glob.glob("out.*.json")):
+    try:
+        samples += json.load(open(o))["samples"]
+    except ValueError:  # loom-test did not get to run the cases: a compile/link error (PARSE, TYPE, SYMBOL...)
+        e = o.replace("out", "err", 1).replace(".json", ".txt")
+        err = [l for l in open(e, errors="replace") if not l.startswith('{"format')]
+        out = open(o, errors="replace").read()
+        print(f"FAIL compile: loom-test produced no results ({o}). Diagnostics ({e} / {o}):")
+        print("".join(err[-30:]) or out[-3000:])
+        print("(a case launching a kernel the generator no longer emits shows up as a SYMBOL error: regenerate the tests "
+              "with make_kernel_tests.py after changing the generator)")
+        sys.exit(1)
+d = {"samples": samples}
 bad = 0
 for s in d["samples"]:
     fails = [f.get("detail", f.get("message", "")) if isinstance(f, dict) else str(f) for f in s["expectations"].get("failures", [])]

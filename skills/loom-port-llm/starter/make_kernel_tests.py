@@ -589,7 +589,9 @@ def _pkg_llm_text():
     text = None
     for c in cands:
         for f in glob.glob(c) if c else []:
-            text = text or open(f, errors="replace").read()
+            if text is None:   # a split library (split_library.py): the program file and its kernel files
+                import split_library
+                text = split_library.library_text(os.path.dirname(f), os.path.basename(f))
     _PKG_TEXT.append(text)
     return text
 
