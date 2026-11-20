@@ -1799,6 +1799,50 @@ if os.environ.get("GEMM_TESTS", "1") == "1":
                 for f in (0.3, 0.1, 0.03, 0.01):
                     cases.append(_case.replace(f"@{tag} {{", f"@{tag}_x{round(f * 100)} {{", 1).replace(f"atol({tol:.3e}) rtol(1.0e-2)", f"atol({tol * f:.3e}) rtol({1.0e-2 * f:.3e})", 1))
                 cases.append(_case.replace(f"@{tag} {{", f"@{tag}_err {{", 1).replace(f"atol({tol:.3e}) rtol(1.0e-2)", "atol(0.0) rtol(0.0)", 1))
+# 3b-mixed. choice prefill.gemm.m256_mixed (gfx11): the mixed-format f16-output swiglu m256 kernel of a layer whose ffn_gate and
+# ffn_up differ in format (gen_gemm.gemm_big256 fmt2 + f16out_m256): f16 result, scales_out (1, 1) per live row, (0, 0) per dead row
+if os.environ.get("GEMM_TESTS", "1") == "1" and os.environ.get("GEMM_M256_MIXED_F16O", "0").lower() not in ("", "0", "false", "no", "off"):
+    _seen_mx = set()
+    for li in range(cfg["layers"]):
+        gn, un = f"blk.{li}.ffn_gate.weight", f"blk.{li}.ffn_up.weight"
+        if gn not in T or un not in T:
+            continue
+        fg, fu = T[gn].tensor_type.name.lower(), T[un].tensor_type.name.lower()
+        if fg == fu or not {fg, fu} <= {"q4_k", "q5_k", "q6_k"} or (fg, fu) in _seen_mx:
+            continue
+        _seen_mx.add((fg, fu))
+        W = deq(gn); n, K = W.shape; n_use = min(n, 1024)
+        Ws = W[:n_use].astype(np.float64); U = deq(un)[:n_use].astype(np.float64)
+        Wr = raw(gn).reshape(n, -1)[:n_use].reshape(-1); Ur = raw(un).reshape(n, -1)[:n_use].reshape(-1)
+        rows = 512
+        x16 = rng.standard_normal((rows, K)).astype(np.float16)
+        inv = rng.uniform(0.25, 2.0, rows).astype(np.float32)
+        sc = np.stack([np.ones(rows, np.float32), inv], 1)
+        dead = rng.choice(rows, 5, replace=False)
+        x16[dead] = 0; sc[dead] = 0
+        yd = ffn_act((x16.astype(np.float64) @ Ws.T) * inv[:, None]) * ((x16.astype(np.float64) @ U.T) * inv[:, None])
+        so = np.ones((rows, 2), np.float32); so[dead] = 0
+        tag = f"gm_{fg}_{fu}_sw_{rows}_f16o"
+        save(tag + "_x", x16); save(tag + "_s", sc); save(tag + "_y", yd.astype(np.float16)); save(tag + "_so", so); save(tag + "_w", Wr); save(tag + "_u", Ur)
+        tol = 3.0e-2 * float(np.abs(yd).std() + 1e-6)
+        cases.append(f"""check.case public @{tag} {{
+  %rows = check.literal value({rows}) : index
+  %k = check.literal value({K}) : index
+  %n = check.literal value({n_use}) : index
+  %x = check.file.read.npy path("{tag}_x.npy") : tensor<{rows}x{K}xf16>
+  %s = check.file.read.npy path("{tag}_s.npy") : tensor<{rows}x2xf32>
+  %w = check.file.read.npy path("{tag}_w.npy") : {ty(Wr)}
+  %u = check.file.read.npy path("{tag}_u.npy") : {ty(Ur)}
+  %e = check.file.read.npy path("{tag}_y.npy") : tensor<{rows}x{n_use}xf16>
+  %eso = check.file.read.npy path("{tag}_so.npy") : tensor<{rows}x2xf32>
+  %y = check.generate.fill value(0.0) : tensor<{rows}x{n_use}xf16>
+  %so = check.generate.fill value(7.0) : tensor<{rows}x2xf32>
+  kernel.launch @g_gemm_{fg}_{fu}_swiglu_m256_f16o[%rows, %n](%rows, %k, %n, %x, %s, %w, %u, %y, %so) : [index, index](index, index, index, tensor<{rows}x{K}xf16>, tensor<{rows}x2xf32>, {ty(Wr)}, {ty(Ur)}, tensor<{rows}x{n_use}xf16>, tensor<{rows}x2xf32>)
+  check.expect.close actual(%y) expected(%e) atol({tol:.3e}) rtol(1.0e-2) nan(different) : tensor<{rows}x{n_use}xf16>
+  check.expect.close actual(%so) expected(%eso) atol(0.0) rtol(0.0) nan(different) : tensor<{rows}x2xf32>
+  check.return
+}}
+""")
 # 3b'. the producers' fp8 twins (gen_mxfp4s.fuse_mxfp4s_f8; choice prefill.gemm.mxfp4s_f8, gfx12 only) against numpy's e4m3 rounding. The fp8 GEMM itself is tested by the
 # gemm_mxfp4s kbench suite (loom-test cases on synthetic split planes).
 def e4m3_round(x):

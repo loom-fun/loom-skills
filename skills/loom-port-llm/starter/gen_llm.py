@@ -4583,6 +4583,11 @@ def mv_name(fmt, kval, sw, n, TG, iq=False):
     USED_MV_R.add((fmt, kval, sw, R, TG))
     return base + f"_r{R}"
 USED_GEMM = {}       # fmt -> set of GEMM modes
+# choice prefill.gemm.m256_mixed: a layer whose ffn_gate and ffn_up differ in format (Q4_K_M: q4_k gate, q6_k up) takes,
+# on whole 256-row epochs, one f16-output swiglu m256 kernel over both weights (gen_gemm.gemm_big256 fmt2 + f16out_m256)
+# instead of two f32 GEMMs + g_silu_mul + the row scale of f
+M256_MIXED = os.environ.get("GEMM_M256_MIXED_F16O", "0").lower() not in ("", "0", "false", "no", "off")
+MIXED_PAIRS = set()  # (gate fmt, up fmt) the mixed kernels are generated for
 USED_MVQ = set()     # (fmt, K, swiglu, R, TG) of the int8-activation matvecs (ACT_Q8); swiglu 2 = pair (PAIR_PROJ)
 
 
@@ -5707,10 +5712,20 @@ command.def public @llm_advance() launch(%weights: buffer, %residual: buffer, %m
           if fg == fu:
               T.append("  " + lin(fg, "%h", "%s_h", (f"%w_gate_{i}", f"%w_up_{i}"), sz("ffn_gate"), "%f", "%nH", nff(i), H, mode="swiglu") + "\n")
           else:   # gate and up in different formats (unsloth UD mixes): two projections, then silu(gate) * up
+              mixed = (M256_MIXED and GEMM_M256 and {fg, fu} <= {"q4_k", "q5_k", "q6_k"} and int(NVAL.get(nff(i), 0) or 0) % 64 == 0
+                       and int(NVAL.get(nff(i), 0) or 0) > 0)
+              if mixed:
+                  MIXED_PAIRS.add((fg, fu))
+                  T.append(f"""  scf.if %huge {{
+    kernel.launch @g_gemm_{fg}_{fu}_swiglu_m256_f16o[%t, {nff(i)}](%t, %nH, {nff(i)}, %h16, %s_h, %w_gate_{i}, %w_up_{i}, %f16, %s_f) : [index, index](index, index, index, buffer, buffer, view<{sz("ffn_gate")}xi8>, view<{sz("ffn_up")}xi8>, buffer, buffer)
+  }} else {{
+""")
               T.append("  " + lin(fg, "%h", "%s_h", f"%w_gate_{i}", sz("ffn_gate"), "%f", "%nH", nff(i), H) + "\n")
               T.append("  " + lin(fu, "%h", "%s_h", f"%w_up_{i}", sz("ffn_up"), "%fu", "%nH", nff(i), H) + "\n")
               T.append(f"  kernel.launch @g_silu_mul[%t](%t, {nff(i)}, %f, %fu) : [index](index, index, buffer, buffer)\n")
           T.append(f"  scf.if %gemm {{\n    kernel.launch @g_row_scale_f16[%t](%t, {nff(i)}, %f, %s_f, %f16) : [index](index, index, buffer, buffer, buffer)\n  }}\n")
+          if fg != fu and mixed:
+              T.append("  }\n")
           T.append("  " + lin(fmt_of(nm("ffn_down")), "%f", "%s_f", f"%w_down_{i}", sz("ffn_down"), "%y", nff(i), "%nH", FFL[i]) + "\n")
         pf = f"%post_ffn_{i}" if POST_NORM else f"%ffn_norm_{i}"
         if last_norm:
@@ -5962,6 +5977,8 @@ if __name__ == "__main__":
         _gg = importlib.util.module_from_spec(_spec); _spec.loader.exec_module(_gg)
         parts.append(moe_kernels(ROW_SCALE, _gg.gemm))
     env = dict(os.environ, GEMM_FORMATS=",".join(f"{f}:{'+'.join(sorted(m))}" for f, m in sorted(USED_GEMM.items())))
+    if MIXED_PAIRS:   # gen_gemm.py emits the mixed-format f16-output swiglu m256 kernels (choice prefill.gemm.m256_mixed)
+        env["GEMM_M256_MIXED"] = ",".join(f"{a}:{b}" for a, b in sorted(MIXED_PAIRS))
     from gen_gemm_rdna4 import f16o_swiglu as _f16o_env
     if _f16o_env(CFG):
         env["GEMM_F16O_ON"] = "swiglu"   # gen_gemm.py emits the f16-output swiglu twins (gen_gemm_rdna4.with_twins)

@@ -274,6 +274,11 @@ CHOICE("prefill.gemm.m256_swz", "int", 0, "GEMM_M256_SWZ", from_pr="q38pf-gemm",
 CHOICE("prefill.gemm.m256_xclamp", "bool", False, "GEMM_M256_XCLAMP", from_pr="q38pf-gemm",
        doc="m256 GEMM: the next step's activation loads at the clamped K, unconditionally (no scf.if: its yielded loads made the "
        "compiler wait for them right after the barrier on q6_k).", **_PG)
+CHOICE("prefill.gemm.m256_mixed", "bool", False, "GEMM_M256_MIXED_F16O", kernels=["g_gemm_*_*_swiglu_m256_f16o", "g_silu_mul*"],
+       rows=ROWS_PREFILL, devices=["rdna3"], from_pr="q38pf-gemm",
+       doc="gfx11: a layer whose ffn_gate and ffn_up differ in K-quant format (Q4_K_M: q4_k gate + q6_k up) runs, on whole 256-row "
+       "epochs, one f16-output swiglu m256 kernel over both weights (gen_gemm.gemm_big256 fmt2) instead of two f32 GEMMs + "
+       "g_silu_mul + the row scale of f.")
 CHOICE("prefill.gemm.m256_db", "bool", False, "GEMM_M256_DB", from_pr="q38pf-gemm", doc="m256 GEMM with double-buffered 32-K LDS stages (loses).", **_PG)
 CHOICE("prefill.gemm.m256_db_fence", "bool", True, "GEMM_M256_DB_FENCE", from_pr="q38pf-gemm", doc="fence after the barrier of prefill.gemm.m256_db.", **_PG)
 CHOICE("prefill.gemm.q4_0_native", "bool", False, "GEMM_Q4_0_NATIVE", kernels=["g_gemm_q4_0_*", "g_moe_*q4_0*"], rows=ROWS_PREFILL,
@@ -508,7 +513,7 @@ NOT("kbench experiment options of the gfx12 flash kernels (flash_r9700 suite; th
 NOT("input path or file selection (not a model-affecting knob)", "CATALOG", "LOOM_SKILLS", "LOOM_KB_ROOT", "LOOM_ROOT", "VENV", "HF", "HF_HOME",
     "HF_HUB_CACHE", "LD_LIBRARY_PATH", "LOOM_SERVE_STATE", "VISION_TEST_DIR", "FLASH2_OUT", "LLM_OUT")
 NOT("transport between a generator and its subprocesses (set by the caller from cfg / the build)", "LLM_CONFIG", "LLM_DRAFT",
-    "LLM_TOKENIZER", "GEMM_FORMATS", "GEMM_F16O_ON", "GEMM_KMETA", "GEMM_PREFIX", "FLASH2_TARGET", "FLASH2_ROLE", "FLASH2_ARCH",
+    "LLM_TOKENIZER", "GEMM_FORMATS", "GEMM_M256_MIXED", "GEMM_F16O_ON", "GEMM_KMETA", "GEMM_PREFIX", "FLASH2_TARGET", "FLASH2_ROLE", "FLASH2_ARCH",
     "FLASH2_NAME", "FLASH2_KV_FN", "FLASH2_SCALE", "FLASH2_POS_BYTES")
 NOT("kernel-test selection (which cases make_kernel_tests.py writes), not a model choice", "FLASH_TESTS", "GEMM_TESTS", "MOE_TESTS",
     "MOE_GEMM_TESTS", "DRAFTER_TESTS", "KTEST_GEMM_ALL", "KTEST_GEMM_ERR", "KTEST_HEADS_SFX", "KTEST_LLM", "PREFILL_CONT",

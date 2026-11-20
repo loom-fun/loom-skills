@@ -838,7 +838,7 @@ def _swizzle_text():
   %out_group = index.assume %out_group_id [lt(%out_group_id, %out_tile_count)] : index"""
 
 
-def gemm_big256(fmt, mode):
+def gemm_big256(fmt, mode, fmt2=None):
     """256-row WMMA GEMM: 256 threads (8 waves in a 4 x 2 grid), each wave 64 rows x 64 columns (4 x 4
     16 x 16 accumulators). store/acc: 256 x 128 tiles, swiglu: 256 rows x 64 outputs of each of gate and up.
     Each staged weight value feeds 256 rows, and each wave reuses an A fragment across 4 B fragments and a
@@ -848,13 +848,18 @@ def gemm_big256(fmt, mode):
     row t/2 (two 16-value slices) of the gate/up-interleaved weight tile."""
     f = FMT[fmt]
     two_w = mode == "swiglu"
+    # fmt2 (swiglu, choice prefill.gemm.m256_mixed): the up weight in another format (Q4_K_M's q4_k gate + q6_k up layers).
+    # Every thread loads its row of both weights (same local row, unconditional: loads yielded from a branch stall), and
+    # dequantizes the one of its wave's half of the tile in a wave-uniform scf.if (waves 0-3 stage gate rows, 4-7 up rows).
+    fmt2 = fmt2 if two_w and fmt2 not in (None, fmt) else None
     NT, TW = 256, 128
     TN = TW // 2 if two_w else TW
     cfr = 2 if two_w else 4
     RF = 4                               # 16-row A fragments per wave
     wave_cols = 16 * cfr
     WVR = TW - (TN - wave_cols) - 15
-    name = f"{PREFIX}_gemm_{fmt}_{mode}_m256"
+    name = f"{PREFIX}_gemm_{fmt}_{mode}_m256" if fmt2 is None else f"{PREFIX}_gemm_{fmt}_{fmt2}_{mode}_m256"
+    assert fmt2 is None or (f["block_values"] == 256 and FMT[fmt2]["block_values"] == 256), (fmt, fmt2)
     weights = ["w", "w2"] if two_w else ["w"]
     k_min = 256 if f["block_values"] == 256 else 64
     L = []
@@ -875,6 +880,7 @@ def gemm_big256(fmt, mode):
   %sixteen = index.constant 16 : offset
   %four = index.constant 4 : offset
   %block_bytes = index.constant {f["block_bytes"]} : offset
+  %block_bytes2 = index.constant {FMT[fmt2 or fmt]["block_bytes"]} : offset
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
   %c2 = index.constant 2 : index
@@ -941,20 +947,34 @@ def gemm_big256(fmt, mode):
         L.append("  %w_out_row_value = index.add %out_origin, %stage_row : index")
     L.append(f'''  %w_out_row = index.assume %w_out_row_value [lt(%w_out_row_value, %n)] : index
   %w_row_origin = index.scale %w_out_row, %row_bytes : index, offset -> offset
+  %row_bytes2 = index.scale %blocks, %block_bytes2 : index, offset -> offset
+  %w2_row_origin = index.scale %w_out_row, %row_bytes2 : index, offset -> offset
   %zero8 = vector.splatf 0.0 : vector<8xf32>
   %init = vector.fragment<init> %zero8 shape [%c16, %c16] : vector<8xf32>
   %k_steps = index.div %k, %c64 : index
   %wb_row = index.add %wave_col, %lane_row : index
   %wb_off = index.scale %wb_row, %c144_off : index, offset -> offset
   %w_wave_view = buffer.view %w_stage[%wb_off] : buffer -> view<{WVR}x72xf16>''')
-    wsrc = "wsel" if two_w else "w"
-    g32 = _on("GEMM_M256_G32") and fmt in _g32_fmts()
-    if g32:
+    wsrc = "wsel" if two_w and not fmt2 else "w"
+    def fmt_parts(fm, ws, pre, second):
+        """(g32, parts) of one weight's dequant: parts = [(out, col, stage col, lines, addr, loads)]"""
+        g = _on("GEMM_M256_G32") and fm in _g32_fmts()
+        fix = (lambda t: t.replace("%w_row_origin", "%w2_row_origin").replace("%block_bytes", "%block_bytes2")) if second else (lambda t: t)
+        def fixp(out, col, sc, res):
+            lines, addr, loads = res
+            return (out, col, sc, [fix(l) for l in lines], [fix(l) for l in addr], loads)
+        if g:
+            return g, [fixp(f"{pre}g", f"%{pre}colg", "%c0", _g32_dequant(fm, ws, f"{pre}g", f"%{pre}colg"))]
+        return g, [fixp(f"{pre}{x}", f"%{pre}col{x}", sc, _split_dequant(fm, ws, f"{pre}{x}", f"%{pre}col{x}"))
+                   for x, sc in (("a", "%stage_col"), ("b", "%stage_col1"))]
+    g32, parts = fmt_parts(fmt, wsrc, "dq", False)
+    groups = [(fmt, g32, parts)]
+    if fmt2:
+        g32b, parts2 = fmt_parts(fmt2, "w2", "du", True)
+        groups.append((fmt2, g32b, parts2))
+        parts = parts + parts2
+    if any(g for _, g, _ in groups):
         L.append(G32_CONSTS)
-        parts = [("dqg", "%wcolg", "%c0") + _g32_dequant(fmt, wsrc, "dqg", "%wcolg")]
-    else:
-        slices = [("dqa", "%wcola", "%stage_col"), ("dqb", "%wcolb", "%stage_col1")]
-        parts = [(out, col, sc) + _split_dequant(fmt, wsrc, out, col) for out, col, sc in slices]
     def addr_text(sfx, kvar):
         t = []
         for out, col, sc, lines, addr, loads in parts:
@@ -1004,12 +1024,39 @@ def gemm_big256(fmt, mode):
     L.append("""    %k_origin = index.mul %step, %c64 : index
     vector.store %cr_x, %x_stage_view[%x_stage_row, %x_stage_col] : vector<32xf16>, view<256x72xf16>
     vector.store %cr_x1, %x_stage_view[%x_stage_row1, %x_stage_col] : vector<32xf16>, view<256x72xf16>""")
-    for out, col, sc, lines, addr, loads in parts:
-        L.append(f"    {col} = index.add %k_origin, {sc} : index")
-        text = "\n".join(l for l in lines if ".load " not in l)
-        for nm, ty in loads:
-            text = _re.sub(_re.escape(nm) + r"\b", f"%cr_{nm[1:]}", text)
-        L.append(text)
+    def compute(gparts):
+        t = []
+        for out, col, sc, lines, addr, loads in gparts:
+            t.append(f"    {col} = index.add %k_origin, {sc} : index")
+            text = "\n".join(l for l in lines if ".load " not in l)
+            for nm, ty in loads:
+                text = _re.sub(_re.escape(nm) + r"\b", f"%cr_{nm[1:]}", text)
+            t.append(text)
+        return t
+    def halves(fm, g, gparts):
+        """the two 16-value halves (stage_col, stage_col1) of one weight's dequant, as values (and the slices making them)"""
+        if not g:
+            return [], [f"%{gparts[0][0]}", f"%{gparts[1][0]}"]
+        st = _g32_stores(fm, gparts[0][0])
+        if len(st) == 2:
+            return [], [st[0][0], st[1][0]]
+        v = st[0][0]
+        return [f"    {v}_h0 = vector.slice {v}[0] : vector<32xf16> -> vector<16xf16>",
+                f"    {v}_h1 = vector.slice {v}[16] : vector<32xf16> -> vector<16xf16>"], [f"{v}_h0", f"{v}_h1"]
+    if fmt2:
+        (fa, ga, pa), (fb, gb, pb) = groups
+        sa, va = halves(fa, ga, pa)
+        sb, vb = halves(fb, gb, pb)
+        L.append("    %mx_lo, %mx_hi = scf.if %w_is_up -> (vector<16xf16>, vector<16xf16>) {")
+        L += compute(pb) + sb
+        L.append(f"      scf.yield {vb[0]}, {vb[1]} : vector<16xf16>, vector<16xf16>\n    }} else {{")
+        L += compute(pa) + sa
+        L.append(f"      scf.yield {va[0]}, {va[1]} : vector<16xf16>, vector<16xf16>\n    }}")
+        L.append(f"    vector.store %mx_lo, %w_stage_view[%stage_row, %stage_col] : vector<16xf16>, view<{TW}x72xf16>")
+        L.append(f"    vector.store %mx_hi, %w_stage_view[%stage_row, %stage_col1] : vector<16xf16>, view<{TW}x72xf16>")
+    else:
+      for out, col, sc, lines, addr, loads in parts:
+        L += compute([(out, col, sc, lines, addr, loads)])
         if g32:
             for v, wd, co in _g32_stores(fmt, out):
                 cc = "%stage_col" if co == 0 else "%stage_col1"
@@ -1690,4 +1737,7 @@ if __name__ == "__main__":
                         out.append(post(var256) + _rdna4.with_twins(base256)[len(base256):])
                     if mode == "swiglu" and _on("GEMM_M256_F16O"):   # gfx11 f16-output swiglu (f16o_fuse.fuse_gfx11)
                         out.append(f16out_m256(base256 if var256 is None else post(var256)))
+    for pair in filter(None, os.environ.get("GEMM_M256_MIXED", "").split(",")):   # gen_llm sets it (choice prefill.gemm.m256_mixed)
+        f1, f2 = pair.split(":")
+        out.append(f16out_m256(post(gemm_big256(f1, "swiglu", f2))))
     sys.stdout.write("\n".join(out))
