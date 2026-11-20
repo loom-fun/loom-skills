@@ -1515,6 +1515,9 @@ def gemm_m256_variant(fmt, mode, fmt2=None):
         return _xg.gemm_xg(fmt, mode, fmt2)
     if fmt2 is not None:
         return None
+    import gen_gemm_ws as _ws
+    if _ws.ws_on() and fmt in _ws.ws_fmts():   # choice prefill.gemm.m256_ws (gfx11): producer / consumer waves
+        return _ws.gemm_ws(fmt, mode)
     if (os.environ.get("GEMM_M256_DB", "0").strip().lower() not in ("", "0", "false", "no", "off")):
         return gemm_big256_db(fmt, mode)
     if (os.environ.get("GEMM_M256_G32", "0").strip().lower() not in ("", "0", "false", "no", "off")) and fmt in _g32_fmts():   # gfx11 only: the gfx12 twin comes from the default kernel

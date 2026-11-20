@@ -52,6 +52,10 @@ def ablate(t, abl):
                                   f"      {m.group(1)}_h1 = vector.extract {m.group(1)}_hv[1] : vector<8xf16> -> f16\n"
                                   f"      {m.group(1)} = scalar.extf {m.group(1)}_h0 : f16 to f32\n"
                                   f"      {m.group(2)} = scalar.extf {m.group(1)}_h1 : f16 to f32"), t)
+        elif a == "nodq":   # no dequant VALU: the weight stage gets the step's activation registers (random f16) instead
+            t = re.sub(r"vector\.store (%\S+), %w_stage_view\[%stage_row(_up)?, (%stage_col1?)\] : vector<(16|32)xf16>",
+                       lambda m: f"vector.store {'%cr_xs' + m.group(4)}, %w_stage_view[%stage_row{m.group(2) or ''}, {m.group(3)}] : vector<{m.group(4)}xf16>", t)
+            t = t.replace("    %k_origin = index.mul %step, %c64 : index\n", "    %k_origin = index.mul %step, %c64 : index\n    %cr_xs32 = vector.addf %cr_x, %cr_x1 : vector<32xf16>\n    %cr_xs16 = vector.slice %cr_xs32[0] : vector<32xf16> -> vector<16xf16>\n", 1)
         elif a == "nostore":
             t = re.sub(r"^\s*vector\.store [^\n]*%(?:x|w)_stage_view\[[^\n]*\n", "", t, flags=re.M)
     return t
