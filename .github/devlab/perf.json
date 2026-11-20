@@ -1,18 +1,47 @@
 {
- "_comment": "q38pf gemm2 final: balanced mixed-format m256 (prefill.gemm.m256_mixed_bal, rdna3 scope rule) vs main 9742f6ee on Strix Halo (85 W): func, kernel tests, dev gates on the winner, short ABBA perf",
- "runner": "strix",
- "card": "loom-fun/bartowski-Qwen3.8-27B-loom",
- "memory_bytes": 52000000000,
- "kit": null,
- "llamacpp": "b1374",
+ "_comment": "R9700 per-model measurement (r9700_jobs.py): one job per model on one R9700 runner; loom-fun-staging card, llama.cpp ROCm b1375 + Vulkan b12211 with the matched drafting, reduced-context models served at served_context. Does not fit: none",
+ "runner": "r9700",
+ "memory_bytes": 34000000000,
+ "llama_spec": "matched",
  "jobs": [
   {
-   "name": "gemm2-final",
+   "name": "unsloth-qwen3-0-6b-loom",
+   "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
+   "kit": null,
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "memory_bytes_r9700": 17000000000,
    "variants": [
-    {"name": "base", "build": {}, "ref": "9742f6ee2b3059fa9455c03b4b3aefd2af3f4903"},
-    {"name": "new", "build": {}}
+    {
+     "name": "card",
+     "build": {}
+    },
+    {
+     "name": "nodraft",
+     "build": {},
+     "execution": {
+      "draft_depth": 0
+     }
+    }
    ],
-   "steps": ["func:new", "ktest:new", "perf:base:1", "perf:new:1", "perf:new:1", "perf:base:1", "gates:new:dev"]
+   "steps": [
+    "func:card",
+    "ktest:card",
+    "gates:card:dev",
+    "perf:card:3",
+    "perf:card:3:long",
+    "c4:nodraft",
+    "llama@rocm.np1:3",
+    "llama@rocm.np1:3:long",
+    "llamac4@rocm.nodraft",
+    "llama@vulkan.np1:3",
+    "llama@vulkan.np1:3:long",
+    "llamac4@vulkan.perslot.nodraft"
+   ]
   }
- ]
+ ],
+ "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
+ "kit": null,
+ "llamacpp": "b1375",
+ "llamacpp_vulkan": "b12211"
 }
