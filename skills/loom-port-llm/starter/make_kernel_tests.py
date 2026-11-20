@@ -18,7 +18,9 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import kb_choices  # noqa: E402  the choices the model's kernels were generated with (resolved.env of the package, else resolved here)
 kb_choices.apply_for_tests(json.load(open(sys.argv[1])))
 from mv_rows import pick_r, iq_r, flash2_deep_from  # noqa: E402
-from gen_gemm import HELPER as GEMM_HELPER  # noqa: E402
+from gen_gemm import HELPER as GEMM_HELPER, IQ4_NATIVE as _IQ4_NATIVE  # noqa: E402
+_IQ4_NATIVE_FMTS = frozenset({"iq4_xs", "iq4_nl"} if _IQ4_NATIVE else ())   # prefill.gemm.iq4_native: their own 128/256-row GEMMs, tested like the K-quants'
+_MIXED_FMTS = {"q4_k", "q5_k", "q6_k"} | ({"iq4_xs"} if _IQ4_NATIVE else set())   # gen_llm.M256_MIXED_FMTS
 from gen_gemm_rdna4 import f16o_swiglu as _f16o_on  # noqa: E402  formats with no 256-row (_m256) GEMM
 ACT_Q8 = os.environ.get("ACT_Q8", "1") == "1"   # gen_llm.py's default: int8 activations for these formats
 from formats import ICODES as IQ_FMTS  # noqa: E402  (gen_llm.py takes int8 activations for these)
@@ -1833,7 +1835,7 @@ def gemm_cases():
             fmt = T[name].tensor_type.name.lower()
             up = f"blk.{li}.ffn_up.weight"
             sw = nm_ == "ffn_gate" and up in T and T[up].tensor_type == T[name].tensor_type and fmt not in SPLIT   # split formats: two projections + g_silu_mul
-            if (fmt not in (_GEMM_FMTS if os.environ.get("KTEST_GEMM_ALL", "0") not in ("", "0") else IQ_FMTS) and fmt not in SPLIT) or (fmt, sw) in seen_g:   # the formats with GEMM kernel tests (formats.ICODES; KTEST_GEMM_ALL=1: every GEMM format, e.g. bf16/f32/q4_0 on a new device)
+            if (fmt not in (_GEMM_FMTS if os.environ.get("KTEST_GEMM_ALL", "0") not in ("", "0") else IQ_FMTS | _IQ4_NATIVE_FMTS) and fmt not in SPLIT) or (fmt, sw) in seen_g:   # the formats with GEMM kernel tests (formats.ICODES; KTEST_GEMM_ALL=1: every GEMM format, e.g. bf16/f32/q4_0 on a new device)
                 continue
             seen_g.add((fmt, sw))
             yield name, fmt, sw
@@ -1960,7 +1962,7 @@ if os.environ.get("GEMM_TESTS", "1") == "1" and os.environ.get("GEMM_M256_MIXED_
         if gn not in T or un not in T:
             continue
         fg, fu = T[gn].tensor_type.name.lower(), T[un].tensor_type.name.lower()
-        if fg == fu or not {fg, fu} <= {"q4_k", "q5_k", "q6_k"} or (fg, fu) in _seen_mx:
+        if fg == fu or not {fg, fu} <= _MIXED_FMTS or (fg, fu) in _seen_mx:
             continue
         _seen_mx.add((fg, fu))
         W = deq(gn); n, K = W.shape; n_use = min(n, 1024)
@@ -3851,7 +3853,7 @@ if True:   # coverage: a case for every kernel the package launches
   check.return
 }}
 """)
-    if 'export("g_gemm_ab_f32w")' in (_pkg_llm_text() or ""):   # launched through a dual-target template (pkg_launched does not see those)
+    for _abk in [k for k in ("g_gemm_ab_f32w", "g_gemm_ab_q8_0w") if f'export("{k}")' in (_pkg_llm_text() or "")]:   # launched through a dual-target template (pkg_launched does not see those)
         # g_gemm_ab_f32w (gen_gdn_ab, GDN_AB_WMMA): the GDN alpha / beta projections of a GEMM epoch as one WMMA GEMM over the f16 norm row + its
         # row scales (%h16, %s_h), F32 weights rounded to F16 while staging; a dead row (scale 0) gives zeros. Real layer weights, 128 rows (2 tiles).
         from gen_gdn import gdn_geometry as _gg
@@ -3867,7 +3869,12 @@ if True:   # coverage: a case for every kernel the package launches
                         ("gab_eb", (_xr @ _wb.astype(np.float16).astype(np.float64).T).astype(np.float32))]:
             save(_nm, _a)
         _wt = f"tensor<{_HV * H * 4}xi8>"
-        cases.append(f"""check.case public @gemm_ab_f32w {{
+        _wt = f"tensor<{raw(f'blk.{_li}.ssm_alpha.weight').size}xi8>"   # the raw weight bytes (f32: HV*H*4, q8_0: 34 bytes per 32 values)
+        # f32 WMMA accumulation over K=H terms: the error scales with sum |x w|, not with the result (an element near zero after
+        # cancellation of terms summing to ~1e3 in absolute value misses atol 1e-4 by rounding alone): atol >= 5e-7 * max sum |x w|
+        _abs = np.abs(_xr) @ np.abs(np.concatenate([_wa, _wb]).astype(np.float16).astype(np.float64)).T
+        _atol = max(1.0e-4, 5.0e-7 * float(_abs.max()))
+        cases.append(f"""check.case public @{_abk[2:]} {{
   %rows = check.literal value({_R}) : index
   %x = check.file.read.npy path("gab_h16{KS}.npy") : tensor<{_R}x{H}xf16>
   %s = check.file.read.npy path("gab_s{KS}.npy") : tensor<{_R}x2xf32>
@@ -3877,9 +3884,9 @@ if True:   # coverage: a case for every kernel the package launches
   %eb = check.file.read.npy path("gab_eb{KS}.npy") : tensor<{_R}x{_HV}xf32>
   %ya = check.generate.fill value(7.0) : tensor<{_R}x{_HV}xf32>
   %yb = check.generate.fill value(7.0) : tensor<{_R}x{_HV}xf32>
-  kernel.launch @g_gemm_ab_f32w[%rows](%rows, %x, %s, %wa, %wb, %ya, %yb) : [index](index, tensor<{_R}x{H}xf16>, tensor<{_R}x2xf32>, {_wt}, {_wt}, tensor<{_R}x{_HV}xf32>, tensor<{_R}x{_HV}xf32>)
-  check.expect.close actual(%ya) expected(%ea) atol(1.0e-4) rtol(1.0e-3) nan(different) : tensor<{_R}x{_HV}xf32>
-  check.expect.close actual(%yb) expected(%eb) atol(1.0e-4) rtol(1.0e-3) nan(different) : tensor<{_R}x{_HV}xf32>
+  kernel.launch @{_abk}[%rows](%rows, %x, %s, %wa, %wb, %ya, %yb) : [index](index, tensor<{_R}x{H}xf16>, tensor<{_R}x2xf32>, {_wt}, {_wt}, tensor<{_R}x{_HV}xf32>, tensor<{_R}x{_HV}xf32>)
+  check.expect.close actual(%ya) expected(%ea) atol({_atol:.3e}) rtol(1.0e-3) nan(different) : tensor<{_R}x{_HV}xf32>
+  check.expect.close actual(%yb) expected(%eb) atol({_atol:.3e}) rtol(1.0e-3) nan(different) : tensor<{_R}x{_HV}xf32>
   check.return
 }}
 """)

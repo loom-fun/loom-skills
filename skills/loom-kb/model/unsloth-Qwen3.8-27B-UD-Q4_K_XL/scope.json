@@ -1,0 +1,134 @@
+{
+ "scope": "model/unsloth-Qwen3.8-27B-UD-Q4_K_XL",
+ "match": {
+  "slug": [
+   "unsloth-Qwen3.8-27B-UD-Q4_K_XL"
+  ]
+ },
+ "owner": "kb",
+ "choices": [
+  {
+   "when": {
+    "devices": [
+     "radeon-r9700"
+    ]
+   },
+   "set": {
+    "exec.prefill_capacity": 1024,
+    "exec.context_capacity": 120832,
+    "exec.pool_capacity": 120832,
+    "exec.context_cap": 120832
+   },
+   "evidence": "Carried from the sibling bartowski-Qwen3.8-27B-loom (same architecture and geometry; re-validated on this UD-Q4_K_XL file by this port's gates and local A/B, PR q38xl-port). Sibling evidence: migrated from the R9700 fit table (.github/devlab/r9700_fit.json r9700_execution / ctx_cap, measured on the R9700 DevLab runner; #609 #613 #615 #617 #618 #619 #628 #630); values unchanged; context 124928 -> 120832: with the proposal-head copy (draft.propose.head_rows, +0.24 GB and the load-time staging) the image component is unavailable at 124928 and 122880 (dev gates: vision and spec FAIL, 503) and passes at 120832 and below (phead experiment runs 43754342025, 43755664241, 43757260999)"
+  },
+  {
+   "when": {},
+   "set": {
+    "draft.propose.head_rows": 81920
+   },
+   "evidence": "Carried from the sibling bartowski-Qwen3.8-27B-loom (same architecture and geometry; re-validated on this UD-Q4_K_XL file by this port's gates and local A/B, PR q38xl-port). Sibling evidence: MTP proposals read a Q4_0 copy of head rows [0, 81920) plus the added-token rows (0.2 GB per proposal round instead of the 1.04 GB Q6_K head; verification keeps the head). DevLab R9700 (phead experiment, MTP depth 3, medians of 2 interleaved sessions): decode 65.2 -> 71.8 tok/s, decode_2k 58.7 -> 64.8 (round 3), acceptance .541 -> .533; N sweep 32k..all rows: 67.2 / 69.0 (64k) / 71.8 (80k) / 70.9 (88k) / 70.4 (96k) / 69.4 (128k) / 68.7 (160k) / 66.9 (all rows, Q4_0). Strix Halo: decode 25.2 -> 28.1, decode_2k 24.1 -> 26.9."
+  },
+  {
+   "when": {
+    "devices": [
+     "rdna4"
+    ]
+   },
+   "set": {
+    "hybrid.gdn.chunk": true
+   },
+   "evidence": "Carried from the sibling bartowski-Qwen3.8-27B-loom (same architecture and geometry; re-validated on this UD-Q4_K_XL file by this port's gates and local A/B, PR q38xl-port). Sibling evidence: q38r9700 gdnpf (PR 860): gfx12 chunked WY GDN prefill on the R9700 DevLab runner, same-job A/B vs the card build (2 rounds): prefill 1k/2k 1536/1622 -> 1599/1694 tok/s (+4.1/+4.4 %), 8k/16k/32k 1713/1649/1525 -> 1801/1730/1594 (+5.1/+4.9/+4.6 %), decode 65.2 -> 65.0 and decode_32k 52.05 -> 51.98 (ties), 4 streams undrafted 116.9 -> 117.0; ktest 84/84 (gdn_chunk_spans), gates:dev PASS (spec, consistency, agent x2, golden, compare, vision, sampling), textmatch 3/3"
+  },
+  {
+   "when": {
+    "devices": [
+     "rdna4"
+    ]
+   },
+   "set": {
+    "decode.spec.gdn_copy_split": 8
+   },
+   "evidence": "Carried from the sibling bartowski-Qwen3.8-27B-loom (same architecture and geometry; re-validated on this UD-Q4_K_XL file by this port's gates and local A/B, PR q38xl-port). Sibling evidence: q38r9700 verify: devlab-perf run 43763681525 (ABBA, drafted decode): 64.79 -> 66.05 tok/s (+1.9 %), cs4 65.89, cs20 66.09; doubling the capture and restore launches cost +0.45 / +0.54 ms of a 40 ms step"
+  },
+  {
+   "when": {
+    "devices": [
+     "rdna3"
+    ]
+   },
+   "set": {
+    "prefill.attn.flash2_kt256": 16
+   },
+   "evidence": "Carried from the sibling bartowski-Qwen3.8-27B-loom (same architecture and geometry; re-validated on this UD-Q4_K_XL file by this port's gates and local A/B, PR q38xl-port). Sibling evidence: q38pf attn lane: 16-key flash2s tiles at head_dim 256 on gfx1151 (two 12-wave workgroups per WGP instead of one). Kernel (1024-token chunk, local 123 W): 8k depth 10.59 -> 9.31 ms, 32k 60.3 -> 47.8 ms; DevLab kbench 44646059869 -26/-27 %. Prefill, same-job ABBA long rows: local 123 W 8k/16k/32k 591.1/559.1/504.1 -> 592.6/566.2/518.1 tok/s (+0.3/+1.3/+2.8 %); DevLab 85 W run 44648364984 554.1/526.2/475.0 -> 555.5/531.0/487.2 (+0.3/+0.9/+2.6 %); decode ties; ktest 154/154, smoke PASS. Keyed on the rdna3 family (a dual-target build resolves families, never device names; a strix-halo key never matched). Measured on Strix Halo only."
+  },
+  {
+   "when": {
+    "devices": [
+     "rdna3"
+    ]
+   },
+   "set": {
+    "hybrid.gdn.chunk11": true,
+    "hybrid.gdn.chunk11_fuse": true,
+    "hybrid.gdn.chunk11_gate": true,
+    "hybrid.gdn.chunk11_cn": 16,
+    "hybrid.gdn.chunk11_opt": "kbo",
+    "hybrid.gdn.skip_long": true
+   },
+   "evidence": "Carried from the sibling bartowski-Qwen3.8-27B-loom (same architecture and geometry; re-validated on this UD-Q4_K_XL file by this port's gates and local A/B, PR q38xl-port). Sibling evidence: q38pf gdn lane: gfx11 fused chunked WY GDN prefill (conv+SiLU+q/k norms+recurrence+gated norm, 16-token chunks) on 64+-token spans. Same-job ABBA prefill 1k/2k/8k/16k/32k vs 550fc117: local 123 W 575.5/579.8/588.8/558.4/504.5 -> 592.7/598.0/608.5/576.2/518.8 (+3.0/+3.1/+3.3/+3.2/+2.8 %); DevLab 85 W run 44691375703 +3.0/+3.2/+3.3/+3.2/+2.8 %; decode ties; GDN bucket .115 -> .054 ms/token at 8k; ktest 154/154 incl. gdn_chunkf_serve, smoke PASS. Keyed on the rdna3 family (a dual-target build resolves families, never device names; a strix-halo key never matched). Measured on Strix Halo only."
+  },
+  {
+   "when": {},
+   "set": {
+    "prefill.gemm.m256_f16o": true,
+    "prefill.gemm.m256_mixed": true
+   },
+   "evidence": "Carried from the sibling bartowski-Qwen3.8-27B-loom (same architecture and geometry; re-validated on this UD-Q4_K_XL file by this port's gates and local A/B, PR q38xl-port). Sibling evidence: q38pf gemm (PR 1321). DevLab Strix 85 W same-job ABBA: F16O+G32 vs base prefill 1k/2k/8k/16k/32k +2.0/+2.2/+2.7/+2.6/+2.3 % (run 44684320713); MIXED on top +0.4/+0.7/+1.0/+1.0/+0.9 % (run 44691122550); local Strix 123 W (base 550fc117) 8k/16k/32k +3.6/+3.6/+3.4 %; ktest 157/157, smoke PASS. Build-wide (the program rewrite is shared; gfx12 runs the f16o kernels' twins): R9700 check in the PR."
+  },
+  {
+   "when": {
+    "devices": [
+     "rdna3"
+    ]
+   },
+   "set": {
+    "prefill.gemm.m256_g32": true
+   },
+   "evidence": "Carried from the sibling bartowski-Qwen3.8-27B-loom (same architecture and geometry; re-validated on this UD-Q4_K_XL file by this port's gates and local A/B, PR q38xl-port). Sibling evidence: q38pf gemm (PR 1321). DevLab Strix 85 W same-job ABBA: F16O+G32 vs base prefill 1k/2k/8k/16k/32k +2.0/+2.2/+2.7/+2.6/+2.3 % (run 44684320713); MIXED on top +0.4/+0.7/+1.0/+1.0/+0.9 % (run 44691122550); local Strix 123 W (base 550fc117) 8k/16k/32k +3.6/+3.6/+3.4 %; ktest 157/157, smoke PASS. gfx11 kernels only (the gfx12 twins keep the default dequant)."
+  },
+  {
+   "when": {
+    "devices": [
+     "rdna3"
+    ]
+   },
+   "set": {
+    "prefill.gemm.m256_mixed_bal": true
+   },
+   "evidence": "Carried from the sibling bartowski-Qwen3.8-27B-loom (same architecture and geometry; re-validated on this UD-Q4_K_XL file by this port's gates and local A/B, PR q38xl-port). Sibling evidence: q38pf gemm2: the 16 mixed-format FFN layers (q4_k gate + q6_k up) run one balanced f16o swiglu m256 (every thread stages 16 gate + 16 up values; the old kernel's q6_k waves set the barrier pace). Kernel (local 123 W, 1024 rows, real weights): 14.38 -> 10.33 ms (-28 %). Local same-job ABBA vs main 9742f6ee (localperf/gemm2/e1): prefill 1k/2k/8k/16k/32k 606.0/615.0/633.7/601.5/546.8 -> 620.0/629.7/645.9/615.1/559.1 tok/s (+2.3/+2.4/+1.9/+2.3/+2.3 %), decode ties. gfx11 only (the gfx12 twin keeps the branch form); keyed on the rdna3 family. DevLab Strix 85 W (run 44732757118, same job vs main): prefill 1k/2k 570.3/577.6 -> 580.6/589.5 (+1.8/+2.1 %), decode tie; func pass, ktest 160/160 (gm_q4_k_q6_k_sw_512_f16o), gates:dev PASS (consistency, spec, agent, agent_think_off, golden, compare, vision, sampling)."
+  },
+  {
+   "when": {
+    "devices": [
+     "rdna3"
+    ]
+   },
+   "set": {
+    "prefill.gdn.ab_wmma": true,
+    "prefill.fuse.post_norm_noh_all": true,
+    "prefill.fuse.resid_epi": true,
+    "prefill.gdn.o16": true,
+    "prefill.fuse.qg_split": true
+   },
+   "evidence": "Carried from the sibling bartowski-Qwen3.8-27B-loom (same architecture and geometry; re-validated on this UD-Q4_K_XL file by this port's gates and local A/B, PR q38xl-port). Sibling evidence: q38pf fuse2 (PR 1323): GDN alpha/beta as one WMMA GEMM, dead-h input norms (_noh), residual add in the m256 output-GEMM epilogue (acc) with an x-only norm, f16 GDN output without the row-scale pass, q/gate split in the q GEMM epilogue. Local Strix 123 W same-job ABBA vs main 77cdb8a9 (localperf/fuse2/e2): prefill 8k/16k/32k 644.0/613.1/556.4 -> 662.4/628.8/570.5 tok/s (+2.9/+2.6/+2.5 %), decode_32k tie; pf8k busy 1.542 -> 1.523 ms/token. Ablation e4 without resid_epi: 659.0/625.9/567.4 (resid_epi +0.6/+0.6/+0.7 %, norms 36.8 -> 15.5 us/token). Keyed on the rdna3 family; the gfx12 twins only run in this dual-target build's R9700 launches."
+  },
+  {
+   "when": {},
+   "set": {
+    "prefill.gemm.iq4_native": true,
+    "prefill.gemm.prune": true
+   },
+   "evidence": "PENDING (q38xl-port): inline IQ4_XS/IQ4_NL GEMM staging -> 128/256-row kernels + iq4_xs in the mixed swiglu m256."
+  }
+ ]
+}

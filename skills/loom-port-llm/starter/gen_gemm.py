@@ -43,12 +43,107 @@ HELPER = {"q4_0", "q5_0", "iq4_nl", "iq4_xs", "q3_k", "iq3_s", "f16", "mxfp4", "
 Q4_0_NATIVE = os.environ.get("GEMM_Q4_0_NATIVE", "0").strip().lower() not in ("", "0", "false", "no", "off")
 if Q4_0_NATIVE:
     HELPER = HELPER - {"q4_0"}
+# GEMM_IQ4_NATIVE (choice prefill.gemm.iq4_native): IQ4_XS / IQ4_NL decode their 16-value half-group inline (iq4_dequant16: the
+# loads exposed, so the 128/256-row kernels prefetch them and the mixed-format m256 swiglu takes iq4_xs) instead of through the
+# @g_<fmt>_values helper, which limits them to the 64-row tile. Same values as the helper + fptrunc.
+IQ4_NATIVE = os.environ.get("GEMM_IQ4_NATIVE", "0").strip().lower() not in ("", "0", "false", "no", "off")
+if IQ4_NATIVE:
+    HELPER = HELPER - {"iq4_xs", "iq4_nl"}
+
+_IQ4_KVALUES = (-127, -104, -83, -65, -49, -35, -22, -10, 1, 13, 25, 38, 53, 69, 89, 113)   # ggml kvalues_iq4nl
+
+
+def iq4_dequant16(fmt, w, out):
+    """IQ4_XS / IQ4_NL: 16 consecutive weights of row %w_row_origin at column %w_col -> F16 vector %{out}. All loads first.
+    IQ4_NL (18-byte blocks of 32): d * kvalues[q], one F16 multiply (int8 code times an F16 scale is exact in F32: same rounding).
+    IQ4_XS (136-byte superblocks of 256): dl = d * (ls - 32) per 32-group (ls: 4 low bits from scales_l, 2 high from scales_h),
+    dl * kvalues[q] in F32 then fptrunc (as @g_iq4_xs_values)."""
+    o = out
+    book = "\n".join(f"      %{o}_k{i} = scalar.constant {v} : i8" for i, v in enumerate(_IQ4_KVALUES))
+    lookup = f'''
+{book}
+      %{o}_book = vector.from_elements {", ".join(f"%{o}_k{i}" for i in range(16))} : vector<16xi8>
+      %{o}_shift_bits = index.mul %{o}_half, %{o}_c4 : index
+      %{o}_shift_i8 = index.cast %{o}_shift_bits : index to i8
+      %{o}_shift = vector.splat %{o}_shift_i8 : vector<16xi8>
+      %{o}_shifted = vector.shrui %{o}_packed, %{o}_shift : vector<16xi8>
+      %{o}_mask = vector.splati 15 : vector<16xi8>
+      %{o}_idx = vector.andi %{o}_shifted, %{o}_mask : vector<16xi8>
+      %{o}_codes = vector.table.lookup %{o}_book[%{o}_idx] : vector<16xi8>, vector<16xi8> -> vector<16xi8>'''
+    if fmt == "iq4_nl":
+        return f'''
+      %{o}_c4 = index.constant 4 : index
+      %{o}_block = index.div %w_col, %c32 : index
+      %{o}_in_block = index.rem %w_col, %c32 : index
+      %{o}_half = index.div %{o}_in_block, %c16 : index
+      %{o}_block_add = index.scale %{o}_block, %block_bytes : index, offset -> offset
+      %{o}_block_origin = index.add %w_row_origin, %{o}_block_add : offset
+      %{o}_two = index.constant 2 : offset
+      %{o}_code_origin = index.add %{o}_block_origin, %{o}_two : offset
+      %{o}_scale_view = buffer.view %{w}[%{o}_block_origin] : buffer -> view<1xf16>
+      %{o}_code_view = buffer.view %{w}[%{o}_code_origin] : buffer -> view<16xi8>
+      %{o}_scale = view.load %{o}_scale_view[0] : view<1xf16> -> f16
+      %{o}_packed = vector.load %{o}_code_view[0] : view<16xi8> -> vector<16xi8>{lookup}
+      %{o}_values = vector.sitofp %{o}_codes : vector<16xi8> to vector<16xf16>
+      %{o}_scales = vector.splat %{o}_scale : vector<16xf16>
+      %{o} = vector.mulf %{o}_values, %{o}_scales : vector<16xf16>'''
+    assert fmt == "iq4_xs", fmt
+    return f'''
+      %{o}_c4 = index.constant 4 : index
+      %{o}_c256 = index.constant 256 : index
+      %{o}_block = index.div %w_col, %{o}_c256 : index
+      %{o}_within = index.rem %w_col, %{o}_c256 : index
+      %{o}_group_value = index.div %{o}_within, %c32 : index
+      %{o}_group = index.assume %{o}_group_value [range(%{o}_group_value, 0, 7)] : index
+      %{o}_in_group = index.rem %{o}_within, %c32 : index
+      %{o}_half = index.div %{o}_in_group, %c16 : index
+      %{o}_block_add = index.scale %{o}_block, %block_bytes : index, offset -> offset
+      %{o}_block_origin = index.add %w_row_origin, %{o}_block_add : offset
+      %{o}_qs_base = index.constant 8 : offset
+      %{o}_sixteen = index.constant 16 : offset
+      %{o}_qs_add = index.scale %{o}_group, %{o}_sixteen : index, offset -> offset
+      %{o}_qs0 = index.add %{o}_block_origin, %{o}_qs_base : offset
+      %{o}_qs_origin = index.add %{o}_qs0, %{o}_qs_add : offset
+      %{o}_header_view = buffer.view %{w}[%{o}_block_origin] : buffer -> view<2xi32>
+      %{o}_code_view = buffer.view %{w}[%{o}_qs_origin] : buffer -> view<16xi8>
+      %{o}_header = vector.load %{o}_header_view[0] : view<2xi32> -> vector<2xi32>
+      %{o}_packed = vector.load %{o}_code_view[0] : view<16xi8> -> vector<16xi8>
+      %{o}_halves = vector.bitcast %{o}_header : vector<2xi32> to vector<4xf16>
+      %{o}_d_half = vector.extract %{o}_halves[0] : vector<4xf16> -> f16
+      %{o}_d = scalar.extf %{o}_d_half : f16 to f32
+      %{o}_word0 = vector.extract %{o}_header[0] : vector<2xi32> -> i32
+      %{o}_word1 = vector.extract %{o}_header[1] : vector<2xi32> -> i32
+      %{o}_i16 = scalar.constant 16 : i32
+      %{o}_i15 = scalar.constant 15 : i32
+      %{o}_i3 = scalar.constant 3 : i32
+      %{o}_i4 = scalar.constant 4 : i32
+      %{o}_i2 = scalar.constant 2 : i32
+      %{o}_i32 = scalar.constant 32 : i32
+      %{o}_g32 = index.cast %{o}_group : index to i32
+      %{o}_scales_h = scalar.shrui %{o}_word0, %{o}_i16 : i32
+      %{o}_lo_shift = scalar.muli %{o}_g32, %{o}_i4 : i32
+      %{o}_hi_shift = scalar.muli %{o}_g32, %{o}_i2 : i32
+      %{o}_lo_s = scalar.shrui %{o}_word1, %{o}_lo_shift : i32
+      %{o}_lo = scalar.andi %{o}_lo_s, %{o}_i15 : i32
+      %{o}_hi_s = scalar.shrui %{o}_scales_h, %{o}_hi_shift : i32
+      %{o}_hi_m = scalar.andi %{o}_hi_s, %{o}_i3 : i32
+      %{o}_hi = scalar.shli %{o}_hi_m, %{o}_i4 : i32
+      %{o}_ls = scalar.ori %{o}_lo, %{o}_hi : i32
+      %{o}_centered = scalar.subi %{o}_ls, %{o}_i32 : i32
+      %{o}_lf = scalar.sitofp %{o}_centered : i32 to f32
+      %{o}_dl = scalar.mulf %{o}_d, %{o}_lf : f32{lookup}
+      %{o}_wide = vector.sitofp %{o}_codes : vector<16xi8> to vector<16xf32>
+      %{o}_dls = vector.splat %{o}_dl : vector<16xf32>
+      %{o}_scaled = vector.mulf %{o}_wide, %{o}_dls : vector<16xf32>
+      %{o} = vector.fptrunc %{o}_scaled : vector<16xf32> to vector<16xf16>'''
 
 def dequant16(fmt, w, view_name, out):
     """Loom snippet: dequantize 16 consecutive weights of row %w_row at column %w_col into F16 vector %{out}."""
     if fmt == "q4_0" and Q4_0_NATIVE:
         import moe_q4_0
         return moe_q4_0.dequant16(w, out)
+    if fmt in ("iq4_xs", "iq4_nl") and IQ4_NATIVE:
+        return iq4_dequant16(fmt, w, out)
     if fmt in HELPER:   # 16 consecutive weights = one half of a 32-value group from the shared value helper
         bv = FMT[fmt]["block_values"]
         sc_setup = f"""      %{out}_sidx = index.madd %bounded_w_out_row, %blocks, %{out}_block : index

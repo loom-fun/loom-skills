@@ -284,7 +284,9 @@ if [ -n "$catalog" ]; then
   # No ktest.log: the card shows the kernel_tests gate as having no evidence here (the catalog's tests run in its own CI)
   echo "skipped: a catalog package's kernel tests are the catalog's own (Bazel); there are none to generate"
 else
-"$T" -I "$K/make_kernel_tests.py" cfg.json ktest > ktest.log 2>&1 || { tail -5 ktest.log; echo "STOP: make_kernel_tests.py failed (ktest.log)"; exit 5; }
+# the built package's config: its "resolved" block is the environment the kernels were generated with (cfg.json can carry the
+# reference package's block, find_reference.py "took resolved": tests generated with another model's choices miss kernels)
+"$T" -I "$K/make_kernel_tests.py" pkg/llm_config.json ktest > ktest.log 2>&1 || { tail -5 ktest.log; echo "STOP: make_kernel_tests.py failed (ktest.log)"; exit 5; }
 VENV=$venv "$K/run_kernel_tests.sh" pkg ktest | tee ktest.log | tail -3
 grep -q "^FAIL\|Traceback" ktest.log && { echo "STOP: kernel tests failed (ktest.log); see the bring-up debugging order in SKILL.md"; exit 5; }
 fi

@@ -2133,6 +2133,31 @@ def noh_dead_h(text):
     return text[:a] + "\n".join(out) + text[b:], n
 
 
+def prune_gemm(text):
+    """GEMM_PRUNE (choice prefill.gemm.prune): drop g_gemm_* kernel definitions nothing launches or calls (and the gfx12 twin of each,
+    `<name>_rdna4`): a program rewrite (f16o swiglu, qg split, residual epilogue) leaves the kernel it replaced in the library.
+    Keeps the library under hrx-loom's 16-bit encoding value ids (dual_target.encodings_first) when a format mix adds kernels.
+    Returns (text, pruned names)."""
+    parts = re.split(r"(?m)^(?=kernel\.def |func\.def |template\.|command\.def )", text)
+    defs = {}
+    for i, p in enumerate(parts):
+        m = re.match(r"kernel\.def (?:target\(@\w+\) )?(?:export\(\"[^\"]+\"\) )?@(g_gemm_\w+)\(", p)
+        if m:
+            defs[m.group(1)] = i
+    fam = {}   # base name -> its definitions (the kernel and its gfx12 twin)
+    for name, i in defs.items():
+        fam.setdefault(name[:-len("_rdna4")] if name.endswith("_rdna4") else name, []).append(i)
+    ref = re.compile(r"@(g_gemm_\w+?)(?:_rdna4)?[\[(]")
+    used = set()
+    for i, p in enumerate(parts):   # references outside a kernel's own definitions
+        for m in ref.finditer(p):
+            if i not in fam.get(m.group(1), ()):
+                used.add(m.group(1))
+    drop = {i for base, ix in fam.items() if base not in used for i in ix}
+    pruned = sorted(n for n, i in defs.items() if i in drop)
+    return "".join(p for i, p in enumerate(parts) if i not in drop), pruned
+
+
 def qg_split_on():
     """QG_SPLIT (choice prefill.fuse.qg_split): fused query+gate projections (attn_gate fused_q) store q and gate straight from the 256-row GEMM's
     epilogue (gen_gemm.qg_split) in whole 256-row epochs; g_split_qgate runs only in the other GEMM epochs."""
@@ -2148,8 +2173,20 @@ def qg_split(text):
     body = text[a:b]
     body, n1 = re.subn(r"(?m)^(?P<ind>\s*)kernel\.launch @g_gemm_(?P<f>\w+?)_store_m256\[(?P<g>[^\]]*)\]\((?P<args>.*), %qg\) : (?P<ty>.*), buffer\)$",
                        lambda m: f"{m.group('ind')}kernel.launch @g_gemm_{m.group('f')}_store_m256_qgs[{m.group('g')}]({m.group('args')}, %q, %gate) : {m.group('ty')}, buffer, buffer)", body)
-    body, n2 = re.subn(r"(?m)^  scf\.if %gemm \{\n\s*kernel\.launch @g_split_qgate(?:_lv)?\[[^\n]*\n  \} else \{\n[^\n]*\n  \}\n",
-                       lambda m: "  scf.if %qgs_nhuge {\n" + "\n".join("  " + l for l in m.group(0).rstrip("\n").split("\n")) + "\n  }\n", body)
+    # wrap the split of each layer whose q GEMM got the epilogue split; a layer whose q weight has no m256 kernel (a format
+    # without one, e.g. unsloth UD's iq4_xs q projections) keeps its unconditional split
+    split = re.compile(r"(?m)^  scf\.if %gemm \{\n\s*kernel\.launch @g_split_qgate(?:_lv)?\[[^\n]*\n  \} else \{\n[^\n]*\n  \}\n")
+    parts, pos, n2 = [], 0, 0
+    for m in split.finditer(body):
+        layer = body[pos:m.start()]   # since the previous layer's split: this layer's q GEMM launches
+        parts.append(layer)
+        if "_m256_qgs[" in layer:
+            parts.append("  scf.if %qgs_nhuge {\n" + "\n".join("  " + l for l in m.group(0).rstrip("\n").split("\n")) + "\n  }\n")
+            n2 += 1
+        else:
+            parts.append(m.group(0))
+        pos = m.end()
+    body = "".join(parts) + body[pos:]
     assert n1 == n2, (n1, n2)
     assert all("g_split_qgate" in l for l in body.split("\n") if "%qg, " in l and "kernel.launch" in l), "qg_split: another %qg reader"
     if not n1:
@@ -5034,6 +5071,8 @@ USED_GEMM = {}       # fmt -> set of GEMM modes
 # on whole 256-row epochs, one f16-output swiglu m256 kernel over both weights (gen_gemm.gemm_big256 fmt2 + f16out_m256)
 # instead of two f32 GEMMs + g_silu_mul + the row scale of f
 M256_MIXED = os.environ.get("GEMM_M256_MIXED_F16O", "0").lower() not in ("", "0", "false", "no", "off")
+# the formats the mixed kernel stages (256-value blocks with an inline dequant): the K-quants, and IQ4_XS under prefill.gemm.iq4_native
+M256_MIXED_FMTS = {"q4_k", "q5_k", "q6_k"} | ({"iq4_xs"} if __import__("gen_gemm").IQ4_NATIVE else set())
 MIXED_PAIRS = set()  # (gate fmt, up fmt) the mixed kernels are generated for
 USED_MVQ = set()     # (fmt, K, swiglu, R, TG) of the int8-activation matvecs (ACT_Q8); swiglu 2 = pair (PAIR_PROJ)
 
@@ -6184,7 +6223,7 @@ command.def public @llm_advance() launch(%weights: buffer, %residual: buffer, %m
           if fg == fu:
               T.append("  " + lin(fg, "%h", "%s_h", (f"%w_gate_{i}", f"%w_up_{i}"), sz("ffn_gate"), "%f", "%nH", nff(i), H, mode="swiglu") + "\n")
           else:   # gate and up in different formats (unsloth UD mixes): two projections, then silu(gate) * up
-              mixed = (M256_MIXED and GEMM_M256 and {fg, fu} <= {"q4_k", "q5_k", "q6_k"} and int(NVAL.get(nff(i), 0) or 0) % 64 == 0
+              mixed = (M256_MIXED and GEMM_M256 and {fg, fu} <= M256_MIXED_FMTS and int(NVAL.get(nff(i), 0) or 0) % 64 == 0
                        and int(NVAL.get(nff(i), 0) or 0) > 0)
               if mixed:
                   MIXED_PAIRS.add((fg, fu))
@@ -6511,7 +6550,7 @@ if __name__ == "__main__":
         if _nab:
             _first = text.index("command.def ")   # kernels (and their gfx12 twins) before the programs that launch them
             _first = text.rfind("\n", 0, _first) + 1
-            text = text[:_first] + gen_gdn_ab.kernel(H, GDN["HV"]) + "\n" + text[_first:]
+            text = text[:_first] + "".join(gen_gdn_ab.kernel(H, GDN["HV"], _f) + "\n" for _f in sorted(gen_gdn_ab.USED)) + text[_first:]
         print("alpha/beta wmma layers:", _nab)
     if os.environ.get("POST_NORM_NOH_ALL", "0").strip().lower() not in ("", "0", "false", "no", "off"):   # choice prefill.fuse.post_norm_noh_all
         text, _nnoh = noh_dead_h(text)
@@ -6585,6 +6624,9 @@ if __name__ == "__main__":
             V, CHUNKS = _V, _CH
             _pk.append(f"// head pieces: {_prefix} rows={_rows} piece={_sizes[0]} n={len(_sizes)} fmt={_pfmt} suffix={_suf} on {_root}\n")
         text += "\n" + "".join(_pk)
+    if os.environ.get("GEMM_PRUNE", "0").strip().lower() not in ("", "0", "false", "no", "off"):   # choice prefill.gemm.prune
+        text, _pruned = prune_gemm(text)
+        print("pruned unlaunched GEMM kernels:", _pruned)
     out = os.path.join(out_dir, "model.loom")
     open(out, "w", newline="\n").write(text)
     print("wrote", out)

@@ -309,6 +309,15 @@ CHOICE("prefill.gemm.q4_0_native", "bool", False, "GEMM_Q4_0_NATIVE", kernels=["
        from_pr="gemma-qat-perf",
        doc="Dense Q4_0 GEMMs stage their 16-value half-block straight to F16 (moe_q4_0.dequant16: the values of @g_q4_0_values + "
            "fptrunc) and get the 128/256-row kernels; off: the shared value helper and the 64-row tile at every size (quant/q4_0 node).")
+CHOICE("prefill.gemm.iq4_native", "bool", False, "GEMM_IQ4_NATIVE", kernels=["g_gemm_iq4_xs_*", "g_gemm_iq4_nl_*", "g_gemm_*_*_swiglu_m256_f16o"],
+       rows=ROWS_PREFILL, from_pr="q38xl-port",
+       doc="Dense IQ4_XS / IQ4_NL GEMMs stage their 16-value half-group inline (gen_gemm.iq4_dequant16: the values of "
+           "@g_<fmt>_values + fptrunc, loads exposed) and get the 128/256-row kernels, and iq4_xs joins the mixed-format swiglu m256 "
+           "(prefill.gemm.m256_mixed); off: the shared value helper and the 64-row tile at every size (unsloth UD quants).")
+CHOICE("prefill.gemm.prune", "bool", False, "GEMM_PRUNE", kernels=["g_gemm_*"], rows=ROWS_PREFILL, from_pr="q38xl-port",
+       doc="Drop g_gemm_* kernel definitions nothing launches (and their gfx12 twins) from llm.loom: kernels a program rewrite "
+           "replaced (plain swiglu m256 under f16o). Keeps a library with many formats under hrx-loom's 16-bit encoding value ids "
+           "(dual_target.encodings_first).")
 CHOICE("prefill.gemm.n_fastest", "bool", True, "GEMM_N_FASTEST", derive=_n_fastest, from_pr="gemm_n_fastest",
        doc="Output-column tiles fastest. cfg gemm_n_fastest is the model's own value (Glimmer-30B +4/+7/+6 % at 2k/8k/32k; "
            "Flint -4 % at 8k).", **_PG)
