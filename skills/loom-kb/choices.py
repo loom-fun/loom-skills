@@ -279,6 +279,30 @@ CHOICE("prefill.gemm.m256_mixed", "bool", False, "GEMM_M256_MIXED_F16O", kernels
        doc="A layer whose ffn_gate and ffn_up differ in K-quant format (Q4_K_M: q4_k gate + q6_k up) runs, on whole 256-row "
        "epochs, one f16-output swiglu m256 kernel over both weights (gen_gemm.gemm_big256 fmt2) instead of two f32 GEMMs + "
        "g_silu_mul + the row scale of f.")
+CHOICE("prefill.gemm.m256_mixed_bal", "bool", False, "GEMM_M256_MIXED_BAL", kernels=["g_gemm_*_*_swiglu_m256_f16o"],
+       rows=ROWS_PREFILL, from_pr="q38pf-gemm2", devices=["rdna3"],
+       doc="gfx11 mixed-format swiglu m256 (prefill.gemm.m256_mixed): every thread stages 16 values of a gate row and 16 of the "
+       "matching up row, so all waves do the same q4_k + q6_k dequant (no wave-uniform branch, the barrier does not wait for the "
+       "q6_k waves) and each thread loads only what it dequantizes. The gfx12 twin keeps the branch form.")
+CHOICE("prefill.gemm.m256_a32", "bool", False, "GEMM_M256_A32", from_pr="q38pf-gemm2", devices=["rdna3"],
+       doc="gfx11 m256 GEMM weight addressing (gen_gemm.a32): the thread's row origin proven < 2^31 (32-bit offsets from the buffer's "
+       "scalar base instead of 64-bit per-load address arithmetic; every m256 weight tensor must be < 2 GiB), the dequant column split "
+       "into the uniform superblock and the thread's slice, and the swiglu gate/up buffer choice from the subgroup id. q6_k store loop "
+       "VALU 227 -> 175 per 64 WMMA, q8_0 94 -> 80, mixed 222 -> 177. The gfx12 twins keep the default addressing.", **_PG)
+CHOICE("prefill.gemm.m256_edq", "bool", False, "GEMM_M256_EDQ", from_pr="q38pf-gemm2", devices=["rdna3"],
+       doc="gfx11 m256 GEMM: the next step's weights dequantized right after this step's MMAs (before the overwrite barrier) and "
+       "carried as f16, so only the LDS stores sit between the overwrite and publication barriers (not the mixed branch form).", **_PG)
+CHOICE("prefill.gemm.m256_ws", "int", 0, "GEMM_M256_WS", from_pr="q38pf-gemm2", devices=["rdna3"],
+       doc="gfx11 q4_k m256 GEMM through a 2-slot 32-K LDS ring synchronised by LDS counters (gen_gemm_ws): 1 = 8 WMMA + 4 producer "
+       "waves (loses 11 %), 2 = every wave fills the next slot and reads the current one (loses 33 %).", **_PG)
+CHOICE("prefill.gemm.m256_ws_pd", "int", 1, "GEMM_M256_WS_PD", from_pr="q38pf-gemm2", devices=["rdna3"],
+       doc="producer load distance in slots of prefill.gemm.m256_ws=1 (1 or 2).", **_PG)
+CHOICE("prefill.gemm.m256_xg", "int", 0, "GEMM_M256_XG", from_pr="q38pf-gemm2", devices=["rdna3"],
+       doc="gfx11 m256 GEMM with A fragments read straight from global memory (gen_gemm_xg): 1 = 256-row tiles, 2 = 512-row "
+       "tiles (loses: latency-bound A loads).", **_PG)
+CHOICE("prefill.gemm.m256_xg_fmts", "str", "q4_k,q6_k,q8_0,q5_k", "GEMM_M256_XG_FMTS", from_pr="q38pf-gemm2", devices=["rdna3"], doc="formats prefill.gemm.m256_xg applies to.", **_PG)
+CHOICE("prefill.gemm.m256_xg_db", "bool", False, "GEMM_M256_XG_DB", from_pr="q38pf-gemm2", devices=["rdna3"],
+       doc="double-buffered weight stage of prefill.gemm.m256_xg (one barrier per step).", **_PG)
 CHOICE("prefill.gemm.m256_db", "bool", False, "GEMM_M256_DB", from_pr="q38pf-gemm", doc="m256 GEMM with double-buffered 32-K LDS stages (loses).", **_PG)
 CHOICE("prefill.gemm.m256_db_fence", "bool", True, "GEMM_M256_DB_FENCE", from_pr="q38pf-gemm", doc="fence after the barrier of prefill.gemm.m256_db.", **_PG)
 CHOICE("prefill.gemm.q4_0_native", "bool", False, "GEMM_Q4_0_NATIVE", kernels=["g_gemm_q4_0_*", "g_moe_*q4_0*"], rows=ROWS_PREFILL,
@@ -568,6 +592,7 @@ CHOICE("feature.logits_export", "bool", True, "LLM_LOGITS", kernels=["g_logits_e
 # ======================================================================================================================
 NOT("kbench experiment options of the gfx12 flash kernels (flash_r9700 suite; the shipped variants are choices)", "FLASH2_B2_OPTS", "FLASH2_G6_OPTS")
 NOT("timing-only ablations of the gfx11 chunked GDN kernel (kbench; wrong results)", "GDN_CHUNK11_ABL")
+NOT("timing-only ablations of the gfx11 wave-specialised m256 GEMM (kbench; wrong results)", "GEMM_M256_WS_ABL")
 NOT("input path or file selection (not a model-affecting knob)", "CATALOG", "LOOM_SKILLS", "LOOM_KB_ROOT", "LOOM_ROOT", "VENV", "HF", "HF_HOME",
     "HF_HUB_CACHE", "LD_LIBRARY_PATH", "LOOM_SERVE_STATE", "VISION_TEST_DIR", "FLASH2_OUT", "LLM_OUT")
 NOT("transport between a generator and its subprocesses (set by the caller from cfg / the build)", "LLM_CONFIG", "LLM_DRAFT",
