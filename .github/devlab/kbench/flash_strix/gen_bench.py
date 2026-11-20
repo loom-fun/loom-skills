@@ -22,6 +22,10 @@ CTXS = [("8k", 8192), ("32k", 32768)]
 VARIANTS = {   # name -> environment of gen_flash2s.py
     "lazy": {"FLASH2_G11": "lazy"}, "kvh": {"FLASH2_G11": "kvh"}, "vtf": {"FLASH2_G11": "vtf"}, "hot": {"FLASH2_G11": "hot"},
     "pf": {"FLASH2_G11": "pf"}, "kt16": {"FLASH2_KT256": "16"},
+    "db": {"FLASH2_KT256": "16", "FLASH2_G11": "db"},
+    "b2": {"FLASH2_DB_AT": "b2"},          # with db: stores after the S exchange barrier
+    "ng2": {"FLASH2_NG256": "2"}, "ng3": {"FLASH2_NG256": "3"},
+    "kv0": {"FLASH2_G11": "abl=nokld"},
     "trim": {"FLASH2_G11": "lazy,kvh,vtf,hot"},
     "nostv": {"FLASH2_G11": "abl=nostv"}, "nokld": {"FLASH2_G11": "abl=nokld"}, "nobar": {"FLASH2_G11": "abl=nobar"},
     "noqk": {"FLASH2_G11": "abl=noqk"}, "nopv": {"FLASH2_G11": "abl=nopv"}, "nosm": {"FLASH2_G11": "abl=nosm"},

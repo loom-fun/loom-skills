@@ -65,6 +65,9 @@ NG = (1 if WG3 else G // B_HEADS) if B_MODE == "2" else next(n for n in (1, 2, 4
 if D == 512 and os.environ.get("FLASH2_NG512"):   # experiment: query-head groups per KV head at head_dim 512 (more groups: fewer waves per workgroup, cheaper barriers)
     NG = int(os.environ["FLASH2_NG512"])
     assert G % NG == 0
+if D == 256 and B_MODE != "2" and os.environ.get("FLASH2_NG256"):   # experiment: query-head groups per KV head at head_dim 256 (fewer waves per workgroup)
+    NG = int(os.environ["FLASH2_NG256"])
+    assert G % NG == 0
 GW = G // NG                      # query heads per workgroup
 WAVES = WPH * GW
 if B_MODE == "2":   # two heads per wave: a workgroup is the four waves of a head pair
@@ -76,6 +79,8 @@ LANES = 32 * WAVES
 SEG_N = 16 if WAVES >= 16 else 8
 if KT == 16:
     SEG_N = 2 * SEG_N
+while KT * SEG_N > LANES and SEG_N > 8 and B_MODE != "2":   # FLASH2_NG256 groups: fewer lanes, wider segments
+    SEG_N //= 2
 SEG_W = D // SEG_N
 assert WPH == 2 or KB == 1, "head_dim 512: 16-key tiles"
 assert LANES >= KT * SEG_N or B_MODE == "2", "need at least 8 waves (head_dim * G >= 1024)"
@@ -596,6 +601,9 @@ if G11:
     if "pf" in G11:
         from flash2_prefetch import prefetch
         text = prefetch(text)
+    if "db" in G11:   # double-buffered K/V staging, one tile ahead (flash2_db.py; 16-key tiles)
+        from flash2_db import double_buffer
+        text = double_buffer(text, os.environ.get("FLASH2_DB_AT", "end"))
 if os.environ.get("FLASH2_PEEL", "1") == "1" and not EDGE_ZERO and B_MODE != "2":   # the masked path only in the last key tile (flash2_peel.py)
     from flash2_peel import peel_last_tile
     _hot = None
