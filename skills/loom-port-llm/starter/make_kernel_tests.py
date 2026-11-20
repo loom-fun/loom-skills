@@ -1871,6 +1871,14 @@ if os.environ.get("GEMM_TESTS", "1") == "1":
 }}
 """)
             cases.append(_case)
+            _acck = kern.replace("_store_m256", "_acc_m256")
+            if not swiglu and kern.endswith("_store_m256") and f'export("{_acck}")' in (_pkg_llm_text() or ""):
+                # gen_llm RESID_EPI: the 256-row accumulate kernel (y += x16 . W^T * inv: the residual add in the output GEMM's epilogue)
+                y0 = (rng.standard_normal((rows, n_use)) * 3).astype(np.float32)
+                save(tag + "_y0", y0); save(tag + "_ya", (y0.astype(np.float64) + yv).astype(np.float32))
+                cases.append(_case.replace(f"@{tag} {{", f"@{tag}_acc {{", 1).replace(f'path("{tag}_y.npy")', f'path("{tag}_ya.npy")', 1)
+                             .replace(f"  %y = check.generate.fill value(0.0) : tensor<{rows}x{n_use}xf32>", f'  %y = check.file.read.npy path("{tag}_y0.npy") : tensor<{rows}x{n_use}xf32>', 1)
+                             .replace(f"kernel.launch @{kern}[", f"kernel.launch @{_acck}[", 1))
             _f16o11 = swiglu and kern.endswith("_m256") and os.environ.get("GEMM_M256_F16O", "0").lower() not in ("", "0", "false", "no", "off")
             for _f16o_k in ([f"{kern}_f16o_rdna4"] if swiglu and _f16o_on(cfg) else []) + ([f"{kern}_f16o"] if _f16o11 else []):
                     # the gfx12 f16-output swiglu twin (f16o_fuse.py's group): f16 result, scales_out = (1, 1) per live row and (0, 0) per dead
@@ -3772,6 +3780,65 @@ if True:   # coverage: a case for every kernel the package launches
   kernel.launch @{_k}[%t](%t, %f, %u, %s, %h) : [index](index, tensor<3x{_n}xf32>, tensor<3x{_n}xf32>, tensor<3x2xf32>, tensor<3x{_n}xf16>)
   check.expect.close actual(%s) expected(%es) atol(0.0) rtol(0.0) nan(different) : tensor<3x2xf32>
   check.expect.close actual(%h) expected(%eh) atol(1.0e-3) rtol(2.0e-3) nan(different) : tensor<3x{_n}xf16>
+  check.return
+}}
+""")
+    for _an in ("g_add_norm_rs_live_lv", "g_add_norm_rs_live_noh_lv"):
+        # g_add_norm_rs_live[_noh]_lv (gen_llm RESID_EPI): the norm of a residual row the output GEMM already accumulated: reads x only (the y
+        # operand is unused), leaves x as it is; h16 + scales (+ f32 h unless _noh) as g_post_add_norm_rs_live_lv; a padding row only gets scale 0
+        if f'export("{_an}")' not in (_pkg_llm_text() or ""):
+            continue
+        _hck = "" if "_noh" in _an else f"  check.expect.close actual(%h) expected(%eh) atol(1.0e-2) rtol(1.0e-4) nan(different) : tensor<3x{H}xf32>\n"
+        cases.append(f"""check.case public @{_an[2:]} {{
+  %rows = check.literal value(3) : index
+  %info = check.file.read.npy path("pa_info{KS}.npy") : tensor<3x4xi32>
+  %y = check.file.read.npy path("pa_y{KS}.npy") : tensor<3x{H}xf32>
+  %x = check.file.read.npy path("pa_xe{KS}.npy") : tensor<3x{H}xf32>
+  %wp = check.file.read.npy path("pa_wp{KS}.npy") : tensor<{H}xf32>
+  %wn = check.file.read.npy path("pa_wn{KS}.npy") : tensor<{H}xf32>
+  %ex = check.file.read.npy path("pa_xe{KS}.npy") : tensor<3x{H}xf32>
+  %eh = check.file.read.npy path("pa_he_lv{KS}.npy") : tensor<3x{H}xf32>
+  %es = check.file.read.npy path("pa_s_live_lv{KS}.npy") : tensor<3x2xf32>
+  %eh16 = check.file.read.npy path("pa_h16_live_lv{KS}.npy") : tensor<3x{H}xf16>
+  %h = check.generate.fill value(0.0) : tensor<3x{H}xf32>
+  %s = check.generate.fill value(7.0) : tensor<3x2xf32>
+  %h16 = check.generate.fill value(0.0) : tensor<3x{H}xf16>
+  kernel.launch @{_an}[%rows](%rows, %info, %y, %wp, %x, %wn, %h, %s, %h16) : [index](index, tensor<3x4xi32>, tensor<3x{H}xf32>, tensor<{H}xf32>, tensor<3x{H}xf32>, tensor<{H}xf32>, tensor<3x{H}xf32>, tensor<3x2xf32>, tensor<3x{H}xf16>)
+  check.expect.close actual(%x) expected(%ex) atol(0.0) rtol(0.0) nan(different) : tensor<3x{H}xf32>
+{_hck}  check.expect.close actual(%s) expected(%es) atol(0.0) rtol(0.0) nan(different) : tensor<3x2xf32>
+  check.expect.close actual(%h16) expected(%eh16) atol(1.0e-3) rtol(1.0e-3) nan(different) : tensor<3x{H}xf16>
+  check.return
+}}
+""")
+    if 'export("g_gemm_ab_f32w")' in (_pkg_llm_text() or ""):   # launched through a dual-target template (pkg_launched does not see those)
+        # g_gemm_ab_f32w (gen_gdn_ab, GDN_AB_WMMA): the GDN alpha / beta projections of a GEMM epoch as one WMMA GEMM over the f16 norm row + its
+        # row scales (%h16, %s_h), F32 weights rounded to F16 while staging; a dead row (scale 0) gives zeros. Real layer weights, 128 rows (2 tiles).
+        from gen_gdn import gdn_geometry as _gg
+        _HV = _gg(cfg)["HV"]; _li = cfg["recurrent_layers"][0]; _R = 128
+        _wa, _wb = (deq(f"blk.{_li}.ssm_{n}.weight").astype(np.float32).reshape(_HV, H) for n in ("alpha", "beta"))
+        _h = (_brng.standard_normal((_R, H)) * np.exp(_brng.uniform(-3, 3, (_R, 1)))).astype(np.float32)
+        _e = np.clip(np.frexp(np.abs(_h).max(1))[1] - 1 - 13, 0, 100); _e[5] = 0
+        _sc = np.stack([2.0 ** -_e, 2.0 ** _e], 1).astype(np.float32); _sc[5] = 0
+        _h16 = (_h * _sc[:, :1]).astype(np.float16)
+        _xr = _h16.astype(np.float64) * _sc[:, 1:]
+        for _nm, _a in [("gab_h16", _h16), ("gab_s", _sc), ("gab_wa", raw(f"blk.{_li}.ssm_alpha.weight")), ("gab_wb", raw(f"blk.{_li}.ssm_beta.weight")),
+                        ("gab_ea", (_xr @ _wa.astype(np.float16).astype(np.float64).T).astype(np.float32)),
+                        ("gab_eb", (_xr @ _wb.astype(np.float16).astype(np.float64).T).astype(np.float32))]:
+            save(_nm, _a)
+        _wt = f"tensor<{_HV * H * 4}xi8>"
+        cases.append(f"""check.case public @gemm_ab_f32w {{
+  %rows = check.literal value({_R}) : index
+  %x = check.file.read.npy path("gab_h16{KS}.npy") : tensor<{_R}x{H}xf16>
+  %s = check.file.read.npy path("gab_s{KS}.npy") : tensor<{_R}x2xf32>
+  %wa = check.file.read.npy path("gab_wa{KS}.npy") : {_wt}
+  %wb = check.file.read.npy path("gab_wb{KS}.npy") : {_wt}
+  %ea = check.file.read.npy path("gab_ea{KS}.npy") : tensor<{_R}x{_HV}xf32>
+  %eb = check.file.read.npy path("gab_eb{KS}.npy") : tensor<{_R}x{_HV}xf32>
+  %ya = check.generate.fill value(7.0) : tensor<{_R}x{_HV}xf32>
+  %yb = check.generate.fill value(7.0) : tensor<{_R}x{_HV}xf32>
+  kernel.launch @g_gemm_ab_f32w[%rows](%rows, %x, %s, %wa, %wb, %ya, %yb) : [index](index, tensor<{_R}x{H}xf16>, tensor<{_R}x2xf32>, {_wt}, {_wt}, tensor<{_R}x{_HV}xf32>, tensor<{_R}x{_HV}xf32>)
+  check.expect.close actual(%ya) expected(%ea) atol(1.0e-4) rtol(1.0e-3) nan(different) : tensor<{_R}x{_HV}xf32>
+  check.expect.close actual(%yb) expected(%eb) atol(1.0e-4) rtol(1.0e-3) nan(different) : tensor<{_R}x{_HV}xf32>
   check.return
 }}
 """)
