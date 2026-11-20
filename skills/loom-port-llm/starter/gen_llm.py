@@ -15,7 +15,7 @@
 import json, math, os, subprocess, sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from gen_gdn import gdn_geometry, gdn_kernels, recurrence_pf, split_qgate, chunk_mode, fused_mode  # noqa: E402
+from gen_gdn import gdn_geometry, gdn_kernels, recurrence_pf, split_qgate, chunk_mode, chunk11_mode, fused_mode  # noqa: E402
 from formats import SPLIT, SCALE_DIV  # noqa: E402
 from attention_masks import full_blocks  # noqa: E402
 
@@ -4937,6 +4937,8 @@ def gdn_layer(i, b, nm, sz, par):
         # every span runs in exactly one of the two kernels (by its own length), so the pf kernel is only needed when
         # the epoch can hold a long span
         REC = REC + "\n  scf.if %gemm {\n  " + REC.replace("@g_gdn_recurrence[", "@g_gdn_recurrence_pf[") + "\n  }"
+    elif chunk11_mode(g) == "group":   # gfx11 chunked kernel g_gdn_chunk (and its gfx12 twin g_gdn_chunk_rdna4) takes the spans of 64+ tokens
+        REC = REC + "\n  scf.if %gemm {\n  " + REC.strip().replace("@g_gdn_recurrence[", "@g_gdn_chunk[") + "\n  }"
     elif chunk_mode(g) == "group":   # gfx12: spans of 64+ tokens run the chunked kernel (a gfx11 build launches nothing here: its kernel takes every span)
         REC = REC + "\n  scf.if %gemm {\n  // dual-group: rdna4 " + REC.strip().replace("@g_gdn_recurrence[", "@g_gdn_chunk_rdna4[") + "\n  // dual-group: end\n  }"
     FRONT = f"""  kernel.launch @g_gdn_conv[%t](%t, %spans, %layer_{i}, %metadata, %info, %origins, %arena, %gq, %conv_{i}, %gs) : [index](index, index, index, buffer, buffer, buffer, buffer, buffer, view<{C * K}xf32>, buffer)

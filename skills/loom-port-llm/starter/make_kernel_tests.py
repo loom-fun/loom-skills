@@ -1072,8 +1072,9 @@ if cfg.get("recurrent_layers"):
 # 4b. g_gdn_recurrence alone on one launch of two spans: a fresh 37-token span (position 0) and a 5-token span that
 # continues its reader slot, plus a 70-token span that runs in the prefill-form kernel (odd lengths: partial output batches; each span's own reader/writer slots).
 if cfg.get("recurrent_layers"):
-    from gen_gdn import chunk_mode as _cm
-    _chunk = bool(_cm(gdn_geometry(cfg)))   # gfx12 chunked prefill kernel: spans of 64+ tokens are its (case gdn_chunk_spans), so this case keeps every span under 64
+    from gen_gdn import chunk_mode as _cm, chunk11_mode as _cm11
+    _c11 = _cm11(gdn_geometry(cfg))
+    _chunk = bool(_cm(gdn_geometry(cfg))) or bool(_c11)   # chunked prefill kernel: spans of 64+ tokens are its (case gdn_chunk_spans), so this case keeps every span under 64
     spans_ = [(37, 0, False), (63 if _chunk else 70, 0, False), (5, 10, True)]; t = sum(L for L, _, _ in spans_); ns = len(spans_)
     x = rng.standard_normal((t, C)).astype(np.float32)
     qs, ks, vs = x[:, :HK * DK].reshape(t, HK, DK), x[:, HK * DK:2 * HK * DK].reshape(t, HK, DK), x[:, 2 * HK * DK:].reshape(t, HV, DV)
@@ -1360,13 +1361,14 @@ if cfg.get("recurrent_layers") and cfg.get("draft") and _defer_on(gdn_geometry(c
 # 4c. g_gdn_chunk_rdna4 (gfx12 chunked prefill, gen_gdn_chunk.py) alone on three spans of 64+ tokens: a fresh 130-token span (two full chunks and a
 # 2-token tail), a 64-token span that continues a stored state (one full chunk) and a fresh 97-token span; f16 WMMA products with f32 state, so the
 # tolerances are those of f16 operands (about 1e-3 of the largest value), not of the f32 sequential kernel.
-if cfg.get("recurrent_layers") and _chunk:
-    spans_ = [(130, 0, False), (64, 10, True), (97, 0, False)]; t = sum(L for L, _, _ in spans_); ns = len(spans_)
-    x = rng.standard_normal((t, C)).astype(np.float32)
+def _chunk_case(cname, pre, spans_, kerns, seed=None):
+    rng_ = rng if seed is None else np.random.default_rng(seed)
+    t = sum(L for L, _, _ in spans_); ns = len(spans_)
+    x = rng_.standard_normal((t, C)).astype(np.float32)
     qs, ks, vs = x[:, :HK * DK].reshape(t, HK, DK), x[:, HK * DK:2 * HK * DK].reshape(t, HK, DK), x[:, 2 * HK * DK:].reshape(t, HV, DV)
     qinv = 1 / np.sqrt((qs.astype(np.float64) ** 2).sum(-1) + eps); kinv = 1 / np.sqrt((ks.astype(np.float64) ** 2).sum(-1) + eps)
     inv = np.stack([qinv, kinv], -1).reshape(t, 2 * HK).astype(np.float32)
-    alpha = rng.standard_normal((t, HV)).astype(np.float32); beta = rng.standard_normal((t, HV)).astype(np.float32)
+    alpha = rng_.standard_normal((t, HV)).astype(np.float32); beta = rng_.standard_normal((t, HV)).astype(np.float32)
     arena = np.zeros(2 * ns * LB // 4, np.float32); meta = np.zeros(4 + 9 * ns, np.int32); meta[0] = ns
     origins = np.zeros((ns, 5), np.int64); raw_o = np.zeros((t, HV, DV)); first = 0; finals = []
     for si, (L, p0, cont) in enumerate(spans_):
@@ -1374,7 +1376,7 @@ if cfg.get("recurrent_layers") and _chunk:
         origins[si] = [rd, wr, 0, p0, 0]; meta[4 + 9 * si:4 + 9 * si + 5] = [L, p0, 0, si, first]
         S = np.zeros((HV, DV, DK))
         if cont:
-            S0 = (0.3 * rng.standard_normal((HV, DV, DK))).astype(np.float32)
+            S0 = (0.3 * rng_.standard_normal((HV, DV, DK))).astype(np.float32)
             arena[rd // 4:rd // 4 + SB // 4] = S0.reshape(-1); S = S0.astype(np.float64)
         for i in range(first, first + L):
             for h in range(HV):
@@ -1386,33 +1388,41 @@ if cfg.get("recurrent_layers") and _chunk:
     expect = arena.copy()
     for wr, S in finals:
         expect[wr // 4:wr // 4 + SB // 4] = S.astype(np.float32).reshape(-1)
-    for n, a in [("gc_meta", meta), ("gc_orig", origins.reshape(-1).view(np.int32)), ("gc_arena", arena), ("gc_expect", expect),
-                 ("gc_x", x), ("gc_inv", inv), ("gc_alpha", alpha), ("gc_beta", beta), ("gc_raw", raw_o.reshape(t, VD).astype(np.float32))]:
+    for n, a in [(f"{pre}_meta", meta), (f"{pre}_orig", origins.reshape(-1).view(np.int32)), (f"{pre}_arena", arena), (f"{pre}_expect", expect),
+                 (f"{pre}_x", x), (f"{pre}_inv", inv), (f"{pre}_alpha", alpha), (f"{pre}_beta", beta), (f"{pre}_raw", raw_o.reshape(t, VD).astype(np.float32))]:
         save(n, a)
     AT = f"tensor<{2 * ns * LB // 4}xf32>"; MT = f"tensor<{4 + 9 * ns}xi32>"; OT = f"tensor<{10 * ns}xi32>"
     _scale = float(np.abs(raw_o).max()); _sscale = float(max(np.abs(S).max() for _, S in finals))
-    cases.append(f"""check.case public @gdn_chunk_spans {{
+    cases.append(f"""check.case public @{cname} {{
   %t = check.literal value({t}) : index
   %spans = check.literal value({ns}) : index
   %layer = check.literal value(0) : index
-  %meta = check.file.read.npy path("gc_meta.npy") : {MT}
-  %orig = check.file.read.npy path("gc_orig.npy") : {OT}
-  %arena = check.file.read.npy path("gc_arena.npy") : {AT}
-  %expect = check.file.read.npy path("gc_expect.npy") : {AT}
-  %x = check.file.read.npy path("gc_x.npy") : tensor<{t}x{C}xf32>
-  %inv = check.file.read.npy path("gc_inv.npy") : tensor<{t}x{2 * HK}xf32>
-  %alpha = check.file.read.npy path("gc_alpha.npy") : tensor<{t}x{HV}xf32>
-  %beta = check.file.read.npy path("gc_beta.npy") : tensor<{t}x{HV}xf32>
+  %meta = check.file.read.npy path(f"{pre}_meta.npy") : {MT}
+  %orig = check.file.read.npy path(f"{pre}_orig.npy") : {OT}
+  %arena = check.file.read.npy path(f"{pre}_arena.npy") : {AT}
+  %expect = check.file.read.npy path(f"{pre}_expect.npy") : {AT}
+  %x = check.file.read.npy path(f"{pre}_x.npy") : tensor<{t}x{C}xf32>
+  %inv = check.file.read.npy path(f"{pre}_inv.npy") : tensor<{t}x{2 * HK}xf32>
+  %alpha = check.file.read.npy path(f"{pre}_alpha.npy") : tensor<{t}x{HV}xf32>
+  %beta = check.file.read.npy path(f"{pre}_beta.npy") : tensor<{t}x{HV}xf32>
   %a = check.file.read.npy path("g_a.npy") : tensor<{HV}xf32>
   %dt = check.file.read.npy path("g_dt.npy") : tensor<{HV}xf32>
-  %eraw = check.file.read.npy path("gc_raw.npy") : tensor<{t}x{VD}xf32>
+  %eraw = check.file.read.npy path(f"{pre}_raw.npy") : tensor<{t}x{VD}xf32>
   %raw = check.generate.fill value(0.0) : tensor<{t}x{VD}xf32>
-  kernel.launch @g_gdn_chunk_rdna4[%spans](%t, %spans, %layer, %meta, %orig, %arena, %x, %inv, %alpha, %beta, %a, %dt, %raw) : [index](index, index, index, {MT}, {OT}, {AT}, tensor<{t}x{C}xf32>, tensor<{t}x{2 * HK}xf32>, tensor<{t}x{HV}xf32>, tensor<{t}x{HV}xf32>, tensor<{HV}xf32>, tensor<{HV}xf32>, tensor<{t}x{VD}xf32>)
-  check.expect.close actual(%raw) expected(%eraw) atol({3e-3 * _scale:.3e}) rtol(1.0e-2) nan(different) : tensor<{t}x{VD}xf32>
+{"".join(f"  kernel.launch @{k}[%spans](%t, %spans, %layer, %meta, %orig, %arena, %x, %inv, %alpha, %beta, %a, %dt, %raw) : [index](index, index, index, {MT}, {OT}, {AT}, tensor<{t}x{C}xf32>, tensor<{t}x{2 * HK}xf32>, tensor<{t}x{HV}xf32>, tensor<{t}x{HV}xf32>, tensor<{HV}xf32>, tensor<{HV}xf32>, tensor<{t}x{VD}xf32>){chr(10)}" for k in kerns)}  check.expect.close actual(%raw) expected(%eraw) atol({3e-3 * _scale:.3e}) rtol(1.0e-2) nan(different) : tensor<{t}x{VD}xf32>
   check.expect.close actual(%arena) expected(%expect) atol({3e-3 * _sscale:.3e}) rtol(1.0e-2) nan(different) : {AT}
   check.return
 }}
 """)
+if cfg.get("recurrent_layers") and _chunk:
+    # the launch of the long spans: gfx11 g_gdn_chunk (its gfx12 twin g_gdn_chunk_rdna4 on gfx12), the pf kernel in "pf" mode, else the gfx12 kernel
+    _ck = {"group": "g_gdn_chunk", "pf": "g_gdn_recurrence_pf"}.get(_c11, "g_gdn_chunk_rdna4")
+    _chunk_case("gdn_chunk_spans", "gc", [(130, 0, False), (64, 10, True), (97, 0, False)], [_ck])
+    if _c11:
+        # gdn_chunk_mixed: the serving shape of a prompt epoch beside decode/verify spans: both kernels of the split launched on one packet,
+        # each span (fresh 130, continuing 5, continuing 64, continuing 1, fresh 97, continuing 63) must be run by exactly one of them
+        _chunk_case("gdn_chunk_mixed", "gm", [(130, 0, False), (5, 10, True), (64, 10, True), (1, 7, True), (97, 0, False), (63, 3, True)],
+                    ["g_gdn_recurrence", _ck], seed=51)
 # 4d. g_gdn_fa_rdna4 + g_gdn_fb_rdna4 (gfx12 fused prefill, gen_gdn_fused.py) against float64 (conv, norms, recurrence, norm-gate of the whole
 # chain; f16-operand tolerances as gdn_chunk_spans). gdn_fused_spans: four prompt spans packed back to back (fresh 130, continuing 64, fresh 97,
 # continuing 2: the history commit shifts the stored rows). gdn_fused_serve: the serving shape of a mixed epoch: 8 span packets of which 6 are

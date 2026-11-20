@@ -517,10 +517,22 @@ kernel.def export("g_gdn_recurrence") @g_gdn_recurrence(%spans: index) {{
         # Each span runs in exactly one of the two kernels, chosen by its own length, so its numerics never depend on
         # what else shares the epoch.
         PF = (8, 4)
-        T[-1] = _recurrence_rows(G, NG, LB, *RL, guard_open, guard_close, "short" if recurrence_pf(G) else None)
+        c11 = chunk11_mode(G)
+        T[-1] = _recurrence_rows(G, NG, LB, *RL, guard_open, guard_close, "short" if recurrence_pf(G) or c11 else None)
         if recurrence_pf(G):
             pf = _recurrence_rows(G, NG, LB, *PF, guard_open, guard_close, "long")
+            if c11:   # gfx11 chunked prefill (gen_gdn_chunk.py, arch rdna3) in the pf kernel's place; gfx12 keeps its twin
+                from gen_gdn_chunk import chunk_kernel
+                if rdna4_twins() and not chunk_mode(G):
+                    T.append(_as_rdna4(pf.replace("g_gdn_recurrence", "g_gdn_recurrence_pf"), "g_gdn_recurrence_pf"))
+                pf = chunk_kernel(G, NG, LB, guard_open, guard_close, arch="rdna3").replace("g_gdn_chunk", "g_gdn_recurrence")
             T.append(pf.replace("g_gdn_recurrence", "g_gdn_recurrence_pf"))
+        elif c11:   # single-form models: g_gdn_recurrence takes spans under PF_SPAN, g_gdn_chunk (launched in GEMM epochs) the rest
+            from gen_gdn_chunk import chunk_kernel
+            T.append(chunk_kernel(G, NG, LB, guard_open, guard_close, arch="rdna3"))
+            if rdna4_twins() and not chunk_mode(G):   # gfx12 twin of g_gdn_chunk: the sequential kernel of the long spans
+                T.append(_as_rdna4(_recurrence_rows(G, NG, LB, *RL, guard_open, guard_close, "long").replace("g_gdn_recurrence", "g_gdn_chunk"),
+                                   "g_gdn_chunk"))
     # ---- gated RMSNorm per value head: out = rmsnorm(o) * w * silu(z); padding tokens get zeros. One wave per head,
     # HPW heads per workgroup: 32-lane workgroups (tokens x HV of them) made this tiny kernel cost as much as the
     # recurrence at prefill (Qwen3.5-35B-A3B, 1k tokens: 32k workgroups per layer).
@@ -586,7 +598,7 @@ kernel.def export("g_gdn_norm_gate") @g_gdn_norm_gate(%tokens: index) {{
         text = _prefetch_recurrence(text, RK)
     fold = spec and fold_enabled(G)
     if fold:   # GDN_FOLD: the verification variants and the fold launches (draft/gen_draft.verify_program)
-        main_class = "short" if recurrence_pf(G) else None
+        main_class = "short" if recurrence_pf(G) or chunk11_mode(G) else None
         text += "\n" + FOLD_RANK + "\n" + _conv_bank(text, G, CU) + "\n" + _recurrence_rows(G, NG, LB, *RL, guard_open, guard_close, main_class, record=True)
         text += "\n" + fold_kernels(G, NG, LB)
         if defer_enabled(G):
@@ -610,6 +622,29 @@ kernel.def export("g_gdn_norm_gate") @g_gdn_norm_gate(%tokens: index) {{
         from gen_gdn_fused import fused_kernels
         text = text + "\n" + fused_kernels(G, NG, LB, eps, _V_GROUPED[0], _V_GROUPED[1], guard_open, guard_close)
     return text
+
+
+def rdna4_twins():
+    return os.environ.get("LOOM_RDNA4", "1") not in ("", "0", "false", "no")
+
+
+def _as_rdna4(text, name):
+    """The gfx12 twin of kernel `name` (same text, export name_rdna4, target(@rdna4))."""
+    out = text.replace(f'kernel.def export("{name}") @{name}(', f'kernel.def target(@rdna4) export("{name}_rdna4") @{name}_rdna4(', 1)
+    assert out != text, name
+    return out
+
+
+def chunk11_mode(G):
+    """The gfx11 chunked prefill kernel (gen_gdn_chunk.py arch rdna3, choice hybrid.gdn.chunk11, env GDN_CHUNK11): None (off, or head dims
+    other than 128 x 128), "pf" (it replaces g_gdn_recurrence_pf, the long-span kernel) or "group" (single-form models: g_gdn_recurrence
+    keeps the spans under PF_SPAN, g_gdn_chunk launched in GEMM epochs the rest). On gfx12 the chunk twin is g_gdn_chunk_rdna4 (GDN_CHUNK)
+    or the sequential kernel restricted to the long spans, so gfx12 numerics do not change with this switch."""
+    if os.environ.get("GDN_CHUNK11", "") in ("", "0", "off", "no", "false"):
+        return None
+    if G["DK"] != 128 or G["DV"] != 128 or G["HV"] % G["HK"] or not _row_lanes(G["DK"], G["DV"]):
+        return None
+    return "pf" if recurrence_pf(G) else "group"
 
 
 def fused_mode(G):

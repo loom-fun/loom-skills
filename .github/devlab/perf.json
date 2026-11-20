@@ -1,27 +1,32 @@
 {
- "_comment": "q38-27b Strix Halo prefill campaign, round 0: HAL per-kernel profile of the published card (pf2k, pf8k) and of a rebuild from this branch, plus one prefill perf each.",
+ "_comment": "q38pf lane gdn, round 1: gfx11 chunked WY GDN prefill (GDN_CHUNK11) vs the base rebuild, ABBA short + long, kernel tests, smoke, pf8k profile.",
  "runner": "strix",
  "memory_bytes": 52000000000,
  "llama_spec": "matched",
  "jobs": [
   {
-   "name": "q38pf-r0-profile",
+   "name": "q38pf-gdn-r1",
    "runner": "strix",
    "card": "loom-fun/bartowski-Qwen3.8-27B-loom",
    "memory_bytes": 52000000000,
    "kit": null,
    "llamacpp": "b1374",
    "variants": [
-    {"name": "card"},
-    {"name": "base", "build": {}}
+    {"name": "base", "build": {}, "ref": "550fc117fa1cb45bef8ab2fbdb8fcde9d2e362aa"},
+    {"name": "new", "build": {"GDN_CHUNK11": "1"}}
    ],
    "steps": [
-    "profile:card:pf2k,pf8k",
-    "profile:base:pf2k,pf8k",
-    "perf:card:1:long",
+    "ktest:new",
+    "smoke:new",
+    "perf:base:1",
+    "perf:new:1",
+    "perf:new:1",
+    "perf:base:1",
     "perf:base:1:long",
+    "perf:new:1:long",
+    "perf:new:1:long",
     "perf:base:1:long",
-    "perf:card:1:long"
+    "profile:new:pf8k"
    ]
   }
  ]

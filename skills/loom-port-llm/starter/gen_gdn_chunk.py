@@ -27,11 +27,17 @@ NT = CN // 16
 SPAN_MIN = 64   # spans of at least this many tokens (the GEMM epoch shape) run the chunked kernel; shorter ones the sequential twin
 
 
-def chunk_kernel(G, NG, LB, guard_open="", guard_close="", target=True, dep=2):
+def chunk_kernel(G, NG, LB, guard_open="", guard_close="", target=True, dep=2, arch="rdna4"):
+    """arch "rdna4": g_gdn_chunk_rdna4 (gfx12 WMMA layouts). arch "rdna3": g_gdn_chunk, the gfx11 form of the same dataflow (RDNA3 WMMA:
+    vector<16xf16> operands holding all 16 k in each lane half, f32 results holding rows 2 i + lane / 16 of column lane % 16): the result ->
+    rhs conversions (the state copy, R, d) exchange the other row parity with the partner lane (xor 16; f16 pairs packed in i32) and
+    interleave; the per-row scalars and rows of a result fragment are gathered with stride 2."""
+    R3 = arch == "rdna3"
+    FH = "vector<16xf16>" if R3 else "vector<8xf16>"
     from gen_gdn import kh_line, _V_GROUPED
     chk_def = "" if _V_GROUPED[0] else f"%chk = index.constant {G['HK']} : index\n  "   # kh_line's tiled form reads %chk; the grouped form needs none
     HK, HV, DK, DV, C, VD = G["HK"], G["HV"], G["DK"], G["DV"], G["C"], G["VD"]
-    assert DK == 128 and DV == 128 and HV % HK == 0, "g_gdn_chunk_rdna4 is built for 128 x 128 heads (8 waves x 16 value columns)"
+    assert DK == 128 and DV == 128 and HV % HK == 0, "g_gdn_chunk(_rdna4) is built for 128 x 128 heads (8 waves x 16 value columns)"
     NS = HV * DV * DK
     consts = set()
 
@@ -46,6 +52,38 @@ def chunk_kernel(G, NG, LB, guard_open="", guard_close="", target=True, dep=2):
 
     def bar():
         P("    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)")
+
+    def to_rhs(n, src, h4, ind="    "):
+        """%n = the rhs fragment (f16) of the f32 result fragment src (rows of the result = k of the rhs); h4: the gfx12 f16 copy's name."""
+        if not R3:
+            P(f"{ind}%{h4} = vector.fptrunc {src} : {vec8} to vector<8xf16>")
+            P(f"{ind}%{n} = vector.fragment<rhs> %{h4} {SH} : vector<8xf16>")
+            return
+        P(f"{ind}%{n}_h = vector.fptrunc {src} : {vec8} to vector<8xf16>")
+        # gfx11: this lane holds rows 2 i + half; the partner lane (xor 16) the other parity. Exchange f16 pairs as i32, interleave.
+        P(f"{ind}%{n}_w = vector.bitcast %{n}_h : vector<8xf16> to vector<4xi32>")
+        for j in range(4):
+            P(f"{ind}%{n}_e{j} = vector.extract %{n}_w[{j}] : vector<4xi32> -> i32")
+            P(f"{ind}%{n}_o{j}, %{n}_u{j} = kernel.subgroup.shuffle<xor> %{n}_e{j}, %exchange, %width : i32, i32, i32")
+        P(f"{ind}%{n}_pw = vector.from_elements {', '.join(f'%{n}_o{j}' for j in range(4))} : vector<4xi32>")
+        P(f"{ind}%{n}_ph = vector.bitcast %{n}_pw : vector<4xi32> to vector<8xf16>")
+        P(f"{ind}%{n}_ev = scf.select %hi_half, %{n}_ph, %{n}_h : vector<8xf16>")
+        P(f"{ind}%{n}_od = scf.select %hi_half, %{n}_h, %{n}_ph : vector<8xf16>")
+        P(f"{ind}%{n}_f = vector.interleave<0> %{n}_ev, %{n}_od : vector<8xf16>, vector<8xf16> -> vector<16xf16>")
+        P(f"{ind}%{n} = vector.fragment<rhs> %{n}_f {SH} : vector<16xf16>")
+
+    def rows8(n, view, base, ind="    "):
+        """%n = vector<8xf32> of the CN-entry LDS vector `view` at the 8 result rows from `base` (gfx12: base + i; gfx11: base + 2 i)."""
+        if not R3:
+            P(f"{ind}%{n} = vector.load {view}[{base}] : view<{CN}xf32> -> {vec8}")
+            return
+        for e in range(8):
+            P(f"{ind}%{n}_a{e} = index.add {base}, {ci(2 * e)} : index")
+            P(f"{ind}%{n}_{e} = view.load {view}[%{n}_a{e}] : view<{CN}xf32> -> f32")
+        P(f"{ind}%{n} = vector.from_elements {', '.join(f'%{n}_{e}' for e in range(8))} : {vec8}")
+
+    RS = 2 if R3 else 1                       # row step of a result fragment's elements
+    LH = "%lane_half" if R3 else "%lane_h8"   # this lane's first result row
 
     # ------------------------------------------------------------------------------------------------------------------
     P(f"    %c0tok = index.mul %ci, {ci(CN)} : index")
@@ -116,29 +154,28 @@ def chunk_kernel(G, NG, LB, guard_open="", guard_close="", target=True, dep=2):
     bar()
     # ---- P2: S as rhs fragments; K S and Q S; this wave's tile of K K^T (waves 0-3) or Q K^T (waves 4-7)
     for kb in range(8):
-        P(f"    %sh{kb} = vector.fptrunc %s{kb} : {vec8} to vector<8xf16>")
-        P(f"    %sf{kb} = vector.fragment<rhs> %sh{kb} {SH} : vector<8xf16>")
+        to_rhs(f"sf{kb}", f"%s{kb}", f"sh{kb}")
     for nmx, vw, sz in (("zk", "%kh_view", KHS), ("zq", "%q_view", QAS)):
         for mt in range(NT):
             prev = "%init"
             for kb in range(8):
-                P(f"    %{nmx}l{mt}_{kb} = vector.fragment.load<lhs> {vw}[{ci(16 * mt)}, {ci(16 * kb)}] {SH} : view<{CN}x{sz}xf16> -> vector<8xf16>")
-                P(f"    %{nmx}{mt}_{kb} = vector.mma %{nmx}l{mt}_{kb}, %sf{kb}, {prev} : vector<8xf16>, vector<8xf16>, {vec8}")
+                P(f"    %{nmx}l{mt}_{kb} = vector.fragment.load<lhs> {vw}[{ci(16 * mt)}, {ci(16 * kb)}] {SH} : view<{CN}x{sz}xf16> -> {FH}")
+                P(f"    %{nmx}{mt}_{kb} = vector.mma %{nmx}l{mt}_{kb}, %sf{kb}, {prev} : {FH}, {FH}, {vec8}")
                 prev = f"%{nmx}{mt}_{kb}"
     P(f"    %tq = index.rem %wave, {ci(NT * NT)} : index")
     P(f"    %tmt = index.div %tq, {ci(NT)} : index")
     P(f"    %tnt = index.rem %tq, {ci(NT)} : index")
     P(f"    %tr = index.mul %tmt, %k16 : index")
     P(f"    %tc = index.mul %tnt, %k16 : index")
-    P(f"    %rb_v = index.add %tr, %lane_h8 : index")
-    P(f"    %rb = index.assume %rb_v [range(%rb_v, 0, {CN - 8})] : index")
+    P(f"    %rb_v = index.add %tr, {LH} : index")
+    P(f"    %rb = index.assume %rb_v [range(%rb_v, 0, {CN - 16 + (1 if R3 else 8)})] : index")
     P(f"    %cj_v = index.add %tc, %lane_row : index")
     P(f"    %cj = index.assume %cj_v [range(%cj_v, 0, {CN - 1})] : index")
     P(f"    %rb_i = index.cast %rb : index to i32")
     P(f"    %cj_i = index.cast %cj : index to i32")
-    P(f"    %rows = vector.iota %rb_i step %one_i32 : vector<8xi32>")
+    P(f"    %rows = vector.iota %rb_i step {'%two_i32' if R3 else '%one_i32'} : vector<8xi32>")
     P(f"    %colv = vector.splat %cj_i : vector<8xi32>")
-    P(f"    %gci = vector.load %gc_s[%rb] : view<{CN}xf32> -> {vec8}")
+    rows8("gci", "%gc_s", "%rb")
     P(f"    %gcj_s = view.load %gc_s[%cj] : view<{CN}xf32> -> f32")
     P(f"    %gcj = vector.splat %gcj_s : {vec8}")
     P(f"    %dg = vector.subf %gci, %gcj : {vec8}")
@@ -147,11 +184,11 @@ def chunk_kernel(G, NG, LB, guard_open="", guard_close="", target=True, dep=2):
     P(f"    scf.if %is_kk {{")
     prev = "%init"
     for kb in range(8):
-        P(f"      %kkl{kb} = vector.fragment.load<lhs> %kh_view[%tr, {ci(16 * kb)}] {SH} : view<{CN}x{KHS}xf16> -> vector<8xf16>")
-        P(f"      %kkr{kb} = vector.fragment.load<rhs> %kh_t[{ci(16 * kb)}, %tc] {SH} : view<{KHS}x{CN}xf16, %kh_tl> -> vector<8xf16>")
-        P(f"      %kk{kb} = vector.mma %kkl{kb}, %kkr{kb}, {prev} : vector<8xf16>, vector<8xf16>, {vec8}")
+        P(f"      %kkl{kb} = vector.fragment.load<lhs> %kh_view[%tr, {ci(16 * kb)}] {SH} : view<{CN}x{KHS}xf16> -> {FH}")
+        P(f"      %kkr{kb} = vector.fragment.load<rhs> %kh_t[{ci(16 * kb)}, %tc] {SH} : view<{KHS}x{CN}xf16, %kh_tl> -> {FH}")
+        P(f"      %kk{kb} = vector.mma %kkl{kb}, %kkr{kb}, {prev} : {FH}, {FH}, {vec8}")
         prev = f"%kk{kb}"
-    P(f"      %bti = vector.load %beta_s[%rb] : view<{CN}xf32> -> {vec8}")
+    rows8("bti", "%beta_s", "%rb", "      ")
     P(f"      %lts = vector.cmpi sgt, %rows, %colv : vector<8xi32> -> vector<8xi1>")
     P(f"      %kkd = vector.mulf {prev}, %dec : {vec8}")
     P(f"      %kkb = vector.mulf %kkd, %bti : {vec8}")
@@ -161,9 +198,9 @@ def chunk_kernel(G, NG, LB, guard_open="", guard_close="", target=True, dep=2):
     P(f"    }} else {{")
     prev = "%init"
     for kb in range(8):
-        P(f"      %qkl{kb} = vector.fragment.load<lhs> %q_view[%tr, {ci(16 * kb)}] {SH} : view<{CN}x{QAS}xf16> -> vector<8xf16>")
-        P(f"      %qkr{kb} = vector.fragment.load<rhs> %kh_t[{ci(16 * kb)}, %tc] {SH} : view<{KHS}x{CN}xf16, %kh_tl> -> vector<8xf16>")
-        P(f"      %qk{kb} = vector.mma %qkl{kb}, %qkr{kb}, {prev} : vector<8xf16>, vector<8xf16>, {vec8}")
+        P(f"      %qkl{kb} = vector.fragment.load<lhs> %q_view[%tr, {ci(16 * kb)}] {SH} : view<{CN}x{QAS}xf16> -> {FH}")
+        P(f"      %qkr{kb} = vector.fragment.load<rhs> %kh_t[{ci(16 * kb)}, %tc] {SH} : view<{KHS}x{CN}xf16, %kh_tl> -> {FH}")
+        P(f"      %qk{kb} = vector.mma %qkl{kb}, %qkr{kb}, {prev} : {FH}, {FH}, {vec8}")
         prev = f"%qk{kb}"
     P(f"      %les = vector.cmpi sge, %rows, %colv : vector<8xi32> -> vector<8xi1>")
     P(f"      %qkd = vector.mulf {prev}, %dec : {vec8}")
@@ -227,39 +264,37 @@ def chunk_kernel(G, NG, LB, guard_open="", guard_close="", target=True, dep=2):
     bar()
     # ---- P4: R = beta (v - exp(gc) K S), d = T R
     for mt in range(NT):
-        P(f"    %ri{mt}_v = index.add {ci(16 * mt)}, %lane_h8 : index")
-        P(f"    %ri{mt} = index.assume %ri{mt}_v [range(%ri{mt}_v, 0, {CN - 8})] : index")
-        P(f"    %bti_{mt} = vector.load %beta_s[%ri{mt}] : view<{CN}xf32> -> {vec8}")
-        P(f"    %egi_{mt} = vector.load %eg_s[%ri{mt}] : view<{CN}xf32> -> {vec8}")
+        P(f"    %ri{mt}_v = index.add {ci(16 * mt)}, {LH} : index")
+        P(f"    %ri{mt} = index.assume %ri{mt}_v [range(%ri{mt}_v, 0, {CN - 16 + (1 if R3 else 8)})] : index")
+        rows8(f"bti_{mt}", "%beta_s", f"%ri{mt}")
+        rows8(f"egi_{mt}", "%eg_s", f"%ri{mt}")
         els = []
         for e in range(8):
-            P(f"    %vt{mt}_{e}_o = index.add %ri{mt}, {ci(e)} : index")
+            P(f"    %vt{mt}_{e}_o = index.add %ri{mt}, {ci(RS * e)} : index")
             P(f"    %vv{mt}_{e} = view.load %v_view[%vt{mt}_{e}_o, %dv] : view<{CN}x{VS}xf32> -> f32")
             els.append(f"%vv{mt}_{e}")
         P(f"    %vvec{mt} = vector.from_elements {', '.join(els)} : {vec8}")
         P(f"    %ezk{mt} = vector.mulf %egi_{mt}, %zk{mt}_7 : {vec8}")
         P(f"    %vmz{mt} = vector.subf %vvec{mt}, %ezk{mt} : {vec8}")
         P(f"    %rr{mt} = vector.mulf %bti_{mt}, %vmz{mt} : {vec8}")
-        P(f"    %rh{mt} = vector.fptrunc %rr{mt} : {vec8} to vector<8xf16>")
-        P(f"    %rf{mt} = vector.fragment<rhs> %rh{mt} {SH} : vector<8xf16>")
+        to_rhs(f"rf{mt}", f"%rr{mt}", f"rh{mt}")
     for mt in range(NT):
         prev = "%init"
         for kt in range(mt + 1):
-            P(f"    %tl{mt}_{kt} = vector.fragment.load<lhs> %t_view[{ci(16 * mt)}, {ci(16 * kt)}] {SH} : view<{CN}x{TS}xf16> -> vector<8xf16>")
-            P(f"    %dd{mt}_{kt} = vector.mma %tl{mt}_{kt}, %rf{kt}, {prev} : vector<8xf16>, vector<8xf16>, {vec8}")
+            P(f"    %tl{mt}_{kt} = vector.fragment.load<lhs> %t_view[{ci(16 * mt)}, {ci(16 * kt)}] {SH} : view<{CN}x{TS}xf16> -> {FH}")
+            P(f"    %dd{mt}_{kt} = vector.mma %tl{mt}_{kt}, %rf{kt}, {prev} : {FH}, {FH}, {vec8}")
             prev = f"%dd{mt}_{kt}"
-        P(f"    %dh{mt} = vector.fptrunc {prev} : {vec8} to vector<8xf16>")
-        P(f"    %df{mt} = vector.fragment<rhs> %dh{mt} {SH} : vector<8xf16>")
+        to_rhs(f"df{mt}", prev, f"dh{mt}")
     # ---- P5: O = exp(gc) Q S + P d
     for mt in range(NT):
         P(f"    %oi{mt} = vector.mulf %egi_{mt}, %zq{mt}_7 : {vec8}")
         prev = f"%oi{mt}"
         for kt in range(mt + 1):
-            P(f"    %pl{mt}_{kt} = vector.fragment.load<lhs> %p_view[{ci(16 * mt)}, {ci(16 * kt)}] {SH} : view<{CN}x{PS}xf16> -> vector<8xf16>")
-            P(f"    %oo{mt}_{kt} = vector.mma %pl{mt}_{kt}, %df{kt}, {prev} : vector<8xf16>, vector<8xf16>, {vec8}")
+            P(f"    %pl{mt}_{kt} = vector.fragment.load<lhs> %p_view[{ci(16 * mt)}, {ci(16 * kt)}] {SH} : view<{CN}x{PS}xf16> -> {FH}")
+            P(f"    %oo{mt}_{kt} = vector.mma %pl{mt}_{kt}, %df{kt}, {prev} : {FH}, {FH}, {vec8}")
             prev = f"%oo{mt}_{kt}"
         for e in range(8):
-            P(f"    %olt{mt}_{e}_r = index.add {ci(16 * mt + e)}, %lane_h8 : index")
+            P(f"    %olt{mt}_{e}_r = index.add {ci(16 * mt + RS * e)}, {LH} : index")
             P(f"    %olt{mt}_{e} = index.cmp ult, %olt{mt}_{e}_r, %m : index")
             P(f"    scf.if %olt{mt}_{e} {{")
             P(f"      %ov{mt}_{e} = vector.extract {prev}[{e}] : {vec8} -> f32")
@@ -276,17 +311,20 @@ def chunk_kernel(G, NG, LB, guard_open="", guard_close="", target=True, dep=2):
         P(f"    %sd{kb} = vector.fragment<init> %sdv{kb} {SH} : {vec8}")
         prev = f"%sd{kb}"
         for kt in range(NT):
-            P(f"    %ul{kb}_{kt} = vector.fragment.load<lhs> %kdt_view[{ci(16 * kb)}, {ci(16 * kt)}] {SH} : view<{DK}x{KDS}xf16> -> vector<8xf16>")
-            P(f"    %un{kb}_{kt} = vector.mma %ul{kb}_{kt}, %df{kt}, {prev} : vector<8xf16>, vector<8xf16>, {vec8}")
+            P(f"    %ul{kb}_{kt} = vector.fragment.load<lhs> %kdt_view[{ci(16 * kb)}, {ci(16 * kt)}] {SH} : view<{DK}x{KDS}xf16> -> {FH}")
+            P(f"    %un{kb}_{kt} = vector.mma %ul{kb}_{kt}, %df{kt}, {prev} : {FH}, {FH}, {vec8}")
             prev = f"%un{kb}_{kt}"
         P(f"    %sn{kb} = vector.addf {prev}, %zero8 : {vec8}")
     bar()
     P(f"    scf.yield {', '.join(f'%sn{kb}' for kb in range(8))} : {', '.join([vec8] * 8)}")
     chunk_text = out
     # ------------------------------------------------------------------------------------------------------------------
-    tgt = "target(@rdna4) " if target else ""
+    tgt = "target(@rdna4) " if target and not R3 else ""
+    R3_CONSTS = ("  %hi_half = index.cmp ne, %lane_half, %k0 : index\n  %exchange = scalar.constant 16 : i32\n  %width = scalar.constant 32 : i32\n"
+                 "  %two_i32 = scalar.constant 2 : i32\n") if R3 else ""
+    kname = "g_gdn_chunk" if R3 else "g_gdn_chunk_rdna4"
     head = f"""
-kernel.def {tgt}export("g_gdn_chunk_rdna4") @g_gdn_chunk_rdna4(%spans: index) {{
+kernel.def {tgt}export("{kname}") @{kname}(%spans: index) {{
   %c1 = index.constant 1 : index
   %heads = index.constant {HV} : index
   %c256 = index.constant 256 : index
@@ -355,8 +393,8 @@ kernel.def {tgt}export("g_gdn_chunk_rdna4") @g_gdn_chunk_rdna4(%spans: index) {{
   // state tile rows (dk = 16 kb + 8 half + i) of value column dv
   %srow_dv = index.add %head_cols, %dv : index
   %sidx0 = index.mul %srow_dv, %k_dk : index
-  %sidx_l = index.add %sidx0, %lane_h8 : index
-"""
+  %sidx_l = index.add %sidx0, {LH} : index
+{R3_CONSTS}"""
     lds = f"""
   %kh_bytes = index.constant {CN * KHS * 2} : offset
   %kh_buf = buffer.alloca<workgroup> align(16) %kh_bytes : buffer
@@ -405,6 +443,12 @@ kernel.def {tgt}export("g_gdn_chunk_rdna4") @g_gdn_chunk_rdna4(%spans: index) {{
     init.append(f"    scf.yield {', '.join(['%zero8'] * 8)} : {', '.join([vec8] * 8)}")
     init.append("  } else {")
     for kb in range(8):
+        if R3:   # gfx11 result rows 16 kb + 2 i + half: strided (once per span)
+            for e in range(8):
+                init.append(f"    %sk{kb}_{e} = index.add %sidx_l, {ci(16 * kb + 2 * e)} : index")
+                init.append(f"    %sl{kb}_{e} = view.load %state_view[%sk{kb}_{e}] : view<{NS}xf32> -> f32")
+            init.append(f"    %sl{kb} = vector.from_elements {', '.join(f'%sl{kb}_{e}' for e in range(8))} : {vec8}")
+            continue
         init.append(f"    %sk{kb}_i = index.add %sidx_l, {ci(16 * kb)} : index")
         init.append(f"    %sl{kb} = vector.load %state_view[%sk{kb}_i] : view<{NS}xf32> -> {vec8}")
     init.append(f"    scf.yield {', '.join(f'%sl{kb}' for kb in range(8))} : {', '.join([vec8] * 8)}")
@@ -413,7 +457,11 @@ kernel.def {tgt}export("g_gdn_chunk_rdna4") @g_gdn_chunk_rdna4(%spans: index) {{
     carry = ", ".join(f"%s{kb} = %ist{kb} : {vec8}" for kb in range(8))
     outs = ", ".join(f"%fin{kb}" for kb in range(8))
     loop_head = f"  {outs} = scf.for %ci = [%k0 to %nchunks step %k1]({carry}) -> ({', '.join([vec8] * 8)}) {{"
-    stores = [f"    %so{kb}_i = index.add %sidx_l, {ci(16 * kb)} : index\n    vector.store %fin{kb}, %next_view[%so{kb}_i] : {vec8}, view<{NS}xf32>" for kb in range(8)]
+    if R3:
+        stores = [f"    %so{kb}_{e} = index.add %sidx_l, {ci(16 * kb + 2 * e)} : index\n    %sov{kb}_{e} = vector.extract %fin{kb}[{e}] : {vec8} -> f32\n"
+                  f"    view.store %sov{kb}_{e}, %next_view[%so{kb}_{e}] : f32, view<{NS}xf32>" for kb in range(8) for e in range(8)]
+    else:
+        stores = [f"    %so{kb}_i = index.add %sidx_l, {ci(16 * kb)} : index\n    vector.store %fin{kb}, %next_view[%so{kb}_i] : {vec8}, view<{NS}xf32>" for kb in range(8)]
     consts.update({0, 1, 8, 16})
     cdefs = "\n".join(f"  %k{k} = index.constant {k} : index" for k in sorted(consts))
     head = head.replace("@CONSTS@", cdefs + f"\n  %k_dk = index.constant {DK} : index\n  %k_dv = index.constant {DV} : index")

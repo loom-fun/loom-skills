@@ -422,6 +422,11 @@ CHOICE("hybrid.gdn.chunk", "bool", False, "GDN_CHUNK", devices=["rdna4"], rows=R
        from_pr="q38r9700 gdnpf",
        doc="gfx12 chunked (WY) gated delta-net prefill (gen_gdn_chunk.py): spans of 64+ tokens run g_gdn_chunk_rdna4 (f16 WMMA, f32 state), the "
            "sequential kernel's gfx12 twin the shorter ones; the gfx11 kernels do not change (128 x 128 heads only).")
+CHOICE("hybrid.gdn.chunk11", "bool", False, "GDN_CHUNK11", devices=["rdna3"], rows=ROWS_PREFILL, kernels=["g_gdn_chunk", "g_gdn_recurrence*"],
+       from_pr="q38pf gdn",
+       doc="gfx11 chunked (WY) gated delta-net prefill (gen_gdn_chunk.py arch rdna3): spans of 64+ tokens run g_gdn_chunk (RDNA3 f16 WMMA, f32 "
+           "state), the sequential g_gdn_recurrence the shorter ones (decode, verify); its gfx12 twin is g_gdn_chunk_rdna4 with hybrid.gdn.chunk, "
+           "else the sequential kernel (gfx12 numerics unchanged). 128 x 128 heads only.")
 CHOICE("prefill.gdn.fused2", "bool", False, "GDN_FUSED2", devices=["rdna4"], rows=ROWS_PREFILL, kernels=["g_gdn_fa_rdna4", "g_gdn_fb_rdna4"],
        from_pr="mxfp4st olayer",
        doc="gfx12 fused gated delta-net prefill in two launches (gen_gdn_fused.py): g_gdn_fa_rdna4 (conv + SiLU, q/k norms, gates, the WY solve "
