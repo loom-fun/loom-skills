@@ -81,7 +81,9 @@ class Status(unittest.TestCase):
         result = run(st + ["get"], env=dict(os.environ, CAMPAIGN_DIR=str(self.dir)), timeout=30)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout), doc)
-        self.assertEqual(run(st + ["set", "only_a_path"], cwd=self.dir, timeout=30).returncode, 2)
+        env = dict(os.environ)
+        env.pop("CAMPAIGN_DIR", None)
+        self.assertEqual(run(st + ["set", "only_a_path"], cwd=self.dir, env=env, timeout=30).returncode, 2)
 
     def test_status_and_log_concurrent_writers(self):
         with ThreadPoolExecutor(max_workers=16) as pool:
