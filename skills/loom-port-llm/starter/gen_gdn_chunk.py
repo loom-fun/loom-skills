@@ -27,11 +27,14 @@ NT = CN // 16
 SPAN_MIN = 64   # spans of at least this many tokens (the GEMM epoch shape) run the chunked kernel; shorter ones the sequential twin
 
 
-def chunk_kernel(G, NG, LB, guard_open="", guard_close="", target=True, dep=2, arch="rdna4"):
+def chunk_kernel(G, NG, LB, guard_open="", guard_close="", target=True, dep=2, arch="rdna4", fuse=False, eps=None):
     """arch "rdna4": g_gdn_chunk_rdna4 (gfx12 WMMA layouts). arch "rdna3": g_gdn_chunk, the gfx11 form of the same dataflow (RDNA3 WMMA:
     vector<16xf16> operands holding all 16 k in each lane half, f32 results holding rows 2 i + lane / 16 of column lane % 16): the result ->
     rhs conversions (the state copy, R, d) exchange the other row parity with the partner lane (xor 16; f16 pairs packed in i32) and
-    interleave; the per-row scalars and rows of a result fragment are gathered with stride 2."""
+    interleave; the per-row scalars and rows of a result fragment are gathered with stride 2.
+    fuse: the chunk's staging also runs the conv1d + SiLU of its q / k / v channels (inputs before the span from the stored history) and the
+    q / k L2 norms (gen_gdn_fused phase A's staging), so %x is the RAW qkv projection and a last argument %weight holds the conv weights;
+    g_gdn_conv / g_gdn_qk_norm then only serve the spans under SPAN_MIN, and the history commit runs after this kernel."""
     R3 = arch == "rdna3"
     FH = "vector<16xf16>" if R3 else "vector<8xf16>"
     from gen_gdn import kh_line, _V_GROUPED
@@ -93,6 +96,7 @@ def chunk_kernel(G, NG, LB, guard_open="", guard_close="", target=True, dep=2, a
     P(f"    %m_last = index.assume %m_last_a [range(%m_last_a, 0, {CN - 1})] : index")
     P(f"    %vbase_tok = index.add %first, %c0tok : index")
     # ---- P0: stage the chunk (thread -> row thread / 8, 16 columns of K, Q and V)
+    p0_start = len(out)
     P(f"    %srow = index.div %thread, {ci(8)} : index")
     P(f"    %spart = index.rem %thread, {ci(8)} : index")
     P(f"    %scol = index.mul %spart, {ci(16)} : index")
@@ -136,6 +140,8 @@ def chunk_kernel(G, NG, LB, guard_open="", guard_close="", target=True, dep=2, a
     P(f"      view.store %bt_live, %beta_s[%srow] : f32, view<{CN}xf32>")
     P(f"    }}")
     bar()
+    if fuse:
+        out[p0_start:] = _fused_stage(G, CN, ci, KHS, QAS, VS)
     # ---- P1: inclusive scan of g (threads < CN)
     P(f"    %tcn = index.cmp ult, %thread, {ci(CN)} : index")
     P(f"    scf.if %tcn {{")
@@ -320,6 +326,9 @@ def chunk_kernel(G, NG, LB, guard_open="", guard_close="", target=True, dep=2, a
     chunk_text = out
     # ------------------------------------------------------------------------------------------------------------------
     tgt = "target(@rdna4) " if target and not R3 else ""
+    FUSE_HEAD = (f"  %history_skip = index.constant {G['state_bytes']} : offset\n  %history_at = index.add %reader, %history_skip : offset\n"
+                 f"  %hist_view = buffer.view %arena[%history_at] : buffer -> view<{G['K'] - 1}x{C}xf32>\n"
+                 f"  %w_view = buffer.view %weight[%zero] : buffer -> view<{C}x{G['K']}xf32>\n  %eps = scalar.constant {eps!r} : f32\n") if fuse else ""
     R3_CONSTS = ("  %hi_half = index.cmp ne, %lane_half, %k0 : index\n  %exchange = scalar.constant 16 : i32\n  %width = scalar.constant 32 : i32\n"
                  "  %two_i32 = scalar.constant 2 : i32\n") if R3 else ""
     kname = "g_gdn_chunk" if R3 else "g_gdn_chunk_rdna4"
@@ -329,7 +338,7 @@ kernel.def {tgt}export("{kname}") @{kname}(%spans: index) {{
   %heads = index.constant {HV} : index
   %c256 = index.constant 256 : index
   kernel.launch.config workgroups(%heads, %c1, %spans) workgroup_size(%c256, %c1, %c1) : index
-}} launch(%tokens_arg: index, %spans_arg: index, %layer_arg: index, %metadata: buffer, %origins: buffer, %arena: buffer, %x: buffer, %inverse: buffer, %alpha: buffer, %beta: buffer, %ssm_a: buffer, %dt_bias: buffer, %out: buffer) {{
+}} launch(%tokens_arg: index, %spans_arg: index, %layer_arg: index, %metadata: buffer, %origins: buffer, %arena: buffer, %x: buffer, %inverse: buffer, %alpha: buffer, %beta: buffer, %ssm_a: buffer, %dt_bias: buffer, %out: buffer{", %weight: buffer" if fuse else ""}) {{
   %tokens = index.assume %tokens_arg [range(%tokens_arg, 1, 8192)] : index
   %spans = index.assume %spans_arg [range(%spans_arg, 1, 8192)] : index
   %layer = index.assume %layer_arg [range(%layer_arg, 0, {NG - 1})] : index
@@ -364,7 +373,7 @@ kernel.def {tgt}export("{kname}") @{kname}(%spans: index) {{
   %out_view = buffer.view %out[%zero] : buffer -> view<[%tokens]x{VD}xf32>
   %state_view = buffer.view %arena[%reader] : buffer -> view<{NS}xf32>
   %next_view = buffer.view %arena[%writer] : buffer -> view<{NS}xf32>
-@CONSTS@
+{FUSE_HEAD}@CONSTS@
   %a_value = view.load %a_view_g[%vh] : view<{HV}xf32> -> f32
   %dt_bias_value = view.load %bias_view[%vh] : view<{HV}xf32> -> f32
   %qscale_c = scalar.constant {DK ** -0.5!r} : f32
@@ -395,6 +404,8 @@ kernel.def {tgt}export("{kname}") @{kname}(%spans: index) {{
   %sidx0 = index.mul %srow_dv, %k_dk : index
   %sidx_l = index.add %sidx0, {LH} : index
 {R3_CONSTS}"""
+    RED = (f"  %red_bytes = index.constant {CN * 8 * 4} : offset\n  %red_buf = buffer.alloca<workgroup> align(16) %red_bytes : buffer\n"
+           f"  %red_view = buffer.view %red_buf[%zero] : buffer -> view<{CN}x8xf32>\n") if fuse else ""
     lds = f"""
   %kh_bytes = index.constant {CN * KHS * 2} : offset
   %kh_buf = buffer.alloca<workgroup> align(16) %kh_bytes : buffer
@@ -430,7 +441,7 @@ kernel.def {tgt}export("{kname}") @{kname}(%spans: index) {{
   %eg_s = buffer.view %sc_buf[%o2] : buffer -> view<{CN}xf32>
   %beta_s = buffer.view %sc_buf[%o3] : buffer -> view<{CN}xf32>
   %zero_cell = buffer.view %sc_buf[%o5] : buffer -> view<16xi32>
-  %thread_is0 = index.cmp eq, %thread, %k0 : index
+{RED}  %thread_is0 = index.cmp eq, %thread, %k0 : index
   scf.if %thread_is0 {{
     vector.store %zero16, %zero_cell[%k0] : vector<16xi32>, view<16xi32>
   }}
@@ -468,3 +479,121 @@ kernel.def {tgt}export("{kname}") @{kname}(%spans: index) {{
     text = (head + lds + "\n".join(init) + "\n" + "\n".join(nch) + "\n" + loop_head + "\n" + "\n".join(chunk_text) + "\n  }\n"
             + guard_open + "\n".join(stores) + "\n" + guard_close + "\n  }\n  kernel.return\n}\n")
     return text
+
+
+def _fused_stage(G, CN, ci, KHS, QAS, VS):
+    """Loop-body lines of the fused staging (chunk_kernel fuse=True): g / beta per token (threads < CN); conv1d + SiLU of the chunk's rows of
+    q / k channel `thread % 128` of the key head (threads < 128: q, else k) and of value channel `thread` (threads < DV); the q / k L2 norms
+    (a subgroup sum per row, the 4 waves' partials through LDS); K, Q (x DK^-0.5) as f16 rows and V as f32 rows in LDS. Rows past the
+    span's end are zero. Same arithmetic as g_gdn_conv + g_gdn_qk_norm (the conv taps in the same order)."""
+    HV, DV, C, K = G["HV"], G["DV"], G["C"], G["K"]
+    out = []
+    P = out.append
+    P(f"    %ftcn = index.cmp ult, %thread, {ci(CN)} : index")
+    P("    scf.if %ftcn {")
+    P(f"      %sr = index.assume %thread [range(%thread, 0, {CN - 1})] : index")
+    P("      %slive = index.cmp ult, %sr, %m : index")
+    P("      %stoff = index.add %vbase_tok, %sr : index")
+    P("      %stokc = scf.select %slive, %stoff, %vbase_tok : index")
+    P("      %stok = index.assume %stokc [lt(%stokc, %tokens)] : index")
+    P(f"      %al = view.load %alpha_view[%stok, %vh] : view<[%tokens]x{HV}xf32> -> f32")
+    P(f"      %be = view.load %beta_view[%stok, %vh] : view<[%tokens]x{HV}xf32> -> f32")
+    P("      %al_b = scalar.addf %al, %dt_bias_value : f32")
+    P("      %al_p = scalar.softplusf<afn> %al_b : f32")
+    P("      %gate = scalar.mulf %al_p, %a_value : f32")
+    P("      %g_live = scf.select %slive, %gate, %zero_f : f32")
+    P("      %bt = scalar.logisticf<afn> %be : f32")
+    P("      %bt_live = scf.select %slive, %bt, %zero_f : f32")
+    P(f"      view.store %g_live, %g_s[%sr] : f32, view<{CN}xf32>")
+    P(f"      view.store %bt_live, %beta_s[%sr] : f32, view<{CN}xf32>")
+    P("    }")
+    for r in range(CN):
+        P(f"    %frl{r} = index.cmp ult, {ci(r)}, %m : index")
+        P(f"    %ftr{r}_a = index.add %vbase_tok, {ci(r)} : index")
+        P(f"    %ftr{r}_c = scf.select %frl{r}, %ftr{r}_a, %vbase_tok : index")
+        P(f"    %ftrow{r} = index.assume %ftr{r}_c [lt(%ftr{r}_c, %tokens)] : index")
+    P("    %ffirst = index.cmp eq, %ci, %k0 : index")
+
+    def conv_channel(tag, chv, ind):
+        def Q(t):
+            P(ind + t)
+        for j in range(K):
+            Q(f"%fw{tag}{j} = view.load %w_view[{chv}, {ci(j)}] : view<{C}x{K}xf32> -> f32")
+        for r in range(-(K - 1), 0):
+            u = f"{tag}{-r}"
+            Q(f"%fx{tag}m{-r} = scf.if %ffirst -> (f32) {{")
+            Q(f"  %fhz{u} = scf.if %fresh -> (f32) {{")
+            Q("    scf.yield %zero_f : f32")
+            Q("  } else {")
+            Q(f"    %fhv{u} = view.load %hist_view[{ci(K - 1 + r)}, {chv}] : view<{K - 1}x{C}xf32> -> f32")
+            Q(f"    scf.yield %fhv{u} : f32")
+            Q("  }")
+            Q(f"  scf.yield %fhz{u} : f32")
+            Q("} else {")
+            Q(f"  %fpr{u} = index.sub %vbase_tok, {ci(-r)} : index")
+            Q(f"  %fprb{u} = index.assume %fpr{u} [lt(%fpr{u}, %tokens)] : index")
+            Q(f"  %fpv{u} = view.load %x_view[%fprb{u}, {chv}] : view<[%tokens]x{C}xf32> -> f32")
+            Q(f"  scf.yield %fpv{u} : f32")
+            Q("}")
+        for r in range(CN):
+            Q(f"%fx{tag}{r}_r = view.load %x_view[%ftrow{r}, {chv}] : view<[%tokens]x{C}xf32> -> f32")
+
+        def xname(r):
+            return f"%fx{tag}m{-r}" if r < 0 else f"%fx{tag}{r}_r"
+        for r in range(CN):
+            acc = "%zero_f"
+            for j in range(K):
+                Q(f"%fc{tag}{r}_{j} = scalar.fmaf %fw{tag}{j}, {xname(r - (K - 1) + j)}, {acc} : f32")
+                acc = f"%fc{tag}{r}_{j}"
+            Q(f"%fs{tag}{r}_g = scalar.logisticf<afn> {acc} : f32")
+            Q(f"%fs{tag}{r}_m = scalar.mulf {acc}, %fs{tag}{r}_g : f32")
+            Q(f"%fs{tag}{r} = scf.select %frl{r}, %fs{tag}{r}_m, %zero_f : f32")
+    P(f"    %fisk = index.cmp uge, %thread, {ci(128)} : index")
+    P(f"    %ftq = index.rem %thread, {ci(128)} : index")
+    P("    %fqk_base = scf.select %fisk, %kcol_base, %qcol_base : index")
+    P("    %fchqk_v = index.add %fqk_base, %ftq : index")
+    P(f"    %fchqk = index.assume %fchqk_v [range(%fchqk_v, 0, {C - 1})] : index")
+    conv_channel("a", "%fchqk", "    ")
+    for r in range(CN):
+        P(f"    %fsq{r} = scalar.mulf %fsa{r}, %fsa{r} : f32")
+        P(f"    %fss{r} = kernel.subgroup.reduce<addf> %fsq{r} : f32")
+    P("    %flead = index.cmp eq, %lane, %k0 : index")
+    P("    scf.if %flead {")
+    for r in range(CN):
+        P(f"      view.store %fss{r}, %red_view[{ci(r)}, %wave] : f32, view<{CN}x8xf32>")
+    P("    }")
+    P(f"    %fisv = index.cmp ult, %thread, {ci(DV)} : index")
+    P("    scf.if %fisv {")
+    P(f"      %fvt = index.assume %thread [range(%thread, 0, {DV - 1})] : index")
+    P("      %fchv_v = index.add %vcol_head, %fvt : index")
+    P(f"      %fchv = index.assume %fchv_v [range(%fchv_v, 0, {C - 1})] : index")
+    conv_channel("b", "%fchv", "      ")
+    for r in range(CN):
+        P(f"      view.store %fsb{r}, %v_view[{ci(r)}, %fvt] : f32, view<{CN}x{VS}xf32>")
+    P("    }")
+    P("    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)")
+    P(f"    %fwq = index.cmp uge, %wave, {ci(4)} : index")
+    P(f"    %fwb = scf.select %fwq, {ci(4)}, %k0 : index")
+    for r in range(CN):
+        P(f"    %frd{r}_0 = view.load %red_view[{ci(r)}, %fwb] : view<{CN}x8xf32> -> f32")
+        acc = f"%frd{r}_0"
+        for w in range(1, 4):
+            P(f"    %frw{r}_{w} = index.add %fwb, {ci(w)} : index")
+            P(f"    %frd{r}_{w} = view.load %red_view[{ci(r)}, %frw{r}_{w}] : view<{CN}x8xf32> -> f32")
+            P(f"    %fra{r}_{w} = scalar.addf {acc}, %frd{r}_{w} : f32")
+            acc = f"%fra{r}_{w}"
+        P(f"    %frs{r} = scalar.addf {acc}, %eps : f32")
+        P(f"    %fri{r} = scalar.rsqrtf %frs{r} : f32")
+        P(f"    %frq{r} = scalar.mulf %fri{r}, %qscale_c : f32")
+        P(f"    %frf{r} = scf.select %fisk, %fri{r}, %frq{r} : f32")
+        P(f"    %fn{r} = scalar.mulf %fsa{r}, %frf{r} : f32")
+        P(f"    %fnh{r} = scalar.fptrunc %fn{r} : f32 to f16")
+    P("    scf.if %fisk {")
+    for r in range(CN):
+        P(f"      view.store %fnh{r}, %kh_view[{ci(r)}, %ftq] : f16, view<{CN}x{KHS}xf16>")
+    P("    } else {")
+    for r in range(CN):
+        P(f"      view.store %fnh{r}, %q_view[{ci(r)}, %ftq] : f16, view<{CN}x{QAS}xf16>")
+    P("    }")
+    P("    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)")
+    return out

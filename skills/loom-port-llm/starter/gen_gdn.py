@@ -194,6 +194,9 @@ def gdn_kernels(cfg, eps):
         view.store %val_u{u}, %out_view[%token, %cs{u}] : f32, view<[%tokens]x{C}xf32>
       }}""")
     conv_unrolled = "\n".join(cu_parts + cu_stores)
+    fz_ = _row_lanes(DK, DV) and chunk11_fuse(G)
+    CONV_SKIP_OPEN = f"    %cv_long = index.constant {PF_SPAN} : index\n    %cv_short = index.cmp ult, %length, %cv_long : index\n    scf.if %cv_short {{\n" if fz_ else ""
+    CONV_SKIP_CLOSE = "    }\n" if fz_ else ""
     T.append(f"""
 // out[t, c] = silu(sum_j w[c, j] x[t - (K-1) + j, c]); inputs before the span come from the history.
 kernel.def export("g_gdn_conv") @g_gdn_conv(%tokens: index) {{
@@ -248,10 +251,10 @@ kernel.def export("g_gdn_conv") @g_gdn_conv(%tokens: index) {{
     %cstride = index.mul %cbn, %c256 : index
     %cunroll = index.constant {CU} : index
     %cstride_u = index.mul %cstride, %cunroll : index
-    scf.for %c = [%cstart to %cC step %cstride_u] {{
+{CONV_SKIP_OPEN}    scf.for %c = [%cstart to %cC step %cstride_u] {{
 {conv_unrolled}
     }}
-  }}
+{CONV_SKIP_CLOSE}  }}
   kernel.return
 }}
 """)
@@ -529,8 +532,11 @@ kernel.def export("g_gdn_recurrence") @g_gdn_recurrence(%spans: index) {{
             T.append(pf.replace("g_gdn_recurrence", "g_gdn_recurrence_pf"))
         elif c11:   # single-form models: g_gdn_recurrence takes spans under PF_SPAN, g_gdn_chunk (launched in GEMM epochs) the rest
             from gen_gdn_chunk import chunk_kernel
-            T.append(chunk_kernel(G, NG, LB, guard_open, guard_close, arch="rdna3"))
-            if rdna4_twins() and not chunk_mode(G):   # gfx12 twin of g_gdn_chunk: the sequential kernel of the long spans
+            fz = chunk11_fuse(G)
+            T.append(chunk_kernel(G, NG, LB, guard_open, guard_close, arch="rdna3", fuse=fz, eps=eps))
+            if rdna4_twins() and fz and not chunk_mode(G):   # the fused launch has no sequential gfx12 counterpart: the gfx12 fused chunk kernel
+                T.append(chunk_kernel(G, NG, LB, guard_open, guard_close, fuse=True, eps=eps))
+            elif rdna4_twins() and not chunk_mode(G):   # gfx12 twin of g_gdn_chunk: the sequential kernel of the long spans
                 T.append(_as_rdna4(_recurrence_rows(G, NG, LB, *RL, guard_open, guard_close, "long").replace("g_gdn_recurrence", "g_gdn_chunk"),
                                    "g_gdn_chunk"))
     # ---- gated RMSNorm per value head: out = rmsnorm(o) * w * silu(z); padding tokens get zeros. One wave per head,
@@ -606,7 +612,7 @@ kernel.def export("g_gdn_norm_gate") @g_gdn_norm_gate(%tokens: index) {{
     mode = chunk_mode(G)
     if mode:
         from gen_gdn_chunk import chunk_kernel
-        ck = chunk_kernel(G, NG, LB, guard_open, guard_close)
+        ck = chunk_kernel(G, NG, LB, guard_open, guard_close, fuse=chunk11_fuse(G), eps=eps)
         if mode == "pf":
             ck = ck.replace("g_gdn_chunk_rdna4", "g_gdn_recurrence_pf_rdna4")
         else:   # the sequential kernel's gfx12 twin runs the spans shorter than the chunk kernel's minimum
@@ -645,6 +651,13 @@ def chunk11_mode(G):
     if G["DK"] != 128 or G["DV"] != 128 or G["HV"] % G["HK"] or not _row_lanes(G["DK"], G["DV"]):
         return None
     return "pf" if recurrence_pf(G) else "group"
+
+
+def chunk11_fuse(G):
+    """hybrid.gdn.chunk11_fuse (GDN_CHUNK11_FUSE, with hybrid.gdn.chunk11 in group mode): g_gdn_chunk (and its gfx12 twin) also run the conv1d +
+    SiLU and the q / k norms of their spans (gen_gdn_chunk fuse); g_gdn_conv skips the rows of spans of PF_SPAN+ tokens and the history commit
+    runs after the recurrence."""
+    return chunk11_mode(G) == "group" and os.environ.get("GDN_CHUNK11_FUSE", "") not in ("", "0", "off", "no", "false")
 
 
 def fused_mode(G):
