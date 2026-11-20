@@ -314,6 +314,17 @@ CHOICE("prefill.gemm.iq4_native", "bool", False, "GEMM_IQ4_NATIVE", kernels=["g_
        doc="Dense IQ4_XS / IQ4_NL GEMMs stage their 16-value half-group inline (gen_gemm.iq4_dequant16: the values of "
            "@g_<fmt>_values + fptrunc, loads exposed) and get the 128/256-row kernels, and iq4_xs joins the mixed-format swiglu m256 "
            "(prefill.gemm.m256_mixed); off: the shared value helper and the 64-row tile at every size (unsloth UD quants).")
+CHOICE("prefill.gemm.iq4_g32", "bool", False, "GEMM_IQ4_G32", kernels=["g_gemm_iq4_xs_*_m256*", "g_gemm_iq4_nl_*_m256*"],
+       rows=ROWS_PREFILL, from_pr="q38xl-iq4", devices=["rdna3"],
+       doc="gfx11 m256 IQ4_XS / IQ4_NL GEMM (needs prefill.gemm.iq4_native and prefill.gemm.m256_g32; the gfx12 twin keeps the "
+           "16-value dequant): each thread decodes its whole 32-weight group once (one IQ4_XS scale decode per 32), the nibble "
+           "book holds kvalue + 128 so bytes become f16 by the 0x64 magic, and the scale is one f16 fma per value pair "
+           "(round_f16(kvalue * f16(dl)), as the K-quant kernels; implies prefill.gemm.iq4_f16lut so every tile size stages the same values). Loop VALU 467 -> 174 per 64 WMMA, no scratch spills.")
+CHOICE("prefill.gemm.iq4_f16lut", "bool", False, "GEMM_IQ4_F16LUT", kernels=["g_gemm_iq4_xs_*", "g_gemm_iq4_nl_*", "g_gemm_*_*_swiglu_m256_f16o"],
+       rows=ROWS_PREFILL, from_pr="q38xl-iq4",
+       doc="gen_gemm.iq4_dequant16 (the 16-value IQ4 staging of the 64/128-row tiles, the mixed-format swiglu m256 and the "
+           "gfx12 twins) with the unsigned book + 0x64 magic + one f16 fma per value pair instead of sign-extend + F32 "
+           "convert/multiply/round (mixed iq4_xs/q5_k loop VALU 409 -> 309 per 64 WMMA).")
 CHOICE("prefill.gemm.prune", "bool", False, "GEMM_PRUNE", kernels=["g_gemm_*"], rows=ROWS_PREFILL, from_pr="q38xl-port",
        doc="Drop g_gemm_* kernel definitions nothing launches (and their gfx12 twins) from llm.loom: kernels a program rewrite "
            "replaced (plain swiglu m256 under f16o). Keeps a library with many formats under hrx-loom's 16-bit encoding value ids "

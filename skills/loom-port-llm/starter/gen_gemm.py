@@ -53,6 +53,28 @@ if IQ4_NATIVE:
 _IQ4_KVALUES = (-127, -104, -83, -65, -49, -35, -22, -10, 1, 13, 25, 38, 53, 69, 89, 113)   # ggml kvalues_iq4nl
 
 
+def _iq4_f16lut_on():
+    """GEMM_IQ4_F16LUT (choice prefill.gemm.iq4_f16lut): iq4_dequant16 with the unsigned book (kvalue + 128), the 0x64 magic
+    byte -> f16 conversion and one f16 fma per value pair (as _g32_iq4) instead of sign-extend + F32 convert/multiply/round.
+    GEMM_IQ4_G32 implies it, so every tile size of a model stages the same f16 weights (_g32_iq4's values)."""
+    return os.environ.get("GEMM_IQ4_F16LUT", "0").strip().lower() not in ("", "0", "false", "no", "off") or _g32_iq4_on()
+
+
+def _iq4_f16_tail(o, dl, pre=""):
+    """unsigned-book lookup of %{o}_idx (vector<16xi8>, 0..15) -> %{o} = (book - 128) * dl, dl an f16 SSA value"""
+    book = "\n".join(f"      %{o}_k{i} = scalar.constant {v + 128 - (256 if v + 128 > 127 else 0)} : i8" for i, v in enumerate(_IQ4_KVALUES))
+    return f'''
+{book}
+{pre}      %{o}_book = vector.from_elements {", ".join(f"%{o}_k{i}" for i in range(16))} : vector<16xi8>
+      %{o}_ucodes = vector.table.lookup %{o}_book[%{o}_idx] : vector<16xi8>, vector<16xi8> -> vector<16xi8>
+      %{o}_uf = vector.uitofp %{o}_ucodes : vector<16xi8> to vector<16xf16>
+      %{o}_m128 = scalar.constant -128.0 : f16
+      %{o}_off_h = scalar.mulf {dl}, %{o}_m128 : f16
+      %{o}_scl = vector.splat {dl} : vector<16xf16>
+      %{o}_offs = vector.splat %{o}_off_h : vector<16xf16>
+      %{o} = vector.fmaf %{o}_uf, %{o}_scl, %{o}_offs : vector<16xf16>'''
+
+
 def iq4_dequant16(fmt, w, out):
     """IQ4_XS / IQ4_NL: 16 consecutive weights of row %w_row_origin at column %w_col -> F16 vector %{out}. All loads first.
     IQ4_NL (18-byte blocks of 32): d * kvalues[q], one F16 multiply (int8 code times an F16 scale is exact in F32: same rounding).
@@ -70,8 +92,10 @@ def iq4_dequant16(fmt, w, out):
       %{o}_mask = vector.splati 15 : vector<16xi8>
       %{o}_idx = vector.andi %{o}_shifted, %{o}_mask : vector<16xi8>
       %{o}_codes = vector.table.lookup %{o}_book[%{o}_idx] : vector<16xi8>, vector<16xi8> -> vector<16xi8>'''
+    f16 = _iq4_f16lut_on()
+    lookup_idx = lookup[lookup.index(f"\n      %{o}_shift_bits = "): lookup.index(f"\n      %{o}_codes = ")]
     if fmt == "iq4_nl":
-        return f'''
+        head = f'''
       %{o}_c4 = index.constant 4 : index
       %{o}_block = index.div %w_col, %c32 : index
       %{o}_in_block = index.rem %w_col, %c32 : index
@@ -83,12 +107,15 @@ def iq4_dequant16(fmt, w, out):
       %{o}_scale_view = buffer.view %{w}[%{o}_block_origin] : buffer -> view<1xf16>
       %{o}_code_view = buffer.view %{w}[%{o}_code_origin] : buffer -> view<16xi8>
       %{o}_scale = view.load %{o}_scale_view[0] : view<1xf16> -> f16
-      %{o}_packed = vector.load %{o}_code_view[0] : view<16xi8> -> vector<16xi8>{lookup}
+      %{o}_packed = vector.load %{o}_code_view[0] : view<16xi8> -> vector<16xi8>'''
+        if f16:
+            return head + lookup_idx + _iq4_f16_tail(o, f"%{o}_scale")
+        return head + lookup + f'''
       %{o}_values = vector.sitofp %{o}_codes : vector<16xi8> to vector<16xf16>
       %{o}_scales = vector.splat %{o}_scale : vector<16xf16>
       %{o} = vector.mulf %{o}_values, %{o}_scales : vector<16xf16>'''
     assert fmt == "iq4_xs", fmt
-    return f'''
+    head = f'''
       %{o}_c4 = index.constant 4 : index
       %{o}_c256 = index.constant 256 : index
       %{o}_block = index.div %w_col, %{o}_c256 : index
@@ -131,7 +158,10 @@ def iq4_dequant16(fmt, w, out):
       %{o}_ls = scalar.ori %{o}_lo, %{o}_hi : i32
       %{o}_centered = scalar.subi %{o}_ls, %{o}_i32 : i32
       %{o}_lf = scalar.sitofp %{o}_centered : i32 to f32
-      %{o}_dl = scalar.mulf %{o}_d, %{o}_lf : f32{lookup}
+      %{o}_dl = scalar.mulf %{o}_d, %{o}_lf : f32'''
+    if f16:
+        return head + lookup_idx + _iq4_f16_tail(o, f"%{o}_dlh", f"      %{o}_dlh = scalar.fptrunc %{o}_dl : f32 to f16\n")
+    return head + lookup + f'''
       %{o}_wide = vector.sitofp %{o}_codes : vector<16xi8> to vector<16xf32>
       %{o}_dls = vector.splat %{o}_dl : vector<16xf32>
       %{o}_scaled = vector.mulf %{o}_wide, %{o}_dls : vector<16xf32>
@@ -781,7 +811,8 @@ def _split_dequant(fmt, wsrc, out, col):
 
 # q6_k: correct but 5-7 % slower (local kbench 2026-11-19); opt in with GEMM_M256_G32_FMTS=q4_k,q6_k
 def _g32_fmts():
-    return tuple(os.environ.get("GEMM_M256_G32_FMTS", "q4_k").split(","))
+    f = tuple(os.environ.get("GEMM_M256_G32_FMTS", "q4_k").split(","))
+    return f + ("iq4_xs", "iq4_nl") if _g32_iq4_on() and IQ4_NATIVE else f
 
 
 def _g32_dequant(fmt, w, out, col):
@@ -876,6 +907,8 @@ def _g32_dequant(fmt, w, out, col):
       %{o}_offsets{h} = vector.splat %{o}_offset_h{h} : vector<16xf16>
       %{o}_c{h} = vector.slice %{o}_codes[{16 * h}] : vector<32xf16> -> vector<16xf16>
       %{o}_v{h} = vector.fmaf %{o}_c{h}, %{o}_scales{h}, %{o}_offsets{h} : vector<16xf16>'''
+    elif fmt in ("iq4_xs", "iq4_nl"):
+        text = _g32_iq4(fmt, w, o, col)
     else:
         raise ValueError(fmt)
     lines = [l for l in text.strip("\n").split("\n") if l.strip()]
@@ -883,6 +916,95 @@ def _g32_dequant(fmt, w, out, col):
     addr = lines[: last + 1]
     loads = [(_re.match(r"\s*(%\S+) = ", l).group(1), l.split("-> ")[-1].strip()) for l in addr if ".load " in l]
     return lines, addr, loads
+
+
+def _g32_iq4(fmt, w, o, col):
+    """GEMM_IQ4_G32 (choice prefill.gemm.iq4_g32): the thread's whole 32-weight IQ4 group (group = col / 32 + %stage_ks) as
+    %{o}_v0 (weights 0-15: low nibbles) and %{o}_v1 (16-31: high nibbles). The nibble book holds kvalue + 128 (unsigned
+    1..241), so the byte -> f16 conversion is the 0x64 magic (v_perm + pk_add) instead of sign-extend + cvt_f32 + mul_f32 +
+    cvt_f16; the scale goes on as one f16 fma per value pair: (u - 128) * dl = fma(u, dl, -128 dl), and -128 dl is exact in
+    f16, so the value is round_f16(kvalue * f16(dl)) (one rounding of the f16 scale product, as the K-quant kernels).
+    IQ4_XS: dl = d * (ls - 32) in F32 (one header decode per group, not per 16 values); IQ4_NL: dl = d."""
+    book = "\n".join(f"      %{o}_k{i} = scalar.constant {v + 128 - (256 if v + 128 > 127 else 0)} : i8" for i, v in enumerate(_IQ4_KVALUES))
+    if fmt == "iq4_nl":
+        head = f'''
+      %{o}_bq = index.div {col}, %c32 : index
+      %{o}_bi = index.add %{o}_bq, %stage_ks : index
+      %{o}_block_add = index.scale %{o}_bi, %block_bytes : index, offset -> offset
+      %{o}_block_origin = index.add %w_row_origin, %{o}_block_add : offset
+      %{o}_two = index.constant 2 : offset
+      %{o}_code_origin = index.add %{o}_block_origin, %{o}_two : offset
+      %{o}_scale_view = buffer.view %{w}[%{o}_block_origin] : buffer -> view<1xf16>
+      %{o}_code_view = buffer.view %{w}[%{o}_code_origin] : buffer -> view<16xi8>
+      %{o}_dh = view.load %{o}_scale_view[0] : view<1xf16> -> f16
+      %{o}_packed8 = vector.load %{o}_code_view[0] : view<16xi8> -> vector<16xi8>'''
+        dl = f"%{o}_dh"
+    else:
+        head = f'''
+      %{o}_super = index.div {col}, %c256 : index
+      %{o}_within = index.rem {col}, %c256 : index
+      %{o}_gq = index.div %{o}_within, %c32 : index
+      %{o}_gv = index.add %{o}_gq, %stage_ks : index
+      %{o}_group = index.assume %{o}_gv [range(%{o}_gv, 0, 7)] : index
+      %{o}_block_add = index.scale %{o}_super, %block_bytes : index, offset -> offset
+      %{o}_block_origin = index.add %w_row_origin, %{o}_block_add : offset
+      %{o}_qs_base = index.constant 8 : offset
+      %{o}_sixteen = index.constant 16 : offset
+      %{o}_qs_add = index.scale %{o}_group, %{o}_sixteen : index, offset -> offset
+      %{o}_qs0 = index.add %{o}_block_origin, %{o}_qs_base : offset
+      %{o}_qs_origin = index.add %{o}_qs0, %{o}_qs_add : offset
+      %{o}_header_view = buffer.view %{w}[%{o}_block_origin] : buffer -> view<2xi32>
+      %{o}_code_view = buffer.view %{w}[%{o}_qs_origin] : buffer -> view<16xi8>
+      %{o}_header = vector.load %{o}_header_view[0] : view<2xi32> -> vector<2xi32>
+      %{o}_packed8 = vector.load %{o}_code_view[0] : view<16xi8> -> vector<16xi8>
+      %{o}_halves = vector.bitcast %{o}_header : vector<2xi32> to vector<4xf16>
+      %{o}_d_half = vector.extract %{o}_halves[0] : vector<4xf16> -> f16
+      %{o}_d = scalar.extf %{o}_d_half : f16 to f32
+      %{o}_word0 = vector.extract %{o}_header[0] : vector<2xi32> -> i32
+      %{o}_word1 = vector.extract %{o}_header[1] : vector<2xi32> -> i32
+      %{o}_i16 = scalar.constant 16 : i32
+      %{o}_i15 = scalar.constant 15 : i32
+      %{o}_i3 = scalar.constant 3 : i32
+      %{o}_i4 = scalar.constant 4 : i32
+      %{o}_i2 = scalar.constant 2 : i32
+      %{o}_i32 = scalar.constant 32 : i32
+      %{o}_g32 = index.cast %{o}_group : index to i32
+      %{o}_scales_h = scalar.shrui %{o}_word0, %{o}_i16 : i32
+      %{o}_lo_shift = scalar.muli %{o}_g32, %{o}_i4 : i32
+      %{o}_hi_shift = scalar.muli %{o}_g32, %{o}_i2 : i32
+      %{o}_lo_s = scalar.shrui %{o}_word1, %{o}_lo_shift : i32
+      %{o}_lo = scalar.andi %{o}_lo_s, %{o}_i15 : i32
+      %{o}_hi_s = scalar.shrui %{o}_scales_h, %{o}_hi_shift : i32
+      %{o}_hi_m = scalar.andi %{o}_hi_s, %{o}_i3 : i32
+      %{o}_hi = scalar.shli %{o}_hi_m, %{o}_i4 : i32
+      %{o}_ls = scalar.ori %{o}_lo, %{o}_hi : i32
+      %{o}_centered = scalar.subi %{o}_ls, %{o}_i32 : i32
+      %{o}_lf = scalar.sitofp %{o}_centered : i32 to f32
+      %{o}_dl = scalar.mulf %{o}_d, %{o}_lf : f32
+      %{o}_dlh = scalar.fptrunc %{o}_dl : f32 to f16'''
+        dl = f"%{o}_dlh"
+    return head + f'''
+{book}
+      %{o}_book = vector.from_elements {", ".join(f"%{o}_k{i}" for i in range(16))} : vector<16xi8>
+      %{o}_m15 = vector.splati 15 : vector<16xi8>
+      %{o}_f4 = vector.splati 4 : vector<16xi8>
+      %{o}_lo_i = vector.andi %{o}_packed8, %{o}_m15 : vector<16xi8>
+      %{o}_hn_s = vector.shrui %{o}_packed8, %{o}_f4 : vector<16xi8>
+      %{o}_hi_i = vector.andi %{o}_hn_s, %{o}_m15 : vector<16xi8>
+      %{o}_lo_u = vector.table.lookup %{o}_book[%{o}_lo_i] : vector<16xi8>, vector<16xi8> -> vector<16xi8>
+      %{o}_hi_u = vector.table.lookup %{o}_book[%{o}_hi_i] : vector<16xi8>, vector<16xi8> -> vector<16xi8>
+      %{o}_lo_f = vector.uitofp %{o}_lo_u : vector<16xi8> to vector<16xf16>
+      %{o}_hi_f = vector.uitofp %{o}_hi_u : vector<16xi8> to vector<16xf16>
+      %{o}_m128 = scalar.constant -128.0 : f16
+      %{o}_off_h = scalar.mulf {dl}, %{o}_m128 : f16
+      %{o}_scales = vector.splat {dl} : vector<16xf16>
+      %{o}_offsets = vector.splat %{o}_off_h : vector<16xf16>
+      %{o}_v0 = vector.fmaf %{o}_lo_f, %{o}_scales, %{o}_offsets : vector<16xf16>
+      %{o}_v1 = vector.fmaf %{o}_hi_f, %{o}_scales, %{o}_offsets : vector<16xf16>'''
+
+
+def _g32_iq4_on():
+    return os.environ.get("GEMM_IQ4_G32", "0").strip().lower() not in ("", "0", "false", "no", "off")
 
 
 def _g32_stores(fmt, out):
