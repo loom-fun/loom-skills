@@ -25,6 +25,7 @@ VARIANTS = {   # name -> environment of gen_flash2s.py
     "db": {"FLASH2_KT256": "16", "FLASH2_G11": "db"},
     "b2": {"FLASH2_DB_AT": "b2"},          # with db: stores after the S exchange barrier
     "ng2": {"FLASH2_NG256": "2"}, "ng3": {"FLASH2_NG256": "3"},
+    "ngx": {"FLASH2_NGX": "1"},   # with ng2/ng3: a tile's head groups adjacent in dispatch order
     "kv0": {"FLASH2_G11": "abl=nokld"},
     "trim": {"FLASH2_G11": "lazy,kvh,vtf,hot"},
     "tnl": {"FLASH2_G11": "kvh,vtf,hot"},   # trim without lazy (lazy spills on gfx11)

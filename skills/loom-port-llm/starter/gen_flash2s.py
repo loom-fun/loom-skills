@@ -591,6 +591,29 @@ if R4:
 if MT > 1:   # two query tiles per workgroup (flash2_mt.py; before the FLASH2_G11 transforms, so db stages inside the pass loop)
     from flash2_mt import two_tiles
     text = two_tiles(text, WAVES // MT)
+if NG > 1 and not PARTIAL and os.environ.get("FLASH2_NGX") == "1":   # experiment: a tile's head groups adjacent in dispatch order (x = tile * NG + group)
+    _o = f"""  %tile_id = kernel.workgroup.id<x> : index
+  %tile = index.assume %tile_id [lt(%tile_id, %tile_count)] : index
+  %kv_id = kernel.workgroup.id<y> : index
+  %cng = index.constant {NG} : index
+  %kv_value = index.div %kv_id, %cng : index
+  %kv = index.assume %kv_value [range(%kv_value, 0, {KVH - 1})] : index
+  %hgroup = index.rem %kv_id, %cng : index
+"""
+    _n = f"""  %xg_id = kernel.workgroup.id<x> : index
+  %cng = index.constant {NG} : index
+  %tile_id = index.div %xg_id, %cng : index
+  %tile = index.assume %tile_id [lt(%tile_id, %tile_count)] : index
+  %hgroup = index.rem %xg_id, %cng : index
+  %kv_id = kernel.workgroup.id<y> : index
+  %kv = index.assume %kv_id [range(%kv_id, 0, {KVH - 1})] : index
+"""
+    assert _o in text, "FLASH2_NGX: grid decode not found"
+    text = text.replace(_o, _n, 1)
+    _o2 = f"  %ckv = index.constant {KVH * NG} : index\n"
+    assert _o2 in text
+    text = text.replace(_o2, f"  %ckv = index.constant {KVH} : index\n  %cngx = index.constant {NG} : index\n", 1)
+    text = text.replace("  kernel.launch.config workgroups(%tiles, %ckv, %c1)", "  %tiles_ngx = index.mul %tiles, %cngx : index\n  kernel.launch.config workgroups(%tiles_ngx, %ckv, %c1)", 1)
 # FLASH2_G11 (gfx11 kernel only; comma list, default empty = unchanged): the gfx12 twin's text transforms on the gfx11 kernel. lazy / kvh / vtf / hot
 # (flash2_trim.py), pf (flash2_prefetch.py), vp (flash2_vpack.py), abl=<flag>+<flag> (flash2_ablate.py timing ablations: outputs garbage, kbench only).
 G11 = set(x for x in os.environ.get("FLASH2_G11", "").split(",") if x) if not R4 and B_MODE != "2" else set()
