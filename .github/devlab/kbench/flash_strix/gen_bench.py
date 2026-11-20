@@ -157,5 +157,5 @@ if __name__ == "__main__" and len(sys.argv) > 2:
             raise SystemExit("unknown variant " + v)
         v = "" if v == "base" else v
         open(os.path.join(OUT, "bench%s.loom" % ("_" + v if v else "")), "w").write(HEAD + "\n".join(bench(v)))
-    tested = [v for v in vs if v != "base" and not any(x.startswith("no") for x in v.split("+"))]
+    tested = [v for v in vs if v != "base" and not any("abl=" in VARIANTS[x].get("FLASH2_G11", "") for x in v.split("+"))]   # ablations compute garbage
     open(os.path.join(OUT, "test.loom"), "w").write(HEAD + "\n".join(tests(tested)))
