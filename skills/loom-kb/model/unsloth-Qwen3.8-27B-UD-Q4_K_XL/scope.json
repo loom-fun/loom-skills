@@ -137,6 +137,13 @@
     "prefill.gemm.q3_k_native": true
    },
    "evidence": "q38xl-fmt (PR #1330): the 5 FFN layers pairing IQ4_NL or Q3_K with another format run one mixed f16o swiglu m256 kernel (iq4_nl+q5_k x2, q5_k+iq4_nl, iq4_nl+iq4_xs, iq4_xs+q3_k) instead of two GEMMs + silu_mul_rs. DevLab Strix run 44825536379, same-job ABBA (2 sessions each): prefill 1k/2k 510.6/514.0 -> 515.1/518.6 (+0.9 %), 8k/16k/32k 525.6/507.5/466.3 -> 530.1/511.9/469.9 (+0.9/+0.9/+0.8 %), decode 23.90/23.88 and decode_32k 20.21/20.34 ties; pf8k busy 1.8983 -> 1.8848 ms/token (-0.7 %; gate/up+silu 1023 -> 803 ms over the run). ktest 204/204 (gm_iq4_nl_q5_k / q5_k_iq4_nl / iq4_nl_iq4_xs / iq4_xs_q3_k sw_512_f16o, gm_q3_k_st_512), func pass. Whole-build choice (programs shared by both targets): the gfx12 twins compile (gfx1201) and the R9700 is untimed."
+  },
+  {
+   "when": {},
+   "set": {
+    "decode.iq4.act_q8": true
+   },
+   "evidence": "q38xl dec lane (PR #1332): IQ4_XS / IQ4_NL (33 % of trunk bytes) verify matvecs ran on f32 activations at 138 GB/s vs 225 for the int8 K-quant matvecs (drafted-decode HAL profile, DevLab Strix run 44825902062); with int8 activations iq4_xs/iq4_nl reach 226/225 GB/s, step 108.5 -> 96.3 ms. Same-job ABBA (DevLab 85 W, 2 sessions each): decode 23.88 -> 26.38 tok/s (+10.5 %), decode_32k 20.7 -> 22.33 (+7.9 %), 4 streams 40.65 -> 45.8 (+12.7 %), prefill tie; ktest 206/206. ISA (K=5120 t4): 762 instr / 179 VGPR -> 438 / 67 (q4_k int8: 413 / 67)."
   }
  ]
 }
