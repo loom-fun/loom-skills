@@ -17,7 +17,7 @@ from render_card import drafted_note  # noqa: E402
 
 class StubRoofline:
     DEVICE, BW, FLOPS = "stub device", 1.0, 1.0
-    DEVICES = {"stub": {"name": "stub device", "bw": 1.0, "flops": 1.0}}
+    DEVICES = {"stub": {"name": "stub device", "bw": 1.0, "flops": 1.0, "power_modes": {"spec": {"label": "spec", "flops": 1.0}}}}
 
     @staticmethod
     def ceilings(m, bw, flops, docs):
@@ -32,7 +32,7 @@ class StubRoofline:
         return StubRoofline.drafted_ceiling(m, depth, acceptance, bw)
 
     @staticmethod
-    def efficiency(m, metric, ceiling, tokens_per_pass=None):
+    def efficiency(m, metric, ceiling, tokens_per_pass=None, compute=None):
         return 0.5 if tokens_per_pass else 0.9
 
 

@@ -423,6 +423,11 @@ def basis_note(metrics):
     return ""
 
 
+def power_note(d):
+    """' sustained at 85 W (spec 59)' for a compute ceiling measured at a platform power mode; '' for a spec-sheet peak."""
+    return f" sustained at {d['power_mode']} (spec {d['spec_peak_flops'] / 1e12:.0f})" if d.get("power_mode") else ""
+
+
 def roofline_note(info):
     """The footnote that says what the roofline column is."""
     r = info.get("roofline")
@@ -430,7 +435,7 @@ def roofline_note(info):
         t, d, dr = r["tool"], r["device"], r.get("drafting")
         commit = short(t["skills_commit"]) if t["skills_commit"] != "unknown" else "unknown commit"
         out = (f"Roofline: the hardware ceiling for this {'checkpoint' if str(r.get('checkpoint', '')).endswith('.safetensors') else 'GGUF'} on {d['name']} at {d['bandwidth_bytes_per_s'] / 1e9:.0f} GB/s "
-               f"and {d['peak_flops'] / 1e12:.0f} TFLOP/s, from loom-roofline `roofline.py` (loom-skills {commit}"
+               f"and {d['peak_flops'] / 1e12:.0f} TFLOP/s{power_note(d)}, from loom-roofline `roofline.py` (loom-skills {commit}"
                + (", with local changes" if t.get("dirty") else "") + ")")
         if dr:
             out += drafted_note(dr, r["metrics"])
@@ -1045,7 +1050,7 @@ def report_gpu(L, info, facts, g, here, h, single):
     if r:
         t, d, dr = r["tool"], r["device"], r.get("drafting")
         L += [f"{h} Roofline", "",
-              f"- Device: {d['name']}, {d['bandwidth_bytes_per_s'] / 1e9:.0f} GB/s, {d['peak_flops'] / 1e12:.0f} TFLOP/s.",
+              f"- Device: {d['name']}, {d['bandwidth_bytes_per_s'] / 1e9:.0f} GB/s, {d['peak_flops'] / 1e12:.0f} TFLOP/s{power_note(d)}.",
               f"- Tool: `{t['script']}` sha256 `{t['sha256']}`, loom-skills "
               + (f"`{t['skills_commit']}`" if t["skills_commit"] != "unknown" else "commit unknown")
               + (" (with local changes)" if t.get("dirty") else "") + ".",

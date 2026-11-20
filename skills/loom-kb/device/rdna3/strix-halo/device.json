@@ -33,7 +33,20 @@
         "name": "AMD Ryzen AI Max+ 395 \"Strix Halo\" (gfx1151)",
         "bw": 228000000000.0,
         "flops": 59000000000000.0,
-        "note": "LPDDR5X-8000, 256-bit (256 GB/s peak); bw MEASURED: 228 GB/s, Loom streaming read of 1 GiB (+64 MiB written; copy of 512 MiB the same), loom-benchmark dispatch_complete, 8 launches per batch, on a DevLab Strix Halo runner with and without the active wait (completion_spin_ns), hrx-loom 0.2.0, run 44388427539 (the same kernel: 611 GB/s on the R9700S). The earlier 216 GB/s sat under it: Loom dense decode and 4-stream rows measured above their ceilings (e.g. Nanbeige4.3-33B decode 105 %, Gemma 4 31B 4 streams 104 %). 40 CUs x 512 x 2.9 GHz"
+        "note": "LPDDR5X-8000, 256-bit (256 GB/s peak); bw MEASURED: 228 GB/s, Loom streaming read of 1 GiB (+64 MiB written; copy of 512 MiB the same), loom-benchmark dispatch_complete, 8 launches per batch, on a DevLab Strix Halo runner with and without the active wait (completion_spin_ns), hrx-loom 0.2.0, run 44388427539 (the same kernel: 611 GB/s on the R9700S). The earlier 216 GB/s sat under it: Loom dense decode and 4-stream rows measured above their ceilings (e.g. Nanbeige4.3-33B decode 105 %, Gemma 4 31B 4 streams 104 %). flops: the spec-sheet peak, 40 CUs x 512 x 2.9 GHz (power mode 'spec'); never sustained, see power_modes",
+        "power_default": "85w",
+        "power_modes": {
+          "85w": {
+            "label": "85 W",
+            "flops": 43800000000000.0,
+            "note": "BIOS balanced, the DevLab Strix Halo runners' mode (cards are measured there): socket power settles at 85 W after a ~5 s boost; register-only random-f16 WMMA (kbench wmma_peak) 43.8 TFLOP/s on DevLab run 44642983266 (local 42.6 at 2.29 GHz); see prefill.md 'WMMA peak'"
+          },
+          "123w": {
+            "label": "123 W",
+            "flops": 48400000000000.0,
+            "note": "BIOS performance mode (local GMKtec EVO-X2): ~122 W sustained; best register-only random-f16 WMMA 48.4 TFLOP/s at 2.59 GHz (80 long-running workgroups; the kbench base layout 47.4 at 2.57 GHz), 2026-11-20; see prefill.md 'WMMA peak'"
+          }
+        }
       }
     }
   },

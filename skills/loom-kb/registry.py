@@ -13,7 +13,7 @@
   runner_labels()      {runner key: labels} of every device with a DevLab runner (the workflows' runs-on tables)
   fit_table(name)      repo-relative path of a device's fit table (device.json "fit_table", else .github/devlab/<device>_fit.json)
   fit_execution_key(name)  the fit-row key holding a device's preset execution (r9700: "r9700_execution")
-  roofline_presets()   {preset: {name, bw, flops, device}} every roofline device preset of every device
+  roofline_presets()   {preset: {name, bw, flops, device, power_modes, power_default}} every roofline device preset of every device
   quants()             {format: format dict}         quant/<fmt>/format.json
   file_quants()        the GGUF file quants the factory accepts, in order of preference
   methodology()        method/methodology.json
@@ -107,11 +107,14 @@ def fit_execution_key(name):
 
 
 def roofline_presets():
-    """{preset: {"name", "bw", "flops", "device"}}: every roofline preset of every device (a device may have a spec and a measured one)."""
+    """{preset: {"name", "bw", "flops", "device", "power_modes", "power_default"}}: every roofline preset of every device (a device may
+    have a spec and a measured one). flops is the spec-sheet peak; power_modes ({key: {"label", "flops", "note"}}) are measured sustained
+    compute rates per platform power mode, power_default the one the roofline uses ("spec": flops)."""
     out = {}
     for key, dev in devices().items():
         for name, p in dev["roofline"]["presets"].items():
-            out[name] = {"name": p["name"], "bw": p["bw"], "flops": p["flops"], "device": key}
+            out[name] = {"name": p["name"], "bw": p["bw"], "flops": p["flops"], "device": key,
+                         "power_modes": p.get("power_modes", {}), "power_default": p.get("power_default", "spec")}
     return out
 
 
