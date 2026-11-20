@@ -1516,6 +1516,30 @@ if cfg.get("recurrent_layers") and _chunk and _c11 == "group" and (_fz or _gt):
 """)
     if _f11:   # the fused pair replaced the g_gdn_chunk launch
         cases[-1] = "\n".join(l for l in cases[-1].split("\n") if not l.startswith("  //kernel.launch @g_gdn_chunk"))
+    if _gt and not _f11 and 'export("g_gdn_chunk_o16")' in (_pkg_llm_text() or ""):
+        # gen_llm GDN_O16: the same chain with the F16 producers of GEMM epochs (g_gdn_chunk_o16, g_gdn_norm_gate_s_o16 + unit row scales);
+        # the norm-gate gets an info whose last row is padding (zero f16 row, scale 0); the other kernels keep the live info
+        _i2 = info.copy(); _i2[-1, 2] = 0
+        _o16 = o.reshape(t, VD).copy(); _o16[-1] = 0
+        _so = np.ones((t, 2), np.float32); _so[-1] = 0
+        for n, a in [("info2", _i2), ("o16", _o16.astype(np.float16)), ("so", _so)]:
+            save(f"gcf_{n}", a)
+        c = cases[-1].replace("@gdn_chunkf_serve {", "@gdn_chunkf_serve_o16 {", 1)
+        HV16 = f"tensor<{t}x{VD}xf16>"
+        c = c.replace(f'  %eo = check.file.read.npy path("gcf_o.npy") : {VT}\n',
+                      f'  %eo = check.file.read.npy path("gcf_o16.npy") : {HV16}\n  %info2 = check.file.read.npy path("gcf_info2.npy") : tensor<{t}x4xi32>\n'
+                      f'  %eso = check.file.read.npy path("gcf_so.npy") : tensor<{t}x2xf32>\n  %so = check.generate.fill value(7.0) : tensor<{t}x2xf32>\n', 1)
+        c = c.replace(f"  %o = check.generate.fill value(0.0) : {VT}\n", f"  %o = check.generate.fill value(7.0) : {HV16}\n", 1)
+        lines = c.split("\n")
+        for i, l in enumerate(lines):
+            if "kernel.launch @g_gdn_chunk[" in l:
+                lines[i] = l.replace("@g_gdn_chunk[", "@g_gdn_chunk_o16[", 1).replace(f", {VT}, {VT})", f", {VT}, {HV16})")
+            elif "kernel.launch @g_gdn_norm_gate_s[" in l:
+                lines[i] = (f"  kernel.launch @g_gdn_norm_gate_s_o16[%t](%t, %spans, %meta, %info2, %raw, %nw, %z, %o, %so) : [index](index, index, {MT}, "
+                            f"tensor<{t}x4xi32>, {VT}, tensor<{DV}xf32>, {VT}, {HV16}, tensor<{t}x2xf32>)")
+            elif l.startswith("  check.expect.close actual(%o) "):
+                lines[i] = (l.replace(f": {VT}", f": {HV16}") + f"\n  check.expect.close actual(%so) expected(%eso) atol(0.0) rtol(0.0) nan(different) : tensor<{t}x2xf32>")
+        cases.append("\n".join(lines))
 # 4d. g_gdn_fa_rdna4 + g_gdn_fb_rdna4 (gfx12 fused prefill, gen_gdn_fused.py) against float64 (conv, norms, recurrence, norm-gate of the whole
 # chain; f16-operand tolerances as gdn_chunk_spans). gdn_fused_spans: four prompt spans packed back to back (fresh 130, continuing 64, fresh 97,
 # continuing 2: the history commit shifts the stored rows). gdn_fused_serve: the serving shape of a mixed epoch: 8 span packets of which 6 are
@@ -1879,6 +1903,23 @@ if os.environ.get("GEMM_TESTS", "1") == "1":
                 cases.append(_case.replace(f"@{tag} {{", f"@{tag}_acc {{", 1).replace(f'path("{tag}_y.npy")', f'path("{tag}_ya.npy")', 1)
                              .replace(f"  %y = check.generate.fill value(0.0) : tensor<{rows}x{n_use}xf32>", f'  %y = check.file.read.npy path("{tag}_y0.npy") : tensor<{rows}x{n_use}xf32>', 1)
                              .replace(f"kernel.launch @{kern}[", f"kernel.launch @{_acck}[", 1))
+            _qgk = kern.replace("_store_m256", "_store_m256_qgs")
+            if not swiglu and kern.endswith("_store_m256") and f'export("{_qgk}")' in (_pkg_llm_text() or "") and n_use % (2 * D) == 0:
+                # gen_llm QG_SPLIT: the fused query+gate projection's split in the epilogue: column c = head c / 2D, part (c / D) % 2 -> q / gate [row, head * D + dim]
+                _y4 = yv.reshape(rows, n_use // (2 * D), 2, D)
+                save(tag + "_qq", _y4[:, :, 0].reshape(rows, -1).astype(np.float32)); save(tag + "_qgt", _y4[:, :, 1].reshape(rows, -1).astype(np.float32))
+                _h = n_use // 2
+                cases.append(_case.replace(f"@{tag} {{", f"@{tag}_qgs {{", 1)
+                             .replace(f'  %e = check.file.read.npy path("{tag}_y.npy") : tensor<{rows}x{n_use}xf32>\n',
+                                      f'  %e = check.file.read.npy path("{tag}_qq.npy") : tensor<{rows}x{_h}xf32>\n  %e2 = check.file.read.npy path("{tag}_qgt.npy") : tensor<{rows}x{_h}xf32>\n', 1)
+                             .replace(f"  %y = check.generate.fill value(0.0) : tensor<{rows}x{n_use}xf32>\n",
+                                      f"  %y = check.generate.fill value(7.0) : tensor<{rows}x{_h}xf32>\n  %y2 = check.generate.fill value(7.0) : tensor<{rows}x{_h}xf32>\n", 1)
+                             .replace(f"kernel.launch @{kern}[%rows, %n](%rows, %k, %n, %x, %s, {wargs}, %y) : [index, index](index, index, index, tensor<{rows}x{K}xf16>, tensor<{rows}x2xf32>, {wtys}, tensor<{rows}x{n_use}xf32>)",
+                                      f"kernel.launch @{_qgk}[%rows, %n](%rows, %k, %n, %x, %s, {wargs}, %y, %y2) : [index, index](index, index, index, tensor<{rows}x{K}xf16>, tensor<{rows}x2xf32>, {wtys}, tensor<{rows}x{_h}xf32>, tensor<{rows}x{_h}xf32>)", 1)
+                             .replace(f"  check.expect.close actual(%y) expected(%e) atol({tol:.3e}) rtol(1.0e-2) nan(different) : tensor<{rows}x{n_use}xf32>",
+                                      f"  check.expect.close actual(%y) expected(%e) atol({tol:.3e}) rtol(1.0e-2) nan(different) : tensor<{rows}x{_h}xf32>\n"
+                                      f"  check.expect.close actual(%y2) expected(%e2) atol({tol:.3e}) rtol(1.0e-2) nan(different) : tensor<{rows}x{_h}xf32>", 1))
+                assert f"@{_qgk}[" in cases[-1] and "%e2" in cases[-1], tag
             _f16o11 = swiglu and kern.endswith("_m256") and os.environ.get("GEMM_M256_F16O", "0").lower() not in ("", "0", "false", "no", "off")
             for _f16o_k in ([f"{kern}_f16o_rdna4"] if swiglu and _f16o_on(cfg) else []) + ([f"{kern}_f16o"] if _f16o11 else []):
                     # the gfx12 f16-output swiglu twin (f16o_fuse.py's group): f16 result, scales_out = (1, 1) per live row and (0, 0) per dead

@@ -1259,6 +1259,38 @@ def f16out_m256(text):
 """)
 
 
+def qg_split(text, D):
+    """GEMM_QGS_FMTS / GEMM_QGS_D (gen_llm QG_SPLIT, choice prefill.fuse.qg_split): the `<K>_qgs` kernel of a store m256 kernel (or its gfx12
+    twin) for the fused query+gate projection (output column c = head c / 2D, part (c / D) % 2, dim c % D): the tile (128 columns, inside
+    one D-wide half) is stored to %y (query) or %y2 (gate) at [row, head * D + dim] with row stride n / 2: g_split_qgate's work in the
+    epilogue, no %qg round trip."""
+    old = _re.search(r'kernel\.def (?:target\(@\w+\) )?export\("(\w+)"\)', text).group(1)
+    new = old.replace("_store_m256", "_store_m256_qgs")
+    assert new != old, old
+    t = text.replace(f'export("{old}") @{old}(', f'export("{new}") @{new}(', 1)
+    assert t.count(", %y: buffer) {") == 1
+    t = t.replace(", %y: buffer) {", ", %y: buffer, %y2: buffer) {", 1)
+    a = """  %y_layout = encoding.layout.strided [%n, %c1] : encoding<layout>
+  %tile_first = index.madd %row_origin, %n, %out_origin : index
+  %tile_offset = index.scale %tile_first, %four : index, offset -> offset
+  %y_view = buffer.view %y[%tile_offset] : buffer"""
+    assert t.count(a) == 1, old
+    b = f"""  %qgs_n2 = index.div %n, %c2 : index
+  %y_layout = encoding.layout.strided [%qgs_n2, %c1] : encoding<layout>
+  %qgs_d = index.constant {D} : index
+  %qgs_2d = index.constant {2 * D} : index
+  %qgs_h = index.div %out_origin, %qgs_2d : index
+  %qgs_r = index.rem %out_origin, %qgs_2d : index
+  %qgs_gate = index.cmp uge, %qgs_r, %qgs_d : index
+  %qgs_dd = index.rem %out_origin, %qgs_d : index
+  %qgs_col = index.madd %qgs_h, %qgs_d, %qgs_dd : index
+  %tile_first = index.madd %row_origin, %qgs_n2, %qgs_col : index
+  %tile_offset = index.scale %tile_first, %four : index, offset -> offset
+  %qgs_buf = scf.select %qgs_gate, %y2, %y : buffer
+  %y_view = buffer.view %qgs_buf[%tile_offset] : buffer"""
+    return t.replace(a, b, 1)
+
+
 def _with_twin(gfx11, base):
     """gfx11 kernel text + the gfx12 twin (gen_gemm_rdna4) of base (the default kernel of the same name): every kernel a dual-target
     program launches needs its K_rdna4, or gfx12 runs the gfx11 WMMA fragment layout."""
@@ -1864,6 +1896,10 @@ if __name__ == "__main__":
                         out.append(_rdna4.with_twins(base256))
                     else:   # gfx11 variant; the gfx12 twin still comes from the default kernel
                         out.append(post(var256) + _rdna4.with_twins(base256)[len(base256):])
+                    if mode == "store" and fmt in set(filter(None, os.environ.get("GEMM_QGS_FMTS", "").split(","))):   # gen_llm QG_SPLIT
+                        _D = int(os.environ["GEMM_QGS_D"])
+                        _g11 = base256 if var256 is None else post(var256)
+                        out.append(qg_split(_g11, _D) + "\n" + (qg_split(_rdna4.with_twins(base256)[len(base256):].lstrip("\n"), _D) if _rdna4.enabled() else ""))
                     if mode == "swiglu" and (os.environ.get("GEMM_M256_F16O", "0").strip().lower() not in ("", "0", "false", "no", "off")):   # f16-output swiglu (f16o_fuse.fuse_gfx11) + its gfx12 twin
                         out.append(_with_twin(f16out_m256(base256 if var256 is None else post(var256)), f16out_m256(base256)))
     for pair in filter(None, os.environ.get("GEMM_M256_MIXED", "").split(",")):   # gen_llm sets it (choice prefill.gemm.m256_mixed)
