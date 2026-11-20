@@ -8,8 +8,11 @@ import os, re, sys
 ROOT, OUT = os.path.abspath(sys.argv[1]), sys.argv[2]
 for k, v in (("Q38_SET", "udxl"), ("GEMM_IQ4_NATIVE", "1"), ("GEMM_M256_G32", "1"), ("GEMM_M256_MIXED_BAL", "1")):
     os.environ.setdefault(k, v)
-NAMED = {"base": {}, "g32": {"GEMM_IQ4_G32": "1"}, "lut": {"GEMM_IQ4_F16LUT": "1"}}
-args = sys.argv[3:]
+NAMED = {"base": {}, "g32": {"GEMM_IQ4_G32": "1"}, "lut": {"GEMM_IQ4_F16LUT": "1"},
+         "g32nf0": {"GEMM_IQ4_G32": "1", "Q38_NF": "0"}, "g32swz10": {"GEMM_IQ4_G32": "1", "GEMM_M256_SWZ": "10", "Q38_NF": "0"}}
+args = [a for a in sys.argv[3:] if not a.startswith("shapes:")]
+_sh = [a[7:] for a in sys.argv[3:] if a.startswith("shapes:")]
+ONLY = [x for x in (_sh[0] if _sh else os.environ.get("Q38_SHAPES", "")).split(",") if x]   # or a "shapes:a,b" argument (kbench.json gen_variants)
 sys.argv = [sys.argv[0], ROOT, OUT]
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import gen_q38 as Q
@@ -20,6 +23,8 @@ for a in args:
     env = NAMED[n] if not spec else dict(kv.split("=", 1) for kv in spec.split("+") if kv)
     parts = [Q.helpers()]
     for sh, fmt, mode, rows, K, N, ws in Q.SHAPES:
+        if ONLY and sh not in ONLY:
+            continue
         wbs = [N * K // Q.WB[f][1] * Q.WB[f][0] for f in fmt.split(":")]
         wbs = wbs * len(ws) if len(wbs) == 1 else wbs
         t = Q.kernel(fmt, mode, env)

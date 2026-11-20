@@ -77,6 +77,7 @@ def ablate(t, abl):
 def kernel(fmt, mode, env):
     env = dict(env)
     abl = env.pop("ABL", "")
+    nf = env.pop("Q38_NF", None)
     old = {k: os.environ.get(k) for k in env}
     os.environ.update(env)
     try:
@@ -86,7 +87,7 @@ def kernel(fmt, mode, env):
         for k, v in old.items():
             if v is None: os.environ.pop(k, None)
             else: os.environ[k] = v
-    if os.environ.get("Q38_NF", "1") != "0":   # production order (gen_gemm GEMM_N_FASTEST, the program default): output tiles fastest
+    if (nf if nf is not None else os.environ.get("Q38_NF", "1")) != "0":   # production order (gen_gemm GEMM_N_FASTEST, the program default): output tiles fastest
         t = t.replace("workgroups(%row_tiles, %out_tiles, %c1)", "workgroups(%out_tiles, %row_tiles, %c1)")
         t = t.replace("  %row_group_id = kernel.workgroup.id<x> : index\n  %out_group_id = kernel.workgroup.id<y> : index",
                       "  %row_group_id = kernel.workgroup.id<y> : index\n  %out_group_id = kernel.workgroup.id<x> : index")
