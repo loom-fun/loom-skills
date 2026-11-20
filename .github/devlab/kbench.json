@@ -338,17 +338,13 @@
         "base",
         "kt16",
         "kt16+tnl",
-        "kt16+kvh",
-        "kt16+ng2+ngx",
-        "kt16+ng3+ngx"
+        "kt16+vp"
       ],
       "files": [
         "bench.loom",
         "bench_kt16.loom",
         "bench_kt16+tnl.loom",
-        "bench_kt16+kvh.loom",
-        "bench_kt16+ng2+ngx.loom",
-        "bench_kt16+ng3+ngx.loom"
+        "bench_kt16+vp.loom"
       ],
       "tests": [
         "test.loom"
