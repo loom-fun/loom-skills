@@ -1208,6 +1208,22 @@ def gemm_big256(fmt, mode, fmt2=None, g32=None, bal=None, a32_=None):
   %tile_first = index.madd %row_origin, %n, %out_origin : index
   %tile_offset = index.scale %tile_first, %four : index, offset -> offset
   %y_view = buffer.view %y[%tile_offset] : buffer -> view<256x{TN}xf32, %y_layout>''')
+    if mode == "acc" and int(os.environ.get("GEMM_ACC_BATCH", "16") or 0) > 0:
+        # acc: a batch of fragments' old values are all loaded before any of the batch's stores (a load issued after a store to the same
+        # buffer waits for it: the per-fragment load / add / store form was one DRAM round trip per fragment, 116 in a row per thread)
+        B = int(os.environ.get("GEMM_ACC_BATCH", "16"))
+        frs = [(r, c) for r in range(RF) for c in range(cfr)]
+        for i in range(0, len(frs), B):
+            grp = frs[i:i + B]
+            for r, c in grp:
+                L.append(f"  %oc{r}{c}_c = index.constant {c * 16} : index\n  %oc{r}{c} = index.add %wave_col, %oc{r}{c}_c : index")
+                L.append(f"  %old{r}{c} = vector.fragment.load<result> %y_view[{rowv[r]}, %oc{r}{c}] shape [%c16, %c16] : view<256x{TN}xf32, %y_layout> -> vector<8xf32>")
+            for r, c in grp:
+                L.append(f"  %v{r}{c}_s = vector.mulf %o0r{r}c{c}, %inv{r} : vector<8xf32>\n  %v{r}{c} = vector.addf %old{r}{c}, %v{r}{c}_s : vector<8xf32>")
+            for r, c in grp:
+                L.append(f"  vector.fragment.store<result> %v{r}{c}, %y_view[{rowv[r]}, %oc{r}{c}] shape [%c16, %c16] : vector<8xf32>, view<256x{TN}xf32, %y_layout>")
+        L.append("  kernel.return\n}\n")
+        return a32("\n".join(L)) if (a32_on() if a32_ is None else a32_) else "\n".join(L)
     for r in range(RF):
         for c in range(cfr):
             row = rowv[r]
