@@ -1,11 +1,11 @@
 {
- "_comment": "q38pf lane D (attn) round 1: 16-key flash2s tiles at head_dim 256 on gfx11 (FLASH2_KT256=16: 208 VGPRs, two 12-wave workgroups per WGP instead of one; kbench flash_strix 44646059869: -27 % / -26 % at 32k / 8k depth) vs the base sha, ABBA long rows, ktest + smoke.",
+ "_comment": "q38pf lane D (attn) round 2: branch default = 16-key flash2s tiles (KB choice prefill.attn.flash2_kt256=16 on Strix) vs the base sha (short rows) and vs + FLASH2_G11=kvh,vtf,hot (tnl: the gfx12 trims without lazy; kbench 44685816049 32k -1.4 % vs kt16) on long rows.",
  "runner": "strix",
  "memory_bytes": 52000000000,
  "llama_spec": "matched",
  "jobs": [
   {
-   "name": "q38pf-attn-r1",
+   "name": "q38pf-attn-r2",
    "runner": "strix",
    "card": "loom-fun/bartowski-Qwen3.8-27B-loom",
    "memory_bytes": 52000000000,
@@ -13,15 +13,20 @@
    "llamacpp": "b1374",
    "variants": [
     {"name": "base", "build": {}, "ref": "550fc117fa1cb45bef8ab2fbdb8fcde9d2e362aa"},
-    {"name": "new", "build": {"FLASH2_KT256": "16", "FLASH2_KT256__RDNA4": ""}}
+    {"name": "kt16", "build": {}},
+    {"name": "tnl", "build": {"FLASH2_G11": "kvh,vtf,hot"}}
    ],
    "steps": [
-    "perf:base:1:long",
-    "perf:new:1:long",
-    "perf:new:1:long",
-    "perf:base:1:long",
-    "smoke:new",
-    "ktest:new"
+    "perf:base:1",
+    "perf:kt16:1",
+    "perf:kt16:1",
+    "perf:base:1",
+    "perf:kt16:1:long",
+    "perf:tnl:1:long",
+    "perf:tnl:1:long",
+    "perf:kt16:1:long",
+    "smoke:tnl",
+    "ktest:tnl"
    ]
   }
  ]
