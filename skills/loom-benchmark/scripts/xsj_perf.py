@@ -212,9 +212,12 @@ def spec_args(repo, draft):
 
 def server_argv(args, engine, mode, model_path, context, spec, device=None):
     if engine == "loom":
+        if args.memory_bytes is None:
+            pool_args = ["--pool_backing=fixed"]
+        else:
+            pool_args = ["--pool_backing=elastic", f"--memory_bytes={args.memory_bytes}"]
         return [str(args.loom), f"--device={DEVICE}", f"--listen=127.0.0.1:{args.port}",
-                f"--model={model_path}", f"--preset={args.preset}", "--pool_backing=fixed",
-                *args.loom_arg]
+                f"--model={model_path}", f"--preset={args.preset}", *pool_args, *args.loom_arg]
     streams = 4 if mode == "nodraft" else 1
     unified = engine == "rocm" and streams == 4
     context = min(context, KV_CONTEXT_LIMITS[engine])
@@ -453,6 +456,7 @@ def arguments(argv):
     ap.add_argument("--vulkan-unavailable")
     ap.add_argument("--engine", action="append", choices=LOGS)
     ap.add_argument("--loom-arg", action="append", default=[], choices=["--parameter_mode=preload"])
+    ap.add_argument("--memory-bytes", type=int, help="Loom's tested elastic pool budget in bytes (default: fixed backing)")
     ap.add_argument("--port", type=int, default=os.environ.get("XSJ_PORT"))
     ap.add_argument("--sessions", type=int)
     ap.add_argument("--fast", action="store_true", help="Methodology rule 5: six sessions and three in-row samples")
@@ -464,6 +468,8 @@ def arguments(argv):
     args.repeat_rows = 3 if args.fast else 1
     if not 1 <= (args.port or 0) <= 65535:
         ap.error("--port or XSJ_PORT must name a valid run-owned loopback port")
+    if args.memory_bytes is not None and not 1 <= args.memory_bytes < 2**64:
+        ap.error("--memory-bytes must be a nonzero unsigned 64-bit byte count")
     if min(args.sessions, args.startup_timeout, args.workload_timeout) < 1:
         ap.error("sessions and timeouts must be positive")
     if not re.fullmatch(r"\d{8}-\d{6}-[a-z0-9]{4}", args.run_id):
