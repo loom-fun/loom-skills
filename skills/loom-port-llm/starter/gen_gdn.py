@@ -535,7 +535,8 @@ kernel.def export("g_gdn_recurrence") @g_gdn_recurrence(%spans: index) {{
             fz, gt = chunk11_fuse(G), chunk11_gate(G)
             if fused11_mode(G):   # the gfx11 fused pair (and its gfx12 twins) on the spans of PF_SPAN+ tokens
                 from gen_gdn_fused import fused_kernels
-                T.append(fused_kernels(G, NG, LB, eps, _V_GROUPED[0], _V_GROUPED[1], guard_open, guard_close, arch="rdna3", span_min=PF_SPAN))
+                T.append(fused_kernels(G, NG, LB, eps, _V_GROUPED[0], _V_GROUPED[1], guard_open, guard_close, arch="rdna3", span_min=PF_SPAN,
+                                       regnorm=os.environ.get("GDN_FUSED11_REGNORM", "") not in ("", "0", "off", "no", "false")))
                 if rdna4_twins():
                     T.append(fused_kernels(G, NG, LB, eps, _V_GROUPED[0], _V_GROUPED[1], guard_open, guard_close, rank=False, span_min=PF_SPAN))
             else:

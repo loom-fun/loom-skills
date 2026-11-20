@@ -535,8 +535,12 @@ kernel.def {tgt}export("{kname}") @{kname}(%tokens: index, %spans: index) {{
     return head + body + "\n  }\n  kernel.return\n}\n"
 
 
-def phase_b(G, NG, LB, eps, grouped, ratio, guard_open="", guard_close="", target=True, abl=(), arch="rdna4", span_min=0):
-    """abl: kbench timing ablations: nonorm (no norm-gate epilogue)."""
+def phase_b(G, NG, LB, eps, grouped, ratio, guard_open="", guard_close="", target=True, abl=(), arch="rdna4", span_min=0, regnorm=False):
+    """abl: kbench timing ablations: nonorm (no norm-gate epilogue).
+    regnorm (gfx11): the norm-gate epilogue keeps O in registers: each wave's per-row sums of squares (a 16-lane DPP butterfly) go through a
+    [CN][8] LDS table instead of the [CN][DV + 4] f32 O tile: -16 KB LDS (57.5 -> 41.6 KB), so 3 workgroups fit a WGP and the 48 head
+    workgroups run in one round."""
+    regnorm = regnorm and arch == "rdna3"
     HK, HV, DK, DV, C, K, VD, SB = G["HK"], G["HV"], G["DK"], G["DV"], G["C"], G["K"], G["VD"], G["state_bytes"]
     NS = HV * DV * DK
     NT = CN // 16
@@ -597,7 +601,7 @@ def phase_b(G, NG, LB, eps, grouped, ratio, guard_open="", guard_close="", targe
     P("    %m = index.min %rem, %k32 : index")
     P("    %tok0 = index.add %first, %c0tok : index")
     # z of this lane's norm rows (independent of the chain: in flight during it)
-    for rr in range(4):
+    for rr in ([] if regnorm else range(4)):
         P(f"    %nr{rr}_a = index.mul %wave, %k4 : index")
         P(f"    %nr{rr}_b = index.add %nr{rr}_a, {ci(rr)} : index")
         P(f"    %nr{rr} = index.assume %nr{rr}_b [range(%nr{rr}_b, 0, {CN - 1})] : index")
@@ -659,7 +663,23 @@ def phase_b(G, NG, LB, eps, grouped, ratio, guard_open="", guard_close="", targe
             P(f"    %pl{mt}_{kt} = vector.fragment.load<lhs> %s_p[{ci(16 * mt)}, {ci(16 * kt)}] {SH} : view<{CN}x{TP}xf16> -> {FH}")
             P(f"    %oo{mt}_{kt} = vector.mma %pl{mt}_{kt}, %df{kt}, {prev} : {FH}, {FH}, {vec8}")
             prev = f"%oo{mt}_{kt}"
-        P(f"    vector.fragment.store<result> {prev}, %o_lds[{ci(16 * mt)}, %wcol] {SH} : {vec8}, view<{CN}x{OS}xf32>")
+        if not regnorm:
+            P(f"    vector.fragment.store<result> {prev}, %o_lds[{ci(16 * mt)}, %wcol] {SH} : {vec8}, view<{CN}x{OS}xf32>")
+            continue
+        # O stays in registers (rows 16 mt + 2 e + half of value column dv): this wave's row sums of squares over its 16 columns
+        P(f"    %O{mt} = vector.addf {prev}, %zero8 : {vec8}")
+        P(f"    %osq{mt} = vector.mulf %O{mt}, %O{mt} : {vec8}")
+        for e in range(8):
+            P(f"    %oq{mt}_{e}_0 = vector.extract %osq{mt}[{e}] : {vec8} -> f32")
+            for j, off in enumerate((1, 2, 4, 8)):
+                P(f"    %oqs{mt}_{e}_{j}, %oqu{mt}_{e}_{j} = kernel.subgroup.shuffle<xor> %oq{mt}_{e}_{j}, %xo{off}, %width : f32, i32, i32")
+                P(f"    %oq{mt}_{e}_{j + 1} = scalar.addf %oq{mt}_{e}_{j}, %oqs{mt}_{e}_{j} : f32")
+        P(f"    scf.if %lrow0 {{")
+        for e in range(8):
+            P(f"      %rrw{mt}_{e}_v = index.add {ci(16 * mt + 2 * e)}, %lane_half : index")
+            P(f"      %rrw{mt}_{e} = index.assume %rrw{mt}_{e}_v [range(%rrw{mt}_{e}_v, 0, {CN - 1})] : index")
+            P(f"      view.store %oq{mt}_{e}_4, %red_view[%rrw{mt}_{e}, %wave] : f32, view<{CN}x8xf32>")
+        P("    }")
     # S <- exp(G) S + K^T (exp(G - gc) d)
     for mt in range(NT):
         P(f"    %dgm{mt} = vector.subf %glv, %gcv{mt} : {vec8}")
@@ -676,7 +696,19 @@ def phase_b(G, NG, LB, eps, grouped, ratio, guard_open="", guard_close="", targe
     P("    %cn_b = index.min %cn_a, %cn_last : index")
     P("    %cn = index.add %cn_b, %dz2 : index")
     out.extend(prefetch("%cn", "    "))
-    for rr in range(4):   # z of this lane's norm rows: in flight during the S update (after O: not over the W S / Q S chains)
+    for mt in (range(NT) if regnorm else []):   # z of this lane's rows 16 mt + 2 e + half, column dv: in flight during the S update
+        for e in range(8):
+            P(f"    %zr{mt}_{e}_v = index.add {ci(16 * mt + 2 * e)}, %lane_half : index")
+            P(f"    %zr{mt}_{e} = index.assume %zr{mt}_{e}_v [range(%zr{mt}_{e}_v, 0, {CN - 1})] : index")
+            P(f"    %zl{mt}_{e} = index.cmp ult, %zr{mt}_{e}, %m : index")
+            P(f"    %zt{mt}_{e}_a = index.add %tok0, %zr{mt}_{e} : index")
+            P(f"    %zt{mt}_{e}_b = scf.select %zl{mt}_{e}, %zt{mt}_{e}_a, %tok0 : index")
+            P(f"    %zt{mt}_{e}_c = index.add %zt{mt}_{e}_b, %dz2 : index")
+            P(f"    %zt{mt}_{e}_d = index.assume %zt{mt}_{e}_c [range(%zt{mt}_{e}_c, 0, 8191)] : index")
+            P(f"    %zt{mt}_{e} = index.assume %zt{mt}_{e}_d [lt(%zt{mt}_{e}_d, %tokens)] : index")
+            P(f"    %ze{mt}_{e} = view.load %z_view[%zt{mt}_{e}, %ocol] : view<[%tokens]x{VD}xf32> -> f32")
+        P(f"    %zv{mt} = vector.from_elements {', '.join(f'%ze{mt}_{e}' for e in range(8))} : {vec8}")
+    for rr in ([] if regnorm else range(4)):   # z of this lane's norm rows: in flight during the S update (after O: not over the W S / Q S chains)
         P(f"    %ztok{rr} = index.add %otok{rr}, %dz2 : index")
         P(f"    %zta{rr} = index.assume %ztok{rr} [range(%ztok{rr}, 0, 8191)] : index")
         P(f"    %ztb{rr} = index.assume %zta{rr} [lt(%zta{rr}, %tokens)] : index")
@@ -694,8 +726,33 @@ def phase_b(G, NG, LB, eps, grouped, ratio, guard_open="", guard_close="", targe
         P(f"    %sn{kb} = vector.addf {prev}, %zero8 : {vec8}")
     P("    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)")
     out.extend(stage_stores("    ", "_cn"))
+    for mt in (range(NT) if regnorm else []):   # norm-gate epilogue from registers: the row sums of the 8 waves from the table
+        for e in range(8):
+            P(f"    %rr{mt}_{e}_v = index.add %lane_half, {ci(16 * mt + 2 * e)} : index")
+            P(f"    %rr{mt}_{e} = index.assume %rr{mt}_{e}_v [range(%rr{mt}_{e}_v, 0, {CN - 1})] : index")
+            P(f"    %rs{mt}_{e} = vector.load %red_view[%rr{mt}_{e}, %k0] : view<{CN}x8xf32> -> {vec8}")
+            P(f"    %rsum{mt}_{e} = vector.reduce<addf> %rs{mt}_{e}, %zero_f : {vec8}, f32")
+            P(f"    %rmean{mt}_{e} = scalar.divf %rsum{mt}_{e}, %count : f32")
+            P(f"    %rst{mt}_{e} = scalar.addf %rmean{mt}_{e}, %eps : f32")
+            P(f"    %rinv{mt}_{e} = scalar.rsqrtf %rst{mt}_{e} : f32")
+        P(f"    %riv{mt} = vector.from_elements {', '.join(f'%rinv{mt}_{e}' for e in range(8))} : {vec8}")
+        P(f"    %rzs{mt} = vector.siluf<afn> %zv{mt} : {vec8}")
+        P(f"    %ron{mt}_a = vector.mulf %O{mt}, %riv{mt} : {vec8}")
+        P(f"    %ron{mt}_b = vector.mulf %ron{mt}_a, %nwdv8 : {vec8}")
+        P(f"    %ron{mt} = vector.mulf %ron{mt}_b, %rzs{mt} : {vec8}")
+        if mt == 0:   # store rows from one base (the z-load indices are not kept live over the S update)
+            P("    %otb = index.add %tok0, %lane_half : index")
+            P("    %omr = index.sub %m, %lane_half : index")
+        for e in range(8):
+            P(f"    %sl{mt}_{e}x = index.cmp ult, {ci(16 * mt + 2 * e)}, %omr : index")
+            P(f"    scf.if %sl{mt}_{e}x {{")
+            P(f"      %roe{mt}_{e} = vector.extract %ron{mt}[{e}] : {vec8} -> f32")
+            P(f"      %sta{mt}_{e} = index.add %otb, {ci(16 * mt + 2 * e)} : index")
+            P(f"      %stb{mt}_{e} = index.assume %sta{mt}_{e} [lt(%sta{mt}_{e}, %tokens)] : index")
+            P(f"      view.store %roe{mt}_{e}, %o_view[%stb{mt}_{e}, %ocol] : f32, view<[%tokens]x{VD}xf32>")
+            P("    }")
     # norm-gate epilogue: wave w takes rows 4 w .. 4 w + 3, lane l value columns 4 l .. 4 l + 3
-    for rr in range(4):
+    for rr in ([] if regnorm else range(4)):
         P(f"    %ov{rr} = vector.load %o_lds[%nr{rr}, %lc4] : view<{CN}x{OS}xf32> -> vector<4xf32>")
         P(f"    %osq{rr} = vector.mulf %ov{rr}, %ov{rr} : vector<4xf32>")
         P(f"    %osr{rr} = vector.reduce<addf> %osq{rr}, %zero_f : vector<4xf32>, f32")
@@ -708,7 +765,7 @@ def phase_b(G, NG, LB, eps, grouped, ratio, guard_open="", guard_close="", targe
         P(f"    %on{rr}_a = vector.mulf %ov{rr}, %oiv{rr} : vector<4xf32>")
         P(f"    %on{rr}_b = vector.mulf %on{rr}_a, %nwv : vector<4xf32>")
         P(f"    %on{rr} = vector.mulf %on{rr}_b, %zs{rr} : vector<4xf32>")
-    for rr in range(4):
+    for rr in ([] if regnorm else range(4)):
         P(f"    scf.if %olive{rr} {{")
         P(f"      vector.store %on{rr}, %o_view[%otok{rr}, %zcol] : vector<4xf32>, view<[%tokens]x{VD}xf32>")
         P("    }")
@@ -841,9 +898,7 @@ kernel.def {tgt}export("{kname}") @{kname}(%spans: index) {{
   %fdiv = index.div %first, %k32 : index
   %rank = func.call @g_gdn_fused_rank(%metadata, %spans, %first) : (buffer, index, index) -> (index)
   %slot0 = index.add %fdiv, %rank : index
-  %ob = index.constant {CN * OS * 4} : offset
-  %o_buf = buffer.alloca<workgroup> align(16) %ob : buffer
-  %o_lds = buffer.view %o_buf[%zero] : buffer -> view<{CN}x{OS}xf32>
+@O_LDS@
 @STAGE@
   %sc_bytes = index.constant 64 : offset
   %sc_buf = buffer.alloca<workgroup> align(16) %sc_bytes : buffer
@@ -881,6 +936,14 @@ kernel.def {tgt}export("{kname}") @{kname}(%spans: index) {{
         stage += [f"  %sb_{nm_} = index.constant {b} : offset", f"  %sbuf_{nm_} = buffer.alloca<workgroup> align(16) %sb_{nm_} : buffer",
                   f"  %s_{nm_} = buffer.view %sbuf_{nm_}[%zero] : buffer -> view<{shp}>"]
     head = head.replace("@STAGE@", "\n".join(stage))
+    O_LDS = (f"  %ob = index.constant {CN * 8 * 4} : offset\n  %o_buf = buffer.alloca<workgroup> align(16) %ob : buffer\n"
+             f"  %red_view = buffer.view %o_buf[%zero] : buffer -> view<{CN}x8xf32>\n  %lrow0 = index.cmp eq, %lane_row, %k0 : index\n"
+             + "".join(f"  %xo{o} = scalar.constant {o} : i32\n" for o in (1, 2, 4, 8))
+             + f"  %ocol = index.add %head_cols, %dv : index\n  %nwdv = view.load %nw_view[%dv] : view<{DV}xf32> -> f32\n"
+             f"  %nwdv8 = vector.splat %nwdv : {vec8}") if regnorm else (
+             f"  %ob = index.constant {CN * OS * 4} : offset\n  %o_buf = buffer.alloca<workgroup> align(16) %ob : buffer\n"
+             f"  %o_lds = buffer.view %o_buf[%zero] : buffer -> view<{CN}x{OS}xf32>")
+    head = head.replace("@O_LDS@", O_LDS)
     carry = ", ".join(f"%s{kb} = %ist{kb} : {vec8}" for kb in range(8))
     outs = ", ".join(f"%fin{kb}" for kb in range(8))
     loop_head = f"  {outs} = scf.for %ci = [%k0 to %nchunks step %k1]({carry}) -> ({', '.join([vec8] * 8)}) {{"
@@ -933,8 +996,8 @@ func.def inline @g_gdn_fused_rank(%metadata: buffer, %spans: index, %first: inde
 """
 
 
-def fused_kernels(G, NG, LB, eps, grouped, ratio, guard_open="", guard_close="", target=True, arch="rdna4", rank=True, span_min=0):
+def fused_kernels(G, NG, LB, eps, grouped, ratio, guard_open="", guard_close="", target=True, arch="rdna4", rank=True, span_min=0, regnorm=False):
     """arch "rdna3": the gfx11 pair g_gdn_fa + g_gdn_fb (same dataflow, RDNA3 WMMA layouts; prefill.gdn.fused11); rank: emit the shared rank
     func; span_min: the pair takes only spans of at least this many tokens."""
     return ((RANK if rank else "") + phase_a(G, NG, LB, eps, grouped, ratio, target, arch=arch, span_min=span_min) + "\n"
-            + phase_b(G, NG, LB, eps, grouped, ratio, guard_open, guard_close, target, arch=arch, span_min=span_min))
+            + phase_b(G, NG, LB, eps, grouped, ratio, guard_open, guard_close, target, arch=arch, span_min=span_min, regnorm=regnorm))

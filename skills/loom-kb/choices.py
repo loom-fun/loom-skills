@@ -448,6 +448,11 @@ CHOICE("prefill.gdn.fused11", "bool", False, "GDN_FUSED11", devices=["rdna3"], r
        doc="With hybrid.gdn.chunk11 (single-form models, 128 x 128 heads, conv 4): GEMM-shape epochs run the spans of 64+ tokens through the "
            "gfx11 fused pair g_gdn_fa + g_gdn_fb (gen_gdn_fused.py arch rdna3; its gfx12 twins restricted the same way) after the chain of the "
            "shorter spans (g_gdn_conv skips the long ones, g_gdn_norm_gate_s); the history commit runs last.")
+CHOICE("prefill.gdn.fused11_regnorm", "bool", False, "GDN_FUSED11_REGNORM", devices=["rdna3"], rows=ROWS_PREFILL, kernels=["g_gdn_fb"],
+       from_pr="q38pf gdn",
+       doc="With prefill.gdn.fused11: g_gdn_fb's norm-gate epilogue keeps O in registers (row sums of squares by a 16-lane DPP butterfly into a "
+           "[32][8] LDS table) instead of a 32 x 132 f32 LDS tile: 57.5 -> 41.6 KB LDS, 237 VGPR, so 3 workgroups fit a WGP and the 48 head "
+           "workgroups of a 27B span run in one round instead of two.")
 CHOICE("prefill.gdn.fused2", "bool", False, "GDN_FUSED2", devices=["rdna4"], rows=ROWS_PREFILL, kernels=["g_gdn_fa_rdna4", "g_gdn_fb_rdna4"],
        from_pr="mxfp4st olayer",
        doc="gfx12 fused gated delta-net prefill in two launches (gen_gdn_fused.py): g_gdn_fa_rdna4 (conv + SiLU, q/k norms, gates, the WY solve "
