@@ -684,7 +684,9 @@ def _split_dequant(fmt, wsrc, out, col):
     loads = [(_re.match(r"\s*(%\S+) = ", l).group(1), l.split("-> ")[-1].strip()) for l in addr if ".load " in l]
     return lines, addr, loads
 
-G32_FMTS = ("q4_k", "q6_k")
+# q6_k: correct but 5-7 % slower (local kbench 2026-11-19); opt in with GEMM_M256_G32_FMTS=q4_k,q6_k
+def _g32_fmts():
+    return tuple(os.environ.get("GEMM_M256_G32_FMTS", "q4_k").split(","))
 
 
 def _g32_dequant(fmt, w, out, col):
@@ -805,6 +807,37 @@ G32_CONSTS = """  %g32_ks = index.rem %workitem, %c2 : index
   %g32_d208 = index.constant 208 : offset"""
 
 
+def _swizzle_text():
+    """GEMM_M256_SWZ=G (choice prefill.gemm.m256_swz): workgroup order in groups of G output tiles, each group walking
+    every row tile with the output tile fastest, so G weight tiles stay cached while the activations stream once per
+    group (default order streams all activations once per ~1 output tile: at 8k rows they do not fit the cache).
+    0/unset: launch order (row tile fastest)."""
+    g = int(os.environ.get("GEMM_M256_SWZ", "0") or 0)
+    plain = """  %row_group_id = kernel.workgroup.id<x> : index
+  %out_group_id = kernel.workgroup.id<y> : index"""
+    if g > 0:
+        plain = f"""  %wg_x = kernel.workgroup.id<x> : index
+  %wg_y = kernel.workgroup.id<y> : index
+  %swz_g = index.constant {g} : index
+  %swz_lin = index.madd %wg_y, %row_tile_count, %wg_x : index
+  %swz_span = index.mul %swz_g, %row_tile_count : index
+  %swz_grp = index.div %swz_lin, %swz_span : index
+  %swz_first = index.mul %swz_grp, %swz_g : index
+  %swz_within = index.rem %swz_lin, %swz_span : index
+  %swz_left = index.sub %out_tile_count, %swz_first : index
+  %swz_size_v = index.min %swz_g, %swz_left : index
+  %swz_size = index.assume %swz_size_v [range(%swz_size_v, 1, {g})] : index
+  %swz_oo = index.rem %swz_within, %swz_size : index
+  %out_group_id = index.add %swz_first, %swz_oo : index
+  %row_group_id = index.div %swz_within, %swz_size : index"""
+        return plain + """
+  %row_group = index.assume %row_group_id [range(%row_group_id, 0, 31), lt(%row_group_id, %row_tile_count)] : index
+  %out_group = index.assume %out_group_id [range(%out_group_id, 0, 4095), lt(%out_group_id, %out_tile_count)] : index"""
+    return plain + """
+  %row_group = index.assume %row_group_id [lt(%row_group_id, %row_tile_count)] : index
+  %out_group = index.assume %out_group_id [lt(%out_group_id, %out_tile_count)] : index"""
+
+
 def gemm_big256(fmt, mode):
     """256-row WMMA GEMM: 256 threads (8 waves in a 4 x 2 grid), each wave 64 rows x 64 columns (4 x 4
     16 x 16 accumulators). store/acc: 256 x 128 tiles, swiglu: 256 rows x 64 outputs of each of gate and up.
@@ -857,10 +890,7 @@ def gemm_big256(fmt, mode):
   %nibble_mask = vector.splati 252645135 : vector<4xi32>
   %row_tile_count = index.div %rows, %c256 : index
   %out_tile_count = index.div %n, %tn : index
-  %row_group_id = kernel.workgroup.id<x> : index
-  %out_group_id = kernel.workgroup.id<y> : index
-  %row_group = index.assume %row_group_id [lt(%row_group_id, %row_tile_count)] : index
-  %out_group = index.assume %out_group_id [lt(%out_group_id, %out_tile_count)] : index
+{_swizzle_text()}
   %workitem_id = kernel.workitem.id<x> : index
   %workitem = index.assume %workitem_id [range(%workitem_id, 0, {NT - 1})] : index
   %subgroup = kernel.subgroup.id : index
@@ -918,7 +948,7 @@ def gemm_big256(fmt, mode):
   %wb_off = index.scale %wb_row, %c144_off : index, offset -> offset
   %w_wave_view = buffer.view %w_stage[%wb_off] : buffer -> view<{WVR}x72xf16>''')
     wsrc = "wsel" if two_w else "w"
-    g32 = _on("GEMM_M256_G32") and fmt in G32_FMTS
+    g32 = _on("GEMM_M256_G32") and fmt in _g32_fmts()
     if g32:
         L.append(G32_CONSTS)
         parts = [("dqg", "%wcolg", "%c0") + _g32_dequant(fmt, wsrc, "dqg", "%wcolg")]

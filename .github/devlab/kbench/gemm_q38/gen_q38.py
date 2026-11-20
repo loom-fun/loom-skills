@@ -72,6 +72,7 @@ def main():
     os.makedirs(OUT, exist_ok=True)
     for sh, fmt, mode, rows, K, N, ws in SHAPES:
         if only and sh not in only.split(","): continue
+        rows = int(os.environ.get("Q38_ROWS", rows))
         bb, bv = WB[fmt]; wb = N * K // bv * bb
         parts, names = [helpers()], []
         for vn, env in variants:
