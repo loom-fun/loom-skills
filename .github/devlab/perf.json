@@ -1,47 +1,446 @@
 {
- "_comment": "R9700 per-model measurement (r9700_jobs.py): one job per model on one R9700 runner; loom-fun-staging card, llama.cpp ROCm b1375 + Vulkan b12211 with the matched drafting, reduced-context models served at served_context. Does not fit: none",
- "runner": "r9700",
- "memory_bytes": 34000000000,
- "llama_spec": "matched",
+ "_comment": "Gufo conformance (gufo:card) of loom-gufo-extension 0.3.0's declared models not yet run locally, on Gufo main ec6d3d07, for the gufo-org/gufo-extension registry PR (loom-fun/loom-gufo-extension registry-0.3.0).",
+ "card": "loom-fun/bartowski-Ornith-1.5-9B-loom",
+ "memory_bytes": 32000000000,
+ "kit": null,
+ "llamacpp": "b1374",
  "jobs": [
   {
-   "name": "unsloth-qwen3-0-6b-loom",
-   "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
-   "kit": null,
-   "llamacpp": "b1375",
-   "llamacpp_vulkan": "b12211",
-   "memory_bytes_r9700": 17000000000,
+   "name": "gufo-ornith-1.5-9b",
+   "card": "loom-fun/bartowski-Ornith-1.5-9B-loom",
+   "memory_bytes": 32000000000,
    "variants": [
     {
-     "name": "card",
-     "build": {}
-    },
-    {
-     "name": "nodraft",
-     "build": {},
-     "execution": {
-      "draft_depth": 0
-     }
+     "name": "card"
     }
    ],
    "steps": [
-    "func:card",
-    "ktest:card",
-    "gates:card:dev",
-    "perf:card:3",
-    "perf:card:3:long",
-    "c4:nodraft",
-    "llama@rocm.np1:3",
-    "llama@rocm.np1:3:long",
-    "llamac4@rocm.nodraft",
-    "llama@vulkan.np1:3",
-    "llama@vulkan.np1:3:long",
-    "llamac4@vulkan.perslot.nodraft"
-   ]
+    "gufo:card"
+   ],
+   "bundle": {
+    "build": {
+     "extension": "loom-fun/loom-gufo-extension@3aa6c2cefaf5c926449dce723e98a4e25e51a396",
+     "gufo": "gufo-org/gufo@ec6d3d0724381585307d98ac760d75d2f8f325b8"
+    }
+   }
+  },
+  {
+   "name": "gufo-nemotron-3.5-bolt-e4b",
+   "card": "loom-fun/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom",
+   "memory_bytes": 36000000000,
+   "variants": [
+    {
+     "name": "card"
+    }
+   ],
+   "steps": [
+    "gufo:card"
+   ],
+   "bundle": {
+    "build": {
+     "extension": "loom-fun/loom-gufo-extension@3aa6c2cefaf5c926449dce723e98a4e25e51a396",
+     "gufo": "gufo-org/gufo@ec6d3d0724381585307d98ac760d75d2f8f325b8"
+    }
+   }
+  },
+  {
+   "name": "gufo-qwen3.5-9b",
+   "card": "loom-fun/unsloth-Qwen3.5-9B-loom",
+   "memory_bytes": 32000000000,
+   "variants": [
+    {
+     "name": "card"
+    }
+   ],
+   "steps": [
+    "gufo:card"
+   ],
+   "bundle": {
+    "build": {
+     "extension": "loom-fun/loom-gufo-extension@3aa6c2cefaf5c926449dce723e98a4e25e51a396",
+     "gufo": "gufo-org/gufo@ec6d3d0724381585307d98ac760d75d2f8f325b8"
+    }
+   }
+  },
+  {
+   "name": "gufo-mellum2.1-12b-a2.5b-thinking",
+   "card": "loom-fun/bartowski-Mellum2.1-12B-A2.5B-Thinking-loom",
+   "memory_bytes": 27000000000,
+   "variants": [
+    {
+     "name": "card"
+    }
+   ],
+   "steps": [
+    "gufo:card"
+   ],
+   "bundle": {
+    "build": {
+     "extension": "loom-fun/loom-gufo-extension@3aa6c2cefaf5c926449dce723e98a4e25e51a396",
+     "gufo": "gufo-org/gufo@ec6d3d0724381585307d98ac760d75d2f8f325b8"
+    }
+   }
+  },
+  {
+   "name": "gufo-qwen3-14b",
+   "card": "loom-fun/ggml-org-Qwen3-14B-loom",
+   "memory_bytes": 31000000000,
+   "variants": [
+    {
+     "name": "card"
+    }
+   ],
+   "steps": [
+    "gufo:card"
+   ],
+   "bundle": {
+    "build": {
+     "extension": "loom-fun/loom-gufo-extension@3aa6c2cefaf5c926449dce723e98a4e25e51a396",
+     "gufo": "gufo-org/gufo@ec6d3d0724381585307d98ac760d75d2f8f325b8"
+    }
+   }
+  },
+  {
+   "name": "gufo-gpt-oss-20b",
+   "card": "loom-fun/unsloth-gpt-oss-20b-loom",
+   "memory_bytes": 28000000000,
+   "variants": [
+    {
+     "name": "card"
+    }
+   ],
+   "steps": [
+    "gufo:card"
+   ],
+   "bundle": {
+    "build": {
+     "extension": "loom-fun/loom-gufo-extension@3aa6c2cefaf5c926449dce723e98a4e25e51a396",
+     "gufo": "gufo-org/gufo@ec6d3d0724381585307d98ac760d75d2f8f325b8"
+    }
+   }
+  },
+  {
+   "name": "gufo-lfm2.5-24b-a2b",
+   "card": "loom-fun/ggml-org-LFM2.5-24B-A2B-loom",
+   "memory_bytes": 24000000000,
+   "variants": [
+    {
+     "name": "card"
+    }
+   ],
+   "steps": [
+    "gufo:card"
+   ],
+   "bundle": {
+    "build": {
+     "extension": "loom-fun/loom-gufo-extension@3aa6c2cefaf5c926449dce723e98a4e25e51a396",
+     "gufo": "gufo-org/gufo@ec6d3d0724381585307d98ac760d75d2f8f325b8"
+    }
+   }
+  },
+  {
+   "name": "gufo-gemma-4-26b-a4b-it",
+   "card": "loom-fun/lmstudio-community-gemma-4-26B-A4B-it-loom",
+   "memory_bytes": 81000000000,
+   "variants": [
+    {
+     "name": "card"
+    }
+   ],
+   "steps": [
+    "gufo:card"
+   ],
+   "bundle": {
+    "build": {
+     "extension": "loom-fun/loom-gufo-extension@3aa6c2cefaf5c926449dce723e98a4e25e51a396",
+     "gufo": "gufo-org/gufo@ec6d3d0724381585307d98ac760d75d2f8f325b8"
+    }
+   }
+  },
+  {
+   "name": "gufo-qwen3-coder-30b-a3b-instruct",
+   "card": "loom-fun/ggml-org-Qwen3-Coder-30B-A3B-Instruct-loom",
+   "memory_bytes": 62000000000,
+   "variants": [
+    {
+     "name": "card"
+    }
+   ],
+   "steps": [
+    "gufo:card"
+   ],
+   "bundle": {
+    "build": {
+     "extension": "loom-fun/loom-gufo-extension@3aa6c2cefaf5c926449dce723e98a4e25e51a396",
+     "gufo": "gufo-org/gufo@ec6d3d0724381585307d98ac760d75d2f8f325b8"
+    }
+   }
+  },
+  {
+   "name": "gufo-qwen3.8-27b",
+   "card": "loom-fun/bartowski-Qwen3.8-27B-loom",
+   "memory_bytes": 52000000000,
+   "variants": [
+    {
+     "name": "card"
+    }
+   ],
+   "steps": [
+    "gufo:card"
+   ],
+   "bundle": {
+    "build": {
+     "extension": "loom-fun/loom-gufo-extension@3aa6c2cefaf5c926449dce723e98a4e25e51a396",
+     "gufo": "gufo-org/gufo@ec6d3d0724381585307d98ac760d75d2f8f325b8"
+    }
+   }
+  },
+  {
+   "name": "gufo-qwen3-30b-a3b-instruct-2507",
+   "card": "loom-fun/unsloth-Qwen3-30B-A3B-Instruct-2507-loom",
+   "memory_bytes": 63000000000,
+   "variants": [
+    {
+     "name": "card"
+    }
+   ],
+   "steps": [
+    "gufo:card"
+   ],
+   "bundle": {
+    "build": {
+     "extension": "loom-fun/loom-gufo-extension@3aa6c2cefaf5c926449dce723e98a4e25e51a396",
+     "gufo": "gufo-org/gufo@ec6d3d0724381585307d98ac760d75d2f8f325b8"
+    }
+   }
+  },
+  {
+   "name": "gufo-gemma-4-31b-it",
+   "card": "loom-fun/unsloth-gemma-4-31B-it-loom",
+   "memory_bytes": 80000000000,
+   "variants": [
+    {
+     "name": "card"
+    }
+   ],
+   "steps": [
+    "gufo:card"
+   ],
+   "bundle": {
+    "build": {
+     "extension": "loom-fun/loom-gufo-extension@3aa6c2cefaf5c926449dce723e98a4e25e51a396",
+     "gufo": "gufo-org/gufo@ec6d3d0724381585307d98ac760d75d2f8f325b8"
+    }
+   }
+  },
+  {
+   "name": "gufo-qwen2.5-32b-instruct",
+   "card": "loom-fun/bartowski-Qwen2.5-32B-Instruct-loom",
+   "memory_bytes": 50000000000,
+   "variants": [
+    {
+     "name": "card"
+    }
+   ],
+   "steps": [
+    "gufo:card"
+   ],
+   "bundle": {
+    "build": {
+     "extension": "loom-fun/loom-gufo-extension@3aa6c2cefaf5c926449dce723e98a4e25e51a396",
+     "gufo": "gufo-org/gufo@ec6d3d0724381585307d98ac760d75d2f8f325b8"
+    }
+   }
+  },
+  {
+   "name": "gufo-laguna-xs-2.1",
+   "card": "loom-fun/ggml-org-Laguna-XS-2.1-loom",
+   "memory_bytes": 81000000000,
+   "variants": [
+    {
+     "name": "card"
+    }
+   ],
+   "steps": [
+    "gufo:card"
+   ],
+   "bundle": {
+    "build": {
+     "extension": "loom-fun/loom-gufo-extension@3aa6c2cefaf5c926449dce723e98a4e25e51a396",
+     "gufo": "gufo-org/gufo@ec6d3d0724381585307d98ac760d75d2f8f325b8"
+    }
+   }
+  },
+  {
+   "name": "gufo-nanbeige4.3-33b",
+   "card": "loom-fun/bartowski-Nanbeige4.3-33B-loom",
+   "memory_bytes": 81000000000,
+   "variants": [
+    {
+     "name": "card"
+    }
+   ],
+   "steps": [
+    "gufo:card"
+   ],
+   "bundle": {
+    "build": {
+     "extension": "loom-fun/loom-gufo-extension@3aa6c2cefaf5c926449dce723e98a4e25e51a396",
+     "gufo": "gufo-org/gufo@ec6d3d0724381585307d98ac760d75d2f8f325b8"
+    }
+   }
+  },
+  {
+   "name": "gufo-qwen3.6-27b",
+   "card": "loom-fun/ggml-org-Qwen3.6-27B-loom",
+   "memory_bytes": 57000000000,
+   "variants": [
+    {
+     "name": "card"
+    }
+   ],
+   "steps": [
+    "gufo:card"
+   ],
+   "bundle": {
+    "build": {
+     "extension": "loom-fun/loom-gufo-extension@3aa6c2cefaf5c926449dce723e98a4e25e51a396",
+     "gufo": "gufo-org/gufo@ec6d3d0724381585307d98ac760d75d2f8f325b8"
+    }
+   }
+  },
+  {
+   "name": "gufo-qwen3.6-35b-a3b",
+   "card": "loom-fun/ggml-org-Qwen3.6-35B-A3B-loom",
+   "memory_bytes": 48000000000,
+   "variants": [
+    {
+     "name": "card"
+    }
+   ],
+   "steps": [
+    "gufo:card"
+   ],
+   "bundle": {
+    "build": {
+     "extension": "loom-fun/loom-gufo-extension@3aa6c2cefaf5c926449dce723e98a4e25e51a396",
+     "gufo": "gufo-org/gufo@ec6d3d0724381585307d98ac760d75d2f8f325b8"
+    }
+   }
+  },
+  {
+   "name": "gufo-ornith-1.0-35b",
+   "card": "loom-fun/lmstudio-community-Ornith-1.0-35B-loom",
+   "memory_bytes": 36000000000,
+   "variants": [
+    {
+     "name": "card"
+    }
+   ],
+   "steps": [
+    "gufo:card"
+   ],
+   "bundle": {
+    "build": {
+     "extension": "loom-fun/loom-gufo-extension@3aa6c2cefaf5c926449dce723e98a4e25e51a396",
+     "gufo": "gufo-org/gufo@ec6d3d0724381585307d98ac760d75d2f8f325b8"
+    }
+   }
+  },
+  {
+   "name": "gufo-minicpm-v-4.7-35b-a3b",
+   "card": "loom-fun/bartowski-MiniCPM-V-4.7-35B-A3B-loom",
+   "memory_bytes": 36000000000,
+   "variants": [
+    {
+     "name": "card"
+    }
+   ],
+   "steps": [
+    "gufo:card"
+   ],
+   "bundle": {
+    "build": {
+     "extension": "loom-fun/loom-gufo-extension@3aa6c2cefaf5c926449dce723e98a4e25e51a396",
+     "gufo": "gufo-org/gufo@ec6d3d0724381585307d98ac760d75d2f8f325b8"
+    }
+   }
+  },
+  {
+   "name": "gufo-sage-a1.5",
+   "card": "loom-fun/InternScience-Sage-A1.5-loom",
+   "memory_bytes": 41000000000,
+   "variants": [
+    {
+     "name": "card"
+    }
+   ],
+   "steps": [
+    "gufo:card"
+   ],
+   "bundle": {
+    "build": {
+     "extension": "loom-fun/loom-gufo-extension@3aa6c2cefaf5c926449dce723e98a4e25e51a396",
+     "gufo": "gufo-org/gufo@ec6d3d0724381585307d98ac760d75d2f8f325b8"
+    }
+   }
+  },
+  {
+   "name": "gufo-qwen3.5-35b-a3b",
+   "card": "loom-fun/unsloth-Qwen3.5-35B-A3B-loom",
+   "memory_bytes": 49000000000,
+   "variants": [
+    {
+     "name": "card"
+    }
+   ],
+   "steps": [
+    "gufo:card"
+   ],
+   "bundle": {
+    "build": {
+     "extension": "loom-fun/loom-gufo-extension@3aa6c2cefaf5c926449dce723e98a4e25e51a396",
+     "gufo": "gufo-org/gufo@ec6d3d0724381585307d98ac760d75d2f8f325b8"
+    }
+   }
+  },
+  {
+   "name": "gufo-ornith-1.5-35b-a3b",
+   "card": "loom-fun/bartowski-Ornith-1.5-35B-A3B-loom",
+   "memory_bytes": 49000000000,
+   "variants": [
+    {
+     "name": "card"
+    }
+   ],
+   "steps": [
+    "gufo:card"
+   ],
+   "bundle": {
+    "build": {
+     "extension": "loom-fun/loom-gufo-extension@3aa6c2cefaf5c926449dce723e98a4e25e51a396",
+     "gufo": "gufo-org/gufo@ec6d3d0724381585307d98ac760d75d2f8f325b8"
+    }
+   }
+  },
+  {
+   "name": "gufo-muse-glimmer-30b",
+   "card": "loom-fun/ggml-org-Muse-Glimmer-30B-loom",
+   "memory_bytes": 44000000000,
+   "variants": [
+    {
+     "name": "card"
+    }
+   ],
+   "steps": [
+    "gufo:card"
+   ],
+   "bundle": {
+    "build": {
+     "extension": "loom-fun/loom-gufo-extension@3aa6c2cefaf5c926449dce723e98a4e25e51a396",
+     "gufo": "gufo-org/gufo@ec6d3d0724381585307d98ac760d75d2f8f325b8"
+    }
+   }
   }
- ],
- "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
- "kit": null,
- "llamacpp": "b1375",
- "llamacpp_vulkan": "b12211"
+ ]
 }
