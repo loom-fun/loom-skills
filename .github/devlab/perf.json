@@ -1,27 +1,27 @@
 {
- "_comment": "q38-27b Strix Halo prefill campaign, round 0: HAL per-kernel profile of the published card (pf2k, pf8k) and of a rebuild from this branch, plus one prefill perf each.",
+ "_comment": "q38pf gemm r1: GEMM_M256_F16O (gfx11 f16-output m256 swiglu, no f row-scale pass) and + GEMM_M256_G32 vs the campaign base.",
  "runner": "strix",
  "memory_bytes": 52000000000,
  "llama_spec": "matched",
  "jobs": [
   {
-   "name": "q38pf-r0-profile",
+   "name": "q38pf-gemm-r1",
    "runner": "strix",
    "card": "loom-fun/bartowski-Qwen3.8-27B-loom",
    "memory_bytes": 52000000000,
    "kit": null,
    "llamacpp": "b1374",
    "variants": [
-    {"name": "card"},
-    {"name": "base", "build": {}}
+    {"name": "base", "build": {}, "ref": "550fc117fa1cb45bef8ab2fbdb8fcde9d2e362aa"},
+    {"name": "f16o", "build": {"GEMM_M256_F16O": "1"}},
+    {"name": "new", "build": {"GEMM_M256_F16O": "1", "GEMM_M256_G32": "1"}}
    ],
    "steps": [
-    "profile:card:pf2k,pf8k",
-    "profile:base:pf2k,pf8k",
-    "perf:card:1:long",
-    "perf:base:1:long",
-    "perf:base:1:long",
-    "perf:card:1:long"
+    "ktest:new",
+    "smoke:new",
+    "perf:base:1", "perf:f16o:1", "perf:new:1", "perf:new:1", "perf:f16o:1", "perf:base:1",
+    "perf:base:1:long", "perf:f16o:1:long", "perf:new:1:long", "perf:new:1:long", "perf:f16o:1:long", "perf:base:1:long",
+    "profile:new:pf8k"
    ]
   }
  ]
