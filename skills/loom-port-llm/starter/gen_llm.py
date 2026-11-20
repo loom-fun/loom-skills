@@ -2136,7 +2136,8 @@ def noh_dead_h(text):
 def qg_split_on():
     """QG_SPLIT (choice prefill.fuse.qg_split): fused query+gate projections (attn_gate fused_q) store q and gate straight from the 256-row GEMM's
     epilogue (gen_gemm.qg_split) in whole 256-row epochs; g_split_qgate runs only in the other GEMM epochs."""
-    return FUSED_Q and os.environ.get("QG_SPLIT", "0").strip().lower() not in ("", "0", "false", "no", "off")
+    # the 128-column output tiles of the q GEMM must not straddle a head's query/gate halves: head_dim a multiple of 128
+    return FUSED_Q and D % 128 == 0 and os.environ.get("QG_SPLIT", "0").strip().lower() not in ("", "0", "false", "no", "off")
 
 
 def qg_split(text):
