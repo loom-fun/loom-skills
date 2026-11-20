@@ -38,7 +38,7 @@ class XsjEvidence(unittest.TestCase):
         krackan = copy.deepcopy(rows["gfx1150"])
         krackan.update(device=GPU, gfx=GPU, name="AMD Radeon 860M", short="Radeon 860M",
                        preset_suffix=f"-{GPU}", runner={"key": GPU, "labels": [], "backend": "xsj"})
-        krackan["card"].update(tag=GPU, detect={"pattern": "gfx1152|860M"})
+        krackan["card"].update(tag=GPU, detect={"pattern": "gfx1152|radeon 860m|krackan", "flags": "i"})
         self.enterContext(patch.object(card_lib.registry, "devices", return_value={**rows, GPU: krackan}))
         self.enterContext(patch.dict(card_lib.GPUS, {GPU: card_lib._gpu_row(krackan)}))
         if GPU not in card_lib.GPU_ORDER:
@@ -161,6 +161,13 @@ class XsjEvidence(unittest.TestCase):
         with self.assertRaisesRegex(SystemExit, "requires a source of kind xsj"):
             self.perf(**{"source-kind": "machine"})
 
+    def test_reported_gpu_matches_registry_after_windows_trademark_cleanup(self):
+        actual = self.write("actual-gpu.json", dict(HARDWARE, gpu="AMD Radeon(TM) 860M Graphics"))
+        self.perf(device=actual)
+        wrong = self.write("wrong-gpu.json", dict(HARDWARE, gpu="AMD Radeon RX 7900 XTX"))
+        with self.assertRaisesRegex(SystemExit, "recorded GPU does not match the registry"):
+            self.perf(device=wrong)
+
     def test_backend_marker_and_empty_devlab_labels_both_required(self):
         dev = card_lib.registry.device(GPU)
         for runner in ({"backend": "xsj", "labels": ["devlab"]}, {"labels": []}, {"backend": "other", "labels": []}):
@@ -190,6 +197,17 @@ class XsjEvidence(unittest.TestCase):
         other = dict(self.device_results(self.with_source(dict(example, gpu="gfx1150"), source(kind="machine"))),
                      device="gfx1150")
         self.assertRegex("\n".join(card_lib.validate_device_results(other)), "run ID and hardware require")
+
+    def test_xsj_gpus_cannot_share_performance_sections_in_either_direction(self):
+        self.write("devices/gfx1152.json", self.device_results())
+        info = self.build("--gpus", "strix-halo")
+        for gpu, other in ((GPU, "strix-halo"), ("strix-halo", GPU)):
+            with self.subTest(gpu=gpu):
+                invalid = copy.deepcopy(info)
+                invalid["devices"][gpu]["shares_section_with"] = other
+                self.assertRegex("\n".join(card_lib.validate(invalid)), "XSJ GPU must have its own performance section")
+                doc = dict(self.device_results(), device=gpu, share_section_with=other)
+                self.assertRegex("\n".join(card_lib.validate_device_results(doc)), "XSJ GPU must have its own performance section")
 
     @staticmethod
     def with_source(example, src):

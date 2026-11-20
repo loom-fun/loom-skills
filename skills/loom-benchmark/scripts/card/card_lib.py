@@ -1187,6 +1187,10 @@ def xsj_source_errors(src, gpu, at):
     gfx = GPUS[gpu]["arch"]
     if device.get("arch") != gfx:
         errs.append(f"{at}.device.arch: expected {gfx} for {gpu}")
+    if recorded(device.get("gpu")):
+        board = re.sub(r"\((?:TM|R|C)\)", "", device["gpu"], flags=re.I)
+        if not GPUS[gpu]["detect"].search(" ".join(board.split())):
+            errs.append(f"{at}.device.gpu: recorded GPU does not match the registry for {gpu}")
     sdk = src.get("hrx_loom")
     if not isinstance(sdk, dict) or not recorded(sdk.get("hrx_loom")):
         errs.append(f"{at}.hrx_loom.hrx_loom: requires the recorded SDK version")
@@ -1266,6 +1270,8 @@ def validate(info, programs=None):
             errs.append(f"{at}: state {dev['state']} cannot come with results")
         if dev.get("shares_section_with") and dev["shares_section_with"] not in info["devices"]:
             errs.append(f"{at}: shares_section_with {dev['shares_section_with']!r} is not a GPU of this card")
+        if dev.get("shares_section_with") and (xsj_enabled(gpu) or xsj_enabled(dev["shares_section_with"])):
+            errs.append(f"{at}: an XSJ GPU must have its own performance section")
         if dev.get("shares_section_with") and (dev.get("gates") or dev.get("performance") or dev.get("roofline")):
             errs.append(f"{at}: a GPU that shares another's section has no results of its own")
         if dev.get("state") == "unsupported" and not dev.get("required_bytes"):
@@ -1336,6 +1342,8 @@ def validate_device_results(doc, what="device results"):
     share = doc.get("share_section_with")
     if share and share not in GPUS:
         errs.append(f"{what}: share_section_with {share!r} is not a device")
+    if share and (xsj_enabled(gpu) or xsj_enabled(share)):
+        errs.append(f"{what}: an XSJ GPU must have its own performance section")
     for slug, m in doc["models"].items():
         at = f"{what}.models.{slug}"
         if m["fits"] and not m.get("max_context"):
