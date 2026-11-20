@@ -263,6 +263,16 @@ CHOICE("decode.mv.pair_proj", "str", "qg", "PAIR_PROJ", kernels=["g_mv*_pair"], 
 # ======================================================================================================================
 _PG = dict(kernels=["g_gemm_*"], rows=ROWS_PREFILL)
 CHOICE("prefill.gemm.m256", "bool", True, "GEMM_M256", doc="256-row GEMM kernels (_m256) beside the 64/128-row ones.", **_PG)
+CHOICE("prefill.gemm.m256_f16o", "bool", False, "GEMM_M256_F16O", kernels=["g_gemm_*swiglu_m256*"], rows=ROWS_PREFILL, devices=["rdna3"],
+       from_pr="q38pf-gemm", doc="gfx11: the 256-row swiglu GEMM stores its result as f16 with scales (1, 1) / (0, 0) per live / dead row "
+       "(gen_gemm.f16out_m256, f16o_fuse.fuse_gfx11): no f32 round trip and no row-scale pass of the FFN activation.")
+CHOICE("prefill.gemm.m256_g32", "bool", False, "GEMM_M256_G32", from_pr="q38pf-gemm",
+       doc="m256 GEMM: each thread dequantizes its 32 weights of one K-quant group in one piece (q4_k; q6_k with GEMM_M256_G32_FMTS).", **_PG)
+CHOICE("prefill.gemm.m256_g32_fmts", "str", "q4_k", "GEMM_M256_G32_FMTS", from_pr="q38pf-gemm", doc="formats prefill.gemm.m256_g32 applies to.", **_PG)
+CHOICE("prefill.gemm.m256_swz", "int", 0, "GEMM_M256_SWZ", from_pr="q38pf-gemm",
+       doc="m256 GEMM workgroup order in groups of N output tiles (0: launch order).", **_PG)
+CHOICE("prefill.gemm.m256_db", "bool", False, "GEMM_M256_DB", from_pr="q38pf-gemm", doc="m256 GEMM with double-buffered 32-K LDS stages (loses).", **_PG)
+CHOICE("prefill.gemm.m256_db_fence", "bool", True, "GEMM_M256_DB_FENCE", from_pr="q38pf-gemm", doc="fence after the barrier of prefill.gemm.m256_db.", **_PG)
 CHOICE("prefill.gemm.q4_0_native", "bool", False, "GEMM_Q4_0_NATIVE", kernels=["g_gemm_q4_0_*", "g_moe_*q4_0*"], rows=ROWS_PREFILL,
        from_pr="gemma-qat-perf",
        doc="Dense Q4_0 GEMMs stage their 16-value half-block straight to F16 (moe_q4_0.dequant16: the values of @g_q4_0_values + "

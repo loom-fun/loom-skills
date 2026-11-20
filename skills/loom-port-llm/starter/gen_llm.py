@@ -6003,6 +6003,10 @@ if __name__ == "__main__":
         from f16o_fuse import fuse as _f16o_fuse
         text, _nf16o = _f16o_fuse(text)
         print("f16o groups:", _nf16o)
+    if os.environ.get("GEMM_M256_F16O", "0").lower() not in ("", "0", "false", "no", "off"):   # gfx11: choice prefill.gemm.m256_f16o
+        from f16o_fuse import fuse as _f16o_fuse11
+        text, _nf16o11 = _f16o_fuse11(text, gfx11=True)
+        print("m256 f16o swiglu launches:", _nf16o11)
     from gen_mxfp4s import f8_enabled as _f8s_on
     if _f8s_on():   # gfx12: the split-plane MXFP4 prefill GEMMs on fp8 WMMA (choice prefill.gemm.mxfp4s_f8; gen_mxfp4s.fuse_mxfp4s_f8)
         from gen_mxfp4s import fuse_mxfp4s_f8 as _f8s_fuse

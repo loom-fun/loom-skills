@@ -1768,17 +1768,18 @@ if os.environ.get("GEMM_TESTS", "1") == "1":
 }}
 """)
             cases.append(_case)
-            if swiglu and _f16o_on(cfg):
-                # the gfx12 f16-output swiglu twin (f16o_fuse.py's group): f16 result, scales_out = (1, 1) per live row and (0, 0) per dead
-                # row (a row whose input scale is 0: its x16 row is zeros); gfx12 only (ktest_select.py skips it elsewhere)
-                dead = rng.choice(rows, 5, replace=False)
-                x16d = x16.copy(); x16d[dead] = 0
-                scd = sc.copy(); scd[dead] = 0
-                gd = (x16d.astype(np.float64) @ Ws.T) * inv[:, None]; ud = (x16d.astype(np.float64) @ U.T) * inv[:, None]
-                yd = ffn_act(gd) * ud
-                so = np.ones((rows, 2), np.float32); so[dead] = 0
-                save(tag + "_xd", x16d); save(tag + "_sd", scd); save(tag + "_yd", yd.astype(np.float16)); save(tag + "_so", so)
-                cases.append(f"""check.case public @{tag}_f16o {{
+            _f16o11 = swiglu and kern.endswith("_m256") and os.environ.get("GEMM_M256_F16O", "0").lower() not in ("", "0", "false", "no", "off")
+            for _f16o_k in ([f"{kern}_f16o_rdna4"] if swiglu and _f16o_on(cfg) else []) + ([f"{kern}_f16o"] if _f16o11 else []):
+                    # the gfx12 f16-output swiglu twin (f16o_fuse.py's group): f16 result, scales_out = (1, 1) per live row and (0, 0) per dead
+                    # row (a row whose input scale is 0: its x16 row is zeros); gfx12 only (ktest_select.py skips it elsewhere)
+                    dead = rng.choice(rows, 5, replace=False)
+                    x16d = x16.copy(); x16d[dead] = 0
+                    scd = sc.copy(); scd[dead] = 0
+                    gd = (x16d.astype(np.float64) @ Ws.T) * inv[:, None]; ud = (x16d.astype(np.float64) @ U.T) * inv[:, None]
+                    yd = ffn_act(gd) * ud
+                    so = np.ones((rows, 2), np.float32); so[dead] = 0
+                    save(tag + "_xd", x16d); save(tag + "_sd", scd); save(tag + "_yd", yd.astype(np.float16)); save(tag + "_so", so)
+                    cases.append(f"""check.case public @{tag}_{'f16o' if _f16o_k.endswith('_f16o') else 'f16o_rdna4'} {{
   %rows = check.literal value({rows}) : index
   %k = check.literal value({K}) : index
   %n = check.literal value({n_use}) : index
@@ -1788,7 +1789,7 @@ if os.environ.get("GEMM_TESTS", "1") == "1":
   %eso = check.file.read.npy path("{tag}_so.npy") : tensor<{rows}x2xf32>
   %y = check.generate.fill value(0.0) : tensor<{rows}x{n_use}xf16>
   %so = check.generate.fill value(7.0) : tensor<{rows}x2xf32>
-  kernel.launch @{kern}_f16o_rdna4[%rows, %n](%rows, %k, %n, %x, %s, {wargs}, %y, %so) : [index, index](index, index, index, tensor<{rows}x{K}xf16>, tensor<{rows}x2xf32>, {wtys}, tensor<{rows}x{n_use}xf16>, tensor<{rows}x2xf32>)
+  kernel.launch @{_f16o_k}[%rows, %n](%rows, %k, %n, %x, %s, {wargs}, %y, %so) : [index, index](index, index, index, tensor<{rows}x{K}xf16>, tensor<{rows}x2xf32>, {wtys}, tensor<{rows}x{n_use}xf16>, tensor<{rows}x2xf32>)
   check.expect.close actual(%y) expected(%e) atol({tol:.3e}) rtol(1.0e-2) nan(different) : tensor<{rows}x{n_use}xf16>
   check.expect.close actual(%so) expected(%eso) atol(0.0) rtol(0.0) nan(different) : tensor<{rows}x2xf32>
   check.return

@@ -35,7 +35,9 @@ def _split(s):
     return parts
 
 
-def fuse(text):
+def fuse(text, gfx11=False):
+    """gfx11=True (GEMM_M256_F16O, gen_gemm.f16out_m256): no dual groups; the _m256 swiglu leaf becomes its `<K>_f16o` kernel
+    (the leaf for 1024-row prefill chunks) and every other leaf is followed by the row-scale launch."""
     lines = text.split("\n")
     done = 0
     r = 0
@@ -61,9 +63,19 @@ def fuse(text):
         if not leaves or len(leaves) > 3:
             r += 1
             continue
+        if gfx11 and not any(lm.group("k").endswith("_m256") for _, lm in leaves):
+            r += 1
+            continue
         for i, lm in leaves:
             args, at = _split(lm.group("args")), _split(lm.group("at"))
             ind, k = lm.group("ind"), lm.group("k")
+            if gfx11:
+                if k.endswith("_m256"):
+                    lines[i] = (f"{ind}kernel.launch @{k}_f16o[{lm.group('grid')}]({', '.join(args[:-1] + [f16, s])}) "
+                                f": [{lm.group('gt')}]({', '.join(at[:-1] + ['buffer', 'buffer'])})")
+                else:
+                    lines[i] = lines[i] + "\n" + ind + lines[r].strip()
+                continue
             alt = (f"{ind}// dual-group: rdna4 kernel.launch @{k}_f16o_rdna4[{lm.group('grid')}]({', '.join(args[:-1] + [f16, s])}) "
                    f": [{lm.group('gt')}]({', '.join(at[:-1] + ['buffer', 'buffer'])})")
             rs = ind + lines[r].strip()

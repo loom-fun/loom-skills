@@ -1062,6 +1062,37 @@ def gemm_big256(fmt, mode):
     return "\n".join(L)
 
 
+def f16out_m256(text):
+    """GEMM_M256_F16O (choice prefill.gemm.m256_f16o; gfx11): the `<K>_f16o` kernel of a skip-padding swiglu m256 kernel K: the
+    result is stored as f16 (an f32 fragment stored into an f16 view narrows; the down GEMM that reads it takes scale 1) and the
+    kernel writes the scales its consumer reads: scales_out[row] = (1, 1) for a live row, (0, 0) for a dead one (input scale 0),
+    from the tile's output tile 0. Replaces `<K>` + g_row_scale_f16[_live][_lv] of the f32 result (f16o_fuse.fuse_gfx11): no f32
+    round trip, no second pass. Same text transform as gen_gemm_rdna4.f16out (gfx12)."""
+    old = _re.search(r'kernel\.def export\("(\w+)"\)', text).group(1)
+    assert old.endswith("_m256") and "swiglu" in old, old
+    t = text.replace(f'export("{old}") @{old}(', f'export("{old}_f16o") @{old}_f16o(', 1)
+    assert t.count(", %y: buffer) {") == 1
+    t = t.replace(", %y: buffer) {", ", %y: buffer, %scales_out: buffer) {", 1)
+    a = "%tile_offset = index.scale %tile_first, %four : index, offset -> offset"
+    assert t.count(a) == 1
+    t = t.replace(a, a.replace("%four", "%two"))
+    t, n1 = _re.subn(r"(view<\d+x\d+x)f32(, %y_layout>)", r"\1f16\2", t)
+    assert n1 >= 3, n1
+    live = "  %tile_live = scalar.cmpf one, %tile_any, %no_scale : f32\n"
+    assert t.count(live) == 1, "f16out_m256 needs GEMM_SKIP_PADDING=1 (gen_llm's default)"
+    return t.replace(live, live + """  %so_view = buffer.view %scales_out[%origin] : buffer -> view<[%rows]x2xf32>
+  %so_n0 = index.cmp eq, %out_group, %c0 : index
+  %so_act = scalar.andi %so_n0, %skip_in : i1
+  scf.if %so_act {
+    %so_one = scalar.constant 1.0 : f32
+    %so_live = scalar.cmpf one, %tile_scale, %no_scale : f32
+    %so_val = scf.select %so_live, %so_one, %no_scale : f32
+    view.store %so_val, %so_view[%tile_row, %c0] : f32, view<[%rows]x2xf32>
+    view.store %so_val, %so_view[%tile_row, %c1] : f32, view<[%rows]x2xf32>
+  }
+""")
+
+
 def _on(k, d="0"):
     return os.environ.get(k, d).strip().lower() not in ("", "0", "false", "no", "off")
 
@@ -1648,4 +1679,6 @@ if __name__ == "__main__":
                         out.append(_rdna4.with_twins(base256))
                     else:   # gfx11 variant; the gfx12 twin still comes from the default kernel
                         out.append(post(var256) + _rdna4.with_twins(base256)[len(base256):])
+                    if mode == "swiglu" and _on("GEMM_M256_F16O"):   # gfx11 f16-output swiglu (f16o_fuse.fuse_gfx11)
+                        out.append(f16out_m256(base256 if var256 is None else post(var256)))
     sys.stdout.write("\n".join(out))
