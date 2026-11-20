@@ -194,6 +194,9 @@ def gdn_kernels(cfg, eps):
         view.store %val_u{u}, %out_view[%token, %cs{u}] : f32, view<[%tokens]x{C}xf32>
       }}""")
     conv_unrolled = "\n".join(cu_parts + cu_stores)
+    fz_ = _row_lanes(DK, DV) and (chunk11_fuse(G) or fused11_mode(G))
+    CONV_SKIP_OPEN = f"    %cv_long = index.constant {PF_SPAN} : index\n    %cv_short = index.cmp ult, %length, %cv_long : index\n    scf.if %cv_short {{\n" if fz_ else ""
+    CONV_SKIP_CLOSE = "    }\n" if fz_ else ""
     T.append(f"""
 // out[t, c] = silu(sum_j w[c, j] x[t - (K-1) + j, c]); inputs before the span come from the history.
 kernel.def export("g_gdn_conv") @g_gdn_conv(%tokens: index) {{
@@ -248,10 +251,10 @@ kernel.def export("g_gdn_conv") @g_gdn_conv(%tokens: index) {{
     %cstride = index.mul %cbn, %c256 : index
     %cunroll = index.constant {CU} : index
     %cstride_u = index.mul %cstride, %cunroll : index
-    scf.for %c = [%cstart to %cC step %cstride_u] {{
+{CONV_SKIP_OPEN}    scf.for %c = [%cstart to %cC step %cstride_u] {{
 {conv_unrolled}
     }}
-  }}
+{CONV_SKIP_CLOSE}  }}
   kernel.return
 }}
 """)
@@ -517,10 +520,35 @@ kernel.def export("g_gdn_recurrence") @g_gdn_recurrence(%spans: index) {{
         # Each span runs in exactly one of the two kernels, chosen by its own length, so its numerics never depend on
         # what else shares the epoch.
         PF = (8, 4)
-        T[-1] = _recurrence_rows(G, NG, LB, *RL, guard_open, guard_close, "short" if recurrence_pf(G) else None)
+        c11 = chunk11_mode(G)
+        T[-1] = _recurrence_rows(G, NG, LB, *RL, guard_open, guard_close, "short" if recurrence_pf(G) or c11 else None)
         if recurrence_pf(G):
             pf = _recurrence_rows(G, NG, LB, *PF, guard_open, guard_close, "long")
+            if c11:   # gfx11 chunked prefill (gen_gdn_chunk.py, arch rdna3) in the pf kernel's place; gfx12 keeps its twin
+                from gen_gdn_chunk import chunk_kernel
+                if rdna4_twins() and not chunk_mode(G):
+                    T.append(_as_rdna4(pf.replace("g_gdn_recurrence", "g_gdn_recurrence_pf"), "g_gdn_recurrence_pf"))
+                pf = chunk_kernel(G, NG, LB, guard_open, guard_close, arch="rdna3").replace("g_gdn_chunk", "g_gdn_recurrence")
             T.append(pf.replace("g_gdn_recurrence", "g_gdn_recurrence_pf"))
+        elif c11:   # single-form models: g_gdn_recurrence takes spans under PF_SPAN, g_gdn_chunk (launched in GEMM epochs) the rest
+            from gen_gdn_chunk import chunk_kernel
+            fz, gt = chunk11_fuse(G), chunk11_gate(G)
+            if fused11_mode(G):   # the gfx11 fused pair (and its gfx12 twins) on the spans of PF_SPAN+ tokens
+                from gen_gdn_fused import fused_kernels
+                T.append(fused_kernels(G, NG, LB, eps, _V_GROUPED[0], _V_GROUPED[1], guard_open, guard_close, arch="rdna3", span_min=PF_SPAN,
+                                       regnorm=os.environ.get("GDN_FUSED11_REGNORM", "") not in ("", "0", "off", "no", "false")))
+                if rdna4_twins():
+                    T.append(fused_kernels(G, NG, LB, eps, _V_GROUPED[0], _V_GROUPED[1], guard_open, guard_close, rank=False, span_min=PF_SPAN))
+            else:
+                T.append(chunk_kernel(G, NG, LB, guard_open, guard_close, arch="rdna3", fuse=fz, eps=eps, gate=gt, cn=chunk11_cn(G), alias=chunk11_alias(G), opts=chunk11_opts(G),
+                                      abl=tuple(x for x in os.environ.get("GDN_CHUNK11_ABL", "").split(",") if x)))
+            if fused11_mode(G):
+                pass
+            elif rdna4_twins() and (fz or gt) and not chunk_mode(G):   # a fused launch has no sequential gfx12 counterpart: the gfx12 chunk kernel
+                T.append(chunk_kernel(G, NG, LB, guard_open, guard_close, fuse=fz, eps=eps, gate=gt))
+            elif rdna4_twins() and not chunk_mode(G):   # gfx12 twin of g_gdn_chunk: the sequential kernel of the long spans
+                T.append(_as_rdna4(_recurrence_rows(G, NG, LB, *RL, guard_open, guard_close, "long").replace("g_gdn_recurrence", "g_gdn_chunk"),
+                                   "g_gdn_chunk"))
     # ---- gated RMSNorm per value head: out = rmsnorm(o) * w * silu(z); padding tokens get zeros. One wave per head,
     # HPW heads per workgroup: 32-lane workgroups (tokens x HV of them) made this tiny kernel cost as much as the
     # recurrence at prefill (Qwen3.5-35B-A3B, 1k tokens: 32k workgroups per layer).
@@ -581,20 +609,27 @@ kernel.def export("g_gdn_norm_gate") @g_gdn_norm_gate(%tokens: index) {{
   kernel.return
 }}
 """)
+    if chunk11_gate(G) or fused11_mode(G):   # the norm-gate of the spans under PF_SPAN beside g_gdn_chunk's gated epilogue / g_gdn_fb
+        T.append(_skip_long_rows(T[-1], "g_gdn_norm_gate", "g_gdn_norm_gate_s", True) if skip_long_whole(G) else _norm_gate_s(T[-1]))
+    if (chunk11_fuse(G) or fused11_mode(G)) and skip_long_whole(G):   # q / k norms only for the spans under PF_SPAN
+        T.append(_skip_long_rows("\n".join(T), "g_gdn_qk_norm", "g_gdn_qk_norm_s", False))
     text = "\n".join(T)
     if not RL and os.environ.get("GDN_PREFETCH", "1") not in ("", "0"):
         text = _prefetch_recurrence(text, RK)
     fold = spec and fold_enabled(G)
     if fold:   # GDN_FOLD: the verification variants and the fold launches (draft/gen_draft.verify_program)
-        main_class = "short" if recurrence_pf(G) else None
+        main_class = "short" if recurrence_pf(G) or chunk11_mode(G) else None
         text += "\n" + FOLD_RANK + "\n" + _conv_bank(text, G, CU) + "\n" + _recurrence_rows(G, NG, LB, *RL, guard_open, guard_close, main_class, record=True)
         text += "\n" + fold_kernels(G, NG, LB)
         if defer_enabled(G):
             text += "\n" + defer_kernels(G, NG)
-    mode = chunk_mode(G)
+    mode = chunk_mode(G) if not fused11_mode(G) else None
+    if fused11_mode(G) and chunk_mode(G) and rdna4_twins():   # the gfx12 sequential twin of the short spans
+        tw = _recurrence_rows(G, NG, LB, *RL, guard_open, guard_close, "short")
+        text = text + "\n" + _as_rdna4(tw, "g_gdn_recurrence")
     if mode:
         from gen_gdn_chunk import chunk_kernel
-        ck = chunk_kernel(G, NG, LB, guard_open, guard_close)
+        ck = chunk_kernel(G, NG, LB, guard_open, guard_close, fuse=chunk11_fuse(G), eps=eps, gate=chunk11_gate(G))
         if mode == "pf":
             ck = ck.replace("g_gdn_chunk_rdna4", "g_gdn_recurrence_pf_rdna4")
         else:   # the sequential kernel's gfx12 twin runs the spans shorter than the chunk kernel's minimum
@@ -606,10 +641,159 @@ kernel.def export("g_gdn_norm_gate") @g_gdn_norm_gate(%tokens: index) {{
                 twin += "\n" + rt.replace('kernel.def export("g_gdn_recurrence_rec") @g_gdn_recurrence_rec(', 'kernel.def target(@rdna4) export("g_gdn_recurrence_rec_rdna4") @g_gdn_recurrence_rec_rdna4(', 1)
             ck = twin + "\n" + ck
         text = text + "\n" + ck
-    if fused_mode(G):   # gfx12 fused prefill (gen_gdn_fused.py): g_gdn_fa_rdna4 + g_gdn_fb_rdna4 replace conv .. norm_gate in GEMM-shape epochs
+    if fused_mode(G) and not fused11_mode(G):   # gfx12 fused prefill (gen_gdn_fused.py): g_gdn_fa_rdna4 + g_gdn_fb_rdna4 replace conv .. norm_gate in GEMM-shape epochs
         from gen_gdn_fused import fused_kernels
         text = text + "\n" + fused_kernels(G, NG, LB, eps, _V_GROUPED[0], _V_GROUPED[1], guard_open, guard_close)
     return text
+
+
+def rdna4_twins():
+    return os.environ.get("LOOM_RDNA4", "1") not in ("", "0", "false", "no")
+
+
+def _as_rdna4(text, name):
+    """The gfx12 twin of kernel `name` (same text, export name_rdna4, target(@rdna4))."""
+    out = text.replace(f'kernel.def export("{name}") @{name}(', f'kernel.def target(@rdna4) export("{name}_rdna4") @{name}_rdna4(', 1)
+    assert out != text, name
+    return out
+
+
+def chunk11_mode(G):
+    """The gfx11 chunked prefill kernel (gen_gdn_chunk.py arch rdna3, choice hybrid.gdn.chunk11, env GDN_CHUNK11): None (off, or head dims
+    other than 128 x 128), "pf" (it replaces g_gdn_recurrence_pf, the long-span kernel) or "group" (single-form models: g_gdn_recurrence
+    keeps the spans under PF_SPAN, g_gdn_chunk launched in GEMM epochs the rest). On gfx12 the chunk twin is g_gdn_chunk_rdna4 (GDN_CHUNK)
+    or the sequential kernel restricted to the long spans, so gfx12 numerics do not change with this switch."""
+    if os.environ.get("GDN_CHUNK11", "") in ("", "0", "off", "no", "false"):
+        return None
+    if G["DK"] != 128 or G["DV"] != 128 or G["HV"] % G["HK"] or not _row_lanes(G["DK"], G["DV"]):
+        return None
+    return "pf" if recurrence_pf(G) else "group"
+
+
+def chunk11_fuse(G):
+    """hybrid.gdn.chunk11_fuse (GDN_CHUNK11_FUSE, with hybrid.gdn.chunk11 in group mode): g_gdn_chunk (and its gfx12 twin) also run the conv1d +
+    SiLU and the q / k norms of their spans (gen_gdn_chunk fuse); g_gdn_conv skips the rows of spans of PF_SPAN+ tokens and the history commit
+    runs after the recurrence."""
+    return chunk11_mode(G) == "group" and os.environ.get("GDN_CHUNK11_FUSE", "") not in ("", "0", "off", "no", "false")
+
+
+def chunk11_cn(G):
+    """hybrid.gdn.chunk11_cn (GDN_CHUNK11_CN, 16 or 32, default 32): g_gdn_chunk's chunk length on gfx11 (16: half the staging LDS and
+    a 16-row serial solve per chunk, twice the chunks)."""
+    v = os.environ.get("GDN_CHUNK11_CN", "32")
+    return int(v) if v in ("16", "32") and chunk11_mode(G) == "group" else None
+
+
+def chunk11_alias(G):
+    """hybrid.gdn.chunk11_alias (GDN_CHUNK11_ALIAS): g_gdn_chunk keeps K^T exp(G - gc) in Q's LDS rows (dead after the K S / Q S step),
+    -9 KB LDS per workgroup (53.7 -> 44.5 KB with CN 32)."""
+    return chunk11_mode(G) == "group" and os.environ.get("GDN_CHUNK11_ALIAS", "") not in ("", "0", "off", "no", "false")
+
+
+def chunk11_opts(G):
+    """hybrid.gdn.chunk11_opt (GDN_CHUNK11_OPT, comma list): g_gdn_chunk latency options on gfx11, "scan" (unrolled g prefix sum),
+    "acc4" (the solve's dot products in 4 partial sums)."""
+    return tuple(x for x in os.environ.get("GDN_CHUNK11_OPT", "").split(",") if x) if chunk11_mode(G) == "group" else ()
+
+
+def chunk11_gate(G):
+    """hybrid.gdn.chunk11_gate (GDN_CHUNK11_GATE, with hybrid.gdn.chunk11 in group mode): g_gdn_chunk (and its gfx12 twin) run the gated RMSNorm of
+    their rows (gen_gdn_chunk gate); g_gdn_norm_gate_s (g_gdn_norm_gate + the span metadata) skips the rows of spans of PF_SPAN+ tokens."""
+    return chunk11_mode(G) == "group" and os.environ.get("GDN_CHUNK11_GATE", "") not in ("", "0", "off", "no", "false")
+
+
+def skip_long_whole(G):
+    """hybrid.gdn.skip_long (GDN_SKIP_LONG, with chunk11_fuse / chunk11_gate / fused11): g_gdn_norm_gate_s and g_gdn_qk_norm_s skip the
+    whole row of a 64+-token span (the fused long-span kernels did its work); off: g_gdn_norm_gate_s computes it and skips only the store,
+    g_gdn_qk_norm runs every row."""
+    return os.environ.get("GDN_SKIP_LONG", "") not in ("", "0", "off", "no", "false")
+
+
+def _row_span_long(info, tok):
+    """IR: %sp_long (i1) = the row `tok` belongs to a live span of PF_SPAN+ tokens (info word 2 live, word 3 span index)."""
+    return f"""  %spans = index.assume %spans_arg [range(%spans_arg, 1, 8192)] : index
+  %sl_zero = index.constant 0 : offset
+  %sl_c0_i32 = scalar.constant 0 : i32
+  %sl_info = buffer.view {info}[%sl_zero] : buffer -> view<[%tokens]x4xi32>
+  %sl_live32 = view.load %sl_info[{tok}, 2] : view<[%tokens]x4xi32> -> i32
+  %sl_live = scalar.cmpi ne, %sl_live32, %sl_c0_i32 : i32
+  %sp_long = scf.if %sl_live -> (i1) {{
+    %span32 = view.load %sl_info[{tok}, 3] : view<[%tokens]x4xi32> -> i32
+    %span_b = scalar.assume %span32 [range(%span32, 0, 8191)] : i32
+    %span = index.cast %span_b : i32 to index
+    %sp_act, %sp_len, %sp_s, %sp_r, %sp_f = func.call @g_gdn_span(%metadata, %spans, %span) : (buffer, index, index) -> (i1, index, i32, index, index)
+    %sp_lim = index.constant {PF_SPAN} : index
+    %sp_l = index.cmp uge, %sp_len, %sp_lim : index
+    scf.yield %sp_l : i1
+  }} else {{
+    %sp_no = index.cmp ne, %sl_ci0, %sl_ci0 : index
+    scf.yield %sp_no : i1
+  }}
+  %sl_false = index.cmp ne, %sl_ci0, %sl_ci0 : index
+  %sp_keep = scf.select %sp_long, %sl_false, %sl_true : i1
+  %sp_short = scf.select %sl_live, %sp_keep, %sl_false : i1
+"""
+
+
+def _skip_long_rows(text, name, new, info_param):
+    """Copy of kernel `name` as `new` that does nothing on padding rows (as its _lv copy) and on the rows of 64+-token spans: params +
+    (%spans_arg, %metadata[, %info]), the whole body after the row index in `scf.if %sp_short`."""
+    a = text.index(f'kernel.def export("{name}") @{name}(')
+    b = text.index("  kernel.return\n}", a)
+    k = text[a:b]
+    k = k.replace(f'export("{name}") @{name}(', f'export("{new}") @{new}(', 1)
+    extra = "%spans_arg: index, %metadata: buffer" + ("" if info_param else ", %info: buffer")
+    k = k.replace("launch(%tokens_arg: index, ", f"launch(%tokens_arg: index, {extra}, ", 1)
+    anchor = "  %token = index.assume %token_id [lt(%token_id, %tokens)] : index\n"
+    assert k.count(anchor) == 1, name
+    k = k.replace(anchor, anchor + "  %sl_ci0 = index.constant 0 : index\n  %sl_true = index.cmp eq, %sl_ci0, %sl_ci0 : index\n" + _row_span_long("%info", "%token") + "  scf.if %sp_short {\n", 1)
+    return k + "  }\n  kernel.return\n}\n"
+
+
+def _norm_gate_s(text):
+    """g_gdn_norm_gate_s: g_gdn_norm_gate that leaves the rows of live spans of PF_SPAN+ tokens alone (g_gdn_chunk wrote them)."""
+    a = text.index('kernel.def export("g_gdn_norm_gate")')
+    b = text.index("kernel.return\n}", a) + len("kernel.return\n}")
+    k = text[a:b]
+    k = k.replace('export("g_gdn_norm_gate") @g_gdn_norm_gate(', 'export("g_gdn_norm_gate_s") @g_gdn_norm_gate_s(', 1)
+    k = k.replace("launch(%tokens_arg: index, %info: buffer,", "launch(%tokens_arg: index, %spans_arg: index, %metadata: buffer, %info: buffer,", 1)
+    anchor = "  %live = scalar.cmpi ne, %live32, %c0_i32 : i32\n"
+    assert anchor in k
+    k = k.replace(anchor, anchor + f"""  %spans = index.assume %spans_arg [range(%spans_arg, 1, 8192)] : index
+  %sp_long = scf.if %live -> (i1) {{
+    %span32 = view.load %info_view[%token, 3] : view<[%tokens]x4xi32> -> i32
+    %span_b = scalar.assume %span32 [range(%span32, 0, 8191)] : i32
+    %span = index.cast %span_b : i32 to index
+    %sp_act, %sp_len, %sp_s, %sp_r, %sp_f = func.call @g_gdn_span(%metadata, %spans, %span) : (buffer, index, index) -> (i1, index, i32, index, index)
+    %sp_lim = index.constant {PF_SPAN} : index
+    %sp_l = index.cmp uge, %sp_len, %sp_lim : index
+    scf.yield %sp_l : i1
+  }} else {{
+    %sp_no = index.cmp ne, %c0, %c0 : index
+    scf.yield %sp_no : i1
+  }}
+  %sp_true = index.cmp eq, %c0, %c0 : index
+  %sp_false = index.cmp ne, %c0, %c0 : index
+""", 1)
+    lines = k.split("\n")
+    st = [i for i, l in enumerate(lines) if l.startswith("    view.store %res")]
+    assert st and st == list(range(st[0], st[-1] + 1)), st
+    lines[st[-1]] += "\n  }"
+    lines[st[0]] = "  %sp_keep = scf.select %sp_long, %sp_false, %sp_true : i1\n  scf.if %sp_keep {\n" + lines[st[0]]
+    k = "\n".join(lines)
+    if "%c0 = index.constant 0 : index" not in k:
+        k = k.replace(anchor, "  %c0 = index.constant 0 : index\n" + anchor, 1)
+    return k
+
+
+def fused11_mode(G):
+    """prefill.gdn.fused11 (GDN_FUSED11, with hybrid.gdn.chunk11 in group mode, 128 x 128 heads, conv 4): the spans of PF_SPAN+ tokens run the
+    gfx11 fused pair g_gdn_fa + g_gdn_fb (gen_gdn_fused.py arch rdna3; gfx12 twins g_gdn_fa_rdna4 / g_gdn_fb_rdna4 restricted the same way):
+    conv, q / k norms, the WY solve and W / U / P in parallel per (head, chunk), then the serial state pass with the norm-gate epilogue.
+    The chain (g_gdn_conv / g_gdn_recurrence / g_gdn_norm_gate_s) keeps the shorter spans of the same epoch."""
+    if os.environ.get("GDN_FUSED11", "") in ("", "0", "off", "no", "false"):
+        return False
+    return chunk11_mode(G) == "group" and G["K"] == 4
 
 
 def fused_mode(G):

@@ -16,8 +16,12 @@
   "^g_gemm_mxfp4s"
  ],
  [
-  "GEMM q8_0 (MTP block and head copies)",
+  "GEMM q8_0 (every Q8_0 tensor: trunk attn/ssm_out on mixed K-quants, MTP/head copies)",
   "^g_gemm_q8"
+ ],
+ [
+  "GEMM k-quant / q4_0 (prefill tiles: trunk; q4_0 also the MTP warm block)",
+  "^g_gemm_q[2-6]_"
  ],
  [
   "GDN chunk (recurrence)",
@@ -49,7 +53,11 @@
  ],
  [
   "MTP proposals: block + head copy (q8_0/q4_0)",
-  "^g_mv_q8_0|^g_head_mv_q8"
+  "^g_head_mv_q8"
+ ],
+ [
+  "matvecs q8_0 (trunk Q8_0 tensors on mixed K-quants)",
+  "^g_mv_q8_0"
  ],
  [
   "verify head (bf16 lm_head)",

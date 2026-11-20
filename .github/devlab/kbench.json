@@ -288,6 +288,79 @@
       "device": "amdgpu://?completion_spin_ns=4294967295",
       "repeats": 5,
       "case_timing": true
+    },
+    {
+      "suite": "wmma_peak",
+      "dir": "wmma_peak",
+      "gen": "wmma_peak/gen_peak.py",
+      "gen_variants": [
+        "base",
+        "f16_const",
+        "f16_zero",
+        "f16_q4int",
+        "f16_q4dq",
+        "f16_asmall",
+        "f16_both_small",
+        "i8_rand",
+        "i8_const",
+        "i8_w4",
+        "i8_w4s",
+        "i8_a7w4"
+      ],
+      "files": [
+        "bench.loom",
+        "bench_f16_const.loom",
+        "bench_f16_zero.loom",
+        "bench_f16_q4int.loom",
+        "bench_f16_q4dq.loom",
+        "bench_f16_asmall.loom",
+        "bench_f16_both_small.loom",
+        "bench_i8_rand.loom",
+        "bench_i8_const.loom",
+        "bench_i8_w4.loom",
+        "bench_i8_w4s.loom",
+        "bench_i8_a7w4.loom"
+      ],
+      "config": [],
+      "args": [
+        "--measure=dispatch_complete",
+        "--batch-size=8",
+        "--profile-final-batch=true"
+      ],
+      "device": "amdgpu://?completion_spin_ns=4294967295",
+      "repeats": 3
+    },
+    {
+      "suite": "flash_strix",
+      "dir": "flash_strix",
+      "gen": "flash_strix/gen_bench.py",
+      "gen_variants": [
+        "kt16+tnl",
+        "kt16+tnl+nobar",
+        "kt16+tnl+nokld",
+        "kt16+tnl+nostv",
+        "kt16+tnl+noqk",
+        "kt16+tnl+nopv"
+      ],
+      "files": [
+        "bench_kt16+tnl.loom",
+        "bench_kt16+tnl+nobar.loom",
+        "bench_kt16+tnl+nokld.loom",
+        "bench_kt16+tnl+nostv.loom",
+        "bench_kt16+tnl+noqk.loom",
+        "bench_kt16+tnl+nopv.loom"
+      ],
+      "tests": [
+        "test.loom"
+      ],
+      "config": [],
+      "args": [
+        "--measure=dispatch_complete",
+        "--batch-size=8",
+        "--profile-final-batch=true"
+      ],
+      "device": "amdgpu://?completion_spin_ns=4294967295",
+      "repeats": 3
     }
   ]
 }

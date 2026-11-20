@@ -8,7 +8,7 @@ one page (a tile is one page at head_dim 512; two keys of an even-aligned pair a
 first's plus one position (the plain KV layout g_kv_offset; a dense layout is left to the generic staging).
 
 Applied to the generated gfx12 twin text before the peel (flash2_peel.py); a kernel it does not fit is returned unchanged:
-lanes must equal (KT / 2) * (D / SEG_W2) with SEG_W2 = 8 or 16, and the KV function must be g_kv_offset.
+lanes must equal (KT / 2) * (D / SEG_W2) with SEG_W2 = 8 or 16 (or exceed (KT / 2) * (D / 8): then that many lanes stage), and the KV function\nmust be g_kv_offset.
 """
 import re
 
@@ -37,8 +37,13 @@ def vpack(text):
     pairs = kt // 2
     segs = lanes // pairs
     segw = d // segs
+    live = None   # every lane stages
     if pairs * segs != lanes or segw * segs != d or segw not in (8, 16):
-        return text
+        # more lanes than (pairs x 8-dim segments): the first pairs * (d / 8) lanes stage (gfx11 16-key tiles at G = 6: 256 of 384)
+        segw, segs = 8, d // 8
+        if pairs * segs > lanes:
+            return text
+        live = pairs * segs
     limit = re.search(r"index\.cmp ule, %key_pos, (%\w+) : index", blk).group(1)
     vec = f"vector<{segw}xf16>"
     pb = re.search(r"%pos_bytes = index\.constant (\d+) : offset", text)
@@ -55,7 +60,9 @@ def vpack(text):
 {ind}%vp_dim_v = index.mul %vp_seg, %vp_segw : index
 {ind}%vp_dim = index.assume %vp_dim_v [range(%vp_dim_v, 0, {d - segw})] : index
 {ind}%vp_kz = vector.splatf 0.0 : {vec}
-"""
+""" + (f"""{ind}%vp_nlive = index.constant {live} : index
+{ind}%vp_live = index.cmp ult, %workitem, %vp_nlive : index
+""" if live else "")
     new = f"""{ind}  %vp_pos0 = index.add %tile_first, %vp_key0 : index
 {ind}  %vp_pos1 = index.add %vp_pos0, %c1 : index
 {ind}  %vp_ok0 = index.cmp ule, %vp_pos0, {limit} : index
@@ -93,6 +100,9 @@ def vpack(text):
 {ind}    %vp_row = index.assume %vp_row_v [range(%vp_row_v, 0, {d - 1})] : index
 {ind}    vector.store %vp_pr, %vt_view[%vp_row, %vp_key0] : vector<2xf16>, view<{d}x{vt_view.group(2)}xf16>
 {ind}  }}"""
-    # one tile (a page) per iteration: all lanes live, no %st_live guard
-    out = lines[:hi] + defs.rstrip("\n").split("\n") + [lines[hi], lines[hi + 1]] + new.split("\n") + lines[ib:]
+    # one tile (a page) per iteration: all lanes live, no %st_live guard (or %vp_live when only some lanes stage)
+    body = new.split("\n")
+    if live:
+        body = [f"{ind}  scf.if %vp_live {{"] + ["  " + s for s in body] + [f"{ind}  }}"]
+    out = lines[:hi] + defs.rstrip("\n").split("\n") + [lines[hi], lines[hi + 1]] + body + lines[ib:]
     return "\n".join(out)
