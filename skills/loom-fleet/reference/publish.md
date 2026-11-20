@@ -19,6 +19,8 @@ not migrate (their head stays the last commit on that SDK). Which loom-skills co
 
 Which models need this work is [populate-org.md](populate-org.md).
 
+For a device whose only lab measurement option is XSJ, use `kb.py route --arch <model-arch> --device <device> --topic xsj` for evidence collection and ingestion.
+
 ## 2. Publish the initial result
 
 The worker publishes the package and its generated card (`loom-benchmark` "Hugging Face model card"; never
