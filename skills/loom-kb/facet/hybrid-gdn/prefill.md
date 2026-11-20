@@ -62,6 +62,13 @@
     GEMMs + `g_silu_mul`). Correct (kernel test) but -1.1/-1.5 % at 2k/8k vs the two GEMMs: carrying both
     formats' prefetch registers costs more than `g_silu_mul` (0.8 %) and the %fu round trip save. Not kept.
 
+## Producer fusions on the 27B hybrid, Strix Halo (switches `SILU_MUL_RS`, `GDN_NORM_RS`, `POST_NORM_NOH`, default on; `=0` = old path)
+`g_silu_mul`+`g_row_scale_f16_live` -> `g_silu_mul_rs`; `g_gdn_norm_gate`+row scale -> `g_gdn_norm_gate_rs`; `g_post_add_norm_rs_live` without the
+f32 h store where only h16 is read -> `..._noh`. Qwen3.8-27B Q4_K_M, DevLab ABBA (run 44647263024, 85 W runner), all three vs base prefill tok/s:
+1k 530->534 (+0.8 %), 2k 531->537 (+0.9 %), 8k 537->545 (+1.5 %), 16k 511->517.5 (+1.3 %), 32k 462.5->468 (+1.1 %); decode unchanged (28.2, 22.9 at 32k).
+Single switches +0.4..+0.7 % each at 8k (silu 539.6, gdn 540.5, noh 539.2 vs 537). Producer family 0.118 -> 0.090 ms/token (8k). ktest 160/160.
+The 17408-wide f-scale (`g_row_scale_f16_live_lv`, 0.029 left) is f32-round-trip bandwidth bound: only a swiglu GEMM epilogue writing f16 removes it.
+
 ## gfx12 chunked (WY) prefill: `g_gdn_chunk_rdna4` (`gen_gdn_chunk.py`, choice `hybrid.gdn.chunk`, env `GDN_CHUNK`)
 Qwen3.8-27B on the R9700, 2k prefill, ms/token (doubling each kernel in prefill, same server): the sequential recurrence 0.046 (7.5 %), conv 0.011,
 gated norm 0.007, q/k norm 0.004 (the last three inside the run-to-run noise of one doubling, +-0.01). Nothing else of the GDN family is worth a kernel.

@@ -2067,7 +2067,7 @@ def fuse_post_add_row_scale(program):
         r"[ ]*kernel\.launch @g_row_scale_f16(?P<live>_live)?\[(?P=n)\]\((?P=n), (?P<info>%info, )?%nH, (?P=h), (?P<s>%\w+), (?P<h16>%\w+)\) : \[index\]\([^\n]*\)\n"
         r"(?P=ind2)\}(?P<els> else \{\n(?P<eb>(?:[^\n]*\n)*?)(?P=ind2)\})?\n")
     used = set()
-    NOH = os.environ.get("POST_NORM_NOH", "0") == "1" and not MOE
+    NOH = os.environ.get("POST_NORM_NOH", "1") == "1" and not MOE
     def rep(m):
         live = bool(m.group("live"))
         noh = bool(NOH and live and m.group("args").split(", ")[3].startswith("%ffn_norm_"))   # the post-attention norm: only the FFN GEMMs follow
@@ -2083,7 +2083,7 @@ def fuse_post_add_row_scale(program):
     return program, "".join(post_add_norm_rs(lv, noh) for lv, noh in sorted(used))
 
 
-# SILU_MUL_RS (env, default off): g_silu_mul + g_row_scale_f16_live of its result in one kernel, GEMM-shape epochs only (layers whose
+# SILU_MUL_RS (env, default on; =0 selects the old path): g_silu_mul + g_row_scale_f16_live of its result in one kernel, GEMM-shape epochs only (layers whose
 # gate/up formats differ: Qwen3.8-27B Q4_K_M has 17). The row is read once (gate, up), activated, kept in registers (N / 1024 vec4 per lane),
 # its max |x| reduced, and written once as f16 + the row scale: the f32 activation row is never stored, and nothing re-reads it
 # (its only reader is the row scale). Same values as the two kernels. The decode-shaped branch keeps g_silu_mul + g_quant_q8.
@@ -2164,7 +2164,7 @@ def fuse_silu_mul_row_scale(program):
     return program, "".join(silu_mul_rs_kernel(n) for n in sorted(widths))
 
 
-# GDN_NORM_RS (env, default off): g_gdn_norm_gate + g_row_scale_f16_live of its output (the ssm_out GEMM's operand) in one kernel,
+# GDN_NORM_RS (env, default on; =0 selects the old path): g_gdn_norm_gate + g_row_scale_f16_live of its output (the ssm_out GEMM's operand) in one kernel,
 # GEMM-shape epochs. One workgroup per token covers every value head (W waves, HV / W heads each), the gated-norm outputs stay in
 # registers, the row max is a workgroup reduce, and only the f16 row + scale are stored: the 6144-wide f32 `o` row is neither
 # written nor re-read. Same values as the two kernels (same per-head arithmetic as g_gdn_norm_gate).
@@ -6118,10 +6118,10 @@ if __name__ == "__main__":
     if os.environ.get("POST_ADD_ROW_SCALE", "1") != "0":   # after live_row_scale; =0 A/B it off
         program, _fused = fuse_post_add_row_scale(program)
         COMMON += _fused
-    if os.environ.get("SILU_MUL_RS", "0") == "1" and not GELU:   # after live_row_scale; the 17 mixed-format FFNs of Qwen3.8-27B
+    if os.environ.get("SILU_MUL_RS", "1") == "1" and not GELU:   # after live_row_scale; the 17 mixed-format FFNs of Qwen3.8-27B
         program, _fused = fuse_silu_mul_row_scale(program)
         COMMON += _fused
-    if os.environ.get("GDN_NORM_RS", "0") == "1" and RECUR:
+    if os.environ.get("GDN_NORM_RS", "1") == "1" and RECUR:
         program, _fused = fuse_gdn_norm_row_scale(program)
         COMMON += _fused
     if os.environ.get("VERIFY_FUSE", "") in ("swq", "swqn", "full") and spec_kernels and USED_MVQ:   # choice decode.verify.fuse (gen_pstep.py): fused layers for 2-4 token epochs
