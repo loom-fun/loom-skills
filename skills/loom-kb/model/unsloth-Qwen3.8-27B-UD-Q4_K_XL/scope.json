@@ -128,7 +128,7 @@
     "prefill.gemm.iq4_native": true,
     "prefill.gemm.prune": true
    },
-   "evidence": "PENDING (q38xl-port): inline IQ4_XS/IQ4_NL GEMM staging -> 128/256-row kernels + iq4_xs in the mixed swiglu m256."
+   "evidence": "q38xl-port: IQ4_XS/IQ4_NL GEMMs staged inline (prefill.gemm.iq4_native: 128/256-row kernels, qg-split/residual-epilogue m256, iq4_xs in the mixed m256 swiglu) + unlaunched GEMM kernels pruned (prefill.gemm.prune: without it the encoding kernels exceed dual_target's 4 MB ENC_BYTES and the build fails). Local Strix 123 W ABBA, 2 sessions each, vs the helper build (64-row iq4 tiles): prefill 1k/2k/8k/16k/32k 480/488/500/482/447 -> 553/557/573/552/506 tok/s (+15.2/+14.1/+14.6/+14.5/+13.3 %), decode/decode_32k ties; ktest 194/194 (gm_iq4_xs_*, gm_iq4_nl_*, mixed iq4_xs pairs), gates:dev PASS (local, llama.cpp ROCm b1374)."
   }
  ]
 }
