@@ -1,6 +1,8 @@
 """Offline tests of the native Windows gfx1152 benchmark runner."""
 
+from contextlib import redirect_stderr
 import hashlib
+from io import StringIO
 import json
 import os
 from pathlib import Path
@@ -62,6 +64,18 @@ class RunnerTests(unittest.TestCase):
             self.assertNotIn("--pool_backing=fixed", loom)
         baseline = runner.server_argv(self.args, "rocm", "single", None, 40960, [], "ROCm0")
         self.assertFalse(any(flag.startswith(("--pool_backing", "--memory_bytes")) for flag in baseline))
+
+    def test_cli_rejects_zero_and_out_of_range_budgets(self):
+        command = ["--package", str(self.out), "--out", str(self.out / "evidence"),
+                   "--repo", "loom-fun/unsloth-Qwen3.5-9B-loom", "--host-alias", "amd-krk-1",
+                   "--run-id", "20261120-165434-test", "--port", "8160", "--engine", "loom",
+                   "--loom", "loom-serve.exe"]
+        with patch.dict(os.environ, {"XSJ_RUN": ""}):
+            for value in ("0", str(2**64)):
+                with self.subTest(value=value), redirect_stderr(StringIO()) as stderr, self.assertRaises(SystemExit) as err:
+                    runner.arguments([*command, "--memory-bytes", value])
+                self.assertEqual(err.exception.code, 2)
+                self.assertIn("unsigned 64-bit byte count", stderr.getvalue())
 
     def test_baseline_context_is_bounded_on_native_context_models(self):
         for engine, slot, four in (("rocm", "65536", "65536"), ("vulkan", "36864", "147456")):

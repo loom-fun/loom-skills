@@ -468,8 +468,8 @@ def arguments(argv):
     args.repeat_rows = 3 if args.fast else 1
     if not 1 <= (args.port or 0) <= 65535:
         ap.error("--port or XSJ_PORT must name a valid run-owned loopback port")
-    if args.memory_bytes is not None and args.memory_bytes < 1:
-        ap.error("--memory-bytes must be positive")
+    if args.memory_bytes is not None and not 1 <= args.memory_bytes < 2**64:
+        ap.error("--memory-bytes must be a nonzero unsigned 64-bit byte count")
     if min(args.sessions, args.startup_timeout, args.workload_timeout) < 1:
         ap.error("sessions and timeouts must be positive")
     if not re.fullmatch(r"\d{8}-\d{6}-[a-z0-9]{4}", args.run_id):
