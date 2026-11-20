@@ -1112,7 +1112,7 @@ def cached_gguf(ck):
     return p if ck.get("revision") and os.path.exists(p) else None
 
 
-def roofline_block(facts, m, acceptance, R, bw, flops, tool, checkpoint, row_acceptance=None, skip=()):
+def roofline_block(facts, m, acceptance, R, bw, flops, tool, checkpoint, row_acceptance=None, skip=(), compute=None):
     """info.json "roofline" from roofline.py's model shape m (R: the roofline module). A drafted row's ceiling counts
     row_acceptance[metric] (measured in the row's own session) when given, else `acceptance` (the spec gate's)."""
     ceil = R.ceilings(m, bw, flops, (1000, 2000, 8000, 16000, 32000))
@@ -1128,7 +1128,7 @@ def roofline_block(facts, m, acceptance, R, bw, flops, tool, checkpoint, row_acc
         basis = None
         if key == "streams4" and ceil.get("c4_steady_shared"):   # MoE: the 4 streams' experts overlap; the ceiling a run may not exceed
             c, basis = ceil["c4_steady_shared"], "shared-experts"
-        row = {"ceiling": round(c, 1), "efficiency": round(R.efficiency(m, rk, c), 3)}
+        row = {"ceiling": round(c, 1), "efficiency": round(R.efficiency(m, rk, c, compute=compute), 3)}
         if basis:
             row["basis"] = basis
         # benchmark rule: 4 streams are loaded without drafting, so that row's ceiling is always the plain one. A drafted row counts the
@@ -1141,9 +1141,11 @@ def roofline_block(facts, m, acceptance, R, bw, flops, tool, checkpoint, row_acc
                 row.update(ceiling=round(d, 1), efficiency=round(R.efficiency(m, rk, d, tokens_per_pass=t), 3),
                            acceptance=acc, acceptance_from="session", tokens_per_pass=t, single_pass=round(c, 1))
         metrics[key] = row
-    preset = next((d["name"] for d in R.DEVICES.values() if (d["bw"], d["flops"]) == (bw, flops)), None)
-    return {"device": {"name": preset or f"{R.DEVICE}, overridden",
-                       "bandwidth_bytes_per_s": bw, "peak_flops": flops},
+    preset = next((d["name"] for d in R.DEVICES.values() if d["bw"] == bw and any(p["flops"] == flops for p in d["power_modes"].values())), None)
+    dev = {"name": preset or f"{R.DEVICE}, overridden", "bandwidth_bytes_per_s": bw, "peak_flops": flops}
+    if compute and compute["label"] != "spec":   # a measured sustained rate at a power mode: say which, and keep the spec peak
+        dev.update(power_mode=compute["label"], spec_peak_flops=compute["spec_flops"])
+    return {"device": dev,
             "tool": tool, "checkpoint": checkpoint,
             "drafting": ({"method": spec[0], "depth": spec[1], "acceptance": acceptance, "tokens_per_pass": tpp}
                          if spec else None),
@@ -1169,7 +1171,8 @@ def cmd_roofline(a):
     if a.device is None:
         a.device = GPUS[a.gpu or DEFAULT_GPU]["roofline"]   # the preset of the GPU (radeon-r9700: the DevLab R9700S runner)
     dev = R.DEVICES[a.device]
-    a.bw, a.flops = a.bw or dev["bw"], a.flops or dev["flops"]
+    comp = R.compute_ceiling(a.device, a.power, a.flops)
+    a.bw, a.flops = a.bw or dev["bw"], comp["flops"]
     facts = package_facts(load_package(a.package))
     cfg_p = a.cfg or os.path.join(a.package, "llm_config.json")
     cfg = load_json(cfg_p) if os.path.exists(cfg_p) else {}
@@ -1206,7 +1209,7 @@ def cmd_roofline(a):
         src = inspect_safetensors.load_hf(cfg["source"]["repo"], cfg["source"]["revision"])
         cfg = dict(cfg, tensors=inspect_safetensors.build_config(src, drop_chat=True)["tensors"])
     shape = R.model_shape_from_config(cfg) if st else R.model_shape(gguf, cfg)
-    block = roofline_block(facts, shape, acc, R, a.bw, a.flops, tool, facts["checkpoint"]["file"] if st else os.path.basename(gguf), row_acc, skip)
+    block = roofline_block(facts, shape, acc, R, a.bw, a.flops, tool, facts["checkpoint"]["file"] if st else os.path.basename(gguf), row_acc, skip, comp)
     write_json(a.o, {"evidence": EVIDENCE_ID, "gpu": gpu, "roofline": block})
     print(f"wrote {a.o}: " + ", ".join(f"{k} {r['ceiling']}" for k, r in block["metrics"].items())
           + "".join(f"; {k} acceptance {r['acceptance']} ({r['acceptance_from']})" for k, r in block["metrics"].items()
@@ -1309,7 +1312,9 @@ def main(argv=None):
     r.add_argument("--gpu", choices=sorted(GPUS), help="the GPU the ceilings are for (default strix-halo); sets --device")
     r.add_argument("--served-context", type=int, help="tokens per request the GPU serves, when less than the native context: "
                    "documents longer than it were refused, so they have no ceiling")
-    r.add_argument("--flops", type=float, default=None, help="peak FLOP/s (default: the --device preset)")
+    r.add_argument("--flops", type=float, default=None, help="compute FLOP/s (default: the --device preset at --power)")
+    r.add_argument("--power", default=None, help="power mode of the compute ceiling (roofline.py --power: a key of the preset's "
+                   "power_modes or 'spec'; default the preset's power_default, strix-halo 85w = the DevLab runners' mode)")
     r.add_argument("-o", required=True)
     m = sub.add_parser("remeasure", help="a same-runner A/B of this package against the build the card's table shows (strix_ab_compare.py --json)")
     m.add_argument("--cmp", required=True, help="strix_ab_compare.py --json output (verdict pass)")

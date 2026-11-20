@@ -151,7 +151,9 @@
          "properties": {
           "name": {"type": "string"},
           "bandwidth_bytes_per_s": {"type": "number", "description": "memory bandwidth the decode ceilings divide by"},
-          "peak_flops": {"type": "number", "description": "peak FLOP/s the prefill ceilings divide by"}
+          "peak_flops": {"type": "number", "description": "FLOP/s the prefill ceilings divide by: the spec-sheet peak, or the measured sustained rate at power_mode"},
+          "power_mode": {"type": "string", "description": "the platform power mode peak_flops was measured at (e.g. \"85 W\"); absent: the spec-sheet peak"},
+          "spec_peak_flops": {"type": "number", "description": "the spec-sheet peak FLOP/s, kept for reference when power_mode is set"}
          }
         },
         "tool": {

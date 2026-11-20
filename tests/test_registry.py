@@ -107,8 +107,35 @@ class DeviceRegistry(unittest.TestCase):
         except ModuleNotFoundError as e:   # roofline.py reads GGUFs (gguf, requests): not installed in the unit-test job
             self.skipTest(f"roofline.py needs {e.name}")
         self.assertEqual(roofline.DEVICES["radeon-r9700s"]["name"], "AMD Radeon AI PRO R9700S (gfx1201, 32 GB, 2.35 GHz)")
-        self.assertEqual((roofline.BW, roofline.FLOPS), (228e9, 59e12))
+        self.assertEqual((roofline.BW, roofline.FLOPS), (228e9, 43.8e12))   # compute at the default power mode (85 W), not the spec peak
         self.assertEqual(roofline.AT_CEILING, 0.03)
+
+    def test_roofline_power_modes(self):
+        """The compute ceiling is stated at a power mode: strix-halo defaults to 85 W (the DevLab runners), 'spec' keeps the spec peak,
+        --flops overrides, an unknown mode fails; prefill efficiency rescales so the target in tok/s is the same in every mode."""
+        sys.path.insert(0, str(ROOT / "skills/loom-benchmark/scripts"))
+        spec = importlib.util.spec_from_file_location("roofline", ROOT / "skills/loom-roofline/roofline.py")
+        roofline = importlib.util.module_from_spec(spec)
+        try:
+            spec.loader.exec_module(roofline)
+        except ModuleNotFoundError as e:
+            self.skipTest(f"roofline.py needs {e.name}")
+        c = roofline.compute_ceiling
+        self.assertEqual(c("strix-halo"), {"flops": 43.8e12, "label": "85 W", "mode": "85w", "spec_flops": 59e12})
+        self.assertEqual(c("strix-halo", "spec")["flops"], 59e12)
+        self.assertEqual(c("strix-halo", "123w")["label"], "123 W")
+        self.assertGreater(c("strix-halo", "123w")["flops"], c("strix-halo", "85w")["flops"])
+        self.assertEqual(c("strix-halo", flops=50e12)["label"], "override")
+        self.assertEqual(c("strix-halo", "spec", flops=59e12)["label"], "spec")
+        self.assertEqual(c("radeon-r9700s"), {"flops": 214e12, "label": "spec", "mode": "spec", "spec_flops": 214e12})   # no power modes: spec
+        with self.assertRaises(ValueError):
+            c("strix-halo", "200w")
+        m = {"geo": {"n_exp": 0}}
+        targets = {mode: roofline.efficiency(m, "prefill_1000", 1.0, compute=c("strix-halo", mode)) * c("strix-halo", mode)["flops"]
+                   for mode in ("spec", "85w", "123w")}
+        self.assertAlmostEqual(targets["85w"], targets["spec"], delta=1)
+        self.assertAlmostEqual(targets["123w"], targets["spec"], delta=1)
+        self.assertAlmostEqual(roofline.efficiency(m, "prefill_1000", 1.0, compute=c("strix-halo", "spec")), roofline.EFF["prefill"])
 
     def test_dual_target_rows(self):
         r = registry.dual_target()

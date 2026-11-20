@@ -93,7 +93,7 @@ Per metric it then prints a row:
 
 | Column | Meaning |
 |---|---|
-| ceiling | Hardware roofline. Decode: the device bandwidth (Strix Halo 228 GB/s, measured) ÷ (weights + KV read per token). Prefill: the device's dense f16 WMMA peak (Strix Halo 59 TFLOP/s) ÷ (2·params + causal attention flops) per token. c4: 4 tokens per weight pass. For MoE, the 4 tokens route to their own experts, so those weights are read for each token. |
+| ceiling | Hardware roofline. Decode: the device bandwidth (Strix Halo 228 GB/s, measured) ÷ (weights + KV read per token). Prefill: the device's dense f16 WMMA rate **at a power mode** (`--power`; Strix Halo default 85 W: 43.8 TFLOP/s sustained, see Power modes below) ÷ (2·params + causal attention flops) per token; prefill rows print `@ 85 W`. c4: 4 tokens per weight pass. For MoE, the 4 tokens route to their own experts, so those weights are read for each token. |
 | eff | llama.cpp's fraction of the ceiling. **This, not Loom, decides how big the win can be.** At eff 0.75, the most Loom can gain is about 1.3×. At eff 0.15, 3–6× is on the table, and such results are routinely reported for new architectures, MoE and prefill. |
 | TARGET | ceiling × the **best efficiency a Loom port has actually reached** on this hardware (`EFF` in the script; sources in the loom-kb `roofline` topic (`kb.py route --topic roofline`)). Realistic by construction. |
 | margin | TARGET ÷ llama.cpp − 1. Reported as is, with no cap and no label. |
@@ -105,14 +105,25 @@ Per metric it then prints a row:
 sharing, a gathered table counted in full, or a wrong expert count. Fix that before
 setting targets.
 
-**Devices.** `--device` selects the hardware preset (`roofline.DEVICES`); `--bw` / `--flops` still override it.
+**Devices.** `--device` selects the hardware preset (`roofline.DEVICES`); `--bw` / `--flops` still override it (an override is labelled `override`).
 llama.cpp's MMQ prefill uses int8 WMMA (twice the f16 rate), so on prefill it can approach or pass an f16 ceiling. `make_info.py roofline --device` takes the same names and records the preset's name on the card.
 
 | `--device` | GPU | bw (streaming) | flops (dense f16 WMMA) |
 |---|---|---|---|
-| `strix-halo` (default) | Ryzen AI Max+ 395, gfx1151, LPDDR5X-8000 256-bit | 228 GB/s measured streaming read (256 peak) | 59 TFLOP/s (40 CU x 512 x 2.9 GHz) |
+| `strix-halo` (default) | Ryzen AI Max+ 395, gfx1151, LPDDR5X-8000 256-bit | 228 GB/s measured streaming read (256 peak) | 43.8 TFLOP/s @ 85 W (default), 47.1 @ 123 W; spec 59 (40 CU x 512 x 2.9 GHz) |
 | `radeon-r9700` | Radeon AI PRO R9700, gfx1201, 32 GB GDDR6 20 Gbps 256-bit | 613 GB/s measured (Loom streaming read on the DevLab R9700S; 640 peak) | 191 TFLOP/s (64 CU x 1024 x 2.92 GHz: RDNA4 doubles the dense f16 WMMA rate per CU; 383 is the sparse figure) |
 | `radeon-r9700s` | R9700S: the DevLab `radeon-r9700` runners (same memory, 2.35 GHz max clock) | 613 GB/s measured | 214 TFLOP/s (measured peak f16 WMMA on the runner, devlab-kbench gemm_r9700) |
+
+**Power modes (compute ceilings).** Strix Halo is power-limited: random-data WMMA never holds the spec clock, so the
+spec-sheet peak is not a ceiling anyone reaches. A preset's `power_modes` (device.json `roofline`) hold the measured
+sustained register-only random-f16 WMMA rate per platform power mode; `--power` picks one (`make_info.py roofline
+--power` too), `spec` gives the spec-sheet peak, and the default is the preset's `power_default`: for Strix Halo `85w`,
+the BIOS balanced mode of the DevLab runners where cards are measured. Use `--power 123w` for a machine in BIOS
+performance mode (the hwmon `power1_input` PPT sensor settles near 123 W instead of 85 W under load). Every compute
+ceiling and prefill efficiency is "@ <mode>": roofline.json records `power_mode` and `flops_spec`, a card's roofline
+device records `power_mode` and `spec_peak_flops`. `EFF`/`STRETCH` prefill fractions are of the spec ceiling and are
+rescaled to the mode (`efficiency(compute=...)`), so the prefill TARGET in tok/s is the same in every mode. Devices
+without `power_modes` (R9700) use their `flops` as `spec`.
 
 The efficiencies (`EFF`, `STRETCH`, `LAYER_US`) were all measured on Strix Halo. On another device, TARGET is an
 out-of-sample estimate until a row in the loom-kb `roofline` topic (`kb.py route --topic roofline`) measures that device. On the R9700 in

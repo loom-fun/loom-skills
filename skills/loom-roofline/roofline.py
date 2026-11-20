@@ -2,7 +2,7 @@
 """Roofline + target picker for a GGUF LLM on a Loom device.
 
 usage: roofline.py MODEL.gguf [--cfg cfg.json] [--baseline perf.json] [--out roofline.json]
-                   [--bw 228e9] [--flops 59e12] [--ctx 1000,2000,16000,32000]
+                   [--bw 228e9] [--power 85w|123w|spec | --flops 59e12] [--ctx 1000,2000,16000,32000]
 
 Reads tensor sizes straight from the GGUF, plus (optionally) the port's cfg.json for
 geometry the GGUF does not spell out (sliding_layers, head_dim_swa, kv_layers for KV
@@ -30,7 +30,7 @@ from formats import split_parts  # noqa: E402
 EFF = {
     "decode": 0.90,      # dense. Bolt-E4B 61.1 / 68.1 (the loom-kb `roofline` topic (`kb.py route --topic roofline`))
     "decode_moe": 0.78,  # expert gather. Flint 101 / 130
-    "prefill": 0.33,     # end to end. Bolt-E4B with d256/d512 flash prefill: 2339 / 7094 (Flint 0.22-0.28)
+    "prefill": 0.33,     # of the SPEC-peak ceiling (efficiency() rescales to the power mode's). End to end. Bolt-E4B with d256/d512 flash prefill: 2339 / 7094 (Flint 0.22-0.28)
     "c4": 0.70,          # dense. Bolt 0.65-0.66
     "c4_moe": 0.85,      # Flint 0.74, LFM2.5-24B-A2B 0.91
 }
@@ -201,10 +201,33 @@ def attn_flops_per_token(geo, P):
 # until a row in the loom-kb `roofline` topic (`kb.py route --topic roofline`) says otherwise.
 # The device presets are rows of the registry (loom-kb/device/<family>/<device>/device.json "roofline": spec presets and the DevLab
 # runner's measured one, e.g. radeon-r9700 vs radeon-r9700s); the notes on bandwidth and peak flops live there.
-DEVICES = {k: dict(name=p["name"], bw=p["bw"], flops=p["flops"]) for k, p in registry.roofline_presets().items()}
+# Compute ceilings are stated at a power mode: "flops" is the spec sheet's peak (the "spec" mode); a preset's "power_modes"
+# hold measured sustained random-data WMMA rates per platform power limit (Strix Halo: 85 W BIOS balanced, the DevLab
+# runners' mode, is the default; 123 W BIOS performance). Every compute ceiling and prefill efficiency is "@ <mode label>".
+DEVICES = {k: dict(name=p["name"], bw=p["bw"], flops=p["flops"],
+                   power_modes={"spec": {"label": "spec", "flops": p["flops"]}, **p.get("power_modes", {})},
+                   power_default=p.get("power_default", "spec"))
+           for k, p in registry.roofline_presets().items()}
 AT_CEILING = registry.methodology()["roofline"]["at_ceiling"]
 DEVICE_KEY = "strix-halo"
-DEVICE, BW, FLOPS = DEVICES[DEVICE_KEY]["name"], DEVICES[DEVICE_KEY]["bw"], DEVICES[DEVICE_KEY]["flops"]
+
+
+def compute_ceiling(device=DEVICE_KEY, power=None, flops=None):
+    """The compute ceiling of a device preset: {"flops", "label", "mode", "spec_flops"}. power: a key of the preset's
+    power_modes ("spec" always exists; None = the preset's power_default). flops: an explicit override (label "override")."""
+    dev = DEVICES[device]
+    mode = power or dev["power_default"]
+    if mode not in dev["power_modes"]:
+        raise ValueError(f"{device}: no power mode {mode!r} (have {', '.join(sorted(dev['power_modes']))})")
+    pm = dev["power_modes"][mode]
+    if flops and flops != pm["flops"]:
+        return dict(flops=flops, label="override", mode="override", spec_flops=dev["flops"])
+    return dict(flops=pm["flops"], label=pm["label"], mode=mode, spec_flops=dev["flops"])
+
+
+DEVICE, BW = DEVICES[DEVICE_KEY]["name"], DEVICES[DEVICE_KEY]["bw"]
+COMPUTE = compute_ceiling()
+FLOPS = COMPUTE["flops"]   # the default power mode's sustained rate (Strix Halo: 85 W); DEVICES[...]["flops"] is the spec peak
 
 
 def shape_of(meta, tensors, cfg=None):
@@ -290,14 +313,17 @@ def drafted_row_ceiling(m, metric, depth, acceptance, bw=BW):
     return drafted_ceiling(m, depth, acceptance, bw, ctx=ctx, streams=streams)
 
 
-def efficiency(m, metric, ceiling, table=None, tokens_per_pass=None):
+def efficiency(m, metric, ceiling, table=None, tokens_per_pass=None, compute=None):
     """The fraction of `ceiling` Loom ports have demonstrated for this kind of metric (table EFF, or STRETCH):
     prefill, c4 (dense / MoE) or decode (dense / MoE), decode capped by the fixed per-layer cost (LAYER_US).
-    tokens_per_pass: a drafted_ceiling() (speculative decoding): EFF_DRAFTED, the per-layer cost paid once per pass."""
+    tokens_per_pass: a drafted_ceiling() (speculative decoding): EFF_DRAFTED, the per-layer cost paid once per pass.
+    compute: the compute_ceiling() the prefill ceiling used (default COMPUTE): the table's prefill fraction is of the
+    spec-peak ceiling, so it scales by spec / flops (the target in tok/s does not depend on the power mode's label)."""
     table = table or (EFF_DRAFTED if tokens_per_pass else EFF)
     moe = bool(m["geo"]["n_exp"])
     if metric.startswith("prefill"):
-        return table["prefill"]
+        c = compute or COMPUTE
+        return min(1.0, table["prefill"] * c["spec_flops"] / c["flops"])
     if metric.startswith("c4"):
         return table["c4_moe" if moe else "c4"]
     floor_ms = m["geo"]["L"] * LAYER_US / 1000
@@ -348,7 +374,10 @@ def main():
     ap.add_argument("--device", default=DEVICE_KEY, choices=sorted(DEVICES),
                     help="hardware preset for --bw / --flops (default strix-halo)")
     ap.add_argument("--bw", type=float, default=None, help="streaming bandwidth, bytes/s (default: the --device preset)")
-    ap.add_argument("--flops", type=float, default=None, help="peak dense f16 flop/s (default: the --device preset)")
+    ap.add_argument("--flops", type=float, default=None, help="dense f16 flop/s (default: the --device preset at --power)")
+    ap.add_argument("--power", default=None,
+                    help="power mode of the compute ceiling: a key of the preset's power_modes, or 'spec' for the spec-sheet peak "
+                         "(default: the preset's power_default; strix-halo: 85w, the DevLab runners' BIOS mode; also 123w)")
     ap.add_argument("--ctx", default="1000,2000,16000,32000")
     ap.add_argument("--budget-h", type=float, default=0.5,
                     help="the user's time budget for optimization (default 0.5 h; qualify.sh computes it for end-to-end jobs); saved for progress.py")
@@ -364,7 +393,11 @@ def main():
     a = ap.parse_args()
     dev = DEVICES[a.device]
     a.bw = a.bw or dev["bw"]
-    a.flops = a.flops or dev["flops"]
+    try:
+        comp = compute_ceiling(a.device, a.power, a.flops)
+    except ValueError as e:
+        ap.error(str(e))
+    a.flops = comp["flops"]
     cfg = json.load(open(a.cfg)) if a.cfg else {}
     m = model_shape(a.gguf, cfg)
     geo, wb, params, head, detail = m["geo"], m["wb"], m["params"], m["head"], m["detail"]
@@ -391,7 +424,7 @@ def main():
                     continue
                 if t.get("kind", "none") != "none" and t.get("baseline_tps"):
                     gain = max(gain, t["decode_tps"] / t["baseline_tps"])
-    rows = [pick_target(k, base.get(k), c, efficiency(m, k, c), efficiency(m, k, c, STRETCH))
+    rows = [pick_target(k, base.get(k), c, efficiency(m, k, c, compute=comp), efficiency(m, k, c, STRETCH, compute=comp))
             for k, c in ceilings(m, a.bw, a.flops, ctxs, gain).items() if k != "c4_steady_shared"]
     if m["geo"]["n_exp"]:   # the c4 ceiling assumes independent routing; streams of similar text share experts, so the hard
         # bound (all 4 tokens on the same experts) is what a measurement may not exceed (Qwen3-30B-A3B: 1.17 x ceiling)
@@ -404,21 +437,24 @@ def main():
                weight_bytes_per_token=round(wb), head_bytes=head,
                bytes_by_kind={k: round(v) for k, v in detail.items()},
                matmul_params=round(params), efficiency_assumed=EFF, stretch_assumed=STRETCH,
-               device=dev["name"] if (a.bw, a.flops) == (dev["bw"], dev["flops"]) else dev["name"] + ", overridden", bw=a.bw, flops=a.flops, draft_gain=round(gain, 3), metrics=rows,
+               device=dev["name"] if a.bw == dev["bw"] and comp["mode"] != "override" else dev["name"] + ", overridden", bw=a.bw, flops=a.flops,
+               power_mode=comp["label"], flops_spec=comp["spec_flops"], draft_gain=round(gain, 3), metrics=rows,
                campaign=dict(budget_h=a.budget_h, reserve_min=a.reserve_min,
                              goals={g.split("=")[0]: float(g.split("=")[1]) for g in a.goal}))
     if a.out:
         json.dump(out, open(a.out, "w"), indent=1)
     print(f"weights read / decode token: {wb/1e9:.3f} GB  (head {head/1e9:.3f} GB)  "
           + "  ".join(f"{k} {v/1e9:.2f}" for k, v in detail.items()))
-    print(f"matmul params: {params/1e9:.2f} B    BW {a.bw/1e9:.0f} GB/s   peak {a.flops/1e12:.0f} TFLOP/s"
+    at = f" @ {comp['label']}" if comp["label"] != "spec" else " (spec)"
+    print(f"matmul params: {params/1e9:.2f} B    BW {a.bw/1e9:.0f} GB/s   compute {a.flops/1e12:.1f} TFLOP/s{at}"
+          + (f" (spec {comp['spec_flops']/1e12:.0f})" if comp["spec_flops"] != a.flops else "")
           + (f"   decode/c4 ceilings x{gain:.2f} (measured drafting gain, --draft-tune)" if gain > 1 else ""))
-    hdr = (f"{'metric':16} {'ceiling':>9} {'llama.cpp':>9} {'eff':>5} "
+    hdr = (f"{'metric':24} {'ceiling':>9} {'llama.cpp':>9} {'eff':>5} "
            f"{'TARGET':>9} {'margin':>8} {'stretch':>9} {'margin':>8}")
     print(hdr)
     for r in rows:
         b = r.get("baseline")
-        line = f"{r['metric']:16} {r['ceiling']:9.1f} "
+        line = f"{r['metric'] + (at if r['metric'].startswith('prefill') else ''):24} {r['ceiling']:9.1f} "
         if b:
             line += (f"{b:9.1f} {r['baseline_eff']:5.2f} {r['target']:9.1f} {r['margin']:+8.0%} "
                      f"{r['stretch']:9.1f} {r['stretch_margin']:+8.0%}"
