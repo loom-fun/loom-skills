@@ -52,7 +52,7 @@ HALF = D // 4 if B_MODE == "2" else 128   # dims per wave (key-split loop: four 
 NFH = HALF // 16                  # 16-dim fragments per wave (8)
 WPH = D // HALF                   # waves per query head (2, or 4 at head_dim 512)
 KT = 32 if D == 256 and B_MODE != "2" else 16   # keys per tile (head_dim 512: K and V^T of 32 keys exceed 64 KiB; the key-split loop reads K/V from the arena)
-if D == 256 and os.environ.get("FLASH2_KT256"):   # experiment: 16-key tiles at head_dim 256 (one workgroup can then hold all query heads of a KV head)
+if D == 256 and os.environ.get("FLASH2_KT256"):   # 16-key tiles at head_dim 256 (choice prefill.attn.flash2_kt256; gfx11 G = 6: two workgroups per WGP)
     KT = int(os.environ["FLASH2_KT256"])
 KB = KT // 16                     # 16-key blocks per tile
 DP8 = D + 8                       # padded K row

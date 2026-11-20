@@ -26,7 +26,9 @@
     cross-workgroup overlap); its double-buffered form needs a 4-half V^T row pad to fit 64 KiB, and that pad alone costs +60 % (LDS
     conflicts). Double-buffered staging (`FLASH2_G11=db`, at = b2) ties (-2 %). gfx12 trims on gfx11: `lazy` spills (684 B scratch,
     +120 %); register prefetch `pf` ties (its loads sit behind an scf.if and are waited at once). Query-head groups (`FLASH2_NG256` 2 / 3,
-    6 / 4 waves): -23 % / -5 % at 8k but +218 % / +147 % at 32k on DevLab.
+    6 / 4 waves): -23 % / -5 % at 8k but +218 % / +147 % at 32k on DevLab, +23 % / +168 % locally. Paired-key V^T stores (`FLASH2_G11=vp`, 256 of
+    384 lanes stage two keys each) +26 % at 32k. The non-lazy trims (`FLASH2_G11=kvh,vtf,hot`): kernel -1.4..-3.8 % at 32k, prefill tie
+    (+0.0/+0.2/+0.4 % at 8k/16k/32k).
 
 ## Key-split flash at head_dim 256 / 6 query heads per KV head (`FLASH2_B=2`, `flash2_b2.py`; choice `prefill.attn.flash2_b2`, gfx12 twin only)
 
