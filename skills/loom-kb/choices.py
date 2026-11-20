@@ -322,6 +322,16 @@ CHOICE("prefill.gemm.iq4_native", "bool", False, "GEMM_IQ4_NATIVE", kernels=["g_
        doc="Dense IQ4_XS / IQ4_NL GEMMs stage their 16-value half-group inline (gen_gemm.iq4_dequant16: the values of "
            "@g_<fmt>_values + fptrunc, loads exposed) and get the 128/256-row kernels, and iq4_xs joins the mixed-format swiglu m256 "
            "(prefill.gemm.m256_mixed); off: the shared value helper and the 64-row tile at every size (unsloth UD quants).")
+CHOICE("prefill.gemm.m256_mixed_nl", "bool", False, "GEMM_M256_MIXED_NL", kernels=["g_gemm_*_*_swiglu_m256_f16o"], rows=ROWS_PREFILL,
+       from_pr="q38xl-fmt",
+       doc="IQ4_NL (32-value blocks, inline under prefill.gemm.iq4_native) joins the mixed-format swiglu m256 "
+           "(prefill.gemm.m256_mixed) on either side: unsloth UD layers pairing iq4_nl with q5_k / iq4_xs run one f16-output kernel "
+           "instead of two GEMMs + silu_mul; the iq4_nl weight's row bytes come from its own block count.")
+CHOICE("prefill.gemm.q3_k_native", "bool", False, "GEMM_Q3_K_NATIVE", kernels=["g_gemm_q3_k_*", "g_gemm_*_*_swiglu_m256_f16o"],
+       rows=ROWS_PREFILL, from_pr="q38xl-fmt",
+       doc="Dense Q3_K GEMMs stage their 16-value half-group inline (gen_gemm.q3_k_dequant16: the values of @g_q3_k_values + "
+           "fptrunc, loads exposed) and get the 256-row kernels, and q3_k joins the mixed-format swiglu m256 "
+           "(prefill.gemm.m256_mixed); off: the shared value helper and the 64/128-row tiles (unsloth UD: one ffn_up).")
 CHOICE("prefill.gemm.prune", "bool", False, "GEMM_PRUNE", kernels=["g_gemm_*"], rows=ROWS_PREFILL, from_pr="q38xl-port",
        doc="Drop g_gemm_* kernel definitions nothing launches (and their gfx12 twins) from llm.loom: kernels a program rewrite "
            "replaced (plain swiglu m256 under f16o). Keeps a library with many formats under hrx-loom's 16-bit encoding value ids "

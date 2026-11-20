@@ -83,25 +83,47 @@ def coverage(lib, selected):
 
 def split_groups(program_dir, name, selected):
     """A split library (split_library.py): the selected cases per module they run against, {file name: case text}.
-    A case runs against the kernel file that defines all its launched kernels, else against the program file (whose
-    kernel.decl lines a case does not launch); the shared preamble of the case file goes with every group."""
+    A case runs against the kernel file that defines its encoding kernels (a case that launches no moved kernel: against
+    the program file). The program-file kernels such a case also launches (rope, split/combine, producers: no encodings,
+    so they add no encoding depth) and the helper funcs they call are copied into its group, after the shared preamble."""
     files = [name] + split_library.kernel_files(program_dir)
-    owner = {}
+    texts = {f: open(os.path.join(program_dir, f), encoding="utf-8").read() for f in files}
+    owner, parts = {}, {}
     for f in files:
-        for k in SYMBOL.findall(open(os.path.join(program_dir, f), encoding="utf-8").read()):
-            owner[k] = f
-    pre, groups, skipped = [], {f: [] for f in files}, []
+        for p in split_library.TOP.split(texts[f]):
+            m = split_library.KDEF.match(p)
+            if m:
+                owner[m.group(1)] = f
+                parts.setdefault(m.group(1), p)
+    funcs = {m.group(1): p for p in split_library.TOP.split(texts[name]) for m in [split_library.FUNC.match(p)] if m}
+    pre, groups, extra, skipped = [], {f: [] for f in files}, {f: [] for f in files}, []
     for b in re.split(r'(?m)^(?=check\.case )', selected):
         if not b.startswith("check.case"):
             pre.append(b)
             continue
-        own = {owner[k] for k in re.findall(r'kernel\.launch @([\w.]+)', b) if k in owner}
+        used = [k for k in dict.fromkeys(re.findall(r'kernel\.launch @([\w.]+)', b)) if k in owner]
+        own = {owner[k] for k in used} - {name}
         if len(own) > 1:
             case = re.search(r'@([\w.]+)', b).group(1)
-            skipped.append(f"SKIP {case}: launches kernels of several library files ({', '.join(sorted(own))})")
+            skipped.append(f"SKIP {case}: launches kernels of several kernel files ({', '.join(sorted(own))})")
             continue
-        groups[own.pop() if own else name].append(b)
-    return {f: "".join(pre + c) for f, c in groups.items() if c}, skipped
+        g = own.pop() if own else name
+        groups[g].append(b)
+        if g != name:
+            extra[g] += [k for k in used if owner[k] == name and k not in extra[g]]
+    out = {}
+    for f, cs in groups.items():
+        if not cs:
+            continue
+        add = [parts[k] for k in extra[f]]
+        need, todo = set(), set(re.findall(r"func\.call @([\w.]+)", "".join(add)))
+        while todo:   # the helpers the copied kernels call, transitively, that the kernel file lacks
+            fn = todo.pop()
+            if fn in funcs and fn not in need and not re.search(rf"(?m)^func\.def\b[^\n@]*@{re.escape(fn)}\(", texts[f]):
+                need.add(fn)
+                todo |= set(re.findall(r"func\.call @([\w.]+)", funcs[fn]))
+        out[f] = "".join(pre + [funcs[n] for n in funcs if n in need] + add + cs)
+    return out, skipped
 
 
 if __name__ == "__main__":
