@@ -337,16 +337,16 @@
       "gen_variants": [
         "base",
         "kt16",
-        "mt2",
-        "kt16+kv0",
-        "mt2+kv0"
+        "kt16+vp4",
+        "mdb+vp4",
+        "mdb+b2+vp4"
       ],
       "files": [
         "bench.loom",
         "bench_kt16.loom",
-        "bench_mt2.loom",
-        "bench_kt16+kv0.loom",
-        "bench_mt2+kv0.loom"
+        "bench_kt16+vp4.loom",
+        "bench_mdb+vp4.loom",
+        "bench_mdb+b2+vp4.loom"
       ],
       "tests": [
         "test.loom"

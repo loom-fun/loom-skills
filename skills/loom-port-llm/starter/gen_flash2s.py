@@ -56,7 +56,7 @@ if D == 256 and os.environ.get("FLASH2_KT256"):   # experiment: 16-key tiles at 
     KT = int(os.environ["FLASH2_KT256"])
 KB = KT // 16                     # 16-key blocks per tile
 DP8 = D + 8                       # padded K row
-VTC = KT + 8                      # padded V^T row
+VTC = KT + int(os.environ.get("FLASH2_VTPAD") or 8)   # padded V^T row (FLASH2_VTPAD: experiment, the pad in halves)
 # Query-head groups per KV head: one workgroup per (tile, KV head, group) when the G heads' S partials don't fit
 # next to the K and V^T tiles in 64 KiB of workgroup memory (G = 8: 70 KiB; Qwen3.5/3.6 MoE). Each group stages
 # K/V itself (the staging is repeated per group; the score/softmax/output work is not).
@@ -588,6 +588,9 @@ if R4:
     if not B_MODE == "2" and os.environ.get("FLASH2_PF", "0") == "1":   # the next K/V tile's loads in flight during this tile's math (flash2_prefetch.py); gfx12 twin only
         from flash2_prefetch import prefetch
         text = prefetch(text)
+if MT > 1:   # two query tiles per workgroup (flash2_mt.py; before the FLASH2_G11 transforms, so db stages inside the pass loop)
+    from flash2_mt import two_tiles
+    text = two_tiles(text, WAVES // MT)
 # FLASH2_G11 (gfx11 kernel only; comma list, default empty = unchanged): the gfx12 twin's text transforms on the gfx11 kernel. lazy / kvh / vtf / hot
 # (flash2_trim.py), pf (flash2_prefetch.py), vp (flash2_vpack.py), abl=<flag>+<flag> (flash2_ablate.py timing ablations: outputs garbage, kbench only).
 G11 = set(x for x in os.environ.get("FLASH2_G11", "").split(",") if x) if not R4 and B_MODE != "2" else set()
@@ -611,9 +614,6 @@ if G11:
     if "db" in G11:   # double-buffered K/V staging, one tile ahead (flash2_db.py; 16-key tiles)
         from flash2_db import double_buffer
         text = double_buffer(text, os.environ.get("FLASH2_DB_AT", "end"))
-if MT > 1:   # two query tiles per workgroup (flash2_mt.py)
-    from flash2_mt import two_tiles
-    text = two_tiles(text, WAVES // MT)
 if os.environ.get("FLASH2_PEEL", "1") == "1" and not EDGE_ZERO and B_MODE != "2":   # the masked path only in the last key tile (flash2_peel.py)
     from flash2_peel import peel_last_tile
     _hot = None

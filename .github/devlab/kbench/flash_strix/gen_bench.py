@@ -29,6 +29,8 @@ VARIANTS = {   # name -> environment of gen_flash2s.py
     "trim": {"FLASH2_G11": "lazy,kvh,vtf,hot"},
     "tnl": {"FLASH2_G11": "kvh,vtf,hot"},   # trim without lazy (lazy spills on gfx11)
     "mt2": {"FLASH2_KT256": "16", "FLASH2_MT256": "2"},   # two 16-token query tiles per workgroup (flash2_mt.py)
+    "mdb": {"FLASH2_KT256": "16", "FLASH2_MT256": "2", "FLASH2_G11": "db"},   # mt2 + double-buffered staging
+    "vp4": {"FLASH2_VTPAD": "4"},   # V^T row pad 4 halves (LDS room for mdb)
     "nostv": {"FLASH2_G11": "abl=nostv"}, "nokld": {"FLASH2_G11": "abl=nokld"}, "nobar": {"FLASH2_G11": "abl=nobar"},
     "noqk": {"FLASH2_G11": "abl=noqk"}, "nopv": {"FLASH2_G11": "abl=nopv"}, "nosm": {"FLASH2_G11": "abl=nosm"},
 }
