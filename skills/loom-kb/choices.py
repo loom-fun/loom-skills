@@ -435,6 +435,14 @@ CHOICE("hybrid.gdn.chunk11_gate", "bool", False, "GDN_CHUNK11_GATE", devices=["r
        kernels=["g_gdn_chunk", "g_gdn_norm_gate*"], from_pr="q38pf gdn",
        doc="With hybrid.gdn.chunk11 (single-form models): g_gdn_chunk (and its gfx12 twin) run the gated RMSNorm of their rows and write the "
            "mixer output; g_gdn_norm_gate_s (the norm-gate with the span metadata) leaves the rows of spans of 64+ tokens alone.")
+CHOICE("hybrid.gdn.chunk11_cn", "int", 32, "GDN_CHUNK11_CN", devices=["rdna3"], rows=ROWS_PREFILL, kernels=["g_gdn_chunk"], from_pr="q38pf gdn",
+       doc="With hybrid.gdn.chunk11 (plain kernel, not fuse / gate): g_gdn_chunk's chunk length, 16 or 32 (default). 16: 240 VGPR and 25.9 KB "
+           "LDS (32: 253 / 53.7 KB), so 3 workgroups fit a WGP and the 48 head workgroups of a 27B span run in one round; a 16-row serial solve.")
+CHOICE("hybrid.gdn.chunk11_alias", "bool", False, "GDN_CHUNK11_ALIAS", devices=["rdna3"], rows=ROWS_PREFILL, kernels=["g_gdn_chunk"],
+       from_pr="q38pf gdn", doc="With hybrid.gdn.chunk11: K^T exp(G - gc) lives in Q's LDS rows (-9 KB LDS at CN 32).")
+CHOICE("hybrid.gdn.chunk11_opt", "str", "", "GDN_CHUNK11_OPT", devices=["rdna3"], rows=ROWS_PREFILL, kernels=["g_gdn_chunk"], from_pr="q38pf gdn",
+       doc="With hybrid.gdn.chunk11: comma list of g_gdn_chunk latency options: scan (the g prefix sum unrolled, independent LDS loads), acc4 "
+           "(the solve's dot products in 4 partial sums).")
 CHOICE("prefill.gdn.fused11", "bool", False, "GDN_FUSED11", devices=["rdna3"], rows=ROWS_PREFILL,
        kernels=["g_gdn_fa", "g_gdn_fb", "g_gdn_conv", "g_gdn_norm_gate*"], from_pr="q38pf gdn",
        doc="With hybrid.gdn.chunk11 (single-form models, 128 x 128 heads, conv 4): GEMM-shape epochs run the spans of 64+ tokens through the "
@@ -510,6 +518,7 @@ CHOICE("feature.logits_export", "bool", True, "LLM_LOGITS", kernels=["g_logits_e
 # Not choices: everything else the generators and their tools read from the environment
 # ======================================================================================================================
 NOT("kbench experiment options of the gfx12 flash kernels (flash_r9700 suite; the shipped variants are choices)", "FLASH2_B2_OPTS", "FLASH2_G6_OPTS")
+NOT("timing-only ablations of the gfx11 chunked GDN kernel (kbench; wrong results)", "GDN_CHUNK11_ABL")
 NOT("input path or file selection (not a model-affecting knob)", "CATALOG", "LOOM_SKILLS", "LOOM_KB_ROOT", "LOOM_ROOT", "VENV", "HF", "HF_HOME",
     "HF_HUB_CACHE", "LD_LIBRARY_PATH", "LOOM_SERVE_STATE", "VISION_TEST_DIR", "FLASH2_OUT", "LLM_OUT")
 NOT("transport between a generator and its subprocesses (set by the caller from cfg / the build)", "LLM_CONFIG", "LLM_DRAFT",

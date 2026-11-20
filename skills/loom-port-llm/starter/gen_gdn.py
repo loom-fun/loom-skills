@@ -539,7 +539,8 @@ kernel.def export("g_gdn_recurrence") @g_gdn_recurrence(%spans: index) {{
                 if rdna4_twins():
                     T.append(fused_kernels(G, NG, LB, eps, _V_GROUPED[0], _V_GROUPED[1], guard_open, guard_close, rank=False, span_min=PF_SPAN))
             else:
-                T.append(chunk_kernel(G, NG, LB, guard_open, guard_close, arch="rdna3", fuse=fz, eps=eps, gate=gt))
+                T.append(chunk_kernel(G, NG, LB, guard_open, guard_close, arch="rdna3", fuse=fz, eps=eps, gate=gt, cn=chunk11_cn(G), alias=chunk11_alias(G), opts=chunk11_opts(G),
+                                      abl=tuple(x for x in os.environ.get("GDN_CHUNK11_ABL", "").split(",") if x)))
             if fused11_mode(G):
                 pass
             elif rdna4_twins() and (fz or gt) and not chunk_mode(G):   # a fused launch has no sequential gfx12 counterpart: the gfx12 chunk kernel
@@ -671,6 +672,25 @@ def chunk11_fuse(G):
     SiLU and the q / k norms of their spans (gen_gdn_chunk fuse); g_gdn_conv skips the rows of spans of PF_SPAN+ tokens and the history commit
     runs after the recurrence."""
     return chunk11_mode(G) == "group" and os.environ.get("GDN_CHUNK11_FUSE", "") not in ("", "0", "off", "no", "false")
+
+
+def chunk11_cn(G):
+    """hybrid.gdn.chunk11_cn (GDN_CHUNK11_CN, 16 or 32, default 32): g_gdn_chunk's chunk length on gfx11 (16: half the staging LDS and
+    a 16-row serial solve per chunk, twice the chunks; the plain kernel only, not with chunk11_fuse / chunk11_gate)."""
+    v = os.environ.get("GDN_CHUNK11_CN", "32")
+    return int(v) if v in ("16", "32") and chunk11_mode(G) == "group" else None
+
+
+def chunk11_alias(G):
+    """hybrid.gdn.chunk11_alias (GDN_CHUNK11_ALIAS): g_gdn_chunk keeps K^T exp(G - gc) in Q's LDS rows (dead after the K S / Q S step),
+    -9 KB LDS per workgroup (53.7 -> 44.5 KB with CN 32)."""
+    return chunk11_mode(G) == "group" and os.environ.get("GDN_CHUNK11_ALIAS", "") not in ("", "0", "off", "no", "false")
+
+
+def chunk11_opts(G):
+    """hybrid.gdn.chunk11_opt (GDN_CHUNK11_OPT, comma list): g_gdn_chunk latency options on gfx11, "scan" (unrolled g prefix sum),
+    "acc4" (the solve's dot products in 4 partial sums)."""
+    return tuple(x for x in os.environ.get("GDN_CHUNK11_OPT", "").split(",") if x) if chunk11_mode(G) == "group" else ()
 
 
 def chunk11_gate(G):
