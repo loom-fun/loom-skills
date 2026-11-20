@@ -958,7 +958,7 @@ def gemm_big256(fmt, mode, fmt2=None, g32=None):
     wsrc = "wsel" if two_w and not fmt2 else "w"
     def fmt_parts(fm, ws, pre, second):
         """(g32, parts) of one weight's dequant: parts = [(out, col, stage col, lines, addr, loads)]"""
-        g = (_on("GEMM_M256_G32") if g32 is None else g32) and fm in _g32_fmts()
+        g = ((os.environ.get("GEMM_M256_G32", "0").strip().lower() not in ("", "0", "false", "no", "off")) if g32 is None else g32) and fm in _g32_fmts()
         fix = (lambda t: t.replace("%w_row_origin", "%w2_row_origin").replace("%block_bytes", "%block_bytes2")) if second else (lambda t: t)
         def fixp(out, col, sc, res):
             lines, addr, loads = res
@@ -987,7 +987,7 @@ def gemm_big256(fmt, mode, fmt2=None, g32=None):
             t.append(f"""    %x_colp = index.add {kvar}, %x_stage_col : index
     %x_rawp = vector.load %x_view[%x_row, %x_colp] : view<[%rows]x[%k]xf16> -> vector<32xf16>
     %x_rawp1 = vector.load %x_view[%x_row1, %x_colp] : view<[%rows]x[%k]xf16> -> vector<32xf16>""")
-        elif _on("GEMM_M256_XCLAMP"):   # choice prefill.gemm.m256_xclamp: unconditional loads at the clamped next K (the last step
+        elif (os.environ.get("GEMM_M256_XCLAMP", "0").strip().lower() not in ("", "0", "false", "no", "off")):   # choice prefill.gemm.m256_xclamp: unconditional loads at the clamped next K (the last step
             # reloads its own slice): no scf.if, whose yielded loads made the compiler wait for them (vmcnt(0)) and copy them
             # into the carried registers right after the barrier, before the MMAs (q6_k)
             t.append(f"""    %x_coln_v = index.add {kvar}, %x_stage_col : index
@@ -1156,10 +1156,6 @@ def _with_twin(gfx11, base):
     return gfx11 + _r4.with_twins(base)[len(base):]
 
 
-def _on(k, d="0"):
-    return os.environ.get(k, d).strip().lower() not in ("", "0", "false", "no", "off")
-
-
 def gemm_big256_db(fmt, mode):
     """GEMM_M256_DB (choice prefill.gemm.m256_db): gemm_big256 with double-buffered LDS stages of 32 K values.
     Same tile and waves (256 threads, 4 x 2 waves of 64 x 64). Two stage pairs (activations 256 x 40 f16, weights
@@ -1170,7 +1166,7 @@ def gemm_big256_db(fmt, mode):
     f = FMT[fmt]
     two_w = mode == "swiglu"
     NT, TW, KS, ST = 256, 128, 32, 40
-    fence = _on("GEMM_M256_DB_FENCE", "1")
+    fence = (os.environ.get("GEMM_M256_DB_FENCE", "1").strip().lower() not in ("", "0", "false", "no", "off"))
     TN = TW // 2 if two_w else TW
     cfr = 2 if two_w else 4
     RF = 4
@@ -1404,9 +1400,9 @@ def gemm_big256_db(fmt, mode):
 
 def gemm_m256_variant(fmt, mode):
     """The gfx11 m256 kernel text the env switches select (None: the default gemm_big256)."""
-    if _on("GEMM_M256_DB"):
+    if (os.environ.get("GEMM_M256_DB", "0").strip().lower() not in ("", "0", "false", "no", "off")):
         return gemm_big256_db(fmt, mode)
-    if _on("GEMM_M256_G32") and fmt in _g32_fmts():   # gfx11 only: the gfx12 twin comes from the default kernel
+    if (os.environ.get("GEMM_M256_G32", "0").strip().lower() not in ("", "0", "false", "no", "off")) and fmt in _g32_fmts():   # gfx11 only: the gfx12 twin comes from the default kernel
         return gemm_big256(fmt, mode)
     return None
 
@@ -1744,7 +1740,7 @@ if __name__ == "__main__":
                         out.append(_rdna4.with_twins(base256))
                     else:   # gfx11 variant; the gfx12 twin still comes from the default kernel
                         out.append(post(var256) + _rdna4.with_twins(base256)[len(base256):])
-                    if mode == "swiglu" and _on("GEMM_M256_F16O"):   # f16-output swiglu (f16o_fuse.fuse_gfx11) + its gfx12 twin
+                    if mode == "swiglu" and (os.environ.get("GEMM_M256_F16O", "0").strip().lower() not in ("", "0", "false", "no", "off")):   # f16-output swiglu (f16o_fuse.fuse_gfx11) + its gfx12 twin
                         out.append(_with_twin(f16out_m256(base256 if var256 is None else post(var256)), f16out_m256(base256)))
     for pair in filter(None, os.environ.get("GEMM_M256_MIXED", "").split(",")):   # gen_llm sets it (choice prefill.gemm.m256_mixed)
         f1, f2 = pair.split(":")
