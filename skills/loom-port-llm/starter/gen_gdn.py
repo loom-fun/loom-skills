@@ -677,7 +677,7 @@ def chunk11_fuse(G):
 
 def chunk11_cn(G):
     """hybrid.gdn.chunk11_cn (GDN_CHUNK11_CN, 16 or 32, default 32): g_gdn_chunk's chunk length on gfx11 (16: half the staging LDS and
-    a 16-row serial solve per chunk, twice the chunks; the plain kernel only, not with chunk11_fuse / chunk11_gate)."""
+    a 16-row serial solve per chunk, twice the chunks)."""
     v = os.environ.get("GDN_CHUNK11_CN", "32")
     return int(v) if v in ("16", "32") and chunk11_mode(G) == "group" else None
 

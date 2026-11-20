@@ -40,12 +40,13 @@ def chunk_kernel(G, NG, LB, guard_open="", guard_close="", target=True, dep=2, a
     arguments %norm_w, %z, %o follow (the raw output %out is not written).
     cn: the chunk length (default CN = 32; 16 halves the staging LDS and the serial solve, gfx11 only, without fuse / gate).
     alias: K^T exp(G - gc) (written in P3, read in P6) lives in Q's LDS rows (Q is dead after P2): -9 KB LDS, so 3 workgroups fit a WGP.
-    opts: latency options: "scan" (the g prefix sum unrolled over vector loads instead of a loop of dependent LDS loads), "acc4" (the
+    opts: "kbo" (P2 kb-outer: one state rhs copy live, -56 VGPR peak), latency options: "scan" (the g prefix sum unrolled over vector loads instead of a loop of dependent LDS loads), "acc4" (the
     solve's dot products in 4 partial sums: a quarter of the dependent FMA chain).
     abl: timing-only ablations (wrong results): "noscan", "nosolve", "nostage" (no global loads in the staging)."""
     CN = cn or globals()["CN"]
     NT = CN // 16
-    assert CN in (16, 32) and (CN == 32 or not (fuse or gate)), "cn 16 is the plain kernel only"
+    assert CN in (16, 32)
+    RPW = CN // 8   # gate epilogue: rows per wave
     R3 = arch == "rdna3"
     FH = "vector<16xf16>" if R3 else "vector<8xf16>"
     from gen_gdn import kh_line, _V_GROUPED
@@ -195,15 +196,24 @@ def chunk_kernel(G, NG, LB, guard_open="", guard_close="", target=True, dep=2, a
     P(f"    }}")
     bar()
     # ---- P2: S as rhs fragments; K S and Q S; this wave's tile of K K^T (waves 0-3) or Q K^T (waves 4-7)
-    for kb in range(8):
-        to_rhs(f"sf{kb}", f"%s{kb}", f"sh{kb}")
-    for nmx, vw, sz in (("zk", "%kh_view", KHS), ("zq", "%q_view", QAS)):
-        for mt in range(NT):
-            prev = "%init"
-            for kb in range(8):
-                P(f"    %{nmx}l{mt}_{kb} = vector.fragment.load<lhs> {vw}[{ci(16 * mt)}, {ci(16 * kb)}] {SH} : view<{CN}x{sz}xf16> -> {FH}")
-                P(f"    %{nmx}{mt}_{kb} = vector.mma %{nmx}l{mt}_{kb}, %sf{kb}, {prev} : {FH}, {FH}, {vec8}")
-                prev = f"%{nmx}{mt}_{kb}"
+    if "kbo" in opts:   # each state fragment's rhs copy feeds its K S / Q S steps right away (one 8-VGPR copy live, not 64; same sums)
+        for kb in range(8):
+            to_rhs(f"sf{kb}", f"%s{kb}", f"sh{kb}")
+            for nmx, vw, sz in (("zk", "%kh_view", KHS), ("zq", "%q_view", QAS)):
+                for mt in range(NT):
+                    prev = "%init" if kb == 0 else f"%{nmx}{mt}_{kb - 1}"
+                    P(f"    %{nmx}l{mt}_{kb} = vector.fragment.load<lhs> {vw}[{ci(16 * mt)}, {ci(16 * kb)}] {SH} : view<{CN}x{sz}xf16> -> {FH}")
+                    P(f"    %{nmx}{mt}_{kb} = vector.mma %{nmx}l{mt}_{kb}, %sf{kb}, {prev} : {FH}, {FH}, {vec8}")
+    else:
+        for kb in range(8):
+            to_rhs(f"sf{kb}", f"%s{kb}", f"sh{kb}")
+        for nmx, vw, sz in (("zk", "%kh_view", KHS), ("zq", "%q_view", QAS)):
+            for mt in range(NT):
+                prev = "%init"
+                for kb in range(8):
+                    P(f"    %{nmx}l{mt}_{kb} = vector.fragment.load<lhs> {vw}[{ci(16 * mt)}, {ci(16 * kb)}] {SH} : view<{CN}x{sz}xf16> -> {FH}")
+                    P(f"    %{nmx}{mt}_{kb} = vector.mma %{nmx}l{mt}_{kb}, %sf{kb}, {prev} : {FH}, {FH}, {vec8}")
+                    prev = f"%{nmx}{mt}_{kb}"
     P(f"    %tq = index.rem %wave, {ci(NT * NT)} : index")
     P(f"    %tmt = index.div %tq, {ci(NT)} : index")
     P(f"    %tnt = index.rem %tq, {ci(NT)} : index")
@@ -365,8 +375,8 @@ def chunk_kernel(G, NG, LB, guard_open="", guard_close="", target=True, dep=2, a
             P(f"    }}")
     if gate:   # gated RMSNorm of the chunk's O rows (fb's epilogue): rows 4 w + rr, columns 4 l .. 4 l + 3 of this head
         bar()
-        for rr in range(4):
-            P(f"    %nr{rr}_a = index.mul %wave, {ci(4)} : index")
+        for rr in range(RPW):
+            P(f"    %nr{rr}_a = index.mul %wave, {ci(RPW)} : index")
             P(f"    %nr{rr}_b = index.add %nr{rr}_a, {ci(rr)} : index")
             P(f"    %nr{rr} = index.assume %nr{rr}_b [range(%nr{rr}_b, 0, {CN - 1})] : index")
             P(f"    %olive{rr} = index.cmp ult, %nr{rr}, %m : index")
@@ -386,7 +396,7 @@ def chunk_kernel(G, NG, LB, guard_open="", guard_close="", target=True, dep=2, a
             P(f"    %gon{rr}_a = vector.mulf %gov{rr}, %goiv{rr} : vector<4xf32>")
             P(f"    %gon{rr}_b = vector.mulf %gon{rr}_a, %nwv : vector<4xf32>")
             P(f"    %gon{rr} = vector.mulf %gon{rr}_b, %gzs{rr} : vector<4xf32>")
-        for rr in range(4):
+        for rr in range(RPW):
             P(f"    scf.if %olive{rr} {{")
             P(f"      vector.store %gon{rr}, %o_view[%otok{rr}, %zcol] : vector<4xf32>, view<[%tokens]x{VD}xf32>")
             P("    }")

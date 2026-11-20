@@ -441,7 +441,7 @@ CHOICE("hybrid.gdn.chunk11_cn", "int", 32, "GDN_CHUNK11_CN", devices=["rdna3"], 
 CHOICE("hybrid.gdn.chunk11_alias", "bool", False, "GDN_CHUNK11_ALIAS", devices=["rdna3"], rows=ROWS_PREFILL, kernels=["g_gdn_chunk"],
        from_pr="q38pf gdn", doc="With hybrid.gdn.chunk11: K^T exp(G - gc) lives in Q's LDS rows (-9 KB LDS at CN 32).")
 CHOICE("hybrid.gdn.chunk11_opt", "str", "", "GDN_CHUNK11_OPT", devices=["rdna3"], rows=ROWS_PREFILL, kernels=["g_gdn_chunk"], from_pr="q38pf gdn",
-       doc="With hybrid.gdn.chunk11: comma list of g_gdn_chunk latency options: scan (the g prefix sum unrolled, independent LDS loads), acc4 "
+       doc="With hybrid.gdn.chunk11: comma list of g_gdn_chunk options: kbo (K S / Q S kb-outer: one state rhs copy live, -56 VGPR peak), scan (the g prefix sum unrolled, independent LDS loads), acc4 "
            "(the solve's dot products in 4 partial sums).")
 CHOICE("prefill.gdn.fused11", "bool", False, "GDN_FUSED11", devices=["rdna3"], rows=ROWS_PREFILL,
        kernels=["g_gdn_fa", "g_gdn_fb", "g_gdn_conv", "g_gdn_norm_gate*"], from_pr="q38pf gdn",
