@@ -631,9 +631,9 @@ if G11:
     if "vp" in G11:
         from flash2_vpack import vpack
         text = vpack(text)
-    if "pf" in G11:
+    if "pf" in G11 or "pfu" in G11:
         from flash2_prefetch import prefetch
-        text = prefetch(text)
+        text = prefetch(text, uncond="pfu" in G11)
     if "db" in G11:   # double-buffered K/V staging, one tile ahead (flash2_db.py; 16-key tiles)
         from flash2_db import double_buffer
         text = double_buffer(text, os.environ.get("FLASH2_DB_AT", "end"))

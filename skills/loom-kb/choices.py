@@ -417,7 +417,7 @@ CHOICE("prefill.attn.flash2_kt256", "int", None, "FLASH2_KT256", per_target=True
        doc="Keys per tile of the gfx11 head_dim-256 flash2s kernel (None: 32). 16: 208 VGPRs / 33 KB LDS, two 12-wave workgroups per WGP "
            "instead of one (G = 6): the second workgroup hides the first's exposed K/V load latency (Qwen3.8-27B Strix: kernel -21 % at 32k, prefill 32k +2.8 %).", **_FL)
 CHOICE("prefill.attn.flash2_g11", "str", None, "FLASH2_G11", experiment=True,
-       doc="gfx11 flash2s kernel only: comma list of the gfx12 twin's text transforms (lazy, kvh, vtf, hot, pf, vp, db) on the gfx11 kernel; abl=... "
+       doc="gfx11 flash2s kernel only: comma list of the gfx12 twin's text transforms (lazy, kvh, vtf, hot, pf, pfu: unconditional clamped prefetch, vp, db) on the gfx11 kernel; abl=... "
            "timing ablations (garbage outputs, kbench only).", **_FL)
 CHOICE("prefill.attn.flash2_db_at", "str", "end", "FLASH2_DB_AT", experiment=True,
        doc="With FLASH2_G11=db: where the next tile's staging stores go (end, or b2: after the S exchange barrier).", **_FL)
@@ -446,6 +446,23 @@ CHOICE("prefill.fuse.silu_mul_rs", "bool", True, "SILU_MUL_RS", doc="g_silu_mul 
        "(GEMM-shape epochs; Qwen3.8-27B Strix: +0.4-0.6 % prefill).", **_PR)
 CHOICE("prefill.fuse.gdn_norm_rs", "bool", True, "GDN_NORM_RS", doc="g_gdn_norm_gate + the f16 row scale of the ssm_out GEMM operand in one kernel.", **_PR)
 CHOICE("prefill.fuse.post_norm_noh", "bool", True, "POST_NORM_NOH", doc="Post-attention norm without the f32 h store no GEMM-branch reader uses.", **_PR)
+CHOICE("prefill.fuse.post_norm_noh_all", "bool", False, "POST_NORM_NOH_ALL", from_pr="q38pf-fuse2", devices=["rdna3"], kernels=["g_post_add_norm*"], rows=ROWS_PREFILL,
+       doc="GEMM epochs: every g_post_add_norm_rs_live_lv whose f32 h no GEMM-epoch launch reads (attention-layer inputs; GDN-layer inputs with "
+       "prefill.gdn.ab_wmma) runs as the _noh kernel (gen_llm.noh_dead_h).")
+CHOICE("prefill.fuse.resid_epi", "bool", False, "RESID_EPI", from_pr="q38pf-fuse2", devices=["rdna3"], kernels=["g_gemm_*_acc_m256", "g_add_norm_rs_live*", "g_post_add_norm*"],
+       rows=ROWS_PREFILL, doc="Whole 256-row epochs: the output GEMMs (attn o, ssm_out, ffn down) accumulate into the residual x in their m256 "
+       "epilogue (g_gemm_<fmt>_acc_m256) and the next norm reads x only (g_add_norm_rs_live[_noh]_lv); gen_llm.resid_epi.")
+CHOICE("prefill.gemm.acc_batch", "int", 16, "GEMM_ACC_BATCH", from_pr="q38pf-fuse2", kernels=["g_gemm_*_acc_m256"], rows=ROWS_PREFILL,
+       doc="acc m256 epilogue: fragments whose old values are loaded before the batch's stores (0: per-fragment load/add/store, one DRAM round trip each).")
+CHOICE("prefill.gdn.ab_wmma", "bool", False, "GDN_AB_WMMA", from_pr="q38pf-fuse2", devices=["rdna3"], kernels=["g_gemm_ab_f32w", "g_mv_f32_*"], rows=ROWS_PREFILL,
+       doc="GEMM epochs: the F32 GDN alpha / beta projections as one WMMA GEMM on %h16 + %s_h (weights rounded to f16 while staging; gen_gdn_ab.py) "
+       "instead of two 4-token f32 matvecs.")
+CHOICE("prefill.gdn.o16", "bool", False, "GDN_O16", from_pr="q38pf-fuse2", devices=["rdna3"], kernels=["g_gdn_chunk_o16", "g_gdn_norm_gate_s_o16", "g_row_scale*"],
+       rows=ROWS_PREFILL, doc="GEMM epochs (with the gated chunk kernel): the GDN output written as f16 with unit row scales by its producers; "
+       "no g_row_scale_f16_live pass (gen_llm.gdn_o16).")
+CHOICE("prefill.fuse.qg_split", "bool", False, "QG_SPLIT", from_pr="q38pf-fuse2", devices=["rdna3"], kernels=["g_gemm_*_store_m256_qgs", "g_split_qgate*"],
+       rows=ROWS_PREFILL, doc="Whole 256-row epochs: the fused query+gate projection's m256 GEMM stores q and gate directly (gen_gemm.qg_split); "
+       "g_split_qgate only in other GEMM epochs.")
 
 _MO = dict(kernels=["g_moe_*"], rows=ROWS_DECODE + ROWS_PREFILL + ROWS_STREAMS)
 CHOICE("moe.decode.rows_per_wg", "int", None, "MOE_R", dynamic=True, kit_legacy={"lfm2moe": 8},
@@ -596,7 +613,7 @@ NOT("timing-only ablations of the gfx11 wave-specialised m256 GEMM (kbench; wron
 NOT("input path or file selection (not a model-affecting knob)", "CATALOG", "LOOM_SKILLS", "LOOM_KB_ROOT", "LOOM_ROOT", "VENV", "HF", "HF_HOME",
     "HF_HUB_CACHE", "LD_LIBRARY_PATH", "LOOM_SERVE_STATE", "VISION_TEST_DIR", "FLASH2_OUT", "LLM_OUT")
 NOT("transport between a generator and its subprocesses (set by the caller from cfg / the build)", "LLM_CONFIG", "LLM_DRAFT",
-    "LLM_TOKENIZER", "GEMM_FORMATS", "GEMM_M256_MIXED", "GEMM_F16O_ON", "GEMM_KMETA", "GEMM_PREFIX", "FLASH2_TARGET", "FLASH2_ROLE", "FLASH2_ARCH",
+    "LLM_TOKENIZER", "GEMM_FORMATS", "GEMM_M256_MIXED", "GEMM_ACC_M256_ONLY", "GEMM_QGS_FMTS", "GEMM_QGS_D", "GEMM_F16O_ON", "GEMM_KMETA", "GEMM_PREFIX", "FLASH2_TARGET", "FLASH2_ROLE", "FLASH2_ARCH",
     "FLASH2_NAME", "FLASH2_KV_FN", "FLASH2_SCALE", "FLASH2_POS_BYTES")
 NOT("kernel-test selection (which cases make_kernel_tests.py writes), not a model choice", "FLASH_TESTS", "GEMM_TESTS", "MOE_TESTS",
     "MOE_GEMM_TESTS", "DRAFTER_TESTS", "KTEST_GEMM_ALL", "KTEST_GEMM_ERR", "KTEST_HEADS_SFX", "KTEST_LLM", "PREFILL_CONT",

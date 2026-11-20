@@ -6,6 +6,7 @@
 - Producer fusions on the 27B hybrid, Strix Halo
 - gfx12 chunked
 - gfx11 chunked prefill on Strix Halo
+- Epilogue fusions on Strix Halo (lane fuse2)
 
 ## Gated delta-net recurrence (`gen_gdn.py`) and the f16 row scale
 
@@ -123,3 +124,16 @@ Switches (all off by default; off = byte-identical programs): `GDN_CHUNK11` (g_g
   ~220 KB/token/layer, the fused kernel ~88 KB. `g_gdn_norm_gate_s` used to compute every long-span row and drop only the store
   (.012 ms/token at 8k) and `g_gdn_qk_norm_lv` normalized every row (.004): `GDN_SKIP_LONG` skips them.
 - Timing ablation (fused CN16): no chunk-row global loads -22 % -> loads are exposed per chunk (opt `xpf` prefetches them).
+
+## Epilogue fusions on Strix Halo (Qwen3.8-27B Q4_K_M, campaign q38pf, lane fuse2; PR 1323)
+
+Switches (opt-in; on for the bartowski 27B via its rdna3 scope rule): `GDN_AB_WMMA` (alpha/beta F32 projections as one WMMA GEMM on
+%h16, weights rounded to f16 while staging; `gen_gdn_ab.py`), `POST_NORM_NOH_ALL` (every input norm whose f32 h no GEMM-epoch launch
+reads runs `_noh`), `RESID_EPI` (o / ssm_out / down m256 GEMMs accumulate into x, `g_gemm_<fmt>_acc_m256`; the next norm reads x only,
+`g_add_norm_rs_live[_noh]_lv`), `GDN_O16` (f16 GDN output with unit scales, no row-scale pass), `QG_SPLIT` (the q+gate m256 GEMM stores
+q and gate directly, `_qgs`). Local 123 W same-job ABBA vs main 77cdb8a9: prefill 8k/16k/32k 644.0/613.1/556.4 -> 662.4/628.8/570.5
+tok/s (+2.9/+2.6/+2.5 %), decode tie; pf8k busy 1.542 -> 1.523 ms/token.
+- Per-pass profile (us/token at 8k): norms 36.8 -> 15.5 with the acc epilogue costing +3 over the store GEMMs (RESID_EPI alone
+  +0.6..0.7 % e2e); alpha/beta 20.7 (`g_mv_f32_k5120_t4`) -> 13.4 (`g_gemm_ab_f32w`); row scale 12.4 -> 3.1 (attn o only); split_qgate 7.6 -> 0.
+- What does not pay: batching the acc epilogue's loads (`GEMM_ACC_BATCH` 16 vs 0: 277.4 vs 278.4 us/token, bound by the 20 KB/row x
+  read, not latency); `FLASH2_G11=pfu` (unconditional clamped K/V prefetch on top of kt16): flash2 +8.5 %, prefill -0.7..-2.8 %.

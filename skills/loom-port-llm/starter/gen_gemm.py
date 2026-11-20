@@ -1208,6 +1208,22 @@ def gemm_big256(fmt, mode, fmt2=None, g32=None, bal=None, a32_=None):
   %tile_first = index.madd %row_origin, %n, %out_origin : index
   %tile_offset = index.scale %tile_first, %four : index, offset -> offset
   %y_view = buffer.view %y[%tile_offset] : buffer -> view<256x{TN}xf32, %y_layout>''')
+    if mode == "acc" and int(os.environ.get("GEMM_ACC_BATCH", "16") or 0) > 0:
+        # acc: a batch of fragments' old values are all loaded before any of the batch's stores (a load issued after a store to the same
+        # buffer waits for it: the per-fragment load / add / store form was one DRAM round trip per fragment, 116 in a row per thread)
+        B = int(os.environ.get("GEMM_ACC_BATCH", "16"))
+        frs = [(r, c) for r in range(RF) for c in range(cfr)]
+        for i in range(0, len(frs), B):
+            grp = frs[i:i + B]
+            for r, c in grp:
+                L.append(f"  %oc{r}{c}_c = index.constant {c * 16} : index\n  %oc{r}{c} = index.add %wave_col, %oc{r}{c}_c : index")
+                L.append(f"  %old{r}{c} = vector.fragment.load<result> %y_view[{rowv[r]}, %oc{r}{c}] shape [%c16, %c16] : view<256x{TN}xf32, %y_layout> -> vector<8xf32>")
+            for r, c in grp:
+                L.append(f"  %v{r}{c}_s = vector.mulf %o0r{r}c{c}, %inv{r} : vector<8xf32>\n  %v{r}{c} = vector.addf %old{r}{c}, %v{r}{c}_s : vector<8xf32>")
+            for r, c in grp:
+                L.append(f"  vector.fragment.store<result> %v{r}{c}, %y_view[{rowv[r]}, %oc{r}{c}] shape [%c16, %c16] : vector<8xf32>, view<256x{TN}xf32, %y_layout>")
+        L.append("  kernel.return\n}\n")
+        return a32("\n".join(L)) if (a32_on() if a32_ is None else a32_) else "\n".join(L)
     for r in range(RF):
         for c in range(cfr):
             row = rowv[r]
@@ -1257,6 +1273,38 @@ def f16out_m256(text):
     view.store %so_val, %so_view[%tile_row, %c1] : f32, view<[%rows]x2xf32>
   }
 """)
+
+
+def qg_split(text, D):
+    """GEMM_QGS_FMTS / GEMM_QGS_D (gen_llm QG_SPLIT, choice prefill.fuse.qg_split): the `<K>_qgs` kernel of a store m256 kernel (or its gfx12
+    twin) for the fused query+gate projection (output column c = head c / 2D, part (c / D) % 2, dim c % D): the tile (128 columns, inside
+    one D-wide half) is stored to %y (query) or %y2 (gate) at [row, head * D + dim] with row stride n / 2: g_split_qgate's work in the
+    epilogue, no %qg round trip."""
+    old = _re.search(r'kernel\.def (?:target\(@\w+\) )?export\("(\w+)"\)', text).group(1)
+    new = old.replace("_store_m256", "_store_m256_qgs")
+    assert new != old, old
+    t = text.replace(f'export("{old}") @{old}(', f'export("{new}") @{new}(', 1)
+    assert t.count(", %y: buffer) {") == 1
+    t = t.replace(", %y: buffer) {", ", %y: buffer, %y2: buffer) {", 1)
+    a = """  %y_layout = encoding.layout.strided [%n, %c1] : encoding<layout>
+  %tile_first = index.madd %row_origin, %n, %out_origin : index
+  %tile_offset = index.scale %tile_first, %four : index, offset -> offset
+  %y_view = buffer.view %y[%tile_offset] : buffer"""
+    assert t.count(a) == 1, old
+    b = f"""  %qgs_n2 = index.div %n, %c2 : index
+  %y_layout = encoding.layout.strided [%qgs_n2, %c1] : encoding<layout>
+  %qgs_d = index.constant {D} : index
+  %qgs_2d = index.constant {2 * D} : index
+  %qgs_h = index.div %out_origin, %qgs_2d : index
+  %qgs_r = index.rem %out_origin, %qgs_2d : index
+  %qgs_gate = index.cmp uge, %qgs_r, %qgs_d : index
+  %qgs_dd = index.rem %out_origin, %qgs_d : index
+  %qgs_col = index.madd %qgs_h, %qgs_d, %qgs_dd : index
+  %tile_first = index.madd %row_origin, %qgs_n2, %qgs_col : index
+  %tile_offset = index.scale %tile_first, %four : index, offset -> offset
+  %qgs_buf = scf.select %qgs_gate, %y2, %y : buffer
+  %y_view = buffer.view %qgs_buf[%tile_offset] : buffer"""
+    return t.replace(a, b, 1)
 
 
 def _with_twin(gfx11, base):
@@ -1839,10 +1887,13 @@ if __name__ == "__main__":
     import gen_gemm_rdna4 as _rdna4   # LOOM_RDNA4=0: no gfx12 twins (output byte-identical to the gfx11-only generator)
     post = lambda t: order(skip(t))
     on256 = os.environ.get("GEMM_M256", "1") not in ("", "0", "false", "no")   # 256-row kernels (_m256)
+    acc256 = set(filter(None, os.environ.get("GEMM_ACC_M256_ONLY", "").split(",")))   # gen_llm RESID_EPI: these formats' acc kernels at 256 rows only
     for item in spec.split(","):
         fmt, modes = item.split(":")
         for mode in modes.split("+"):
-            out.append(_rdna4.with_twins(post(gemm(fmt, mode))))
+            only256 = mode == "acc" and fmt in acc256 and fmt not in HELPER and on256
+            if not only256:
+                out.append(_rdna4.with_twins(post(gemm(fmt, mode))))
             if fmt in HELPER:   # the 64-row tile kernel under the 128-row name (its dequant has no prefetchable load)
                 name = f"{PREFIX}_gemm_{fmt}_{mode}"
                 out.append(_rdna4.with_twins(post(gemm(fmt, mode)).replace(f'export("{name}") @{name}(', f'export("{name}_m128") @{name}_m128(')))
@@ -1852,7 +1903,8 @@ if __name__ == "__main__":
                         out.append(post(_mx.gemm_mxfp4s_f8_m256("store", PREFIX, **_mx.f8_kernel_kwargs("store"))))
                         out.append(post(_mx.gemm_mxfp4s_f8_m256("swiglu", PREFIX, **_mx.f8_kernel_kwargs("swiglu"))))
             else:
-                out.append(_rdna4.with_twins(post(gemm_big(fmt, mode))))
+                if not only256:
+                    out.append(_rdna4.with_twins(post(gemm_big(fmt, mode))))
                 if on256:
                     base256 = post(gemm_big256(fmt, mode, g32=False, a32_=False))
                     var256 = gemm_m256_variant(fmt, mode)
@@ -1860,6 +1912,10 @@ if __name__ == "__main__":
                         out.append(_rdna4.with_twins(base256))
                     else:   # gfx11 variant; the gfx12 twin still comes from the default kernel
                         out.append(post(var256) + _rdna4.with_twins(base256)[len(base256):])
+                    if mode == "store" and fmt in set(filter(None, os.environ.get("GEMM_QGS_FMTS", "").split(","))):   # gen_llm QG_SPLIT
+                        _D = int(os.environ["GEMM_QGS_D"])
+                        _g11 = base256 if var256 is None else post(var256)
+                        out.append(qg_split(_g11, _D) + "\n" + (qg_split(_rdna4.with_twins(base256)[len(base256):].lstrip("\n"), _D) if _rdna4.enabled() else ""))
                     if mode == "swiglu" and (os.environ.get("GEMM_M256_F16O", "0").strip().lower() not in ("", "0", "false", "no", "off")):   # f16-output swiglu (f16o_fuse.fuse_gfx11) + its gfx12 twin
                         out.append(_with_twin(f16out_m256(base256 if var256 is None else post(var256)), f16out_m256(base256)))
     for pair in filter(None, os.environ.get("GEMM_M256_MIXED", "").split(",")):   # gen_llm sets it (choice prefill.gemm.m256_mixed)

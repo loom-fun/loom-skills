@@ -23,7 +23,10 @@ def _suffix(lines, tag):
     return [re.sub("%(" + names + r")\b", lambda m: "%" + m.group(1) + tag, ln) for ln in lines]
 
 
-def prefetch(text):
+def prefetch(text, uncond=False):
+    """uncond (FLASH2_G11=pfu, gfx11): every lane issues the loads at a clamped key position (min(key, last valid key); the staging
+    segment is already clamped) with no scf.if around them, and invalid keys become zeros by a select: a load yielded from a branch
+    is waited for right after the branch, which made the predicated form (pf) a tie on gfx11 (lanes/attn LOG)."""
     lines = text.split("\n")
     hi = next(i for i, ln in enumerate(lines) if HEADER.match(ln))
     m = HEADER.match(lines[hi])
@@ -44,6 +47,25 @@ def prefetch(text):
     rest = [ln.replace("%kvals", "%pfk").replace("%vvals", "%pfv") for ln in stage[l1 + 1:]]   # the stores
     new_stage = [stage[0]] + rest
 
+    def emit_u(tag, first, extra, pad):
+        o = [f"{pad}%key_pos{tag} = index.add {first}, %st_key : index",
+             f"{pad}%key_valid{tag}_0 = index.cmp ule, %key_pos{tag}, {limit} : index",
+             f"{pad}%key_clamp{tag} = index.min %key_pos{tag}, {limit} : index"]
+        valid = f"%key_valid{tag}_0"
+        if extra:
+            o.append(f"{pad}%key_valid{tag} = scalar.andi %key_valid{tag}_0, {extra} : i1")
+            valid = f"%key_valid{tag}"
+        inner = load[1:]   # the loads of the scf.if %key_valid then-branch, up to its yield
+        ye = next(i for i, ln in enumerate(inner) if ln.strip().startswith("scf.yield"))
+        ym = re.match(r"\s*scf\.yield (%\w+), (%\w+) :", inner[ye])
+        body = _suffix(inner[:ye], tag)
+        body = [re.sub(r"%key_pos\b", f"%key_clamp{tag}", ln) for ln in body]
+        body = [pad + ln.strip() for ln in body]
+        kh, vh = (re.sub("%(" + "|".join(INNER) + r")\b", lambda mm: "%" + mm.group(1) + tag, x) for x in ym.groups())
+        o += body
+        o += [f"{pad}%kvals{tag} = scf.select {valid}, {kh}, {zeros} : {vt}", f"{pad}%vvals{tag} = scf.select {valid}, {vh}, {zeros} : {vt}"]
+        return o
+
     def emit(tag, first, extra, pad):
         o = [f"{pad}%key_pos{tag} = index.add {first}, %st_key : index",
              f"{pad}%key_valid{tag}_0 = index.cmp ule, %key_pos{tag}, {limit} : index"]
@@ -56,6 +78,17 @@ def prefetch(text):
         o += body
         return o
 
+    if uncond:
+        pro = emit_u("_p0", "%key_low", None, ind) + [f"{ind}%pfk_p0 = vector.addf %kvals_p0, {zeros} : {vt}", f"{ind}%pfv_p0 = vector.addf %vvals_p0, {zeros} : {vt}"]
+        nxt = [f"{ind}%pf_nt = index.add %kt, %c1 : index",
+               f"{ind}%pf_has = index.cmp ult, %pf_nt, %key_tiles : index",
+               f"{ind}%pf_first = index.madd %pf_nt, %ckt, %key_low : index"]
+        nxt += emit_u("_n", "%pf_first", "%pf_has", ind) + [f"{ind}%pfk_n = vector.addf %kvals_n, {zeros} : {vt}", f"{ind}%pfv_n = vector.addf %vvals_n, {zeros} : {vt}"]
+        head = (f"{ind}%m_final, %l_final, {m.group('outs').strip()}, %pfk_f, %pfv_f = scf.for %kt = [%c0 to %key_tiles step %c1]"
+                f"({m.group('args')}, %pfk = %pfk_p0 : {vt}, %pfv = %pfv_p0 : {vt}) -> ({m.group('types')}, {vt}, {vt}) {{")
+        yi = next(i for i in range(ib, len(lines)) if lines[i].lstrip().startswith("scf.yield %m_new, %l_new,"))
+        y = re.sub(r"^(.*?) : (f32, f32, .*)$", lambda mm: f"{mm.group(1)}, %pfk_n, %pfv_n : {mm.group(2)}, {vt}, {vt}", lines[yi])
+        return "\n".join(lines[:hi] + pro + [head, lines[hi + 1]] + new_stage + lines[ib:ib + 1] + nxt + lines[ib + 1:yi] + [y] + lines[yi + 1:])
     # the prologue: tile 0
     pro = [f"{ind}%pfk_p0, %pfv_p0 = scf.if %st_live -> ({vt}, {vt}) {{"]
     pro += ["  " + ln for ln in emit("_p0", "%key_low", None, ind + "  ")]

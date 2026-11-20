@@ -2084,6 +2084,243 @@ def fuse_post_add_row_scale(program):
     return program, "".join(post_add_norm_rs(lv, noh) for lv, noh in sorted(used))
 
 
+def noh_dead_h(text):
+    """POST_NORM_NOH_ALL (choice prefill.fuse.post_norm_noh_all): in @llm_advance, a g_post_add_norm_rs_live_lv launch whose f32 h row no
+    GEMM-epoch (t >= 64) launch reads before the next norm rewrites %h runs, in GEMM epochs, as the _noh_lv kernel (no f32 h store; same
+    h16 + scales). A reader is any launch with %h as an operand that is not inside `scf.if %single {`, `scf.if %ab_ngemm {` or the else
+    branch of `scf.if %mm` / `scf.if %gemm` (gen_gdn_ab moves the alpha / beta matvecs of GEMM epochs onto %h16, which frees the
+    input norm of every GDN layer; attention layers read only %h16 there). Returns (text, launches rewritten)."""
+    if 'export("g_post_add_norm_rs_live_noh_lv")' not in text:
+        return text, 0
+    a = text.index("command.def public @llm_advance(")
+    b = text.find("\ncommand.def ", a + 10)
+    b = len(text) if b < 0 else b + 1
+    lines = text[a:b].split("\n")
+    norm = re.compile(r"(\s*)kernel\.launch @g_post_add_norm\w*\[")
+    target = re.compile(r"(?P<ind>\s*)kernel\.launch @g_post_add_norm_rs_live_lv\[%t\]\((?P<args>[^)]*)\) : \[index\]\((?P<ty>[^)]*)\)$")
+    hread = re.compile(r"kernel\.launch @\w+\[[^\]]*\]\([^)]*(?:\(|, )%h(?:,|\))")
+    ctx, stack = [], []
+    for line in lines:
+        s_ = line.strip()
+        mi = re.match(r"scf\.if (%\w+) \{$", s_)
+        if mi:
+            stack.append([mi.group(1), "then"])
+        elif s_ == "} else {" and stack:
+            stack[-1][1] = "else"
+        elif s_ == "}" and stack:
+            stack.pop()
+        safe = any((c in ("%single", "%ab_ngemm") and br == "then") or (c in ("%mm", "%gemm") and br == "else") for c, br in stack)
+        ctx.append(safe)
+    n, out = 0, []
+    for i, line in enumerate(lines):
+        m = target.match(line)
+        if m:
+            dead = True
+            for j in range(i + 1, len(lines)):
+                if norm.match(lines[j]) and not ctx[j] and "%h" in lines[j]:
+                    break   # the next GEMM-epoch norm rewrites %h
+                if hread.search(lines[j]) and not ctx[j] and not norm.match(lines[j]):
+                    dead = False
+                    break
+            if dead:
+                ind = m.group("ind")
+                out += [f"{ind}scf.if %gemm {{",
+                        f"{ind}  kernel.launch @g_post_add_norm_rs_live_noh_lv[%t]({m.group('args')}) : [index]({m.group('ty')})",
+                        f"{ind}}} else {{", "  " + line, f"{ind}}}"]
+                n += 1
+                continue
+        out.append(line)
+    return text[:a] + "\n".join(out) + text[b:], n
+
+
+def qg_split_on():
+    """QG_SPLIT (choice prefill.fuse.qg_split): fused query+gate projections (attn_gate fused_q) store q and gate straight from the 256-row GEMM's
+    epilogue (gen_gemm.qg_split) in whole 256-row epochs; g_split_qgate runs only in the other GEMM epochs."""
+    # the 128-column output tiles of the q GEMM must not straddle a head's query/gate halves: head_dim a multiple of 128
+    return FUSED_Q and D % 128 == 0 and os.environ.get("QG_SPLIT", "0").strip().lower() not in ("", "0", "false", "no", "off")
+
+
+def qg_split(text):
+    """QG_SPLIT program rewrite of @llm_advance. Returns (text, layers)."""
+    a = text.index("command.def public @llm_advance(")
+    b = text.find("\ncommand.def ", a + 10)
+    b = len(text) if b < 0 else b + 1
+    body = text[a:b]
+    body, n1 = re.subn(r"(?m)^(?P<ind>\s*)kernel\.launch @g_gemm_(?P<f>\w+?)_store_m256\[(?P<g>[^\]]*)\]\((?P<args>.*), %qg\) : (?P<ty>.*), buffer\)$",
+                       lambda m: f"{m.group('ind')}kernel.launch @g_gemm_{m.group('f')}_store_m256_qgs[{m.group('g')}]({m.group('args')}, %q, %gate) : {m.group('ty')}, buffer, buffer)", body)
+    body, n2 = re.subn(r"(?m)^  scf\.if %gemm \{\n\s*kernel\.launch @g_split_qgate(?:_lv)?\[[^\n]*\n  \} else \{\n[^\n]*\n  \}\n",
+                       lambda m: "  scf.if %qgs_nhuge {\n" + "\n".join("  " + l for l in m.group(0).rstrip("\n").split("\n")) + "\n  }\n", body)
+    assert n1 == n2, (n1, n2)
+    assert all("g_split_qgate" in l for l in body.split("\n") if "%qg, " in l and "kernel.launch" in l), "qg_split: another %qg reader"
+    if not n1:
+        return text, 0
+    anchor = re.search(r"(?m)^  %huge = scalar\.andi [^\n]*\n", body)
+    body = (body[:anchor.end()] + "  %qgs_t = index.cmp eq, %c0, %c0 : index\n  %qgs_f = index.cmp ne, %c0, %c0 : index\n"
+            "  %qgs_nhuge = scf.select %huge, %qgs_f, %qgs_t : i1\n" + body[anchor.end():])
+    return text[:a] + body + text[b:], n1
+
+
+def resid_epi_on():
+    """RESID_EPI (choice prefill.fuse.resid_epi): the residual add of whole 256-row epochs in the output GEMM's epilogue (see resid_epi)."""
+    return (os.environ.get("RESID_EPI", "0").strip().lower() not in ("", "0", "false", "no", "off")) and not POST_NORM and not MOE
+
+
+def add_norm_rs(noh):
+    """g_add_norm_rs_live[_noh]_lv: g_post_add_norm_rs_live[_noh]_lv for a residual row the output GEMM already added (RESID_EPI): x is read
+    (not y + x) and not stored; h16 + scales (+ the f32 h unless noh) as before. Same launch signature (the y operand is unused)."""
+    t = post_add_norm_rs(True, noh)
+    old = f"g_post_add_norm_rs_live{'_noh' if noh else ''}"
+    name = f"g_add_norm_rs_live{'_noh' if noh else ''}"
+    t = t.replace(f'export("{old}") @{old}(', f'export("{name}") @{name}(')
+    t, n1 = re.subn(r"    %a = vector\.load %y_view\[%token, %bl, %c0\] : [^\n]*\n", "    %a = vector.addf %zero32, %zero32 : vector<32xf32>\n", t)
+    t, n2 = re.subn(r"    vector\.store %sum, %x_view\[%token, %bl, %c0\] : [^\n]*\n", "", t)
+    assert n1 == 1 and n2 == 1, (n1, n2)
+    body, _ = live_skip_kernel(t.lstrip("\n"), name)
+    return "\n" + body
+
+
+def resid_epi(text):
+    """RESID_EPI, @llm_advance after live_row_skip / noh_dead_h: each output GEMM whose result %y only feeds the next
+    g_post_add_norm_rs_live[_noh]_lv (attention o, ssm_out, ffn down) accumulates into the residual stream %x in its 256-row kernel
+    (`g_gemm_<fmt>_acc_m256`, x += acc * inverse: the same f32 sum the norm did), and the norm block becomes
+    `scf.if %huge { g_add_norm_rs_live[_noh]_lv (reads x only) } else { <old block> }`. Other epoch shapes are unchanged.
+    Returns (text, pairs rewritten, formats needing acc_m256)."""
+    a = text.index("command.def public @llm_advance(")
+    b = text.find("\ncommand.def ", a + 10)
+    b = len(text) if b < 0 else b + 1
+    lines = text[a:b].split("\n")
+    gemm = re.compile(r"^(?P<ind>\s*)kernel\.launch @g_gemm_(?P<fmt>\w+?)_store_m256\[(?P<g>[^\]]*)\]\((?P<args>.*), %y\) : (?P<ty>.*)$")
+    normre = re.compile(r"^\s*kernel\.launch @g_post_add_norm_rs_live(?P<noh>_noh)?_lv\[%t\]\((?P<args>%t, %info, %y, [^)]*)\) : (?P<ty>.*)$")
+    n, fmts, i = 0, set(), 0
+    last_gemm = None
+    while i < len(lines):
+        if gemm.match(lines[i]):
+            last_gemm = i
+        if lines[i] == "  scf.if %mm {" and last_gemm is not None:
+            # the block up to its closing "  }" at the same indentation (with an optional "  } else {" ... "  }")
+            j = lines.index("  }", i + 1)   # "  } else {" is not "  }"
+            blk = lines[i:j + 1]
+            ms = [normre.match(l) for l in blk]
+            ms = [m for m in ms if m]
+            if ms:
+                gemm_ms = [m for m in ms if m.group("noh")] if len(ms) > 1 else ms   # the noh_dead_h form: GEMM epochs take the noh launch
+                m = gemm_ms[0]
+                noh = bool(m.group("noh"))
+                g = gemm.match(lines[last_gemm])
+                fmts.add(g.group("fmt"))
+                lines[last_gemm] = f"{g.group('ind')}kernel.launch @g_gemm_{g.group('fmt')}_acc_m256[{g.group('g')}]({g.group('args')}, %x) : {g.group('ty')}"
+                name = f"g_add_norm_rs_live{'_noh' if noh else ''}_lv"
+                new = ["  scf.if %huge {", f"    kernel.launch @{name}[%t]({m.group('args')}) : {m.group('ty')}", "  } else {"] + ["  " + l for l in blk] + ["  }"]
+                lines[i:j + 1] = new
+                i += len(new)
+                last_gemm = None
+                n += 1
+                continue
+        i += 1
+    return text[:a] + "\n".join(lines) + text[b:], n, fmts
+
+
+def gdn_o16(text):
+    """GDN_O16 (choice prefill.gdn.o16; with the gated chunk kernel, GDN_CHUNK11_GATE + GDN_SKIP_LONG): in GEMM epochs the GDN output o (the
+    ssm_out GEMM's operand) is written as F16 with unit row scales by its producers, g_gdn_chunk_o16 (the long spans' gated epilogue) and
+    g_gdn_norm_gate_s_o16 (the other live rows; zeros for padding rows; scales (1, 1) live / (0, 0) padding for every row), instead of f32
+    o + g_row_scale_f16_live (a 36 KB/row bandwidth pass). o is a gated RMSNorm output (|o| << 65504): a power-of-two row scale changes
+    no F16 mantissa, only underflow below 6e-5. Returns (text, layers)."""
+    def kern(name):
+        m = re.search(r'(?m)^kernel\.def (?:target\(@\w+\) )?export\("' + name + r'"\)', text)
+        if not m:
+            return None
+        e = text.index("\n  kernel.return\n}\n", m.start()) + len("\n  kernel.return\n}\n")
+        return text[m.start():e]
+    ck, ck4, ng = kern("g_gdn_chunk"), kern("g_gdn_chunk_rdna4"), kern("g_gdn_norm_gate_s")
+    if not (ck and ng and "%o_view = buffer.view %o[%zero]" in ck and "%sp_short" in ng):
+        return text, 0
+    def chunk16(t, name):
+        t = t.replace(f'export("{name}") @{name}(', f'export("{name.replace("g_gdn_chunk", "g_gdn_chunk_o16")}") @{name.replace("g_gdn_chunk", "g_gdn_chunk_o16")}(', 1)
+        t, n1 = re.subn(r"(%o_view = buffer\.view %o\[%zero\] : buffer -> view<\[%tokens\]x\d+x)f32>", r"\1f16>", t)
+        t, n2 = re.subn(r"(?m)^(\s*)vector\.store (%gon\w+), %o_view\[([^\]]*)\] : vector<4xf32>, view<\[%tokens\]x(\d+)xf32>$",
+                        r"\1\2_h = vector.fptrunc \2 : vector<4xf32> to vector<4xf16>\n\1vector.store \2_h, %o_view[\3] : vector<4xf16>, view<[%tokens]x\4xf16>", t)
+        assert n1 == 1 and n2 >= 1, (name, n1, n2)
+        return t
+    kernels = chunk16(ck, "g_gdn_chunk") + "\n" + (chunk16(ck4, "g_gdn_chunk_rdna4") + "\n" if ck4 else "")
+    t = ng.replace('export("g_gdn_norm_gate_s") @g_gdn_norm_gate_s(', 'export("g_gdn_norm_gate_s_o16") @g_gdn_norm_gate_s_o16(', 1)
+    t = t.replace(", %z: buffer, %o: buffer) {", ", %z: buffer, %o: buffer, %so: buffer) {", 1)
+    t, n1 = re.subn(r"(%o_view = buffer\.view %o\[%zero\] : buffer -> view<\[%tokens\]x(\d+)x)f32>", r"\1f16>", t)
+    VD = int(re.search(r"%o_view = buffer\.view %o\[%zero\] : buffer -> view<\[%tokens\]x(\d+)xf16>", t).group(1))
+    t, n2 = re.subn(r"(?m)^(\s*)view\.store (%res\d+), %o_view\[([^\]]*)\] : f32, view<\[%tokens\]x(\d+)xf32>$",
+                    r"\1\2_h = scalar.fptrunc \2 : f32 to f16\n\1view.store \2_h, %o_view[\3] : f16, view<[%tokens]x\4xf16>", t)
+    assert n1 == 1 and n2 >= 1, (n1, n2)
+    G_ = int(re.search(r"%groups = index\.constant (\d+) : index", t).group(1))
+    LN = int(re.search(r"%lanes = index\.constant (\d+) : index", t).group(1))
+    assert VD % (G_ * 4) == 0, (VD, G_)
+    tail = f"""  %q16_dead = scf.select %sl_live, %sl_false, %sl_true : i1
+  scf.if %q16_dead {{
+    %q16_g = kernel.workgroup.id<y> : index
+    %q16_tid = kernel.workitem.id<x> : index
+    %q16_chunk = index.constant {VD // G_} : index
+    %q16_c4 = index.constant 4 : index
+    %q16_base = index.mul %q16_g, %q16_chunk : index
+    %q16_t4 = index.mul %q16_tid, %q16_c4 : index
+    %q16_lo = index.add %q16_base, %q16_t4 : index
+    %q16_hi = index.add %q16_base, %q16_chunk : index
+    %q16_st = index.constant {4 * LN} : index
+    %q16_z = vector.splatf 0.0 : vector<4xf16>
+    %q16_vz = index.constant 0 : offset
+    %q16_view = buffer.view %o[%q16_vz] : buffer -> view<[%tokens]x{VD}xf16>
+    scf.for %q16_col = [%q16_lo to %q16_hi step %q16_st] {{
+      vector.store %q16_z, %q16_view[%token, %q16_col] : vector<4xf16>, view<[%tokens]x{VD}xf16>
+    }}
+  }}
+  %q16_gy = kernel.workgroup.id<y> : index
+  %q16_tid = kernel.workitem.id<x> : index
+  %q16_c0 = index.constant 0 : index
+  %q16_g0 = index.cmp eq, %q16_gy, %q16_c0 : index
+  %q16_t0 = index.cmp eq, %q16_tid, %q16_c0 : index
+  %q16_first = scalar.andi %q16_g0, %q16_t0 : i1
+  scf.if %q16_first {{
+    %q16_one = scalar.constant 1.0 : f32
+    %q16_zf = scalar.constant 0.0 : f32
+    %q16_sv = scf.select %sl_live, %q16_one, %q16_zf : f32
+    %q16_c1 = index.constant 1 : index
+    %q16_so0 = index.constant 0 : offset
+    %q16_sview = buffer.view %so[%q16_so0] : buffer -> view<[%tokens]x2xf32>
+    view.store %q16_sv, %q16_sview[%token, %q16_c0] : f32, view<[%tokens]x2xf32>
+    view.store %q16_sv, %q16_sview[%token, %q16_c1] : f32, view<[%tokens]x2xf32>
+  }}
+  kernel.return
+}}
+"""
+    assert t.endswith("  }\n  kernel.return\n}\n"), t[-80:]
+    t = t[:-len("  kernel.return\n}\n")] + tail
+    kernels += t
+    a = text.index("command.def public @llm_advance(")
+    b = text.find("\ncommand.def ", a + 10)
+    b = len(text) if b < 0 else b + 1
+    body = text[a:b]
+    n = 0
+    def chunk_rep(m):
+        return m.group(0).replace("kernel.launch @g_gdn_chunk[", "kernel.launch @g_gdn_chunk_o16[", 1).replace(", %o) : ", ", %o16) : ", 1)
+    body, nc = re.subn(r"(?m)^\s*kernel\.launch @g_gdn_chunk\[[^\n]*, %gz, %o\) : [^\n]*$", chunk_rep, body)
+    def ng_rep(m):
+        ind, args, ty = m.group("ind"), m.group("args"), m.group("ty")
+        return (f"{ind}scf.if %gemm {{\n{ind}  kernel.launch @g_gdn_norm_gate_s_o16[%t]({args[:-len(', %o')]}, %o16, %s_o) : [index]({ty}, buffer)\n"
+                f"{ind}}} else {{\n{ind}  {m.group(0).strip()}\n{ind}}}")
+    body, nn = re.subn(r"(?m)^(?P<ind>\s*)kernel\.launch @g_gdn_norm_gate_s\[%t\]\((?P<args>[^)]*, %gz, %o)\) : \[index\]\((?P<ty>[^)]*)\)$", ng_rep, body)
+    def rs_rep(m):
+        blk = m.group(0)
+        return "  scf.if %o16_ngemm {\n" + "\n".join("  " + l for l in blk.rstrip("\n").split("\n")) + "\n  }\n"
+    body, nr = re.subn(r"(?m)^  scf\.if %mm \{\n\s*kernel\.launch @g_row_scale_f16_live(?:_lv)?\[%t\]\(%t, %info, %nVD, %o, %s_o, %o16\) : [^\n]*\n  \} else \{\n[^\n]*\n  \}\n", rs_rep, body)
+    assert nc == nn == nr, (nc, nn, nr)
+    if not nc:
+        return text, 0
+    anchor = re.search(r"(?m)^  %gemm = index\.cmp uge, %t, %c64 : index\n", body)
+    body = body[:anchor.end()] + "  %o16_ngemm = index.cmp ult, %t, %c64 : index\n" + body[anchor.end():]
+    text = text[:a] + body + text[b:]
+    first = text.index("command.def ")
+    first = text.rfind("\n", 0, first) + 1
+    return text[:first] + kernels + "\n" + text[first:], nc
+
+
 # SILU_MUL_RS (env, default on; =0 selects the old path): g_silu_mul + g_row_scale_f16_live of its result in one kernel, GEMM-shape epochs only (layers whose
 # gate/up formats differ: Qwen3.8-27B Q4_K_M has 17). The row is read once (gate, up), activated, kept in registers (N / 1024 vec4 per lane),
 # its max |x| reduced, and written once as f16 + the row scale: the f32 activation row is never stored, and nothing re-reads it
@@ -6218,7 +6455,18 @@ if __name__ == "__main__":
         _spec = importlib.util.spec_from_file_location("gen_gemm_mod", os.path.join(here, "gen_gemm.py"))
         _gg = importlib.util.module_from_spec(_spec); _spec.loader.exec_module(_gg)
         parts.append(moe_kernels(ROW_SCALE, _gg.gemm))
-    env = dict(os.environ, GEMM_FORMATS=",".join(f"{f}:{'+'.join(sorted(m))}" for f, m in sorted(USED_GEMM.items())))
+    _ug = {f: set(m) for f, m in USED_GEMM.items()}
+    _acc256 = []
+    if resid_epi_on():   # the output GEMMs' accumulate kernels (256 rows only unless acc was already in use)
+        for f, m in _ug.items():
+            if "store" in m and "acc" not in m and f not in GEMM_HELPER:
+                m.add("acc"); _acc256.append(f)
+    env = dict(os.environ, GEMM_FORMATS=",".join(f"{f}:{'+'.join(sorted(m))}" for f, m in sorted(_ug.items())))
+    if _acc256:
+        env["GEMM_ACC_M256_ONLY"] = ",".join(sorted(_acc256))
+    if qg_split_on():
+        env["GEMM_QGS_FMTS"] = ",".join(sorted({fmt_of(f"blk.{i}.attn_q.weight") for i in range(L) if f"blk.{i}.attn_q.weight" in TENS}))
+        env["GEMM_QGS_D"] = str(D)
     if MIXED_PAIRS:   # gen_gemm.py emits the mixed-format f16-output swiglu m256 kernels (choice prefill.gemm.m256_mixed)
         env["GEMM_M256_MIXED"] = ",".join(f"{a}:{b}" for a, b in sorted(MIXED_PAIRS))
     from gen_gemm_rdna4 import f16o_swiglu as _f16o_env
@@ -6257,6 +6505,31 @@ if __name__ == "__main__":
         print("rope_qg launches:", _nqg)
     if os.environ.get("LIVE_ROW_SKIP", "1") != "0":   # =0 A/B it off
         text = live_row_skip(text)
+    if GDN and os.environ.get("GDN_AB_WMMA", "0").strip().lower() not in ("", "0", "false", "no", "off"):   # choice prefill.gdn.ab_wmma (gen_gdn_ab.py)
+        import gen_gdn_ab
+        text, _nab = gen_gdn_ab.fuse(text)
+        if _nab:
+            _first = text.index("command.def ")   # kernels (and their gfx12 twins) before the programs that launch them
+            _first = text.rfind("\n", 0, _first) + 1
+            text = text[:_first] + gen_gdn_ab.kernel(H, GDN["HV"]) + "\n" + text[_first:]
+        print("alpha/beta wmma layers:", _nab)
+    if os.environ.get("POST_NORM_NOH_ALL", "0").strip().lower() not in ("", "0", "false", "no", "off"):   # choice prefill.fuse.post_norm_noh_all
+        text, _nnoh = noh_dead_h(text)
+        print("noh (dead h) norms:", _nnoh)
+    if GDN and os.environ.get("GDN_O16", "0").strip().lower() not in ("", "0", "false", "no", "off"):   # choice prefill.gdn.o16
+        text, _no16 = gdn_o16(text)
+        print("gdn o16 layers:", _no16)
+    if qg_split_on():   # choice prefill.fuse.qg_split
+        text, _nqgs = qg_split(text)
+        print("qg split layers:", _nqgs)
+    if resid_epi_on():   # choice prefill.fuse.resid_epi
+        text, _nre, _refmts = resid_epi(text)
+        _first = text.index("command.def ")
+        _first = text.rfind("\n", 0, _first) + 1
+        _kn = "".join(add_norm_rs(noh) for noh in (False, True) if f"@g_add_norm_rs_live{'_noh' if noh else ''}_lv[" in text)
+        text = text[:_first] + _kn + "\n" + text[_first:]
+        assert all(f'export("g_gemm_{f}_acc_m256")' in text for f in _refmts), _refmts
+        print("resid_epi pairs:", _nre, sorted(_refmts))
     from gen_gemm_rdna4 import f16o_swiglu as _f16o_on
     if _f16o_on(CFG):   # gfx12: swiglu GEMM + the row scale of its result (f16o_fuse.py; env GEMM_F16O=swiglu or llm_config rdna4_f16_ffn)
         from f16o_fuse import fuse as _f16o_fuse
