@@ -1999,17 +1999,20 @@ def live_row_skip(text, prefill_conds=("%mm", "%gemm", "%big", "%huge"), skip_na
 # no re-read of h (twice) from memory. Same values as the two kernels (h f32 is still written: the 4-token matvecs
 # and the decode-shaped paths read it). Derived from NORMS' g_post_add_norm and ROW_SCALE's exponent code, so a
 # kit's POST_NORM / eps settings carry over.
-def post_add_norm_rs(live):
+def post_add_norm_rs(live, noh=False):
     a = NORMS.index('kernel.def export("g_post_add_norm")')
     t = NORMS[a:]
     t = t[:t.index("\n}\n") + 3]
-    name = "g_post_add_norm_rs_live" if live else "g_post_add_norm_rs"
+    name = ("g_post_add_norm_rs_live" if live else "g_post_add_norm_rs") + ("_noh" if noh else "")
     t = t.replace('export("g_post_add_norm") @g_post_add_norm(', f'export("{name}") @{name}(')
     t = t.replace("launch(%tokens_arg: index, %y: buffer,", "launch(%tokens_arg: index, " + ("%info: buffer, " if live else "") + "%y: buffer,")
     t = t.replace("%w_next: buffer, %h: buffer)", "%w_next: buffer, %h: buffer, %scales: buffer, %h16: buffer)")
     old_tail = t[t.rindex("  scf.if %active {"):]
     assert "vector.store %hv, %h_view" in old_tail and old_tail.rstrip().endswith("kernel.return\n}"), old_tail
     body = old_tail[:old_tail.index("  }\n  kernel.return")]
+    if noh:   # POST_NORM_NOH: no reader of this norm's f32 row in the GEMM branch (the FFN GEMMs read h16): do not store it
+        body = body.replace("    vector.store %hv, %h_view[%token, %bl, %c0] : vector<32xf32>, view<[%tokens]x{HG}x32xf32>\n".replace("{HG}", str(HG)), "")
+        assert "vector.store %hv, %h_view" not in body
     body = body.replace("  scf.if %active {", "  %hfin = scf.if %active -> (vector<32xf32>) {", 1) + "    scf.yield %hv : vector<32xf32>\n  } else {\n    scf.yield %zero32 : vector<32xf32>\n  }\n"
     rs = ROW_SCALE
     expo = rs[rs.index("  %bits = scalar.bitcast %maximum"):rs.index("  %scale4 = vector.splat")]
@@ -2064,18 +2067,224 @@ def fuse_post_add_row_scale(program):
         r"[ ]*kernel\.launch @g_row_scale_f16(?P<live>_live)?\[(?P=n)\]\((?P=n), (?P<info>%info, )?%nH, (?P=h), (?P<s>%\w+), (?P<h16>%\w+)\) : \[index\]\([^\n]*\)\n"
         r"(?P=ind2)\}(?P<els> else \{\n(?P<eb>(?:[^\n]*\n)*?)(?P=ind2)\})?\n")
     used = set()
+    NOH = os.environ.get("POST_NORM_NOH", "0") == "1" and not MOE
     def rep(m):
         live = bool(m.group("live"))
-        used.add(live)
+        noh = bool(NOH and live and m.group("args").split(", ")[3].startswith("%ffn_norm_"))   # the post-attention norm: only the FFN GEMMs follow
+        used.add((live, noh))
         i2 = m.group("ind2")
-        name = "g_post_add_norm_rs_live" if live else "g_post_add_norm_rs"
+        name = ("g_post_add_norm_rs_live" if live else "g_post_add_norm_rs") + ("_noh" if noh else "")
         orig = f"{i2}  kernel.launch @g_post_add_norm[{m.group('n')}]({m.group('n')}, {m.group('args')}, {m.group('h')}) : [index](index, {m.group('ty')}, buffer)\n"
         fused = (f"{i2}  kernel.launch @{name}[{m.group('n')}]({m.group('n')}, {'%info, ' if live else ''}{m.group('args')}, {m.group('h')}, {m.group('s')}, {m.group('h16')})"
                  f" : [index](index, {'buffer, ' if live else ''}{m.group('ty')}, buffer, buffer, buffer)\n")
         return (m.group("cmt") + f"{i2}scf.if {m.group('c')} {{\n" + fused + f"{i2}}} else {{\n" + orig
                 + (m.group("eb") or "") + f"{i2}}}\n")
     program = pat.sub(rep, program)
-    return program, "".join(post_add_norm_rs(lv) for lv in sorted(used))
+    return program, "".join(post_add_norm_rs(lv, noh) for lv, noh in sorted(used))
+
+
+# SILU_MUL_RS (env, default off): g_silu_mul + g_row_scale_f16_live of its result in one kernel, GEMM-shape epochs only (layers whose
+# gate/up formats differ: Qwen3.8-27B Q4_K_M has 17). The row is read once (gate, up), activated, kept in registers (N / 1024 vec4 per lane),
+# its max |x| reduced, and written once as f16 + the row scale: the f32 activation row is never stored, and nothing re-reads it
+# (its only reader is the row scale). Same values as the two kernels. The decode-shaped branch keeps g_silu_mul + g_quant_q8.
+def silu_mul_rs_kernel(n):
+    assert n % 1024 == 0, n
+    ns, n4 = n // 1024, n // 4
+    name = f"g_silu_mul_rs_n{n}"
+    rs = ROW_SCALE
+    expo = rs[rs.index("  %bits = scalar.bitcast %maximum"):rs.index("  %scale4 = vector.splat")]
+    ld = "".join(f"""  %i{j}c = index.constant {256 * j} : index
+  %i{j}v = index.add %lane, %i{j}c : index
+  %i{j} = index.assume %i{j}v [range(%i{j}v, 0, {n4 - 1})] : index
+  %g{j} = vector.load %f_view[%token, %i{j}, %c0] : view<[%tokens]x{n4}x4xf32> -> vector<4xf32>
+  %u{j} = vector.load %u_view[%token, %i{j}, %c0] : view<[%tokens]x{n4}x4xf32> -> vector<4xf32>
+""" for j in range(ns))
+    act = "".join(f"""  %sg{j} = vector.logisticf<afn> %g{j} : vector<4xf32>
+  %s{j} = vector.mulf %g{j}, %sg{j} : vector<4xf32>
+  %o{j} = vector.mulf %s{j}, %u{j} : vector<4xf32>
+  %a{j} = vector.absf %o{j} : vector<4xf32>
+  %m{j} = vector.reduce<maxnumf> %a{j}, {"%zero_f" if j == 0 else f"%m{j - 1}"} : vector<4xf32>, f32
+""" for j in range(ns))
+    st = "".join(f"""  %sv{j} = vector.mulf %o{j}, %scale4 : vector<4xf32>
+  %hv{j} = vector.fptrunc %sv{j} : vector<4xf32> to vector<4xf16>
+  vector.store %hv{j}, %h_view[%token, %i{j}, %c0] : vector<4xf16>, view<[%tokens]x{n4}x4xf16>
+""" for j in range(ns))
+    return f"""
+// f16 row + scale of silu(gate) * up (g_silu_mul followed by g_row_scale_f16): the activation row stays in registers, no f32 store.
+kernel.def export("{name}") @{name}(%tokens: index) {{
+  %c1 = index.constant 1 : index
+  %c256 = index.constant 256 : index
+  kernel.launch.config workgroups(%tokens, %c1, %c1) workgroup_size(%c256, %c1, %c1) : index
+}} launch(%tokens_arg: index, %f: buffer, %u: buffer, %scales: buffer, %f16: buffer) {{
+  %tokens = index.assume %tokens_arg [range(%tokens_arg, 1, 8192)] : index
+  %token_id = kernel.workgroup.id<x> : index
+  %token = index.assume %token_id [lt(%token_id, %tokens)] : index
+  %lane_id = kernel.workitem.id<x> : index
+  %lane = index.assume %lane_id [range(%lane_id, 0, 255)] : index
+  %zero = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %zero_f = scalar.constant 0.0 : f32
+  %f_view = buffer.view %f[%zero] : buffer -> view<[%tokens]x{n4}x4xf32>
+  %u_view = buffer.view %u[%zero] : buffer -> view<[%tokens]x{n4}x4xf32>
+  %h_view = buffer.view %f16[%zero] : buffer -> view<[%tokens]x{n4}x4xf16>
+{ld}{act}  %maximum = kernel.workgroup.reduce<maxnumf> %m{ns - 1} : f32
+{expo}  %scale4 = vector.splat %scale : vector<4xf32>
+{st}  %first = index.cmp eq, %lane, %c0 : index
+  scf.if %first {{
+    %s_view = buffer.view %scales[%zero] : buffer -> view<[%tokens]x2xf32>
+    view.store %scale, %s_view[%token, %c0] : f32, view<[%tokens]x2xf32>
+    view.store %inverse, %s_view[%token, %c1] : f32, view<[%tokens]x2xf32>
+  }}
+  kernel.return
+}}
+"""
+
+
+def fuse_silu_mul_row_scale(program):
+    """`g_silu_mul[%t](%t, N, %f, %fu)` followed by `scf.if C { g_row_scale_f16_live[%t](%t, %info, N, %f, S, F16) } [else { E }]`
+    becomes `scf.if C { g_silu_mul_rs_nN(%f, %fu, S, F16) } else { g_silu_mul; E }`. Returns (program, kernel texts)."""
+    import re as _re
+    pat = _re.compile(
+        r"(?P<ind>[ ]*)kernel\.launch @g_silu_mul\[%t\]\(%t, (?P<n>%\w+), %f, %fu\) : \[index\]\(index, index, buffer, buffer\)\n"
+        r"(?P<ind2>[ ]*)scf\.if (?P<c>%\w+) \{\n"
+        r"[ ]*kernel\.launch @g_row_scale_f16_live\[%t\]\(%t, %info, (?P=n), %f, (?P<s>%\w+), (?P<h16>%\w+)\) : \[index\]\([^\n]*\)\n"
+        r"(?P=ind2)\}(?P<els> else \{\n(?P<eb>(?:[^\n]*\n)*?)(?P=ind2)\})?\n")
+    widths = set()
+    def rep(m):
+        n = NVAL.get(m.group("n"))
+        if not n or n % 1024:
+            return m.group(0)
+        widths.add(n)
+        i2 = m.group("ind2")
+        return (f"{i2}scf.if {m.group('c')} {{\n{i2}  kernel.launch @g_silu_mul_rs_n{n}[%t](%t, %f, %fu, {m.group('s')}, {m.group('h16')})"
+                f" : [index](index, buffer, buffer, buffer, buffer)\n{i2}}} else {{\n{m.group('ind')}  kernel.launch @g_silu_mul[%t](%t, {m.group('n')}, %f, %fu) : [index](index, index, buffer, buffer)\n"
+                + (m.group("eb") or "") + f"{i2}}}\n")
+    program = pat.sub(rep, program)
+    return program, "".join(silu_mul_rs_kernel(n) for n in sorted(widths))
+
+
+# GDN_NORM_RS (env, default off): g_gdn_norm_gate + g_row_scale_f16_live of its output (the ssm_out GEMM's operand) in one kernel,
+# GEMM-shape epochs. One workgroup per token covers every value head (W waves, HV / W heads each), the gated-norm outputs stay in
+# registers, the row max is a workgroup reduce, and only the f16 row + scale are stored: the 6144-wide f32 `o` row is neither
+# written nor re-read. Same values as the two kernels (same per-head arithmetic as g_gdn_norm_gate).
+def gdn_norm_gate_rs_kernel():
+    G = GDN
+    HV, DV, VD = G["HV"], G["DV"], G["VD"]
+    RV = DV // 32
+    W = max(w for w in range(1, 33) if HV % w == 0)
+    HP = HV // W
+    rs = ROW_SCALE
+    expo = rs[rs.index("  %bits = scalar.bitcast %maximum"):rs.index("  %scale4 = vector.splat")]
+    expo = expo.replace("  %scale = scalar.bitcast %scale_bits : i32 to f32\n  %inverse = scalar.bitcast %inverse_bits : i32 to f32\n",
+                        "  %scale_l = scalar.bitcast %scale_bits : i32 to f32\n  %inverse_l = scalar.bitcast %inverse_bits : i32 to f32\n"
+                        "  %scale = scf.select %live, %scale_l, %zero_f : f32\n  %inverse = scf.select %live, %inverse_l, %zero_f : f32\n")
+    assert "%scale_l" in expo
+    heads, stores = [], []
+    for hh in range(HP):
+        L = [f"""  %vh{hh}c = index.constant {W * hh} : index
+  %vh{hh}v = index.add %wave, %vh{hh}c : index
+  %vh{hh} = index.assume %vh{hh}v [range(%vh{hh}v, 0, {HV - 1})] : index
+  %hb{hh} = index.mul %vh{hh}, %cdv : index"""]
+        for m in range(RV):
+            L.append(f"""  %mc{hh}_{m} = index.constant {32 * m} : index
+  %nd{hh}_{m} = index.add %lane, %mc{hh}_{m} : index
+  %ncv{hh}_{m} = index.add %hb{hh}, %nd{hh}_{m} : index
+  %nc{hh}_{m} = index.assume %ncv{hh}_{m} [range(%ncv{hh}_{m}, 0, {VD - 1})] : index
+  %r{hh}_{m} = view.load %raw_view[%token, %nc{hh}_{m}] : view<[%tokens]x{VD}xf32> -> f32
+  %ss{hh}_{m} = scalar.fmaf %r{hh}_{m}, %r{hh}_{m}, {"%zero_f" if m == 0 else f"%ss{hh}_{m - 1}"} : f32""")
+        for m in range(RV):
+            L.append(f"""  %wd{hh}_{m} = view.load %w_view[%nd{hh}_{m}] : view<{DV}xf32> -> f32
+  %z{hh}_{m} = view.load %z_view[%token, %nc{hh}_{m}] : view<[%tokens]x{VD}xf32> -> f32""")
+        L.append(f"""  %sum{hh} = kernel.subgroup.reduce<addf> %ss{hh}_{RV - 1} : f32
+  %mean{hh} = scalar.divf %sum{hh}, %count : f32
+  %stable{hh} = scalar.addf %mean{hh}, %eps : f32
+  %inv{hh} = scalar.rsqrtf %stable{hh} : f32""")
+        for m in range(RV):
+            L.append(f"""  %zs{hh}_{m} = scalar.logisticf<afn> %z{hh}_{m} : f32
+  %zg{hh}_{m} = scalar.mulf %z{hh}_{m}, %zs{hh}_{m} : f32
+  %n{hh}_{m}a = scalar.mulf %r{hh}_{m}, %inv{hh} : f32
+  %n{hh}_{m}b = scalar.mulf %n{hh}_{m}a, %wd{hh}_{m} : f32
+  %n{hh}_{m} = scalar.mulf %n{hh}_{m}b, %zg{hh}_{m} : f32
+  %res{hh}_{m} = scf.select %live, %n{hh}_{m}, %zero_f : f32
+  %ab{hh}_{m} = scalar.absf %res{hh}_{m} : f32""")
+        heads.append("\n".join(L))
+        for m in range(RV):
+            stores.append(f"""  %sv{hh}_{m} = scalar.mulf %res{hh}_{m}, %scale : f32
+  %hv{hh}_{m} = scalar.fptrunc %sv{hh}_{m} : f32 to f16
+  view.store %hv{hh}_{m}, %o_view[%token, %nc{hh}_{m}] : f16, view<[%tokens]x{VD}xf16>""")
+    mx = "%zero_f"
+    mxl = []
+    for hh in range(HP):
+        for m in range(RV):
+            mxl.append(f"  %mx{hh}_{m} = scalar.maxnumf {mx}, %ab{hh}_{m} : f32")
+            mx = f"%mx{hh}_{m}"
+    nl, hs, sl = "\n", "\n".join(heads), "\n".join(stores)
+    return f"""
+// f16 row + scale of the gated RMSNorm output (g_gdn_norm_gate followed by g_row_scale_f16_live): one workgroup per token, {W} waves of
+// {HP} value heads, the row in registers, no f32 store.
+kernel.def export("g_gdn_norm_gate_rs") @g_gdn_norm_gate_rs(%tokens: index) {{
+  %c1 = index.constant 1 : index
+  %lanes = index.constant {32 * W} : index
+  kernel.launch.config workgroups(%tokens, %c1, %c1) workgroup_size(%lanes, %c1, %c1) : index
+}} launch(%tokens_arg: index, %info: buffer, %raw: buffer, %weight: buffer, %z: buffer, %scales: buffer, %o16: buffer) {{
+  %tokens = index.assume %tokens_arg [range(%tokens_arg, 1, 8192)] : index
+  %token_id = kernel.workgroup.id<x> : index
+  %token = index.assume %token_id [lt(%token_id, %tokens)] : index
+  %wave_id = kernel.subgroup.id : index
+  %wave = index.assume %wave_id [range(%wave_id, 0, {W - 1})] : index
+  %lane_id = kernel.subgroup.lane.id : index
+  %lane = index.assume %lane_id [range(%lane_id, 0, 31)] : index
+  %flat_id = kernel.workitem.id<x> : index
+  %zero = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c1i = index.constant 1 : index
+  %live_zero = scalar.constant 0 : i32
+  %zero_f = scalar.constant 0.0 : f32
+  %eps = scalar.constant {EPS!r} : f32
+  %count = scalar.constant {float(DV)!r} : f32
+  %cdv = index.constant {DV} : index
+  %info_view = buffer.view %info[%zero] : buffer -> view<[%tokens]x4xi32>
+  %live32 = view.load %info_view[%token, 2] : view<[%tokens]x4xi32> -> i32
+  %live = scalar.cmpi ne, %live32, %live_zero : i32
+  %raw_view = buffer.view %raw[%zero] : buffer -> view<[%tokens]x{VD}xf32>
+  %z_view = buffer.view %z[%zero] : buffer -> view<[%tokens]x{VD}xf32>
+  %o_view = buffer.view %o16[%zero] : buffer -> view<[%tokens]x{VD}xf16>
+  %w_view = buffer.view %weight[%zero] : buffer -> view<{DV}xf32>
+{hs}
+{nl.join(mxl)}
+  %maximum = kernel.workgroup.reduce<maxnumf> {mx} : f32
+{expo}{sl}
+  %first = index.cmp eq, %flat_id, %c0 : index
+  scf.if %first {{
+    %s_view = buffer.view %scales[%zero] : buffer -> view<[%tokens]x2xf32>
+    view.store %scale, %s_view[%token, %c0] : f32, view<[%tokens]x2xf32>
+    view.store %inverse, %s_view[%token, %c1i] : f32, view<[%tokens]x2xf32>
+  }}
+  kernel.return
+}}
+"""
+
+
+def fuse_gdn_norm_row_scale(program):
+    """`g_gdn_norm_gate[%t](%t, %info, %graw, W, %gz, %o)` followed by `scf.if C { g_row_scale_f16_live[%t](%t, %info, %nVD, %o, S, O16) } [else { E }]`
+    becomes `scf.if C { g_gdn_norm_gate_rs(..., S, O16) } else { g_gdn_norm_gate; E }`. Returns (program, kernel text)."""
+    import re as _re
+    pat = _re.compile(
+        r"(?P<ind>[ ]*)kernel\.launch @g_gdn_norm_gate\[%t\]\(%t, %info, %graw, (?P<w>%\w+), %gz, %o\) : \[index\]\(index, buffer, buffer, (?P<wt>view<\d+xf32>), buffer, buffer\)\n"
+        r"(?P<ind2>[ ]*)scf\.if (?P<c>%\w+) \{\n"
+        r"[ ]*kernel\.launch @g_row_scale_f16_live\[%t\]\(%t, %info, %nVD, %o, (?P<s>%\w+), (?P<o16>%\w+)\) : \[index\]\([^\n]*\)\n"
+        r"(?P=ind2)\}(?P<els> else \{\n(?P<eb>(?:[^\n]*\n)*?)(?P=ind2)\})?\n")
+    used = [0]
+    def rep(m):
+        used[0] += 1
+        i2, wt = m.group("ind2"), m.group("wt")
+        return (f"{i2}scf.if {m.group('c')} {{\n{i2}  kernel.launch @g_gdn_norm_gate_rs[%t](%t, %info, %graw, {m.group('w')}, %gz, {m.group('s')}, {m.group('o16')})"
+                f" : [index](index, buffer, buffer, {wt}, buffer, buffer, buffer)\n"
+                f"{i2}}} else {{\n{m.group('ind')}  kernel.launch @g_gdn_norm_gate[%t](%t, %info, %graw, {m.group('w')}, %gz, %o) : [index](index, buffer, buffer, {wt}, buffer, buffer)\n"
+                + (m.group("eb") or "") + f"{i2}}}\n")
+    program = pat.sub(rep, program)
+    return program, (gdn_norm_gate_rs_kernel() if used[0] else "")
 
 
 # DeepStack (Qwen3-VL, cfg["vision"]["deepstack"] = n): an image row is n + 1 slices of H floats; g_embed takes slice 0,
@@ -5908,6 +6117,12 @@ if __name__ == "__main__":
         COMMON += ROW_SCALE_LIVE
     if os.environ.get("POST_ADD_ROW_SCALE", "1") != "0":   # after live_row_scale; =0 A/B it off
         program, _fused = fuse_post_add_row_scale(program)
+        COMMON += _fused
+    if os.environ.get("SILU_MUL_RS", "0") == "1" and not GELU:   # after live_row_scale; the 17 mixed-format FFNs of Qwen3.8-27B
+        program, _fused = fuse_silu_mul_row_scale(program)
+        COMMON += _fused
+    if os.environ.get("GDN_NORM_RS", "0") == "1" and RECUR:
+        program, _fused = fuse_gdn_norm_row_scale(program)
         COMMON += _fused
     if os.environ.get("VERIFY_FUSE", "") in ("swq", "swqn", "full") and spec_kernels and USED_MVQ:   # choice decode.verify.fuse (gen_pstep.py): fused layers for 2-4 token epochs
         import gen_pstep

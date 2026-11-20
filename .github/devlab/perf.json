@@ -1,27 +1,29 @@
 {
- "_comment": "q38-27b Strix Halo prefill campaign, round 0: HAL per-kernel profile of the published card (pf2k, pf8k) and of a rebuild from this branch, plus one prefill perf each.",
+ "_comment": "q38pf fuse lane: producer fusions (SILU_MUL_RS, GDN_NORM_RS, POST_NORM_NOH) vs the 550fc117 rebuild; palindromic order (ABBA-style), short + long rows.",
  "runner": "strix",
  "memory_bytes": 52000000000,
  "llama_spec": "matched",
  "jobs": [
   {
-   "name": "q38pf-r0-profile",
+   "name": "q38pf-fuse-r1",
    "runner": "strix",
    "card": "loom-fun/bartowski-Qwen3.8-27B-loom",
    "memory_bytes": 52000000000,
    "kit": null,
    "llamacpp": "b1374",
    "variants": [
-    {"name": "card"},
-    {"name": "base", "build": {}}
+    {"name": "base", "build": {}, "ref": "550fc117fa1cb45bef8ab2fbdb8fcde9d2e362aa"},
+    {"name": "all", "build": {"SILU_MUL_RS": "1", "GDN_NORM_RS": "1", "POST_NORM_NOH": "1"}},
+    {"name": "silu", "build": {"SILU_MUL_RS": "1"}},
+    {"name": "gdn", "build": {"GDN_NORM_RS": "1"}},
+    {"name": "noh", "build": {"POST_NORM_NOH": "1"}}
    ],
    "steps": [
-    "profile:card:pf2k,pf8k",
-    "profile:base:pf2k,pf8k",
-    "perf:card:1:long",
-    "perf:base:1:long",
-    "perf:base:1:long",
-    "perf:card:1:long"
+    "ktest:all",
+    "smoke:all",
+    "perf:base:1", "perf:all:1", "perf:silu:1", "perf:gdn:1", "perf:noh:1", "perf:noh:1", "perf:gdn:1", "perf:silu:1", "perf:all:1", "perf:base:1",
+    "perf:base:1:long", "perf:all:1:long", "perf:silu:1:long", "perf:gdn:1:long", "perf:noh:1:long", "perf:noh:1:long", "perf:gdn:1:long", "perf:silu:1:long", "perf:all:1:long", "perf:base:1:long",
+    "profile:all:pf8k"
    ]
   }
  ]
