@@ -1417,8 +1417,9 @@ def _chunk_case(cname, pre, spans_, kerns, seed=None):
 if cfg.get("recurrent_layers") and _chunk:
     # the launch of the long spans: gfx11 g_gdn_chunk (its gfx12 twin g_gdn_chunk_rdna4 on gfx12), the pf kernel in "pf" mode, else the gfx12 kernel
     _ck = {"group": "g_gdn_chunk", "pf": "g_gdn_recurrence_pf"}.get(_c11, "g_gdn_chunk_rdna4")
-    from gen_gdn import chunk11_fuse as _cf11, chunk11_gate as _cg11, fused11_mode as _f11m
+    from gen_gdn import chunk11_fuse as _cf11, chunk11_gate as _cg11, fused11_mode as _f11m, skip_long_whole as _slwm
     _fz, _gt, _f11 = _cf11(gdn_geometry(cfg)), _cg11(gdn_geometry(cfg)), _f11m(gdn_geometry(cfg))
+    _slw = bool((_fz or _f11) and _slwm(gdn_geometry(cfg)))   # g_gdn_qk_norm_s (skips the long spans) in the chain
     if _f11:   # the fused pair takes the long spans (case gdn_chunkf_serve): conv skips them, the norm-gate is g_gdn_norm_gate_s
         _fz = _gt = True
     if not (_fz or _gt):   # the fused chunk kernel reads the raw projection / writes the gated output (case gdn_chunkf_serve)
@@ -1503,7 +1504,7 @@ if cfg.get("recurrent_layers") and _chunk and _c11 == "group" and (_fz or _gt):
   %raw = check.generate.fill value(0.0) : {VT}
   %o = check.generate.fill value(0.0) : {VT}
   kernel.launch @g_gdn_conv[%t](%t, %spans, %layer, %meta, %info, %orig, %arena, %x, %w, %silu) : [index](index, index, index, {MT}, tensor<{t}x4xi32>, {OT}, {AT}, {XT}, tensor<{C * K}xf32>, {XT})
-  kernel.launch @g_gdn_qk_norm[%t](%t, %silu, %inv) : [index](index, {XT}, {IT})
+  {f"kernel.launch @g_gdn_qk_norm_s[%t](%t, %spans, %meta, %info, %silu, %inv) : [index](index, index, {MT}, tensor<{t}x4xi32>, {XT}, {IT})" if _slw else f"kernel.launch @g_gdn_qk_norm[%t](%t, %silu, %inv) : [index](index, {XT}, {IT})"}
   kernel.launch @g_gdn_recurrence[%spans]{_rec.replace("@X@", "%silu").replace("@W@", "").replace("@WT@", "")}
   {_F11_LAUNCH if _f11 else ""}kernel.launch @g_gdn_chunk[%spans]{_rec.replace("@X@", "%x" if _fz else "%silu").replace("@W@", (", %w" if _fz else "") + (", %nw, %z, %o" if _gt else "")).replace("@WT@", (f", tensor<{C * K}xf32>" if _fz else "") + (f", tensor<{DV}xf32>, {VT}, {VT}" if _gt else ""))}
   kernel.launch @g_gdn_conv_commit[%spans](%t, %spans, %layer, %meta, %orig, %arena, %x) : [index](index, index, index, {MT}, {OT}, {AT}, {XT})

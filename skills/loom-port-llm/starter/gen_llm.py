@@ -15,7 +15,7 @@
 import json, math, os, subprocess, sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from gen_gdn import gdn_geometry, gdn_kernels, recurrence_pf, split_qgate, chunk_mode, chunk11_mode, chunk11_fuse, chunk11_gate, fused_mode, fused11_mode  # noqa: E402
+from gen_gdn import gdn_geometry, gdn_kernels, recurrence_pf, split_qgate, chunk_mode, chunk11_mode, chunk11_fuse, chunk11_gate, fused_mode, fused11_mode, skip_long_whole  # noqa: E402
 from formats import SPLIT, SCALE_DIV  # noqa: E402
 from attention_masks import full_blocks  # noqa: E402
 
@@ -4954,6 +4954,10 @@ def gdn_layer(i, b, nm, sz, par):
     GATE = f"""  kernel.launch @g_gdn_norm_gate[%t](%t, %info, %graw, %ssm_norm_{i}, %gz, %o) : [index](index, buffer, buffer, view<{DV}xf32>, buffer, buffer)"""
     if chunk11_gate(g) or fused11_mode(g):   # g_gdn_chunk / g_gdn_fb wrote the gated rows of the 64+-token spans
         GATE = f"""  kernel.launch @g_gdn_norm_gate_s[%t](%t, %spans, %metadata, %info, %graw, %ssm_norm_{i}, %gz, %o) : [index](index, index, buffer, buffer, buffer, view<{DV}xf32>, buffer, buffer)"""
+    if (chunk11_fuse(g) or fused11_mode(g)) and skip_long_whole(g):   # the fused long-span kernels normalize their own q / k
+        FRONT = FRONT.replace("  kernel.launch @g_gdn_qk_norm[%t](%t, %gs, %ginv) : [index](index, buffer, buffer)",
+                              "  kernel.launch @g_gdn_qk_norm_s[%t](%t, %spans, %metadata, %info, %gs, %ginv) : [index](index, index, buffer, buffer, buffer, buffer)")
+        assert "@g_gdn_qk_norm_s[" in FRONT
     if fused11_mode(g):   # gfx11 fused pair on the 64+-token spans after the chain of the shorter ones, before the history commit
         F = FRONT.split("\n")
         FA = (f"kernel.launch @g_gdn_fa[%t, %spans](%t, %spans, %layer_{i}, %metadata, %origins, %arena, %gq, %conv_{i}, %galpha, %gbeta, %ssm_a_{i}, %dt_bias_{i}, %gs)"

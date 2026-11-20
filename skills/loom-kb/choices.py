@@ -453,6 +453,11 @@ CHOICE("prefill.gdn.fused11_regnorm", "bool", False, "GDN_FUSED11_REGNORM", devi
        doc="With prefill.gdn.fused11: g_gdn_fb's norm-gate epilogue keeps O in registers (row sums of squares by a 16-lane DPP butterfly into a "
            "[32][8] LDS table) instead of a 32 x 132 f32 LDS tile: 57.5 -> 41.6 KB LDS, 237 VGPR, so 3 workgroups fit a WGP and the 48 head "
            "workgroups of a 27B span run in one round instead of two.")
+CHOICE("hybrid.gdn.skip_long", "bool", False, "GDN_SKIP_LONG", devices=["rdna3"], rows=ROWS_PREFILL, kernels=["g_gdn_norm_gate_s", "g_gdn_qk_norm_s"],
+       from_pr="q38pf gdn",
+       doc="With hybrid.gdn.chunk11_fuse / chunk11_gate / prefill.gdn.fused11: g_gdn_norm_gate_s and g_gdn_qk_norm_s skip the whole row of a "
+           "64+-token span and padding rows (the fused long-span kernel did that row's work); off, g_gdn_norm_gate_s still loads and computes "
+           "those rows (.012 ms/token at 8k) and g_gdn_qk_norm_lv normalizes every live row (.004).")
 CHOICE("prefill.gdn.fused2", "bool", False, "GDN_FUSED2", devices=["rdna4"], rows=ROWS_PREFILL, kernels=["g_gdn_fa_rdna4", "g_gdn_fb_rdna4"],
        from_pr="mxfp4st olayer",
        doc="gfx12 fused gated delta-net prefill in two launches (gen_gdn_fused.py): g_gdn_fa_rdna4 (conv + SiLU, q/k norms, gates, the WY solve "

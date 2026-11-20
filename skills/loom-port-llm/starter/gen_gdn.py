@@ -610,7 +610,9 @@ kernel.def export("g_gdn_norm_gate") @g_gdn_norm_gate(%tokens: index) {{
 }}
 """)
     if chunk11_gate(G) or fused11_mode(G):   # the norm-gate of the spans under PF_SPAN beside g_gdn_chunk's gated epilogue / g_gdn_fb
-        T.append(_norm_gate_s(T[-1]))
+        T.append(_skip_long_rows(T[-1], "g_gdn_norm_gate", "g_gdn_norm_gate_s", True) if skip_long_whole(G) else _norm_gate_s(T[-1]))
+    if (chunk11_fuse(G) or fused11_mode(G)) and skip_long_whole(G):   # q / k norms only for the spans under PF_SPAN
+        T.append(_skip_long_rows("\n".join(T), "g_gdn_qk_norm", "g_gdn_qk_norm_s", False))
     text = "\n".join(T)
     if not RL and os.environ.get("GDN_PREFETCH", "1") not in ("", "0"):
         text = _prefetch_recurrence(text, RK)
@@ -698,6 +700,54 @@ def chunk11_gate(G):
     """hybrid.gdn.chunk11_gate (GDN_CHUNK11_GATE, with hybrid.gdn.chunk11 in group mode): g_gdn_chunk (and its gfx12 twin) run the gated RMSNorm of
     their rows (gen_gdn_chunk gate); g_gdn_norm_gate_s (g_gdn_norm_gate + the span metadata) skips the rows of spans of PF_SPAN+ tokens."""
     return chunk11_mode(G) == "group" and os.environ.get("GDN_CHUNK11_GATE", "") not in ("", "0", "off", "no", "false")
+
+
+def skip_long_whole(G):
+    """hybrid.gdn.skip_long (GDN_SKIP_LONG, with chunk11_fuse / chunk11_gate / fused11): g_gdn_norm_gate_s and g_gdn_qk_norm_s skip the
+    whole row of a 64+-token span (the fused long-span kernels did its work); off: g_gdn_norm_gate_s computes it and skips only the store,
+    g_gdn_qk_norm runs every row."""
+    return os.environ.get("GDN_SKIP_LONG", "") not in ("", "0", "off", "no", "false")
+
+
+def _row_span_long(info, tok):
+    """IR: %sp_long (i1) = the row `tok` belongs to a live span of PF_SPAN+ tokens (info word 2 live, word 3 span index)."""
+    return f"""  %spans = index.assume %spans_arg [range(%spans_arg, 1, 8192)] : index
+  %sl_zero = index.constant 0 : offset
+  %sl_c0_i32 = scalar.constant 0 : i32
+  %sl_info = buffer.view {info}[%sl_zero] : buffer -> view<[%tokens]x4xi32>
+  %sl_live32 = view.load %sl_info[{tok}, 2] : view<[%tokens]x4xi32> -> i32
+  %sl_live = scalar.cmpi ne, %sl_live32, %sl_c0_i32 : i32
+  %sp_long = scf.if %sl_live -> (i1) {{
+    %span32 = view.load %sl_info[{tok}, 3] : view<[%tokens]x4xi32> -> i32
+    %span_b = scalar.assume %span32 [range(%span32, 0, 8191)] : i32
+    %span = index.cast %span_b : i32 to index
+    %sp_act, %sp_len, %sp_s, %sp_r, %sp_f = func.call @g_gdn_span(%metadata, %spans, %span) : (buffer, index, index) -> (i1, index, i32, index, index)
+    %sp_lim = index.constant {PF_SPAN} : index
+    %sp_l = index.cmp uge, %sp_len, %sp_lim : index
+    scf.yield %sp_l : i1
+  }} else {{
+    %sp_no = index.cmp ne, %sl_ci0, %sl_ci0 : index
+    scf.yield %sp_no : i1
+  }}
+  %sl_false = index.cmp ne, %sl_ci0, %sl_ci0 : index
+  %sp_keep = scf.select %sp_long, %sl_false, %sl_true : i1
+  %sp_short = scf.select %sl_live, %sp_keep, %sl_false : i1
+"""
+
+
+def _skip_long_rows(text, name, new, info_param):
+    """Copy of kernel `name` as `new` that does nothing on padding rows (as its _lv copy) and on the rows of 64+-token spans: params +
+    (%spans_arg, %metadata[, %info]), the whole body after the row index in `scf.if %sp_short`."""
+    a = text.index(f'kernel.def export("{name}") @{name}(')
+    b = text.index("  kernel.return\n}", a)
+    k = text[a:b]
+    k = k.replace(f'export("{name}") @{name}(', f'export("{new}") @{new}(', 1)
+    extra = "%spans_arg: index, %metadata: buffer" + ("" if info_param else ", %info: buffer")
+    k = k.replace("launch(%tokens_arg: index, ", f"launch(%tokens_arg: index, {extra}, ", 1)
+    anchor = "  %token = index.assume %token_id [lt(%token_id, %tokens)] : index\n"
+    assert k.count(anchor) == 1, name
+    k = k.replace(anchor, anchor + "  %sl_ci0 = index.constant 0 : index\n  %sl_true = index.cmp eq, %sl_ci0, %sl_ci0 : index\n" + _row_span_long("%info", "%token") + "  scf.if %sp_short {\n", 1)
+    return k + "  }\n  kernel.return\n}\n"
 
 
 def _norm_gate_s(text):
