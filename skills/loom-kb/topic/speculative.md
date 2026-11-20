@@ -80,6 +80,11 @@ Safetensors-only drafters are not converted.
    plus the per-row carry; DFlash: `fc(features)` -> norm -> each draft layer's context K/V; n-gram: the token id,
    4 bytes). The draft cache shares the target pool's page ids, so drafting covers the whole context, history
    reuse and checkpoints with no extra state.
+   Cost is small: Qwen3.8-27B Q4_K_M (NextN block Q4_0) local Strix pf8k, warm = g_gemm_q4_0_store_m256 .0035 +
+   concat/norms/row-scale/embed/pair/rope share ~.0024 = ~.006 ms/token, 0.35 % of 1.68 busy, so a warm window (warm
+   only the last W prompt positions) caps below 0.4 % and is not worth its acceptance loss; gufo also projects the
+   MTP K/V of every prompt position (Flash-Next `MtpForward(kv_only)` in prefill). The profile's `g_gemm_q8*` family
+   is the trunk's Q8_0 tensors (bartowski Q4_K_M keeps attn_k/v/output, some ssm_out at Q8_0), not warm.
 
 **DFlash proposals read a Q4_0 copy of the head.** Proposing runs the target's head over every proposed position:
 a second full head pass per step (Nemotron-3.5-Bolt-E4B: 262144 x 2560 Q8_0, 0.71 GB, ~2.5 ms of a ~25 ms step).
