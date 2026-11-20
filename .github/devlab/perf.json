@@ -1,39 +1,32 @@
 {
- "_comment": "q38pf gemm r3 on the R9700: the build-wide F16O + MIXED rules (gfx12 runs the f16o twins) and gfx11-only G32 vs the combined base: correctness + no regression.",
- "runner": "r9700",
- "memory_bytes": 34000000000,
+ "_comment": "Strix Halo A/B of origin/main (fun) against 293f41bcf1ad279d64d2dd7f4f7acdcb990196e4 (staging) (ab_jobs.py --base-ref/--head-ref): each variant carries its ref's serving settings",
+ "runner": "strix",
+ "memory_bytes": 52000000000,
  "llama_spec": "matched",
  "jobs": [
   {
-   "name": "q38pf-gemm-r3-r9700",
-   "runner": "r9700",
+   "name": "sab-bartowski-qwen3-8-27b-loom",
+   "runner": "strix",
    "card": "loom-fun/bartowski-Qwen3.8-27B-loom",
-   "memory_bytes": 34000000000,
+   "memory_bytes": 52000000000,
    "kit": null,
    "llamacpp": "b1374",
+   "llamacpp_vulkan": "b12211",
    "variants": [
     {
-     "name": "comb",
+     "name": "staging",
      "build": {},
-     "ref": "ceb829e0c38ffed8263c33f8a88bcdec42247273"
-    },
-    {
-     "name": "new",
-     "build": {}
+     "ref": "293f41bcf1ad279d64d2dd7f4f7acdcb990196e4"
     }
    ],
    "steps": [
-    "ktest:new",
-    "smoke:new",
-    "perf:comb:1",
-    "perf:new:1",
-    "perf:new:1",
-    "perf:comb:1",
-    "perf:comb:1:long",
-    "perf:new:1:long",
-    "perf:new:1:long",
-    "perf:comb:1:long"
+    "func:staging",
+    "ktest:staging",
+    "gates:staging:dev"
    ]
   }
- ]
+ ],
+ "card": "loom-fun/bartowski-Qwen3.8-27B-loom",
+ "kit": null,
+ "llamacpp": "b1374"
 }
