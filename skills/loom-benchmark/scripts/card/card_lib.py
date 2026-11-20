@@ -18,6 +18,7 @@ import math
 import os
 import re
 import sys
+from datetime import datetime
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "..", "..", "loom-kb"))   # skills/loom-kb: devices, quants, methodology as data
@@ -130,7 +131,7 @@ def perf_source_ok(src):
     return bool(src) and (src.get("kind") in PERF_SOURCE_KINDS or (src.get("kind") == LOCAL_POWER_SOURCE and bool(src.get("power_mode"))))
 
 
-PERF_SOURCE_KINDS = ("devlab", "factory", "machine")   # sources a card's performance sessions may come from (machine: a GPU with no DevLab runner, measured on a named machine: fleet/devices data files)
+PERF_SOURCE_KINDS = ("devlab", "factory", "machine", "xsj")
 
 # (key, label): the features table's rows.
 FEATURES = [
@@ -180,10 +181,12 @@ BASE_TAGS = ["loom", "loom-serve", "gguf"]
 
 
 def _gpu_row(dev):
-    c = dev["card"]
+    c, runner = dev["card"], dev["runner"]
     row = {"name": dev["name"], "short": dev["short"], "arch": dev["gfx"], "memory": dev["memory"], "roofline": dev["roofline"]["default"],
            "memory_bytes": dev["memory_bytes"], "runner": c["runner"], "tag": c["tag"],
            "detect": re.compile(c["detect"]["pattern"], re.I if "i" in c["detect"].get("flags", "") else 0)}
+    if runner.get("backend") == "xsj" and runner.get("labels") == []:
+        row["xsj"] = True
     if c.get("serve_args"):
         row["serve_args"] = list(c["serve_args"])
     if "preload_max_weight_bytes" in c:   # absent: the GPU is served as before; null: --parameter_mode=preload for every package; N: up to N weight bytes
@@ -883,8 +886,17 @@ def package_serve_args(gpu, pkg_dir):
 
 
 def has_runner(gpu):
-    """True when the device has a DevLab runner (device.json runner.labels): without one nothing can be measured on it."""
+    """True when the device has a DevLab runner (device.json runner.labels)."""
     return bool(registry.device(gpu)["runner"]["labels"])
+
+
+def xsj_enabled(gpu):
+    """The registry explicitly associates this GPU with XSJ and has no DevLab labels."""
+    return GPUS.get(gpu, {}).get("xsj", False)
+
+
+def historical_xsj_gate(gpu, gate, programs):
+    return xsj_enabled(gpu) and bool(gate) and gate.get("programs_sha256") != programs
 
 
 def fixed_pool_capacity(row, memory_bytes=None, gpu="radeon-r9700"):
@@ -1136,15 +1148,120 @@ def free_text_errors(info):
     return errs
 
 
-def validate(info):
+XSJ_RUN = re.compile(r"[0-9]{8}-[0-9]{6}-[a-z0-9]{4}")
+PROGRAM_DIGEST = re.compile(r"[0-9a-f]{64}")
+
+
+def xsj_source_errors(src, gpu, at):
+    """Validate recorded XSJ identity. The originating lab record is the authority for the run and lease."""
+    src = src if isinstance(src, dict) else {}
+    run = src.get("run")
+    device = src.get("device")
+    device = device if isinstance(device, dict) else {}
+    canonical = isinstance(run, str) and XSJ_RUN.fullmatch(run)
+    if src.get("kind") != "xsj":
+        if xsj_enabled(gpu):
+            return [f"{at}: {gpu} requires a source of kind xsj"]
+        if canonical and any(row.get("xsj") and row["arch"] == device.get("arch") for row in GPUS.values()):
+            return [f"{at}: the XSJ lab run ID and hardware require a source of kind xsj"]
+        return []
+    if not xsj_enabled(gpu):
+        return [f"{at}: an XSJ source requires an XSJ-enabled GPU without DevLab runner labels (got {gpu!r})"]
+
+    def recorded(value):
+        return (isinstance(value, str) and value == value.strip() and bool(value)
+                and value.lower() not in ("unknown", "n/a", "none") and value.isprintable())
+
+    errs = []
+    try:
+        if not canonical:
+            raise ValueError
+        datetime.strptime(run[:15], "%Y%m%d-%H%M%S")
+    except ValueError:
+        errs.append(f"{at}.run: expected the XSJ lab run ID (YYYYMMDD-HHMMSS-xxxx)")
+    for k in ("host", "arch", "cpu", "gpu", "os", "driver"):
+        if not recorded(device.get(k)):
+            errs.append(f"{at}.device.{k}: required as recorded on the leased host")
+    if recorded(device.get("host")) and not re.fullmatch(r"[a-z0-9][a-z0-9-]*", device["host"]):
+        errs.append(f"{at}.device.host: expected the leased pool machine alias")
+    gfx = GPUS[gpu]["arch"]
+    if device.get("arch") != gfx:
+        errs.append(f"{at}.device.arch: expected {gfx} for {gpu}")
+    if recorded(device.get("gpu")):
+        board = re.sub(r"\((?:TM|R|C)\)", "", device["gpu"], flags=re.I)
+        if not GPUS[gpu]["detect"].search(" ".join(board.split())):
+            errs.append(f"{at}.device.gpu: recorded GPU does not match the registry for {gpu}")
+    sdk = src.get("hrx_loom")
+    if not isinstance(sdk, dict) or not recorded(sdk.get("hrx_loom")):
+        errs.append(f"{at}.hrx_loom.hrx_loom: requires the recorded SDK version")
+    if "power_mode" in src or "power" in src:
+        errs.append(f"{at}: local power evidence cannot be attached to an XSJ source")
+    return errs
+
+
+def xsj_measurement_errors(row, src, gpu, at, programs=None):
+    errs = xsj_source_errors(src, gpu, f"{at}.source")
+    if xsj_enabled(gpu):
+        digest = row.get("programs_sha256")
+        if not isinstance(digest, str) or not PROGRAM_DIGEST.fullmatch(digest):
+            errs.append(f"{at}.programs_sha256: requires the full program digest captured on XSJ")
+        elif programs is not None and digest != programs:
+            errs.append(f"{at}.programs_sha256: XSJ digest {digest} differs from the package digest {programs or '(missing)'}")
+    return errs
+
+
+def xsj_evidence_errors(ev, gpu, at, programs=None):
+    """Check raw evidence before GPU overrides, source interning or replacement can hide inconsistencies."""
+    errs = []
+    perf = (ev.get("performance") or {}).get("session")
+    rows = [(f"gates[{i}]", g) for i, g in enumerate(ev.get("gates") or [])]
+    if perf is not None:
+        rows.append(("performance.session", perf))
+    for path, row in rows:
+        loc = f"{at}.{path}"
+        src = row.get("source")
+        target = row.get("gpu") or gpu
+        errs += xsj_measurement_errors(row, src, target, loc, programs)
+        if xsj_enabled(gpu) or xsj_enabled(target) or (isinstance(src, dict) and src.get("kind") == "xsj"):
+            if ev.get("gpu") != gpu or target != gpu:
+                errs.append(f"{loc}: XSJ evidence must explicitly name its matching GPU {gpu!r}")
+            if any(m.get("baseline_from") is not None for m in (row.get("metrics") or {}).values()):
+                errs.append(f"{loc}: XSJ performance requires the baseline's own measurements from the run")
+    return errs
+
+
+def xsj_vulkan_comparison_errors(sessions, vulkan, at):
+    """A displayed Loom / Vulkan margin requires a matching XSJ run for that row."""
+    errs = []
+    for k, (m, i) in card_metrics({"performance": {"sessions": sessions}}).items():
+        vk = vulkan["metrics"].get(k, {}).get("baseline")
+        if k in TIMED and m.get("loom") is not None and vk is not None and vulkan["source"] != sessions[i]["source"]:
+            errs.append(f"{at}.metrics.{k}: the Loom and Vulkan values must come from the same XSJ run")
+    return errs
+
+
+def validate(info, programs=None):
     """Errors of info (loom-card/3, or loom-card/2 read as one GPU) against info_schema.json, plus the
-    cross-references the schema can't express (empty: valid)."""
+    cross-references the schema can't express (empty: valid). Supply the package's program digest to verify XSJ
+    performance attribution, or an empty string if the package has no programs. Published gate history can refer
+    to older programs and is displayed as such."""
     info = normalize(info)
     schema = load_json(SCHEMA_PATH)
     errs = _check(info, schema, schema, "info", [])
     if errs:
         return errs
-    ids = set(info.get("sources", {}))
+    sources = info["sources"]
+    for sid, src in sources.items():
+        if src["kind"] == "xsj" or sid.startswith("xsj-"):
+            if src["kind"] != "xsj" or sid != f"xsj-{src['run']}":
+                errs.append(f"info.sources.{sid}: XSJ sources must have kind xsj and the ID xsj-<run>")
+
+    def measurement(row, gpu, at, expected):
+        sid = row["source"]
+        if sid not in sources:
+            return [f"{at}.source: no source {sid!r}"]
+        return xsj_measurement_errors(row, sources[sid], gpu, at, expected)
+
     for gpu, dev in info["devices"].items():
         at = f"info.devices.{gpu}"
         if gpu not in GPUS:
@@ -1153,6 +1270,8 @@ def validate(info):
             errs.append(f"{at}: state {dev['state']} cannot come with results")
         if dev.get("shares_section_with") and dev["shares_section_with"] not in info["devices"]:
             errs.append(f"{at}: shares_section_with {dev['shares_section_with']!r} is not a GPU of this card")
+        if dev.get("shares_section_with") and (xsj_enabled(gpu) or xsj_enabled(dev["shares_section_with"])):
+            errs.append(f"{at}: an XSJ GPU must have its own performance section")
         if dev.get("shares_section_with") and (dev.get("gates") or dev.get("performance") or dev.get("roofline")):
             errs.append(f"{at}: a GPU that shares another's section has no results of its own")
         if dev.get("state") == "unsupported" and not dev.get("required_bytes"):
@@ -1161,31 +1280,43 @@ def validate(info):
             errs.append(f"{at}: state not_a_target needs a reason")
         p = dev.get("performance") or {}
         for i, s in enumerate(p.get("sessions", [])):
-            if s["source"] not in ids:
-                errs.append(f"{at}.performance.sessions[{i}].source: no source {s['source']!r}")
+            loc = f"{at}.performance.sessions[{i}]"
+            errs += measurement(s, gpu, loc, programs)
+            for k, m in s["metrics"].items():
+                ref = m.get("baseline_from")
+                if ref and (xsj_enabled(gpu) or sources.get(ref["source"], {}).get("kind") == "xsj"):
+                    errs.append(f"{loc}.metrics.{k}.baseline_from: XSJ measurements cannot travel through baseline reuse")
         for b, x in (p.get("baselines") or {}).items():
-            if x["session"]["source"] not in ids:
-                errs.append(f"{at}.performance.baselines.{b}.session.source: no source {x['session']['source']!r}")
-        if dev.get("remeasure") and dev["remeasure"]["source"] not in ids:
-            errs.append(f"{at}.remeasure.source: no source {dev['remeasure']['source']!r}")
-        fs = (dev.get("remeasure") or {}).get("first_source")
-        if fs and fs not in ids:
-            errs.append(f"{at}.remeasure.first_source: no source {fs!r}")
+            session = x["session"]
+            loc = f"{at}.performance.baselines.{b}.session"
+            errs += measurement(session, gpu, loc, programs)
+            if b == "vulkan" and xsj_enabled(gpu) and p["baseline"]["name"] == "llama.cpp":
+                errs += xsj_vulkan_comparison_errors(p["sessions"], session, loc)
+        rm = dev.get("remeasure")
+        if rm and xsj_enabled(gpu):
+            errs.append(f"{at}.remeasure: XSJ performance requires measurements of the package's programs")
+        while rm:
+            for k in ("source", "first_source"):
+                sid = rm.get(k)
+                if sid and sid not in sources and rm is dev["remeasure"]:
+                    errs.append(f"{at}.remeasure.{k}: no source {sid!r}")
+                elif sources.get(sid, {}).get("kind") == "xsj":
+                    errs.append(f"{at}.remeasure.{k}: cannot use XSJ evidence for re-measurement")
+            rm = rm.get("previous")
         for n, g in (dev.get("gates") or {}).items():
-            if g["source"] not in ids:
-                errs.append(f"{at}.gates.{n}.source: no source {g['source']!r}")
+            errs += measurement(g, gpu, f"{at}.gates.{n}", expected=None)
     return errs + free_text_errors(info)
 
 
-def require_valid(info, what="info.json"):
-    errs = validate(info)
+def require_valid(info, what="info.json", programs=None):
+    errs = validate(info, programs)
     if errs:
         raise SystemExit(f"{what} is not valid {SCHEMA_ID}:\n  " + "\n  ".join(errs))
 
 
 # ---- per-device results files: fleet/devices/<name>.json (schema fleet/devices/device_results.schema.json, README.md there)
 # A GPU with no DevLab runner (the gfx1201 16 GB class, gfx1150) records, per model, whether it fits, the largest context it admits, how to serve
-# it and, when measured, evidence (make_info.py perf/gates output with a "machine" source). make_info.py build turns the entry of a card's
+# it and, when measured, evidence (make_info.py perf/gates output with a "machine" or "xsj" source). make_info.py build turns the entry of a card's
 # model into the card's devices entry, the GPU's preset and its evidence; a GPU shows only where its file has data for that card.
 DEVICE_RESULTS_ID = "loom-device-results/1"
 DEVICE_RESULTS_DIR = os.path.join(REPO, "fleet", "devices")
@@ -1203,11 +1334,16 @@ def validate_device_results(doc, what="device results"):
     errs = _check(doc, schema, schema, what, [])
     if errs:
         return errs
-    if doc["device"] not in GPUS:
+    gpu = doc["device"]
+    if gpu not in GPUS:
         errs.append(f"{what}: unknown device {doc['device']!r} (known: {', '.join(GPUS)})")
+    if doc.get("provenance"):
+        errs += xsj_source_errors(doc["provenance"], gpu, f"{what}.provenance")
     share = doc.get("share_section_with")
     if share and share not in GPUS:
         errs.append(f"{what}: share_section_with {share!r} is not a device")
+    if share and (xsj_enabled(gpu) or xsj_enabled(share)):
+        errs.append(f"{what}: an XSJ GPU must have its own performance section")
     for slug, m in doc["models"].items():
         at = f"{what}.models.{slug}"
         if m["fits"] and not m.get("max_context"):
@@ -1222,10 +1358,11 @@ def validate_device_results(doc, what="device results"):
             src = ((ev.get("performance") or {}).get("session") or {}).get("source")
             srcs = [src] if src else []
             srcs += [g.get("source") for g in ev.get("gates") or []]
+            errs += xsj_evidence_errors(ev, gpu, f"{at}.evidence[{i}]")
             for s in srcs:
-                if s and s.get("kind") not in ("machine", "local", "devlab", "factory"):
+                if s and s.get("kind") not in (*PERF_SOURCE_KINDS, "local"):
                     errs.append(f"{at}.evidence[{i}]: unknown source kind {s.get('kind')!r}")
-                if src and s is src and s.get("kind") != "machine":
+                if src and s is src and not xsj_enabled(gpu) and s.get("kind") != "machine":
                     errs.append(f"{at}.evidence[{i}]: performance of a device without a DevLab runner comes from a source of kind machine (make_info.py perf --source-kind machine)")
             for k in ev:
                 if k not in ("evidence", "gpu", "performance", "gates", "roofline"):
