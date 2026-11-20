@@ -2067,7 +2067,8 @@ def fuse_post_add_row_scale(program):
         r"[ ]*kernel\.launch @g_row_scale_f16(?P<live>_live)?\[(?P=n)\]\((?P=n), (?P<info>%info, )?%nH, (?P=h), (?P<s>%\w+), (?P<h16>%\w+)\) : \[index\]\([^\n]*\)\n"
         r"(?P=ind2)\}(?P<els> else \{\n(?P<eb>(?:[^\n]*\n)*?)(?P=ind2)\})?\n")
     used = set()
-    NOH = os.environ.get("POST_NORM_NOH", "1") == "1" and not MOE
+    from gen_mxfp4s import f8_enabled as _f8_on   # the gfx12 fp8 prefill path matches the unfused producers (gen_mxfp4s._PRODUCER): keep them
+    NOH = os.environ.get("POST_NORM_NOH", "1") == "1" and not MOE and not _f8_on()
     def rep(m):
         live = bool(m.group("live"))
         noh = bool(NOH and live and m.group("args").split(", ")[3].startswith("%ffn_norm_"))   # the post-attention norm: only the FFN GEMMs follow
@@ -6158,7 +6159,8 @@ if __name__ == "__main__":
     if os.environ.get("POST_ADD_ROW_SCALE", "1") != "0":   # after live_row_scale; =0 A/B it off
         program, _fused = fuse_post_add_row_scale(program)
         COMMON += _fused
-    if os.environ.get("SILU_MUL_RS", "1") == "1" and not GELU:   # after live_row_scale; the 17 mixed-format FFNs of Qwen3.8-27B
+    from gen_mxfp4s import f8_enabled as _f8_on2
+    if os.environ.get("SILU_MUL_RS", "1") == "1" and not GELU and not _f8_on2():   # f8: its swiglu-triple matcher needs g_silu_mul_lv   # after live_row_scale; the 17 mixed-format FFNs of Qwen3.8-27B
         program, _fused = fuse_silu_mul_row_scale(program)
         COMMON += _fused
     if os.environ.get("GDN_NORM_RS", "1") == "1" and RECUR:
