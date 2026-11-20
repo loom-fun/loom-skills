@@ -60,7 +60,7 @@ def _iq4_f16lut_on():
     return os.environ.get("GEMM_IQ4_F16LUT", "0").strip().lower() not in ("", "0", "false", "no", "off") or _g32_iq4_on()
 
 
-def _iq4_f16_tail(o, dl, pre=""):
+def _iq4_f16_tail(o, dl, pre="", dl32=None):
     """unsigned-book lookup of %{o}_idx (vector<16xi8>, 0..15) -> %{o} = (book - 128) * dl, dl an f16 SSA value"""
     book = "\n".join(f"      %{o}_k{i} = scalar.constant {v + 128 - (256 if v + 128 > 127 else 0)} : i8" for i, v in enumerate(_IQ4_KVALUES))
     return f'''
@@ -68,8 +68,9 @@ def _iq4_f16_tail(o, dl, pre=""):
 {pre}      %{o}_book = vector.from_elements {", ".join(f"%{o}_k{i}" for i in range(16))} : vector<16xi8>
       %{o}_ucodes = vector.table.lookup %{o}_book[%{o}_idx] : vector<16xi8>, vector<16xi8> -> vector<16xi8>
       %{o}_uf = vector.uitofp %{o}_ucodes : vector<16xi8> to vector<16xf16>
-      %{o}_m128 = scalar.constant -128.0 : f16
-      %{o}_off_h = scalar.mulf {dl}, %{o}_m128 : f16
+      %{o}_m128 = scalar.constant -128.0 : f32
+      %{o}_off32 = scalar.mulf {dl32}, %{o}_m128 : f32
+      %{o}_off_h = scalar.fptrunc %{o}_off32 : f32 to f16
       %{o}_scl = vector.splat {dl} : vector<16xf16>
       %{o}_offs = vector.splat %{o}_off_h : vector<16xf16>
       %{o} = vector.fmaf %{o}_uf, %{o}_scl, %{o}_offs : vector<16xf16>'''
@@ -109,7 +110,7 @@ def iq4_dequant16(fmt, w, out):
       %{o}_scale = view.load %{o}_scale_view[0] : view<1xf16> -> f16
       %{o}_packed = vector.load %{o}_code_view[0] : view<16xi8> -> vector<16xi8>'''
         if f16:
-            return head + lookup_idx + _iq4_f16_tail(o, f"%{o}_scale")
+            return head + lookup_idx + _iq4_f16_tail(o, f"%{o}_scale", f"      %{o}_scale32 = scalar.extf %{o}_scale : f16 to f32\n", f"%{o}_scale32")
         return head + lookup + f'''
       %{o}_values = vector.sitofp %{o}_codes : vector<16xi8> to vector<16xf16>
       %{o}_scales = vector.splat %{o}_scale : vector<16xf16>
@@ -160,7 +161,7 @@ def iq4_dequant16(fmt, w, out):
       %{o}_lf = scalar.sitofp %{o}_centered : i32 to f32
       %{o}_dl = scalar.mulf %{o}_d, %{o}_lf : f32'''
     if f16:
-        return head + lookup_idx + _iq4_f16_tail(o, f"%{o}_dlh", f"      %{o}_dlh = scalar.fptrunc %{o}_dl : f32 to f16\n")
+        return head + lookup_idx + _iq4_f16_tail(o, f"%{o}_dlh", f"      %{o}_dlh = scalar.fptrunc %{o}_dl : f32 to f16\n", f"%{o}_dl")
     return head + lookup + f'''
       %{o}_wide = vector.sitofp %{o}_codes : vector<16xi8> to vector<16xf32>
       %{o}_dls = vector.splat %{o}_dl : vector<16xf32>
@@ -938,7 +939,8 @@ def _g32_iq4(fmt, w, o, col):
       %{o}_code_view = buffer.view %{w}[%{o}_code_origin] : buffer -> view<16xi8>
       %{o}_dh = view.load %{o}_scale_view[0] : view<1xf16> -> f16
       %{o}_packed8 = vector.load %{o}_code_view[0] : view<16xi8> -> vector<16xi8>'''
-        dl = f"%{o}_dh"
+        dl, dl32 = f"%{o}_dh", f"%{o}_d32"
+        head += f"\n      %{o}_d32 = scalar.extf %{o}_dh : f16 to f32"
     else:
         head = f'''
       %{o}_super = index.div {col}, %c256 : index
@@ -982,7 +984,7 @@ def _g32_iq4(fmt, w, o, col):
       %{o}_lf = scalar.sitofp %{o}_centered : i32 to f32
       %{o}_dl = scalar.mulf %{o}_d, %{o}_lf : f32
       %{o}_dlh = scalar.fptrunc %{o}_dl : f32 to f16'''
-        dl = f"%{o}_dlh"
+        dl, dl32 = f"%{o}_dlh", f"%{o}_dl"
     return head + f'''
 {book}
       %{o}_book = vector.from_elements {", ".join(f"%{o}_k{i}" for i in range(16))} : vector<16xi8>
@@ -995,8 +997,9 @@ def _g32_iq4(fmt, w, o, col):
       %{o}_hi_u = vector.table.lookup %{o}_book[%{o}_hi_i] : vector<16xi8>, vector<16xi8> -> vector<16xi8>
       %{o}_lo_f = vector.uitofp %{o}_lo_u : vector<16xi8> to vector<16xf16>
       %{o}_hi_f = vector.uitofp %{o}_hi_u : vector<16xi8> to vector<16xf16>
-      %{o}_m128 = scalar.constant -128.0 : f16
-      %{o}_off_h = scalar.mulf {dl}, %{o}_m128 : f16
+      %{o}_m128 = scalar.constant -128.0 : f32
+      %{o}_off32 = scalar.mulf {dl32}, %{o}_m128 : f32
+      %{o}_off_h = scalar.fptrunc %{o}_off32 : f32 to f16
       %{o}_scales = vector.splat {dl} : vector<16xf16>
       %{o}_offsets = vector.splat %{o}_off_h : vector<16xf16>
       %{o}_v0 = vector.fmaf %{o}_lo_f, %{o}_scales, %{o}_offsets : vector<16xf16>
