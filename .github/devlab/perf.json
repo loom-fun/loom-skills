@@ -1,33 +1,47 @@
 {
- "_comment": "q38xl fmt lane (Strix Halo): library split (big = unpruned + NL + Q3: 69.7k encoding values over 2 kernel files, beyond one file's 16-bit ids) func + ktest; base vs q3 (prefill.gemm.m256_mixed_nl + q3_k_native) ABBA short + long, pf8k profiles",
- "runner": "strix",
- "memory_bytes": 49000000000,
+ "_comment": "R9700 per-model measurement (r9700_jobs.py): one job per model on one R9700 runner; loom-fun-staging card, llama.cpp ROCm b1375 + Vulkan b12211 with the matched drafting, reduced-context models served at served_context. Does not fit: none",
+ "runner": "r9700",
+ "memory_bytes": 34000000000,
  "llama_spec": "matched",
  "jobs": [
   {
-   "name": "fmt-unsloth-qwen3-8-27b-ud-q4_k_xl",
-   "runner": "strix",
-   "card": "loom-fun-staging/unsloth-Qwen3.8-27B-UD-Q4_K_XL",
-   "memory_bytes": 49000000000,
+   "name": "unsloth-qwen3-0-6b-loom",
+   "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
    "kit": null,
-   "llamacpp": "b1374",
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "memory_bytes_r9700": 17000000000,
    "variants": [
-    {"name": "base", "build": {}},
-    {"name": "q3", "build": {"GEMM_M256_MIXED_NL": "1", "GEMM_Q3_K_NATIVE": "1"}},
-    {"name": "big", "build": {"GEMM_PRUNE": "0", "GEMM_M256_MIXED_NL": "1", "GEMM_Q3_K_NATIVE": "1"}}
+    {
+     "name": "card",
+     "build": {}
+    },
+    {
+     "name": "nodraft",
+     "build": {},
+     "execution": {
+      "draft_depth": 0
+     }
+    }
    ],
    "steps": [
-    "func:big",
-    "ktest:big",
-    "func:q3",
-    "perf:base:1", "perf:q3:1", "perf:q3:1", "perf:base:1",
-    "perf:base:1:long", "perf:q3:1:long", "perf:q3:1:long", "perf:base:1:long",
-    "profile:q3:pf8k",
-    "profile:base:pf8k"
+    "func:card",
+    "ktest:card",
+    "gates:card:dev",
+    "perf:card:3",
+    "perf:card:3:long",
+    "c4:nodraft",
+    "llama@rocm.np1:3",
+    "llama@rocm.np1:3:long",
+    "llamac4@rocm.nodraft",
+    "llama@vulkan.np1:3",
+    "llama@vulkan.np1:3:long",
+    "llamac4@vulkan.perslot.nodraft"
    ]
   }
  ],
- "card": "loom-fun-staging/unsloth-Qwen3.8-27B-UD-Q4_K_XL",
+ "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
  "kit": null,
- "llamacpp": "b1374"
+ "llamacpp": "b1375",
+ "llamacpp_vulkan": "b12211"
 }

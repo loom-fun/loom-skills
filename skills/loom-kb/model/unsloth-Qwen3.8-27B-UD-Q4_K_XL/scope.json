@@ -129,6 +129,14 @@
     "prefill.gemm.prune": true
    },
    "evidence": "q38xl-port: IQ4_XS/IQ4_NL GEMMs staged inline (prefill.gemm.iq4_native: 128/256-row kernels, qg-split/residual-epilogue m256, iq4_xs in the mixed m256 swiglu) + unlaunched GEMM kernels pruned (prefill.gemm.prune: without it the encoding kernels exceed dual_target's 4 MB ENC_BYTES and the build fails). Local Strix 123 W ABBA, 2 sessions each, vs the helper build (64-row iq4 tiles): prefill 1k/2k/8k/16k/32k 480/488/500/482/447 -> 553/557/573/552/506 tok/s (+15.2/+14.1/+14.6/+14.5/+13.3 %), decode/decode_32k ties; ktest 194/194 (gm_iq4_xs_*, gm_iq4_nl_*, mixed iq4_xs pairs), gates:dev PASS (local, llama.cpp ROCm b1374)."
+  },
+  {
+   "when": {},
+   "set": {
+    "prefill.gemm.m256_mixed_nl": true,
+    "prefill.gemm.q3_k_native": true
+   },
+   "evidence": "q38xl-fmt (PR #1330): the 5 FFN layers pairing IQ4_NL or Q3_K with another format run one mixed f16o swiglu m256 kernel (iq4_nl+q5_k x2, q5_k+iq4_nl, iq4_nl+iq4_xs, iq4_xs+q3_k) instead of two GEMMs + silu_mul_rs. DevLab Strix run 44825536379, same-job ABBA (2 sessions each): prefill 1k/2k 510.6/514.0 -> 515.1/518.6 (+0.9 %), 8k/16k/32k 525.6/507.5/466.3 -> 530.1/511.9/469.9 (+0.9/+0.9/+0.8 %), decode 23.90/23.88 and decode_32k 20.21/20.34 ties; pf8k busy 1.8983 -> 1.8848 ms/token (-0.7 %; gate/up+silu 1023 -> 803 ms over the run). ktest 204/204 (gm_iq4_nl_q5_k / q5_k_iq4_nl / iq4_nl_iq4_xs / iq4_xs_q3_k sw_512_f16o, gm_q3_k_st_512), func pass. Whole-build choice (programs shared by both targets): the gfx12 twins compile (gfx1201) and the R9700 is untimed."
   }
  ]
 }
