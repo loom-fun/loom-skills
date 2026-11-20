@@ -838,7 +838,7 @@ def _swizzle_text():
   %out_group = index.assume %out_group_id [lt(%out_group_id, %out_tile_count)] : index"""
 
 
-def gemm_big256(fmt, mode, fmt2=None):
+def gemm_big256(fmt, mode, fmt2=None, g32=None):
     """256-row WMMA GEMM: 256 threads (8 waves in a 4 x 2 grid), each wave 64 rows x 64 columns (4 x 4
     16 x 16 accumulators). store/acc: 256 x 128 tiles, swiglu: 256 rows x 64 outputs of each of gate and up.
     Each staged weight value feeds 256 rows, and each wave reuses an A fragment across 4 B fragments and a
@@ -958,7 +958,7 @@ def gemm_big256(fmt, mode, fmt2=None):
     wsrc = "wsel" if two_w and not fmt2 else "w"
     def fmt_parts(fm, ws, pre, second):
         """(g32, parts) of one weight's dequant: parts = [(out, col, stage col, lines, addr, loads)]"""
-        g = _on("GEMM_M256_G32") and fm in _g32_fmts()
+        g = (_on("GEMM_M256_G32") if g32 is None else g32) and fm in _g32_fmts()
         fix = (lambda t: t.replace("%w_row_origin", "%w2_row_origin").replace("%block_bytes", "%block_bytes2")) if second else (lambda t: t)
         def fixp(out, col, sc, res):
             lines, addr, loads = res
@@ -1047,13 +1047,13 @@ def gemm_big256(fmt, mode, fmt2=None):
         (fa, ga, pa), (fb, gb, pb) = groups
         sa, va = halves(fa, ga, pa)
         sb, vb = halves(fb, gb, pb)
-        L.append("    %mx_lo, %mx_hi = scf.if %w_is_up -> (vector<16xf16>, vector<16xf16>) {")
-        L += compute(pb) + sb
-        L.append(f"      scf.yield {vb[0]}, {vb[1]} : vector<16xf16>, vector<16xf16>\n    }} else {{")
-        L += compute(pa) + sa
-        L.append(f"      scf.yield {va[0]}, {va[1]} : vector<16xf16>, vector<16xf16>\n    }}")
-        L.append(f"    vector.store %mx_lo, %w_stage_view[%stage_row, %stage_col] : vector<16xf16>, view<{TW}x72xf16>")
-        L.append(f"    vector.store %mx_hi, %w_stage_view[%stage_row, %stage_col1] : vector<16xf16>, view<{TW}x72xf16>")
+        st = lambda v: [f"    vector.store {v[0]}, %w_stage_view[%stage_row, %stage_col] : vector<16xf16>, view<{TW}x72xf16>",
+                        f"    vector.store {v[1]}, %w_stage_view[%stage_row, %stage_col1] : vector<16xf16>, view<{TW}x72xf16>"]
+        L.append("    scf.if %w_is_up {")
+        L += compute(pb) + sb + st(vb)
+        L.append("    } else {")
+        L += compute(pa) + sa + st(va)
+        L.append("    }")
     else:
       for out, col, sc, lines, addr, loads in parts:
         L += compute([(out, col, sc, lines, addr, loads)])
@@ -1147,6 +1147,13 @@ def f16out_m256(text):
     view.store %so_val, %so_view[%tile_row, %c1] : f32, view<[%rows]x2xf32>
   }
 """)
+
+
+def _with_twin(gfx11, base):
+    """gfx11 kernel text + the gfx12 twin (gen_gemm_rdna4) of base (the default kernel of the same name): every kernel a dual-target
+    program launches needs its K_rdna4, or gfx12 runs the gfx11 WMMA fragment layout."""
+    import gen_gemm_rdna4 as _r4
+    return gfx11 + _r4.with_twins(base)[len(base):]
 
 
 def _on(k, d="0"):
@@ -1399,6 +1406,8 @@ def gemm_m256_variant(fmt, mode):
     """The gfx11 m256 kernel text the env switches select (None: the default gemm_big256)."""
     if _on("GEMM_M256_DB"):
         return gemm_big256_db(fmt, mode)
+    if _on("GEMM_M256_G32") and fmt in _g32_fmts():   # gfx11 only: the gfx12 twin comes from the default kernel
+        return gemm_big256(fmt, mode)
     return None
 
 
@@ -1729,15 +1738,15 @@ if __name__ == "__main__":
             else:
                 out.append(_rdna4.with_twins(post(gemm_big(fmt, mode))))
                 if on256:
-                    base256 = post(gemm_big256(fmt, mode))
+                    base256 = post(gemm_big256(fmt, mode, g32=False))
                     var256 = gemm_m256_variant(fmt, mode)
                     if var256 is None:
                         out.append(_rdna4.with_twins(base256))
                     else:   # gfx11 variant; the gfx12 twin still comes from the default kernel
                         out.append(post(var256) + _rdna4.with_twins(base256)[len(base256):])
-                    if mode == "swiglu" and _on("GEMM_M256_F16O"):   # gfx11 f16-output swiglu (f16o_fuse.fuse_gfx11)
-                        out.append(f16out_m256(base256 if var256 is None else post(var256)))
+                    if mode == "swiglu" and _on("GEMM_M256_F16O"):   # f16-output swiglu (f16o_fuse.fuse_gfx11) + its gfx12 twin
+                        out.append(_with_twin(f16out_m256(base256 if var256 is None else post(var256)), f16out_m256(base256)))
     for pair in filter(None, os.environ.get("GEMM_M256_MIXED", "").split(",")):   # gen_llm sets it (choice prefill.gemm.m256_mixed)
         f1, f2 = pair.split(":")
-        out.append(f16out_m256(post(gemm_big256(f1, "swiglu", f2))))
+        out.append(_with_twin(f16out_m256(post(gemm_big256(f1, "swiglu", f2))), f16out_m256(post(gemm_big256(f1, "swiglu", f2, g32=False)))))
     sys.stdout.write("\n".join(out))

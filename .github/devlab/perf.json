@@ -1,70 +1,38 @@
 {
- "_comment": "q38pf gemm r2: on top of F16O+G32 (r1 winner = new): + XCLAMP, + MIXED_F16O, + both.",
- "runner": "strix",
- "memory_bytes": 52000000000,
+ "_comment": "q38pf gemm r3 on the R9700: the build-wide F16O + MIXED rules (gfx12 runs the f16o twins) and gfx11-only G32 vs the combined base: correctness + no regression.",
+ "runner": "r9700",
+ "memory_bytes": 34000000000,
  "llama_spec": "matched",
  "jobs": [
   {
-   "name": "q38pf-gemm-r2",
-   "runner": "strix",
+   "name": "q38pf-gemm-r3-r9700",
+   "runner": "r9700",
    "card": "loom-fun/bartowski-Qwen3.8-27B-loom",
-   "memory_bytes": 52000000000,
+   "memory_bytes": 34000000000,
    "kit": null,
    "llamacpp": "b1374",
    "variants": [
     {
+     "name": "comb",
+     "build": {},
+     "ref": "ceb829e0c38ffed8263c33f8a88bcdec42247273"
+    },
+    {
      "name": "new",
-     "build": {
-      "GEMM_M256_F16O": "1",
-      "GEMM_M256_G32": "1"
-     }
-    },
-    {
-     "name": "xc",
-     "build": {
-      "GEMM_M256_F16O": "1",
-      "GEMM_M256_G32": "1",
-      "GEMM_M256_XCLAMP": "1"
-     }
-    },
-    {
-     "name": "mx",
-     "build": {
-      "GEMM_M256_F16O": "1",
-      "GEMM_M256_G32": "1",
-      "GEMM_M256_MIXED_F16O": "1"
-     }
-    },
-    {
-     "name": "all",
-     "build": {
-      "GEMM_M256_F16O": "1",
-      "GEMM_M256_G32": "1",
-      "GEMM_M256_XCLAMP": "1",
-      "GEMM_M256_MIXED_F16O": "1"
-     }
+     "build": {}
     }
    ],
    "steps": [
-    "ktest:all",
-    "smoke:all",
+    "ktest:new",
+    "smoke:new",
+    "perf:comb:1",
     "perf:new:1",
-    "perf:xc:1",
-    "perf:mx:1",
-    "perf:all:1",
-    "perf:all:1",
-    "perf:mx:1",
-    "perf:xc:1",
     "perf:new:1",
+    "perf:comb:1",
+    "perf:comb:1:long",
     "perf:new:1:long",
-    "perf:xc:1:long",
-    "perf:mx:1:long",
-    "perf:all:1:long",
-    "perf:all:1:long",
-    "perf:mx:1:long",
-    "perf:xc:1:long",
     "perf:new:1:long",
-    "profile:all:pf8k"
+    "perf:comb:1:long"
    ]
   }
  ]
