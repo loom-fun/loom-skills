@@ -52,8 +52,12 @@
   "^g\\d*_attention|^g_qk_rope|^g_split_qgate|^g_qk_norm"
  ],
  [
-  "matvecs q8_0 + head copy (trunk Q8_0 tensors on mixed K-quants, MTP proposals)",
-  "^g_mv_q8_0|^g_head_mv_q8"
+  "MTP proposals: block + head copy (q8_0/q4_0)",
+  "^g_head_mv_q8"
+ ],
+ [
+  "matvecs q8_0 (trunk Q8_0 tensors on mixed K-quants)",
+  "^g_mv_q8_0"
  ],
  [
   "verify head (bf16 lm_head)",
