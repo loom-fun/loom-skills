@@ -317,13 +317,14 @@ def efficiency(m, metric, ceiling, table=None, tokens_per_pass=None, compute=Non
     """The fraction of `ceiling` Loom ports have demonstrated for this kind of metric (table EFF, or STRETCH):
     prefill, c4 (dense / MoE) or decode (dense / MoE), decode capped by the fixed per-layer cost (LAYER_US).
     tokens_per_pass: a drafted_ceiling() (speculative decoding): EFF_DRAFTED, the per-layer cost paid once per pass.
-    compute: the compute_ceiling() the prefill ceiling used (default COMPUTE): the table's prefill fraction is of the
+    compute: the compute_ceiling() the prefill ceiling used (None: the spec peak, any device): the table's prefill fraction is of the
     spec-peak ceiling, so it scales by spec / flops (the target in tok/s does not depend on the power mode's label)."""
     table = table or (EFF_DRAFTED if tokens_per_pass else EFF)
     moe = bool(m["geo"]["n_exp"])
     if metric.startswith("prefill"):
-        c = compute or COMPUTE
-        return min(1.0, table["prefill"] * c["spec_flops"] / c["flops"])
+        if compute is None:   # no power mode given: the ceiling is the spec peak the table was calibrated against
+            return min(1.0, table["prefill"])
+        return min(1.0, table["prefill"] * compute["spec_flops"] / compute["flops"])
     if metric.startswith("c4"):
         return table["c4_moe" if moe else "c4"]
     floor_ms = m["geo"]["L"] * LAYER_US / 1000

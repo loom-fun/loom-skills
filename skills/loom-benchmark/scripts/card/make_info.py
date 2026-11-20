@@ -1171,7 +1171,10 @@ def cmd_roofline(a):
     if a.device is None:
         a.device = GPUS[a.gpu or DEFAULT_GPU]["roofline"]   # the preset of the GPU (radeon-r9700: the DevLab R9700S runner)
     dev = R.DEVICES[a.device]
-    comp = R.compute_ceiling(a.device, a.power, a.flops)
+    try:
+        comp = R.compute_ceiling(a.device, a.power, a.flops)
+    except ValueError as e:   # e.g. --power 85w on a device without power modes
+        sys.exit(f"make_info.py roofline: {e}")
     a.bw, a.flops = a.bw or dev["bw"], comp["flops"]
     facts = package_facts(load_package(a.package))
     cfg_p = a.cfg or os.path.join(a.package, "llm_config.json")
