@@ -44,3 +44,8 @@ On Windows, use Git Bash where an existing benchmark harness expects Bash, or a 
 orchestrator using the same workloads. Launch Windows processes under the lab job, check native exit
 codes in PowerShell, and stop only the run's own processes. Point Python explicitly at a real interpreter
 if the stock command opens the Microsoft Store.
+
+When launching Git Bash from PowerShell, set `SHELL=/usr/bin/bash` inside Git Bash before
+invoking the lab wrapper. OpenSSH starts the ProxyJump helper with the inherited shell. If it
+inherits PowerShell, the helper can fail on the Bash `exec` command before negotiating a host key.
+Check the original lease attempt has ended and verify the dashboard state before retrying.
