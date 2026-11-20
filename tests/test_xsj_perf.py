@@ -28,7 +28,9 @@ class RunnerTests(unittest.TestCase):
 
     def test_engine_modes_match_context_and_load_drafting_only_for_single_stream(self):
         model = self.out / "model.json"
-        spec = runner.spec_args("loom-fun/unsloth-Qwen3.5-4B-loom", self.out / "Qwen3.5-4B-DFlash.Q8_0.gguf")
+        draft = self.out / "Qwen3.5-9B-DFlash.Q8_0.gguf"
+        draft.write_bytes(b"test")
+        spec, _ = runner.spec_args("loom-fun/unsloth-Qwen3.5-9B-loom", draft)
         self.assertEqual(spec[:2], ["--spec-type", "draft-dflash"])
         self.assertEqual(spec[spec.index("--spec-draft-n-max") + 1], "7")
         for engine, device in (("rocm", "ROCm0"), ("vulkan", "Vulkan0")):
@@ -55,11 +57,24 @@ class RunnerTests(unittest.TestCase):
                     self.assertEqual(argv[argv.index("-c") + 1], limit)
 
     def test_alternate_drafter_is_selected_only_by_the_classification(self):
-        self.assertEqual(runner.spec_args("loom-fun/unsloth-Qwen3.5-2B-loom", None), [])
+        self.assertEqual(runner.spec_args("loom-fun/unsloth-Qwen3.5-2B-loom", None), ([], None))
         with self.assertRaisesRegex(runner.RunError, "requires Qwen3.5-4B-DFlash.Q8_0"):
             runner.spec_args("loom-fun/unsloth-Qwen3.5-4B-loom", self.out / "Qwen3.5-4B-DFlash-Q8_0.gguf")
         with self.assertRaisesRegex(runner.RunError, "needs --draft"):
             runner.spec_args("loom-fun/unsloth-Qwen3.5-9B-loom", None)
+
+    def test_external_drafter_validates_bytes_and_records_immutable_source(self):
+        repo = "loom-fun/unsloth-Qwen3.5-4B-loom"
+        key, pin = next(iter(runner.EXTERNAL_DRAFT_PINS.items()))
+        draft = self.out / pin["file"]
+        draft.write_bytes(b"test")
+        with self.assertRaisesRegex(runner.RunError, "SHA-256 differs"):
+            runner.spec_args(repo, draft)
+        test_pin = dict(pin, sha256=hashlib.sha256(b"test").hexdigest())
+        with patch.dict(runner.EXTERNAL_DRAFT_PINS, {key: test_pin}):
+            args, identity = runner.spec_args(repo, draft)
+        self.assertEqual(args[args.index("--spec-draft-model") + 1], str(draft))
+        self.assertEqual(identity["source"], test_pin)
 
     def test_release_matches_executable_and_sibling_dlls(self):
         archive = self.out / "release.zip"

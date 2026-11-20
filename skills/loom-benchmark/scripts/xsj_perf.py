@@ -33,6 +33,14 @@ ROCM_PIN = "918f16a4657b83925df5a9a1e10485f177b46756a8b17d8c6e2deae58dce0d2a"
 VULKAN_ASSET = "llama-b12211-bin-win-vulkan-x64.zip"
 DEVICE = "amdgpu://?completion_spin_ns=4294967295"
 KV_CONTEXT_LIMITS = {"rocm": 65536, "vulkan": 36864}
+EXTERNAL_DRAFT_PINS = {
+    "AtomicChat/Qwen3.5-4B-DFlash-GGUF/Qwen3.5-4B-DFlash.Q8_0.gguf": {
+        "repository": "AtomicChat/Qwen3.5-4B-DFlash-GGUF",
+        "revision": "56b80828981c35dff23affb49820e9ef816048f0",
+        "file": "Qwen3.5-4B-DFlash.Q8_0.gguf",
+        "sha256": "f0689eadab0d46468bc2629bb2706f4aba7f794b63e1c9f6eb291269d572a52b",
+    },
+}
 LOGS = {
     "loom": ("perf_loom.jsonl", "c4_loom.txt"),
     "rocm": ("perf_llamacpp-rocm.np1.jsonl", "c4_llamacpp-rocm.nodraft.txt"),
@@ -174,20 +182,32 @@ def package_identity(args):
 
 
 def spec_args(repo, draft):
-    spec = shlex.split(classification(repo)["llama_spec"])
+    classified = classification(repo)
+    spec = shlex.split(classified["llama_spec"])
     if not spec:
         if draft:
             raise RunError("The model classification calls for no drafter")
-        return []
+        return [], None
+    drafter = None
     for index, arg in enumerate(spec):
         if arg == "{drafter}" or arg.startswith("{hf:"):
             if not draft:
                 raise RunError(f"The classified baseline needs --draft ({arg})")
-            expected = classification(repo)["drafter_file"] if arg == "{drafter}" else arg[:-1].split("/")[-1]
+            pin = None
+            if arg.startswith("{hf:"):
+                pin = EXTERNAL_DRAFT_PINS.get(arg.removeprefix("{hf:").removesuffix("}"))
+                if pin is None:
+                    raise RunError(f"No immutable input pin for the classified external drafter {arg}")
+            expected = pin["file"] if pin else classified["drafter_file"]
             if draft.name != expected:
                 raise RunError(f"The drafting classification requires {expected}, got {draft.name}")
+            drafter = identity(draft)
+            if pin:
+                if drafter["sha256"] != pin["sha256"]:
+                    raise RunError(f"The external drafter SHA-256 differs from the pinned {pin['repository']}@{pin['revision']}")
+                drafter["source"] = pin
             spec[index] = str(draft)
-    return spec
+    return spec, drafter
 
 
 def server_argv(args, engine, mode, model_path, context, spec, device=None):
@@ -496,9 +516,9 @@ def run(args, evidence, manifest):
         engine_ids["loom"] = {"sdk": sdk, "executable": identity(args.loom), "wait": DEVICE}
         evidence.command("loom.version", [str(args.loom), "--version"], cwd=args.loom.parent, timeout=60)
     baselines = [eng for eng in args.engine if eng != "loom" and not (eng == "vulkan" and args.vulkan_unavailable)]
-    spec = spec_args(args.repo, args.draft) if baselines else []
-    if args.draft:
-        manifest["baseline_drafter"] = identity(args.draft)
+    spec, drafter = spec_args(args.repo, args.draft) if baselines else ([], None)
+    if drafter:
+        manifest["baseline_drafter"] = drafter
     failed = False
     for engine in baselines:
         exe = getattr(args, engine)
@@ -596,6 +616,12 @@ def main(argv=None):
         result = 130
     finally:
         manifest["ended_utc"] = now()
+        manifest["sampling"]["completed_sessions"] = {
+            engine: {mode: sum(entry["engine"] == engine and entry["mode"] == mode and entry["status"] == "completed"
+                               for entry in manifest["sessions"])
+                     for mode in ("single", "nodraft")}
+            for engine in args.engine
+        }
         write_json(args.out / "manifest.json", manifest)
     return result
 
