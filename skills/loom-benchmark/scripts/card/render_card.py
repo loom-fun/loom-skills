@@ -281,8 +281,8 @@ def local_power_line(psrc, g):
     per = ", ".join(f"{ENGINE_NAMES.get(k, k)} {v['median_w']:.0f} W / {v['median_ghz']:.2f} GHz" for k, v in eng.items() if v.get("median_w"))
     runner = GPUS[g]["runner"]
     out = (f"- Measured on {device_text(psrc['device'])}, a local machine (not an AMD DevLab Dispatch runner), in its "
-           f"{psrc['power_mode'].replace('w', ' W')} power mode (BIOS performance mode); the DevLab {runner} runners other cards are measured on "
-           "run at 85 W. Every engine in this table was measured in the same job, interleaved, at the same power"
+           f"{psrc['power_mode'].replace('w', ' W')} power mode (BIOS performance mode); the DevLab {runner} runners run at 85 W. "
+           "Every engine in this table was measured in the same job, interleaved, at the same power"
            + (f": {per} (median package power and GPU clock while busy, amdgpu hwmon samples every 0.2 s)" if per else "") + ".")
     if pw.get("flags"):
         out += " Steps outside the expected band: " + "; ".join(pw["flags"]) + " (memory-bound decode draws less than the limit)."
