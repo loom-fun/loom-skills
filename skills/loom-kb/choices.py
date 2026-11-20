@@ -399,6 +399,12 @@ CHOICE("prefill.gemm.min_tokens", "int", 64, "GEMM_MIN_TOKENS", kits=["lfm2moe"]
 # ======================================================================================================================
 # MoE (gen_moe.py, gen_llm.py; lfm2moe and flint-moe reference kits)
 # ======================================================================================================================
+_PR = dict(kernels=["g_silu_mul*", "g_gdn_norm_gate*", "g_post_add_norm*", "g_row_scale*"], rows=ROWS_PREFILL)
+CHOICE("prefill.fuse.silu_mul_rs", "bool", True, "SILU_MUL_RS", doc="g_silu_mul + the f16 row scale of its result in one kernel "
+       "(GEMM-shape epochs; Qwen3.8-27B Strix: +0.4-0.6 % prefill).", **_PR)
+CHOICE("prefill.fuse.gdn_norm_rs", "bool", True, "GDN_NORM_RS", doc="g_gdn_norm_gate + the f16 row scale of the ssm_out GEMM operand in one kernel.", **_PR)
+CHOICE("prefill.fuse.post_norm_noh", "bool", True, "POST_NORM_NOH", doc="Post-attention norm without the f32 h store no GEMM-branch reader uses.", **_PR)
+
 _MO = dict(kernels=["g_moe_*"], rows=ROWS_DECODE + ROWS_PREFILL + ROWS_STREAMS)
 CHOICE("moe.decode.rows_per_wg", "int", None, "MOE_R", dynamic=True, kit_legacy={"lfm2moe": 8},
        doc="Rows of one expert matvec per workgroup; default aims at ~3000 workgroups within 2..8 (Qwen3-30B-A3B decodes "
