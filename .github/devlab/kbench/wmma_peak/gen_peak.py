@@ -90,7 +90,7 @@ VARIANTS = {  # name: (kind, A pattern, B pattern)
     "base": ("f16", "rand", "rand"), "f16_const": ("f16", "one", "one"), "f16_zero": ("f16", "zero", "zero"),
     "f16_q4int": ("f16", "rand", "q4int"), "f16_q4dq": ("f16", "rand", "q4dq"), "f16_asmall": ("f16", "small", "rand"),
     "f16_both_small": ("f16", "small", "q4int"),
-    "bf16_rand": ("bf16", "rand", "rand"),
+
     "i8_rand": ("i8", "i8rand", "i8rand"), "i8_const": ("i8", "i8one", "i8one"), "i8_w4": ("i8", "i8rand", "u4"),
     "i8_w4s": ("i8", "i8rand", "s4"), "i8_a7w4": ("i8", "a7", "u4"),
 }
