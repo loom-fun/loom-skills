@@ -1397,17 +1397,17 @@ def _chunk_case(cname, pre, spans_, kerns, seed=None):
   %t = check.literal value({t}) : index
   %spans = check.literal value({ns}) : index
   %layer = check.literal value(0) : index
-  %meta = check.file.read.npy path(f"{pre}_meta.npy") : {MT}
-  %orig = check.file.read.npy path(f"{pre}_orig.npy") : {OT}
-  %arena = check.file.read.npy path(f"{pre}_arena.npy") : {AT}
-  %expect = check.file.read.npy path(f"{pre}_expect.npy") : {AT}
-  %x = check.file.read.npy path(f"{pre}_x.npy") : tensor<{t}x{C}xf32>
-  %inv = check.file.read.npy path(f"{pre}_inv.npy") : tensor<{t}x{2 * HK}xf32>
-  %alpha = check.file.read.npy path(f"{pre}_alpha.npy") : tensor<{t}x{HV}xf32>
-  %beta = check.file.read.npy path(f"{pre}_beta.npy") : tensor<{t}x{HV}xf32>
+  %meta = check.file.read.npy path("{pre}_meta.npy") : {MT}
+  %orig = check.file.read.npy path("{pre}_orig.npy") : {OT}
+  %arena = check.file.read.npy path("{pre}_arena.npy") : {AT}
+  %expect = check.file.read.npy path("{pre}_expect.npy") : {AT}
+  %x = check.file.read.npy path("{pre}_x.npy") : tensor<{t}x{C}xf32>
+  %inv = check.file.read.npy path("{pre}_inv.npy") : tensor<{t}x{2 * HK}xf32>
+  %alpha = check.file.read.npy path("{pre}_alpha.npy") : tensor<{t}x{HV}xf32>
+  %beta = check.file.read.npy path("{pre}_beta.npy") : tensor<{t}x{HV}xf32>
   %a = check.file.read.npy path("g_a.npy") : tensor<{HV}xf32>
   %dt = check.file.read.npy path("g_dt.npy") : tensor<{HV}xf32>
-  %eraw = check.file.read.npy path(f"{pre}_raw.npy") : tensor<{t}x{VD}xf32>
+  %eraw = check.file.read.npy path("{pre}_raw.npy") : tensor<{t}x{VD}xf32>
   %raw = check.generate.fill value(0.0) : tensor<{t}x{VD}xf32>
 {"".join(f"  kernel.launch @{k}[%spans](%t, %spans, %layer, %meta, %orig, %arena, %x, %inv, %alpha, %beta, %a, %dt, %raw) : [index](index, index, index, {MT}, {OT}, {AT}, tensor<{t}x{C}xf32>, tensor<{t}x{2 * HK}xf32>, tensor<{t}x{HV}xf32>, tensor<{t}x{HV}xf32>, tensor<{HV}xf32>, tensor<{HV}xf32>, tensor<{t}x{VD}xf32>){chr(10)}" for k in kerns)}  check.expect.close actual(%raw) expected(%eraw) atol({3e-3 * _scale:.3e}) rtol(1.0e-2) nan(different) : tensor<{t}x{VD}xf32>
   check.expect.close actual(%arena) expected(%expect) atol({3e-3 * _sscale:.3e}) rtol(1.0e-2) nan(different) : {AT}
