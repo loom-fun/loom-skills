@@ -300,6 +300,7 @@ CHOICE("prefill.gemm.m256_ws_pd", "int", 1, "GEMM_M256_WS_PD", from_pr="q38pf-ge
 CHOICE("prefill.gemm.m256_xg", "int", 0, "GEMM_M256_XG", from_pr="q38pf-gemm2", devices=["rdna3"],
        doc="gfx11 m256 GEMM with A fragments read straight from global memory (gen_gemm_xg): 1 = 256-row tiles, 2 = 512-row "
        "tiles (loses: latency-bound A loads).", **_PG)
+CHOICE("prefill.gemm.m256_xg_fmts", "str", "q4_k,q6_k,q8_0,q5_k", "GEMM_M256_XG_FMTS", from_pr="q38pf-gemm2", devices=["rdna3"], doc="formats prefill.gemm.m256_xg applies to.", **_PG)
 CHOICE("prefill.gemm.m256_xg_db", "bool", False, "GEMM_M256_XG_DB", from_pr="q38pf-gemm2", devices=["rdna3"],
        doc="double-buffered weight stage of prefill.gemm.m256_xg (one barrier per step).", **_PG)
 CHOICE("prefill.gemm.m256_db", "bool", False, "GEMM_M256_DB", from_pr="q38pf-gemm", doc="m256 GEMM with double-buffered 32-K LDS stages (loses).", **_PG)
@@ -591,6 +592,7 @@ CHOICE("feature.logits_export", "bool", True, "LLM_LOGITS", kernels=["g_logits_e
 # ======================================================================================================================
 NOT("kbench experiment options of the gfx12 flash kernels (flash_r9700 suite; the shipped variants are choices)", "FLASH2_B2_OPTS", "FLASH2_G6_OPTS")
 NOT("timing-only ablations of the gfx11 chunked GDN kernel (kbench; wrong results)", "GDN_CHUNK11_ABL")
+NOT("timing-only ablations of the gfx11 wave-specialised m256 GEMM (kbench; wrong results)", "GEMM_M256_WS_ABL")
 NOT("input path or file selection (not a model-affecting knob)", "CATALOG", "LOOM_SKILLS", "LOOM_KB_ROOT", "LOOM_ROOT", "VENV", "HF", "HF_HOME",
     "HF_HUB_CACHE", "LD_LIBRARY_PATH", "LOOM_SERVE_STATE", "VISION_TEST_DIR", "FLASH2_OUT", "LLM_OUT")
 NOT("transport between a generator and its subprocesses (set by the caller from cfg / the build)", "LLM_CONFIG", "LLM_DRAFT",

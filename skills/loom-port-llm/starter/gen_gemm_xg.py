@@ -30,7 +30,7 @@ def xg_fmts():
 
 def gemm_xg(fmt, mode, fmt2=None, M=None, db=None, g32=None):
     M = M or (512 if xg_mode() == 2 else 256)
-    db = _on("GEMM_M256_XG_DB") if db is None else db
+    db = (os.environ.get("GEMM_M256_XG_DB", "0").strip().lower() not in ("", "0", "false", "no", "off")) if db is None else db
     f = G.FMT[fmt]
     two_w = mode == "swiglu"
     fmt2 = fmt2 if two_w and fmt2 not in (None, fmt) else None
