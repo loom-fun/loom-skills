@@ -68,7 +68,7 @@ def short(sha):
 def src_text(s):
     if not s:
         return "not recorded"
-    name = {"local": "local run", "devlab": "DevLab Dispatch run", "factory": "loom-factory run", "machine": "named-machine run"}.get(s["kind"], f"{s['kind']} run")
+    name = {"local": "local run" + (f" {s['run']}" if s.get("run") and s.get("power_mode") else ""), "devlab": "DevLab Dispatch run", "factory": "loom-factory run", "machine": "named-machine run"}.get(s["kind"], f"{s['kind']} run")
     if s["kind"] in ("local", "machine"):
         return name
     label = f"{name} {s['run']}" if s.get("run") else name
@@ -263,7 +263,34 @@ def no_draft_reason(repo):
     return ev
 
 
-def methodology(base, extra, spec, drafter, values, runs_c4, machine=False, cross=None, measured=True, repo=None):
+def column_name(b, x):
+    """The column header of a further baseline engine: a llama.cpp backend by its backend, another engine by its label (its own model)."""
+    bl = x["baseline"]
+    if bl["name"] == "llama.cpp":
+        return f"llama.cpp {b.capitalize()}"
+    return (bl.get("model") or {}).get("label") or bl["name"]
+
+
+ENGINE_NAMES = {"loom": "Loom", "llamacpp-rocm": "llama.cpp ROCm", "llamacpp-vulkan": "llama.cpp Vulkan", "gufo": "Gufo"}
+
+
+def local_power_line(psrc, g):
+    """A local session at a named power mode (card_lib.perf_source_ok): where, at what power, and that every engine ran in that job."""
+    pw = psrc.get("power") or {}
+    eng = pw.get("engines") or {}
+    order = sorted(eng, key=lambda k: (list(ENGINE_NAMES).index(k) if k in ENGINE_NAMES else len(ENGINE_NAMES), k))
+    per = ", ".join(f"{ENGINE_NAMES.get(k, k)} {eng[k]['median_w']:.0f} W / {eng[k]['median_ghz']:.2f} GHz" for k in order if eng[k].get("median_w"))
+    runner = GPUS[g]["runner"]
+    out = (f"- Measured on {device_text(psrc['device'])}, a local machine (not an AMD DevLab Dispatch runner), in its "
+           f"{psrc['power_mode'].replace('w', ' W')} power mode (BIOS performance mode); the DevLab {runner} runners run at 85 W. "
+           "Every engine in this table was measured in the same job, interleaved, at the same power"
+           + (f": {per} (median package power and GPU clock while busy, amdgpu hwmon samples every 0.2 s)" if per else "") + ".")
+    if pw.get("flags"):
+        out += " Steps outside the expected band: " + "; ".join(pw["flags"]) + " (memory-bound decode draws less than the limit)."
+    return out
+
+
+def methodology(base, extra, spec, drafter, values, runs_c4, machine=False, cross=None, measured=True, repo=None, local=False):
     """The card's methodology: the same short template on every card, filled from the card's own data (baseline server
     arguments, drafting setting, runs). Anything that differs between the engines is stated as it is, not smoothed over.
     cross: {"llama": [(date, source)], "loom": (date, source)} when the llama.cpp rows were measured in another job than the Loom rows (a Loom-only
@@ -288,7 +315,8 @@ def methodology(base, extra, spec, drafter, values, runs_c4, machine=False, cros
                  + "; ".join(f"{n} " + (f"{m}" + (f" n-max {k}" if k else "") if m else "no drafting") for n, m, k in ll)
                  + " (NOT the same choice on both engines)")
         depth = ""
-    where = "DevLab runner type, different jobs" if cross else ("machine and session" if machine else "DevLab runner and job")
+    where = ("DevLab runner type, different jobs" if cross else "machine, power mode and job" if local
+             else ("machine and session" if machine else "DevLab runner and job"))
     out = [f"- Compared: Loom against {ver}; the same GGUF, the same {where}, the same prompts; Loom served with "
            f"the active wait. {values} (4 streams: median of {runs_c4}); Loom is timed by the client, "
            "llama.cpp by its server.",
@@ -577,8 +605,8 @@ def perf_section(L, info, facts, feats, d, g, here, ctx):
     roof = (view.get("roofline") or {}).get("metrics") or {}
     stale = stale_metrics(view, here, kind, feats)
     # further llama.cpp backends (performance.baselines): one column each, after the roofline
-    extra = {b: x for b, x in (perf.get("baselines") or {}).items()}
-    xnames = {b: f"{x['baseline']['name']} {b.capitalize()}" for b, x in extra.items()}
+    extra = dict(sorted((perf.get("baselines") or {}).items(), key=lambda kv: kv[1]["baseline"]["name"] != "llama.cpp"))   # llama.cpp backends first
+    xnames = {b: column_name(b, x) for b, x in extra.items()}
     margin_label = "margin vs best llama.cpp" if bname == "llama.cpp" else "margin"
     L += [f"| metric | {bname} | Loom | {margin_label} | roofline | Loom % of roofline "
           + "".join(f"| {n} " for n in xnames.values()) + "|",
@@ -657,12 +685,14 @@ def perf_section(L, info, facts, feats, d, g, here, ctx):
     if facts["drafter"]:
         drafter = f"{facts['drafter']['repo']} / {facts['drafter']['file']}"
     machine = bool(psrc) and psrc["kind"] == "machine"   # a GPU with no DevLab runner: a named machine measured it
+    local = bool(psrc) and psrc["kind"] == "local" and bool(psrc.get("power_mode"))   # a local machine at a named power mode
     bfs = sorted({(m["baseline_from"]["date"] or "", m["baseline_from"]["source"]) for m, _ in rows.values() if m.get("baseline_from")})
     cross = {"llama": [(d or None, sources[sid]) for d, sid in bfs],
              "loom": (sessions[primary]["date"], sources[sessions[primary]["source"]])} if bfs and primary is not None else None
     L += ["", "**Methodology**", "", *methodology(base, extra, facts["spec"], drafter, values_of(tps_keys), runs_of(["streams4"], True), machine, cross,
-                                                        has_baseline_values(m for m, _ in (shown[k] for k, _ in METRICS if k in shown)), info.get("repo")),
-          (f"- Measured on {device_text(psrc['device'])}, a named machine (this GPU has no DevLab runner); both engines ran on it."
+                                                        has_baseline_values(m for m, _ in (shown[k] for k, _ in METRICS if k in shown)), info.get("repo"), local),
+          (local_power_line(psrc, g) if local else
+           f"- Measured on {device_text(psrc['device'])}, a named machine (this GPU has no DevLab runner); both engines ran on it."
            if machine else f"- Measured on AMD DevLab Dispatch {GPUS[g]['runner']} runners (`devlab-perf` jobs); runners differ between sessions.")]
     if bname == "llama.cpp":
         L.append("- Margin vs best llama.cpp: (Loom / max(ROCm, Vulkan) - 1) × 100 %, using the available measured "
@@ -687,6 +717,17 @@ def perf_section(L, info, facts, feats, d, g, here, ctx):
         L.extend(remeasure_lines(rm, g, sources, "this package"))
     for b, x in extra.items():
         xb, xs = x["baseline"], x["session"]
+        if xb["name"] != "llama.cpp":   # another engine (Gufo): its own model file, its own drafting; never the margin's baseline
+            mdl = xb.get("model") or {}
+            L.append(f"- {xnames[b]}: {xb['name']}" + (f" `{xb['version']}`" if xb.get("version") else "")
+                     + (f" running its OWN model file `{mdl['file']}`" + (f" (sha256 {short(mdl['sha256'])})" if mdl.get("sha256") else "")
+                        + ", not this card's GGUF" if mdl.get("file") else "")
+                     + "; timed by the client like Loom" + (f"; server arguments `{xb['args']}`" if xb.get("args") else "")
+                     + f"; measured {text(xs['date'])}; source: {src_text(sources[xs['source']])}. Shown for reference: not in the margin "
+                     "or the win / tie / loss counts.")
+            for u in xb.get("differs") or []:
+                L.append(f"  - {u}")
+            continue
         L.append(f"- {xnames[b]}: measured {text(xs['date'])}; source: {src_text(sources[xs['source']])}."
                  + (f" Archive sha256 {short(xb['sha256'])}." if xb.get("sha256") else ""))
     for sha in sorted(set(stale.values())):
@@ -956,7 +997,17 @@ def engine_of(info, gpus, facts):
     return (sorted(names)[0] if names else "llama.cpp"), ("checkpoint" if facts["checkpoint"]["file"].endswith(".safetensors") else "GGUF")
 
 
-def method_text(gpus, aggs=(None,), engine="llama.cpp", checkpoint="GGUF"):
+def local_power_gpus(info, gpus):
+    """The GPUs whose shown performance comes from a local session at a named power mode (card_lib.perf_source_ok)."""
+    out = []
+    for g in gpus:
+        ss = (gpu_view(info, g).get("performance") or {}).get("sessions") or []
+        if any((info["sources"].get(s["source"]) or {}).get("power_mode") for s in ss):
+            out.append(g)
+    return out
+
+
+def method_text(gpus, aggs=(None,), engine="llama.cpp", checkpoint="GGUF", local=()):
     """The report's method bullets; the runner is the one GPU's (the same text a one-GPU card always had). aggs: the
     "aggregate" of every session shown (None: the mean of its runs, recorded before the median rule)."""
     aggs = set(aggs)
@@ -975,13 +1026,16 @@ def method_text(gpus, aggs=(None,), engine="llama.cpp", checkpoint="GGUF"):
     "4 are decoding; the card shows the median of the runs.",
     f"- One engine runs at a time on the same machine, with the same {checkpoint}. Loom rates are timed by the client; "
     + ("llama.cpp rates come from its server-side `timings`." if engine == "llama.cpp" else f"{engine} rates are timed by the client the same way."),
-    (f"- Every performance value comes from a `devlab-perf` job (loom-skills) on an AMD DevLab Dispatch {runner} runner: "
+    (f"- {'Every performance value' if not local else 'Every other performance value'} comes from a `devlab-perf` job (loom-skills) on an AMD DevLab Dispatch {runner} runner: "
      f"Loom, served with the active wait (`--device=amdgpu://?completion_spin_ns=4294967295`), and {engine} on the same "
      "runner, with the published programs." if runner else
      f"- Every performance value comes from a measuring session on a named machine (the {', '.join(machines)} has no DevLab runner; "
      "the session below records the device and SDK): Loom, served with the active wait (`--device=amdgpu://?completion_spin_ns=4294967295`), "
      f"and {engine} on the same machine, with the published programs.")
-    + (f" The {', '.join(machines)} values come from named machines (the sessions below record them), not DevLab runners." if runner and machines else ""),
+    + (f" The {', '.join(machines)} values come from named machines (the sessions below record them), not DevLab runners." if runner and machines else "")
+    + (f" The {', '.join(GPUS[g]['short'] for g in local)} values (Loom and every baseline engine) come from a local machine at a named power mode (the sessions below "
+       "record the device, the power mode and each engine's measured power); every engine of that table was re-measured in that job at that "
+       "power." if local else ""),
     "- Drafted tokens accepted is the `spec` gate's count: accepted over proposed draft tokens across its requests.",
     "- Gates are loom-benchmark's `gates.sh` at the LEVEL shown; DevLab runs are the nightly-gates workflow on AMD "
     "DevLab Dispatch.",
@@ -1036,7 +1090,8 @@ def report_gpu(L, info, facts, g, here, h, single):
     for b, x in (perf.get("baselines") or {}).items():
         xs, xb = x["session"], x["baseline"]
         src = sources[xs["source"]]
-        L += [f"{h} {xb['name']} {b.capitalize()}: {src_text(src)}, {text(xs['date'])}", "",
+        title = xb["name"] if b.lower() == xb["name"].lower() else f"{xb['name']} {b.capitalize()}"
+        L += [f"{h} {title}: {src_text(src)}, {text(xs['date'])}", "",
               f"- Build: {('`' + xb['version'] + '`') if xb['version'] else 'not recorded'}; server arguments "
               + (f"`{xb['args']}`" if xb["args"] else "not recorded") + ".",
               f"- Device: {device_text(src['device'])}."]
@@ -1123,7 +1178,7 @@ def render_report(d):
           "first-line generator comment.", "",
           "## Method", "", *method_text(live, [s.get("aggregate") for g in live
                                                     for s in (gpu_view(info, g).get("performance") or {}).get("sessions", [])],
-                                       *engine_of(info, live, facts)), ""]
+                                       *engine_of(info, live, facts), local_power_gpus(info, live)), ""]
     if solo:
         report_gpu(L, info, facts, live[0], here, "##", True)
     else:

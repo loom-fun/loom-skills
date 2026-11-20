@@ -83,6 +83,15 @@
 #          vllm:N[:long]        vLLM ROCm (vllm_server.sh --install) serving the card's checkpoint, the card's drafting (job "vllm_spec" = the --speculative-config JSON), perf.py --kind vllm N times
 #                               (job "vllm_max_len": --max-model-len, default the served context); perf_vllm_nN.jsonl, vllm_args_on.txt, vllm_kv_on.txt, vllm_version.txt (a card with no llama.cpp baseline)
 #          vllmc4[:N]           4 streams on vLLM without drafting, N (default 3) runs of c4_steady.py: c4_vllm_nN.txt
+#          gufoperf:N[:long]    Gufo (job/experiment "gufo": {"image": DOCKER_IMAGE@sha256, "model": "OWNER/REPO@REV/FILE", "draft": "OWNER/REPO@REV/FILE",
+#                               "speculative": "dflash2", "context": 65536}) serving ITS OWN model through its OpenAI server (gufo serve llm, the release
+#                               container under docker), perf.py --kind gufo N times (client-timed like Loom): perf_gufo.jsonl, gufo_args_on.txt,
+#                               gufo_version.txt, gufo_model.txt (file + sha256), gufo_metrics_on_*.txt (its /metrics after each session: drafted acceptance)
+#          gufoc4[:N]           4 streams on Gufo without drafting (--speculative off --sessions 4), N (default 3) runs of c4_steady.py: c4_gufo.txt
+# Local-machine evidence (a dev machine measuring a card at a non-default power mode, make_info.py perf --source-kind local):
+#   POWER_LOG=1      out/power.tsv (epoch, package W, GPU MHz every 0.2 s from the amdgpu hwmon) and out/step_times.tsv (step, start, end);
+#                    at the end power_steps.py writes out/power_steps.json (per step and per engine: median W and GHz of the busy samples).
+#   MIN_MEMAVAIL_GB=N  refuse to start any server while MemAvailable is below N GB (a 27B server next to a leftover one OOMs a 128 GB machine).
 #          fullctx:V[:TOKENS]   ctx_admit.py --complete: a request of ~the served context (or TOKENS) is prefilled to the end and answered (fullctx_V*.txt)
 #          coldcapacity:V      opt-in experiment: cold sampled memory, exact full-context completion and structured overflow rejection
 #          func:V               V served alone: the functional checks the card claims (chat, tool calling, image input;
@@ -181,9 +190,26 @@ vllm_down() {   # stop the vLLM OpenAI server this job started (its process grou
   pkill -9 -f "vllm.entrypoints.openai.api_server.*--port $VPORT( |\$)" 2>/dev/null; pkill -9 -f "VLLM::EngineCore" 2>/dev/null
   return 0
 }
+GPORT=${GUFO_PORT:-8133}; gurl=http://127.0.0.1:$GPORT; GCONT=gufo-$job-$$
+gufo_down() {   # stop the Gufo container this job started (docker), and wait until its port is closed
+  [ -n "${GUFO_MODE:-}" ] || return 0
+  docker rm -f "$GCONT" >/dev/null 2>&1
+  for _ in $(seq 60); do curl -sf "$gurl/v1/models" >/dev/null 2>&1 || break; sleep 1; done
+  GUFO_MODE=; return 0
+}
+mem_guard() {   # mem_guard WHAT: MIN_MEMAVAIL_GB (default 0: off) GB of MemAvailable before a server starts
+  local need=${MIN_MEMAVAIL_GB:-0} avail; [ "$need" -gt 0 ] || return 0
+  for _ in $(seq 60); do
+    avail=$(awk '/MemAvailable/{print int($2/1048576)}' /proc/meminfo); [ "$avail" -ge "$need" ] && { echo "MemAvailable ${avail} GB before $1" >> "$out/memavail.txt"; return 0; }
+    sleep 2
+  done
+  echo "FAIL: MemAvailable ${avail} GB < $need GB before $1" | tee -a "$out/memavail.txt"; return 1
+}
 cleanup() {
   coldcapacity_stop
   vllm_down
+  gufo_down
+  [ -n "${PLOG_PID:-}" ] && kill "$PLOG_PID" 2>/dev/null
   for f in "$LOOM_SERVE_STATE"/*.pid; do [ -f "$f" ] && "$SV/stop.sh" "$(basename "$f" .pid)" >/dev/null 2>&1; done
   "$B/llamacpp_server.sh" --stop "$LLAMA_PORT" >/dev/null 2>&1; VLLM_STATE=$D/vllm-state "$B/vllm_server.sh" --stop "$LLAMA_PORT" >/dev/null 2>&1
   cp "$D"/vllm-state/vllm-*.{log,mem} "$out/" 2>/dev/null
@@ -461,7 +487,7 @@ pkg_preset() {   # pkg_preset MODEL_JSON -> the preset this runner serves ("" fo
   "$T" -c "import json,sys; p=list(json.load(open(sys.argv[1]))['presets']); r=p[0] + sys.argv[3]; print((r if sys.argv[2] and r in p else p[0]) if len(p) > 1 else '')" "$1" "$RDEV" "$RSUF"
 }
 serve_alone() { # serve_alone VARIANT
-  vllm_down
+  vllm_down; gufo_down
   for f in "$LOOM_SERVE_STATE"/*.pid; do [ -f "$f" ] && "$SV/stop.sh" "$(basename "$f" .pid)" >/dev/null 2>&1; done
   "$B/llamacpp_server.sh" --stop "$LLAMA_PORT" >/dev/null 2>&1; VLLM_STATE=$D/vllm-state "$B/vllm_server.sh" --stop "$LLAMA_PORT" >/dev/null 2>&1
   local aw sa rp vmem; aw=$(qv "$1" "print(0 if v.get('active_wait') is False else 1)")
@@ -505,6 +531,7 @@ serve_alone() { # serve_alone VARIANT
     [ -f "$CAPACITY_MONITOR_DIR/monitor.ready" ] || { echo "FAIL: cold capacity monitor has no baseline"; coldcapacity_stop; return 1; }
     printf '%s\n' "${rp:-}" > "$CAPACITY_MONITOR_DIR/preset.txt"
   fi
+  mem_guard "serve $1" || return 1
   step "serve $1 (SDK root $vroot)"; LOOM_MEMNEED=$memneed LOOM_ACTIVE_WAIT=$aw "$SV/serve.sh" "perf-$1" "$PORT" amdgpu "$vmem" "$D/$1/pkg/model.json" ${sa:+-- $sa} > "$out/serve_$1.out" 2>&1; tail -2 "$out/serve_$1.out"
   grep -q '^FAILED' "$out/serve_$1.out" && { echo "REGISTRATION FAILED on $RUNNER for variant $1 (fast fail, see serve_$1.out):"; grep -m6 -E 'AMDGPU|error|ERROR' "$out/serve_$1.out" | cut -c1-300; return 1; }
   curl -sf "$url/v1/models" >/dev/null || return 1
@@ -552,7 +579,7 @@ llama_up() {   # llama_up [N_MAX]: llama.cpp with the experiment's llama_spec (n
   spec=$(hf_sub "$spec") || return 1   # {hf:OWNER/REPO/FILE}, fetched once per runner
   spec="$BK$MODS|$spec"   # the backend and its modifiers are part of what runs
   [ "$spec" = "$LSPEC" ] && curl -sf "$lurl/health" >/dev/null 2>&1 && return 0
-  "$B/llamacpp_server.sh" --stop "$LLAMA_PORT" >/dev/null 2>&1
+  "$B/llamacpp_server.sh" --stop "$LLAMA_PORT" >/dev/null 2>&1; gufo_down
   local dir
   if [ "$BK" = rocm ]; then
     LLAMACPP_DIR=${LLAMACPP_DIR:-$("$B/fetch_llamacpp.sh" "$WORK/llamacpp" "$tag" | tail -1)}; export LLAMACPP_DIR LLAMA_CACHE_BUILD=$tag; dir=$LLAMACPP_DIR
@@ -572,6 +599,7 @@ llama_up() {   # llama_up [N_MAX]: llama.cpp with the experiment's llama_spec (n
     elif [ "$vkv" = per-slot ] || { [ "$vkv" = auto ] && [[ "$LLAMA_SPEC" != *draft-dflash* ]]; }; then kv=(36864); fi
     [ -z "$lvkv" ] || kv[0]=$lvkv
   fi
+  mem_guard "llama.cpp $BK" || return 1
   LLAMACPP_BACKEND=$BK LLAMACPP_DIR=$dir LLAMACPP_ARGS_FILE=$out/llamacpp_args$bkt.txt "$B/llamacpp_server.sh" "$gguf" "$LLAMA_PORT" $np "${kv[@]}" | tail -1
   sed -i -e "s#$WORK/hf/#hf:#g" -e "s#$card/#card:#g" "$out/llamacpp_args$bkt.txt" 2>/dev/null   # runner paths out of the recorded arguments
   [ "${PIPESTATUS[0]}" = 0 ] || { cp "$LLAMACPP_STATE/llamacpp-$LLAMA_PORT.log" "$out/llamacpp_start$bkt.log" 2>/dev/null; return 1; }
@@ -580,7 +608,7 @@ vllm_up() {   # vllm_up on|off: vLLM ROCm (vllm_server.sh --install: the pinned 
   # (--max-model-len and, for "on", the job's "vllm_spec" --speculative-config are the only arguments); one engine at a time on the GPU.
   # A server already up in the same mode is reused (vllm:N and vllm:N:long are one load: 27B takes minutes to load); any other engine stops it.
   [ -f "$vpid" ] && [ "${VLLM_MODE:-}" = "$1" ] && kill -0 "$(cat "$vpid")" 2>/dev/null && curl -sf "$vurl/v1/models" >/dev/null 2>&1 && return 0
-  vllm_down
+  vllm_down; gufo_down
   # the old server must be gone (its port closed) before the next one starts: a server that is still shutting down answered the new one's
   # readiness probe and the c4 rows ran on it (with drafting on)
   for _ in $(seq 180); do curl -sf "$vurl/v1/models" >/dev/null 2>&1 || break; sleep 1; done
@@ -615,12 +643,69 @@ vllm_up() {   # vllm_up on|off: vLLM ROCm (vllm_server.sh --install: the pinned 
   done
   echo "vLLM did not come up in 30 min"; return 1
 }
+gufo_path() {   # gufo_path OWNER/REPO[@REV]/FILE -> a local file: the user's HF cache (LOCAL_HF_CACHE=1, never copied), else a download into $WORK/hf
+  local f=$1 r rev=main name; r=${f%/*}; name=${f##*/}; [[ $r == *@* ]] && { rev=${r#*@}; r=${r%@*}; }
+  if [ "${LOCAL_HF_CACHE:-0}" = 1 ]; then
+    local hub=${HF_HOME:-$HOME/.cache/huggingface}/hub/models--${r//\//--} c
+    for c in "$hub"/snapshots/$([ "$rev" = main ] && echo '*' || echo "$rev")*/"$name"; do [ -f "$c" ] && { echo "$c"; return 0; }; done
+  fi
+  local dst=$WORK/hf/$r/$rev/$name; [ -f "$dst" ] || { mkdir -p "${dst%/*}" && curl -fsSL --retry 3 ${HF_TOKEN:+-H "Authorization: Bearer $HF_TOKEN"} "https://huggingface.co/$r/resolve/$rev/$name" -o "$dst.part" && mv "$dst.part" "$dst"; } || return 1
+  echo "$dst"
+}
+gufo_up() {   # gufo_up on|off: Gufo's OpenAI server (gufo serve llm) in its release container, serving the job's "gufo" model; on = its drafting
+  # (--speculative dflash2 with the draft, 1 session), off = no drafting, 4 sessions (the streams4 rule). Reused while up in the same mode.
+  [ "${GUFO_MODE:-}" = "$1" ] && curl -sf "$gurl/v1/models" >/dev/null 2>&1 && return 0
+  gufo_down; vllm_down
+  for f in "$LOOM_SERVE_STATE"/*.pid; do [ -f "$f" ] && "$SV/stop.sh" "$(basename "$f" .pid)" >/dev/null 2>&1; done
+  "$B/llamacpp_server.sh" --stop "$LLAMA_PORT" >/dev/null 2>&1
+  command -v docker >/dev/null || { echo "no docker: the Gufo steps run its release container"; return 1; }
+  local img model draft spec ctx mf df args vols
+  img=$(q "print((j.get('gufo') or e.get('gufo') or {}).get('image') or '')"); model=$(q "print((j.get('gufo') or e.get('gufo') or {}).get('model') or '')")
+  draft=$(q "print((j.get('gufo') or e.get('gufo') or {}).get('draft') or '')"); spec=$(q "print((j.get('gufo') or e.get('gufo') or {}).get('speculative') or 'off')")
+  ctx=$(q "print((j.get('gufo') or e.get('gufo') or {}).get('context') or 65536)")
+  [ -n "$img" ] && [ -n "$model" ] || { echo "job/experiment \"gufo\" needs image and model"; return 1; }
+  mf=$(gufo_path "$model") || { echo "FAIL: gufo model $model"; return 1; }
+  args="--model $mf --served-model-name gufo-card --context $ctx"
+  if [ "$1" = on ] && [ "$spec" != off ]; then
+    df=$(gufo_path "$draft") || { echo "FAIL: gufo draft $draft"; return 1; }
+    args="$args --speculative $spec --dflash-model $df --sessions 1"
+  else args="$args --speculative off --sessions 4"; fi
+  # the container sees only the resolved files (an HF cache snapshot entry is a symlink into blobs/), read-only
+  local rmf rdf; rmf=$(readlink -f "$mf"); vols="-v $rmf:$rmf:ro"; [ -n "${df:-}" ] && { rdf=$(readlink -f "$df"); vols="$vols -v $rdf:$rdf:ro"; }
+  local rargs=${args//$mf/$rmf}; [ -n "${df:-}" ] && rargs=${rargs//$df/$rdf}
+  echo "$args" | sed -e "s#${HF_HOME:-$HOME/.cache/huggingface}/hub/#hfcache:#g" -e "s#$WORK/hf/#hf:#g" > "$out/gufo_args_$1.txt"
+  { echo "image $img"; docker image inspect --format '{{index .RepoDigests 0}}' "${img%@*}" 2>/dev/null; docker run --rm "$img" gufo --version 2>/dev/null | head -3; } > "$out/gufo_version.txt"
+  { echo "model $model sha256 $(basename "$(readlink -f "$mf")")"; [ -n "${df:-}" ] && echo "draft $draft sha256 $(basename "$(readlink -f "$df")")"; } > "$out/gufo_model.txt"
+  "$B/wait_vram.sh" "gufo serve ($1)" 1024 180 "$out/vram_log.txt"
+  mem_guard "gufo $1" || return 1
+  step "gufo serve ($1): $(cat "$out/gufo_args_$1.txt")"
+  docker rm -f "$GCONT" >/dev/null 2>&1
+  docker run -d --name "$GCONT" --network host --device /dev/kfd --device /dev/dri --ulimit memlock=-1 \
+    --group-add "$(getent group video | cut -d: -f3)" --group-add "$(getent group render | cut -d: -f3)" $vols \
+    "$img" gufo serve --host 127.0.0.1 --port "$GPORT" llm $rargs > "$out/gufo_cid_$1.txt" 2>&1 || { cat "$out/gufo_cid_$1.txt"; return 1; }
+  GUFO_MODE=$1
+  for _ in $(seq 900); do
+    curl -sf "$gurl/v1/models" >/dev/null 2>&1 && { echo "gufo ready"; return 0; }
+    [ "$(docker inspect -f "{{.State.Running}}" "$GCONT" 2>/dev/null)" = true ] || { docker logs "$GCONT" > "$out/gufo_serve_$1.log" 2>&1; echo "gufo died:"; tail -15 "$out/gufo_serve_$1.log"; return 1; }
+    sleep 1
+  done
+  echo "gufo did not come up in 15 min"; return 1
+}
 TH=$(q "print(j.get('thinking') or 'off')")   # chat_template_kwargs.enable_thinking sent to both engines
 echo "thinking: $TH (sent to both engines)"
 declare -A res
+if [ "${POWER_LOG:-0}" = 1 ]; then   # local evidence of the power mode: package W and GPU clock through every step
+  hw=$(ls -d /sys/class/drm/card*/device/hwmon/hwmon* 2>/dev/null | while read -r h; do [ "$(cat "$h/name" 2>/dev/null)" = amdgpu ] && [ -e "$h/freq1_input" ] && echo "$h"; done | head -1)
+  if [ -n "$hw" ]; then
+    echo "$hw" > "$out/power_source.txt"
+    ( while :; do p=$(cat "$hw/power1_input" 2>/dev/null || cat "$hw/power1_average" 2>/dev/null); f=$(cat "$hw/freq1_input" 2>/dev/null)
+        echo "$(date +%s.%N) ${p:-0} ${f:-0}"; sleep 0.2; done > "$out/power.tsv" ) & PLOG_PID=$!
+  else echo "POWER_LOG=1: no amdgpu hwmon with freq1_input" | tee "$out/power_source.txt"; fi
+fi
 queue=($steps); qi=0   # a queue, not a fixed list: the step extend:TO:HAVE:ROT appends sessions (ab_extend.py)
 while [ "$qi" -lt "${#queue[@]}" ]; do
-  s=${queue[$qi]}; qi=$((qi + 1))
+  [ -n "${sprev:-}" ] && printf '%s\t%s\t%s\n' "$sprev" "$st0" "$(date +%s.%N)" >> "$out/step_times.tsv"   # the previous step's span (also one that ended on an error)
+  s=${queue[$qi]}; qi=$((qi + 1)); st0=$(date +%s.%N); sprev=$s
   IFS=: read -r kind p1 p2 p3 <<< "$s"
   BK=rocm; bkt=; MODS=; case $kind in *@*) bkt=-${kind#*@}; BK=${kind#*@}; MODS=${BK#"${BK%%.*}"}; BK=${BK%%.*}; kind=${kind%@*};; esac   # llama@vulkan: the other backend's build
   [ "$BK" = rocm ] || [ "$vtag" != - ] || { echo "$s: set llamacpp_vulkan"; res[$s]=ERROR; continue; }
@@ -756,6 +841,26 @@ print('vllm', k, [x.get(k) for x in r if x.get(k)], 'median', round(st.median(v)
       grep -q agg_tps "$out/c4_vllm_n$cn.txt" 2>/dev/null || { echo "vLLM could not run 4 concurrent streams: $(tail -1 "$out/c4_vllm_err.txt" | cut -c1-200)" > "$out/vllm_note_c4.txt"; res[$s]="no 4-stream rate (vllm_note_c4.txt)"; vllm_down; continue; }
       echo "{\"session_end\": \"vllm\"}" >> "$out/c4_vllm_n$cn.txt"
       res[$s]=$("$T" -c "import json,statistics as st; print('vllm c4 median', st.median(r['agg_tps'] for l in open('$out/c4_vllm_n$cn.txt') if 'agg_tps' in (r := json.loads(l))))");;
+    gufoperf)   # gufoperf:N[:long]: Gufo serving its own model with its drafting, perf.py --kind gufo N times on one server (each run a session, as llama.cpp's)
+      gufo_up on || { res[$s]=ERROR; continue; }
+      step "gufo perf x $p1 ${p2:-} (thinking $TH)"
+      for i in $(seq 1 "$p1"); do
+        (cd "$out" && timeout 3600 "$T" "$B/perf.py" "$gurl" gufo --kind gufo --model gufo-card --no-campaign --thinking "$TH" --repeat-rows "$rrows" --log "perf_gufo.jsonl" ${p2:+--long} | tail -1)
+        echo "{\"session_end\": \"gufo\"}" >> "$out/perf_gufo.jsonl"
+        curl -sf "$gurl/metrics" > "$out/gufo_metrics_on_$(date +%s).txt" 2>/dev/null
+      done
+      docker logs "$GCONT" > "$out/gufo_serve_on.log" 2>&1
+      res[$s]=$("$T" -c "
+import json,statistics as st; r=[json.loads(l) for l in open('$out/perf_gufo.jsonl') if l.startswith('{\"label')]
+k='decode_tps_32k' if '${p2:-}' else 'decode_tps'
+print('gufo', k, [x.get(k) for x in r if x.get(k)], 'median', round(st.median(v), 2) if (v := [x[k] for x in r if x.get(k)]) else 'n/a')");;
+    gufoc4)   # gufoc4[:N]: 4 streams on Gufo without drafting (4 sessions), N (default 3) runs of c4_steady.py
+      gufo_up off || { res[$s]=ERROR; continue; }
+      step "gufo c4"
+      for i in $(seq 1 "${p1:-3}"); do (cd "$out" && timeout 1800 "$T" "$B/c4_steady.py" "$gurl" 4 --model gufo-card --thinking "$TH" | tail -1 | tee -a "c4_gufo.txt"); done
+      echo "{\"session_end\": \"gufo\"}" >> "$out/c4_gufo.txt"
+      docker logs "$GCONT" > "$out/gufo_serve_off.log" 2>&1
+      res[$s]=$("$T" -c "import json,statistics as st; print('gufo c4 median', st.median(r['agg_tps'] for l in open('$out/c4_gufo.txt') if 'agg_tps' in (r := json.loads(l))))");;
     llamac4)   # llamac4[:N_MAX]
       llama_up "${p1:-}" || { res[$s]=ERROR; continue; }
       nm=$(echo "$LSPEC" | grep -oE "n-max [0-9]+" | grep -oE "[0-9]+"); nm=${nm:-0}   # 0: no drafting
@@ -943,6 +1048,8 @@ PY
   esac
   echo "RESULT $job $s: ${res[$s]}"
 done
+[ -n "${sprev:-}" ] && printf '%s\t%s\t%s\n' "$sprev" "$st0" "$(date +%s.%N)" >> "$out/step_times.tsv"
+[ -n "${PLOG_PID:-}" ] && { kill "$PLOG_PID" 2>/dev/null; "$T" "$here/.github/scripts/power_steps.py" "$out" ${POWER_BAND:+--band $POWER_BAND} > "$out/power_steps.txt" 2>&1; cat "$out/power_steps.txt"; }
 for s in "${queue[@]}"; do echo "$s	${res[$s]:-}"; done > "$out/results.tsv"
 "$T" - "$job" "$out" <<'EOF'
 import json, os, sys

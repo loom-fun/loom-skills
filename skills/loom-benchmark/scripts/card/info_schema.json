@@ -108,6 +108,8 @@
              "version": {"type": ["string", "null"], "description": "e.g. llamacpp-vulkan/b12211"},
              "args": {"type": ["string", "null"], "description": "The exact server arguments (model path, host and port left out)"},
              "sha256": {"type": ["string", "null"], "description": "sha256 of the release archive the measurement ran"},
+             "model": {"type": "object", "required": ["file"], "description": "Another engine running ITS OWN model file (not the card's GGUF), e.g. Gufo on unsloth UD-Q4_K_XL: shown on the card; such a column is never the margin's baseline",
+                       "properties": {"file": {"type": "string"}, "sha256": {"type": ["string", "null"]}, "label": {"type": ["string", "null"]}}},
              "differs": {"type": "array", "items": {"type": "string"}, "description": "Server settings that differ from the main baseline's or that this backend could not run, with the reason, one line each (never silently changed)"}
             }
            },
@@ -186,11 +188,15 @@
   "source": {
    "type": "object", "required": ["kind", "run", "url", "device", "hrx_loom"],
    "properties": {
-    "kind": {"enum": ["local", "devlab", "factory", "machine"], "description": "local: a developer's machine (gates only: never a performance session); machine: a NAMED machine outside DevLab (the GPU has no DevLab runner; its device block names it; fleet/devices/*.json holds its results with this provenance: performance allowed); devlab: a workflow on AMD DevLab Dispatch (nightly-gates, devlab-port, devlab-perf: the card's performance); factory: the loom-factory workflow"},
+    "kind": {"enum": ["local", "devlab", "factory", "machine"], "description": "local: a developer's machine (gates; a performance session only with power_mode: a named non-default power mode, every engine re-measured in that job); machine: a NAMED machine outside DevLab (the GPU has no DevLab runner; its device block names it; fleet/devices/*.json holds its results with this provenance: performance allowed); devlab: a workflow on AMD DevLab Dispatch (nightly-gates, devlab-port, devlab-perf: the card's performance); factory: the loom-factory workflow"},
     "run": {"type": ["string", "null"], "description": "GitHub Actions run id"},
     "url": {"type": ["string", "null"]},
     "device": {"oneOf": [{"$ref": "#/$defs/device"}, {"type": "null"}]},
-    "hrx_loom": {"oneOf": [{"$ref": "#/$defs/hrx_loom"}, {"type": "null"}], "description": "The Loom SDK that served the model"}
+    "hrx_loom": {"oneOf": [{"$ref": "#/$defs/hrx_loom"}, {"type": "null"}], "description": "The Loom SDK that served the model"},
+    "power_mode": {"type": "string", "description": "local only: the platform power mode the job ran at (a key of the device preset's power_modes, e.g. 123w); a local source with it may hold performance (card_lib.perf_source_ok, methodology rule 18)"},
+    "power": {"type": "object", "description": "local only: power_steps.json summary: per engine median W / GHz of busy samples, steps outside the band",
+              "properties": {"mode": {"type": "string"}, "sampler": {"type": ["string", "null"]}, "busy_w": {"type": ["number", "null"]},
+                             "band": {"type": ["array", "null"]}, "engines": {"type": "object"}, "flags": {"type": "array", "items": {"type": "string"}}}}
    }
   },
   "device": {

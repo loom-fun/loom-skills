@@ -120,6 +120,16 @@ FAR_FRACTION = 0.5
 # acceptance) is a drafting statistic of model, drafter and text, not a timing; its session's programs_sha256 decides
 # whether it is stale like any other card value.
 TIMED = set(ROOFLINE_METRIC)
+LOCAL_POWER_SOURCE = "local"   # a local machine at a named non-default power mode (perf_source_ok)
+
+
+def perf_source_ok(src):
+    """Whether a SOURCE block may hold a card's performance session: a PERF_SOURCE_KINDS source, or a local machine measured at a
+    named non-default power mode (make_info.py perf --source-kind local --power-mode: every engine of that GPU's table re-measured in
+    the same job at that power, methodology rule 18). A plain local session (a development run) never is."""
+    return bool(src) and (src.get("kind") in PERF_SOURCE_KINDS or (src.get("kind") == LOCAL_POWER_SOURCE and bool(src.get("power_mode"))))
+
+
 PERF_SOURCE_KINDS = ("devlab", "factory", "machine")   # sources a card's performance sessions may come from (machine: a GPU with no DevLab runner, measured on a named machine: fleet/devices data files)
 
 # (key, label): the features table's rows.

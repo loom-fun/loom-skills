@@ -1,6 +1,6 @@
 """Throughput on fixed workloads, for Loom or llama.cpp (same prompts both sides).
 
-usage: python perf.py URL LABEL [--kind loom|llama] [--model MODEL_ID] [--long] [--log perf_log.jsonl] [--reverted]
+usage: python perf.py URL LABEL [--kind loom|llama|vllm|gufo] [--model MODEL_ID] [--long] [--log perf_log.jsonl] [--reverted]
                      [--no-campaign] [--repeat-rows N]
 Every run appends one row to --log (also with --no-campaign, which only skips the optimization campaign's
 requirements and tracking: make_info.py perf and devlab_perf.sh read those rows).
@@ -56,8 +56,9 @@ from bench_common import acceptance_between, doc, long_prompt, perf_metrics, ser
 ap = argparse.ArgumentParser()
 ap.add_argument("url")
 ap.add_argument("label")
-ap.add_argument("--kind", default="loom", choices=["loom", "llama", "vllm"],
-                help="the engine: loom, llama (llama.cpp's server-side timings), vllm (an OpenAI server timed by the client like Loom, no drafted-token counters)")
+ap.add_argument("--kind", default="loom", choices=["loom", "llama", "vllm", "gufo"],
+                help="the engine: loom, llama (llama.cpp's server-side timings), vllm or gufo (an OpenAI server timed by the client like Loom, "
+                     "no drafted-token counters read per request)")
 ap.add_argument("--model", default=None, help="Loom model id (model.json model.id), or the vLLM server's served model name")
 ap.add_argument("--long", action="store_true")
 ap.add_argument("--log", default="perf_log.jsonl")
@@ -78,6 +79,7 @@ if not a.no_campaign:  # required steps fail loudly instead of warning (warnings
     from campaign import require
     require(a.kind, a.log)
 H = {"Content-Type": "application/json"}
+CLIENT_TIMED = ("loom", "vllm", "gufo")   # streaming TTFT and token arrival measured here; llama.cpp: its server-side timings
 
 
 class OverContext(Exception):
@@ -87,7 +89,7 @@ class OverContext(Exception):
 def run(content, max_tokens):
     """-> (prompt_tokens, prefill_tps, decode_tps, completion_tokens); raises OverContext on HTTP 400"""
     msgs = [{"role": "user", "content": content}]
-    if a.kind in ("loom", "vllm"):
+    if a.kind in CLIENT_TIMED:
         s = stream(U, M, msgs, max_tokens, extra=TH)
         status, error = s["status"], s.get("error")
     else:
@@ -97,7 +99,7 @@ def run(content, max_tokens):
         raise OverContext(error)
     if status != 200:
         raise RuntimeError(f"HTTP {status}: {error}")
-    if a.kind in ("loom", "vllm"):
+    if a.kind in CLIENT_TIMED:
         return s["prompt_tokens"], s["prompt_tokens"] / s["ttft"], s["decode_tps"], s["tokens"]
     d = r.json()
     t = d["timings"]
