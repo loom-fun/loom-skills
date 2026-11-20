@@ -46,7 +46,7 @@ printf '%s\\n' "$@" > "$LLAMACPP_ARGS_FILE"
                       LLAMA_PORT='8131', lurl='http://unused', gguf='/exact/pinned-target.gguf', LSPEC='')
         shell='\n'.join(f'export {k}={shlex.quote(v)}' for k,v in values.items())+'\n'
         shell += line('q()')+'\n'+line('lkv=')+'\n'+line('lvkv=')+'\n'
-        shell += 'step() { :; }\nhf_sub() { printf "%s\\n" "$1"; }\n'
+        shell += 'step() { :; }\nhf_sub() { printf "%s\\n" "$1"; }\ngufo_down() { :; }\nmem_guard() { :; }\n'
         shell += function('llama_up')+'\nllama_up\n'
         result = subprocess.run(['bash','-c',shell],capture_output=True,text=True)
         argv=(root/'argv').read_text().splitlines() if (root/'argv').exists() else None

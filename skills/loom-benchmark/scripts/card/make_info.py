@@ -84,7 +84,9 @@ byte-identical files.
       [--hrx-loom auto|none|FILE.json]. auto records this machine's device and the Loom SDK under $LOOM_ROOT
       (../machine_info.py); on downloaded DevLab job files: --device none --hrx-loom none. Card performance comes
       only from AMD DevLab Dispatch (a devlab-perf job or a scripted DevLab port, kind devlab; the loom-factory
-      workflow, kind factory), or from a named machine for a GPU with no DevLab runner (kind machine): perf refuses --source-kind local. Gates may come from any source.
+      workflow, kind factory), or from a named machine for a GPU with no DevLab runner (kind machine). perf refuses --source-kind local
+      unless it names a non-default power mode with its evidence (--power-mode 123w --power-evidence power_steps.json: one local job
+      that re-measured every engine at that power, methodology rule 18). Gates may come from any source.
 
 Evidence file (loom-card-evidence/2), every block optional:
   {"evidence": "loom-card-evidence/2", "gpu": "strix-halo" | "radeon-r9700",   # the GPU that produced it (perf, gates, roofline
@@ -116,7 +118,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.dirname(HERE))
-from card_lib import (DEFAULT_GPU, DRAFTED_ROWS, EVIDENCE_ID, GPUS, METRIC_KEYS, PERF_SOURCE_KINDS,  # noqa: E402
+from card_lib import (DEFAULT_GPU, DRAFTED_ROWS, EVIDENCE_ID, GPUS, METRIC_KEYS, PERF_SOURCE_KINDS, perf_source_ok,  # noqa: E402
                       HF, RETIRED_GATES, ROOFLINE_METRIC, SCHEMA_ID, build_tag, card_metrics, derived_tags, dumps, gate_applies, gpu_from_device,
                       gpu_view, load_info, load_json, load_package, metric_applies, native_context, over_context, package_facts,
                       programs_sha256, require_valid, fixed_pool_capacity, gpu_preset_execution, gpu_preset_name, with_gpu_preset, served_context, fit_served_context, upstream_facts, with_gate_features, write_json,
@@ -169,7 +171,8 @@ class Sources:
         self.by_id = {}
 
     def add(self, src):
-        src = {k: src.get(k) for k in ("kind", "run", "url", "device", "hrx_loom")}
+        src = {**{k: src.get(k) for k in ("kind", "run", "url", "device", "hrx_loom")},
+               **{k: src[k] for k in ("power_mode", "power") if src.get(k)}}   # a local session at a power mode keeps its evidence
         base = source_id(src)
         for n in range(1, 1000):
             sid = base if n == 1 else f"{base}-{n}"
@@ -356,7 +359,7 @@ def cmd_build(a):
                      f"({card['memory_bytes']}) is the old build's. Pass --memory-bytes (build.py prints the new one).")
         versions = {k: v for k, v in old["versions"].items() if k != "card_generator"}
         sources.by_id = dict(old["sources"])
-        kind_of = lambda s: (old.get("sources") or {}).get(s["source"], {}).get("kind")
+        src_of = lambda s: (old.get("sources") or {}).get(s["source"])
         for gpu, dev in old["devices"].items():
             st = gpu_state(gpu)
             st["meta"] = {k: dev[k] for k in ("state", "required_bytes", "reason", "memory_bytes", "served_context", "serve_args", "shares_section_with") if k in dev}
@@ -364,7 +367,7 @@ def cmd_build(a):
             if dev.get("performance"):
                 st["baseline"] = dev["performance"]["baseline"]
                 st["sessions"] = [] if a.reset_performance else [s for s in dev["performance"]["sessions"]
-                                                                if kind_of(s) in PERF_SOURCE_KINDS]
+                                                                if perf_source_ok(src_of(s))]
                 dropped = len(dev["performance"]["sessions"]) - len(st["sessions"])
                 if dropped:
                     print(f"--from-info ({gpu}): dropped {dropped} performance session(s)"
@@ -798,7 +801,9 @@ def refused_tokens(rows, package, measured):
     """{card metric: prompt tokens} of the long documents the Loom server refused (perf.py rows' over_context) and
     the session did not measure: each prompt re-rendered from its row's nonce and counted with the package's
     tokenizer (null without --package, or for a row from before perf.py logged its nonce)."""
-    from bench_common import Package, long_prompt
+    if not any(r.get("over_context") for r in rows):
+        return {}
+    from bench_common import Package, long_prompt   # needs requests: only when a document was refused
     card_key = {v: k for k, v in ROOFLINE_METRIC.items()}
     pkg = Package(package) if package and os.path.exists(os.path.join(package, "tokenizer.json")) else None
     out = {}
@@ -846,9 +851,14 @@ def copy_baselines(metrics, old, gpu):
 
 
 def cmd_perf(a):
-    if a.source_kind not in PERF_SOURCE_KINDS:
-        sys.exit(f"perf --source-kind {a.source_kind}: card performance comes only from AMD DevLab Dispatch "
-                 "(a devlab-perf job: loom-fleet reference/publish.md step 3); measure locally only to develop")
+    if a.source_kind == "local" and not (a.power_mode and a.power_evidence):
+        sys.exit("perf --source-kind local: a card's performance comes from AMD DevLab Dispatch (a devlab-perf job: loom-fleet "
+                 "reference/publish.md step 3), or from a local machine at a named non-default power mode with its evidence "
+                 "(--power-mode LABEL --power-evidence power_steps.json; every engine re-measured in that job, methodology rule 18)")
+    if a.source_kind != "local" and a.power_mode:
+        sys.exit("--power-mode belongs to a local session (--source-kind local); DevLab runners run at their registered default")
+    if a.source_kind not in PERF_SOURCE_KINDS + ("local",):
+        sys.exit(f"perf --source-kind {a.source_kind}: not a performance source")
     if a.perf_log:
         loom_rows = perf_rows(a.perf_log, "loom", a.loom_label)
         llama_rows = perf_rows(a.perf_log, "llama", a.llama_label)
@@ -893,7 +903,10 @@ def cmd_perf(a):
     commands = list(a.command or [])
     if a.commands_file:
         commands += [line.rstrip("\n") for line in open(a.commands_file, encoding="utf-8") if line.strip()]
-    session = {"date": date, "source": source_arg(a), "runs": runs, "aggregate": "median", "metrics": metrics,
+    src = source_arg(a)
+    if a.power_mode:
+        src.update(power_mode=a.power_mode, power=power_block(a.power_evidence, a.power_mode))
+    session = {"date": date, "source": src, "runs": runs, "aggregate": "median", "metrics": metrics,
                "programs_sha256": programs_sha256(a.package) if a.package else None}
     if a.fetched_programs and a.package and a.fetched_programs != programs_sha256(a.package):
         sys.exit(f"the run fetched programs {a.fetched_programs[:12]}, the package has {programs_sha256(a.package)[:12]}: "
@@ -912,10 +925,24 @@ def cmd_perf(a):
         perf["baseline"] = dict(perf.get("baseline") or {"name": a.baseline_name, "version": None, "args": None})
         if a.baseline_sha256:
             perf["baseline"]["sha256"] = a.baseline_sha256
+        if a.baseline_model:   # another engine running ITS OWN model file (Gufo): named on the card, never the margin's baseline
+            perf["baseline"]["model"] = {"file": a.baseline_model, "sha256": a.baseline_model_sha256, "label": a.baseline_label}
+    elif a.baseline_model:
+        sys.exit("--baseline-model is for a further baseline engine (--backend NAME other than rocm)")
     if a.differs and "baseline" in perf:   # the main baseline too: a Loom-side note or a cell llama.cpp cannot run (rule: never silent)
         perf["baseline"]["differs"] = a.differs
     write_json(a.o, {"evidence": EVIDENCE_ID, **gpu_key(a, session["source"]), "performance": perf})
     print(f"wrote {a.o}: " + ", ".join(f"{k} {m.get('loom')}/{m['baseline']}" for k, m in metrics.items()), file=sys.stderr)
+
+
+def power_block(path, mode):
+    """The power evidence of a local session (.github/scripts/power_steps.py's power_steps.json): per engine the median W and GHz of
+    its busy samples, and the steps outside the expected band."""
+    d = load_json(path)
+    flags = [f"{r['step']}: {r['flag']}" for r in d.get("steps") or [] if r.get("flag")]
+    return {"mode": mode, "sampler": d.get("source"), "busy_w": d.get("busy_w"), "band": d.get("band"),
+            "engines": {k: {x: v[x] for x in ("median_w", "median_ghz", "p95_w", "busy") if x in v} for k, v in (d.get("engines") or {}).items()},
+            "flags": flags}
 
 
 # ---------------------------------------------------------------- gate results -> evidence
@@ -1283,6 +1310,13 @@ def main(argv=None):
     p.add_argument("--backend", default="rocm", help="the llama.cpp backend measured: rocm (the card's baseline, with Loom) "
                    "or another (vulkan): a baseline-only session recorded under performance.baselines.BACKEND")
     p.add_argument("--baseline-sha256", help="sha256 of the baseline release archive (--backend other than rocm)")
+    p.add_argument("--power-mode", help="local sessions only: the platform power mode the job ran at (a key of the device preset's "
+                   "power_modes, e.g. 123w for a Strix Halo in BIOS performance mode); every engine of the table measured in that job")
+    p.add_argument("--power-evidence", help="power_steps.json of the job (devlab_perf.sh POWER_LOG=1): median W / GHz per engine")
+    p.add_argument("--baseline-model", help="--backend other than rocm: the model FILE the engine ran when it is not the card's GGUF "
+                   "(e.g. Gufo on its own OWNER/REPO/FILE): shown on the card, the column is then never the margin's baseline")
+    p.add_argument("--baseline-model-sha256")
+    p.add_argument("--baseline-label", help="the column header of that engine (default its name)")
     p.add_argument("--differs", action="append", help="a server setting that differs from the main baseline's or that this backend could not run, with the reason, one line (repeat)")
     p.add_argument("--fetched-programs", help="programs_sha256 the DevLab job fetched (its programs_sha256.txt): refused if "
                    "it differs from --package's, i.e. the card was republished after the run fetched it")

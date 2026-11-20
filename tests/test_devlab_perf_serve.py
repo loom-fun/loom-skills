@@ -46,6 +46,7 @@ exp={w}/exp.json; job=j
 {_line("qv()")}
 sdk_root() {{ SDKR=/sdk; }}
 step() {{ :; }}
+gufo_down() {{ :; }}; mem_guard() {{ :; }}
 echo '{{}}' > {w}/serve_v.out
 {_fn("serve_alone")}
 serve_alone v >/dev/null 2>&1; true

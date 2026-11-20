@@ -99,7 +99,7 @@ the local GPU. Hand the card over and move the local GPU on to the next item.
    --hrx-loom JOB_HRX.json --baseline-version llamacpp-rocm/BUILD --baseline-args "$(cat llamacpp_args.txt)"
    --fetched-programs "$(cat programs_sha256.txt)"` on the job's artifact (write JOB_DEVICE.json and JOB_HRX.json with
    `card/pull_devlab.py --identity JOBDIR --device-out JOB_DEVICE.json --hrx-out JOB_HRX.json`: the runner and the SDK
-   the job recorded; `none` if absent; `--source-kind devlab` is perf's default, `--source-kind local` is refused), and
+   the job recorded; `none` if absent; `--source-kind devlab` is perf's default, `--source-kind local` is refused except for a power-mode card, below), and
    rebuild the card as above.
    **Vulkan baseline** (every card, one job each; the same workloads and `llama_spec` as the ROCm baseline): job fields
    `llamacpp_vulkan: "b12211"`, variant `{"name": "card"}`, steps `llama@vulkan.np1:2 llama@vulkan.np1:2:long llamac4@vulkan.perslot.nodraft` (the same drafting choice as ROCm on 1-stream rows)
@@ -132,3 +132,16 @@ parked its CPU while the GPU worked. Loom is now served with an active wait (`se
 `amdgpu://?completion_spin_ns=4294967295`; `LOOM_ACTIVE_WAIT=0` opts out, for A/B only), and DevLab matches or beats
 the old local numbers. Local runs are for development only (the optimize/port loop, kernel A/B, quick checks), and
 a Loom number measured without the active wait is not comparable with a card's.
+
+**Exception: a card measured at a non-default power mode** (methodology rule 18; owner rule 2026-11-20). The DevLab Strix Halo
+runners run at 85 W; a card that states another power mode (the local GMKtec EVO-X2 in BIOS performance mode, ~123 W) comes from
+ONE local job that measures every engine of that GPU's table at that power, interleaved:
+`WORK=DIR LOCAL_HF_CACHE=1 POWER_LOG=1 POWER_BAND="120 125" MIN_MEMAVAIL_GB=40 flock GPU.lock .github/scripts/devlab_perf.sh EXP.json JOB`
+with the card's normal steps (`perf:card:1` x3 short and long, `c4:nodraft`, `llama@rocm.np1:1` / `llama@vulkan.np1:1` rounds,
+`llamac4@rocm.nodraft`, `llamac4@vulkan.perslot.nodraft`) in ABBA rounds, plus `gufoperf:1[:long]` / `gufoc4` when the card shows
+Gufo (experiment field `gufo`: its pinned container image, ITS OWN model file and drafter; devlab_perf.sh header). Ingest each engine
+with `make_info.py perf --source-kind local --power-mode 123w --power-evidence OUT/power_steps.json --run JOB --device DEV.json`
+(DEV.json names the machine; Vulkan and Gufo with `--backend vulkan|gufo`, Gufo also `--baseline-name Gufo --baseline-model
+OWNER/REPO/FILE --baseline-model-sha256 SHA --baseline-label "Gufo (UD-Q4_K_XL)"` and `--differs` lines for its drafting), the
+roofline with `make_info.py roofline --power 123w`. Gates still come from DevLab (final preset), and the other GPUs' rows keep their
+DevLab sources (labelled so on the card).
