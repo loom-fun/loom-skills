@@ -3604,6 +3604,88 @@ if True:   # coverage: a case for every kernel the package launches
   check.return
 }}
 """)
+    for _k in sorted({k[:-3] if k.endswith("_lv") else k for k in _todo if re.fullmatch(r"g_silu_mul_rs_n\d+(_lv)?", k)}):
+        # g_silu_mul_rs_nN (gen_llm SILU_MUL_RS): g_silu_mul + g_row_scale_f16_live in one kernel: f16 row + scale of silu(gate) * up
+        _n = int(_k.rsplit("_n", 1)[1])
+        _g = (2 * _brng.standard_normal((3, _n)) * np.array([[1e-3], [1.0], [3e4]])).astype(np.float32); _u = _brng.standard_normal((3, _n)).astype(np.float32)
+        _o = (_g.astype(np.float64) / (1 + np.exp(-_g.astype(np.float64)))) * _u
+        _e = np.clip(np.frexp(np.abs(_o).max(1))[1] - 1 - 13, 0, 100)
+        _s = np.stack([2.0 ** -_e, 2.0 ** _e], 1).astype(np.float32)
+        for _nm, _a in [("smr_g", _g), ("smr_u", _u), ("smr_s", _s), ("smr_h", (_o * _s[:, :1]).astype(np.float16))]:
+            save(_nm, _a)
+        cases.append(f"""check.case public @silu_mul_rs {{
+  %t = check.literal value(3) : index
+  %f = check.file.read.npy path("smr_g{KS}.npy") : tensor<3x{_n}xf32>
+  %u = check.file.read.npy path("smr_u{KS}.npy") : tensor<3x{_n}xf32>
+  %es = check.file.read.npy path("smr_s{KS}.npy") : tensor<3x2xf32>
+  %eh = check.file.read.npy path("smr_h{KS}.npy") : tensor<3x{_n}xf16>
+  %s = check.generate.fill value(0.0) : tensor<3x2xf32>
+  %h = check.generate.fill value(0.0) : tensor<3x{_n}xf16>
+  kernel.launch @{_k}[%t](%t, %f, %u, %s, %h) : [index](index, tensor<3x{_n}xf32>, tensor<3x{_n}xf32>, tensor<3x2xf32>, tensor<3x{_n}xf16>)
+  check.expect.close actual(%s) expected(%es) atol(0.0) rtol(0.0) nan(different) : tensor<3x2xf32>
+  check.expect.close actual(%h) expected(%eh) atol(1.0e-3) rtol(2.0e-3) nan(different) : tensor<3x{_n}xf16>
+  check.return
+}}
+""")
+    if "g_gdn_norm_gate_rs" in _todo or "g_gdn_norm_gate_rs_lv" in _todo:
+        # g_gdn_norm_gate_rs (gen_llm GDN_NORM_RS): g_gdn_norm_gate + g_row_scale_f16_live: f16 row + scale of the gated RMSNorm output;
+        # a padding row (info word 2 = 0) gets scale 0 and a zero f16 row
+        from gen_gdn import gdn_geometry as _gg
+        _G = _gg(cfg); _HV, _DV, _VD = _G["HV"], _G["DV"], _G["VD"]
+        _li = cfg["recurrent_layers"][0]
+        _nw = deq(f"blk.{_li}.ssm_norm.weight").astype(np.float32)
+        _raw = (_brng.standard_normal((4, _VD)) * np.array([[1.0], [1.0], [3e3], [1e-2]])).astype(np.float32)
+        _z = (2 * _brng.standard_normal((4, _VD))).astype(np.float32)
+        _r3 = _raw.reshape(4, _HV, _DV).astype(np.float64); _z3 = _z.reshape(4, _HV, _DV).astype(np.float64)
+        _o = (_r3 / np.sqrt((_r3 ** 2).mean(-1, keepdims=True) + eps) * _nw * (_z3 / (1 + np.exp(-_z3)))).reshape(4, _VD)
+        _e = np.clip(np.frexp(np.abs(_o).max(1))[1] - 1 - 13, 0, 100)
+        for _sfx, _live in (("", np.array([1, 0, 1, 1], np.int32)), ("_all", np.ones(4, np.int32))):
+            _gi = np.zeros((4, 4), np.int32); _gi[:, 2] = _live
+            _gs = (np.stack([2.0 ** -_e, 2.0 ** _e], 1) * _live[:, None]).astype(np.float32)
+            for _nm, _a in [("gnr_raw", _raw), ("gnr_z", _z), ("gnr_w", _nw), (f"gnr_i{_sfx}", _gi), (f"gnr_s{_sfx}", _gs), (f"gnr_h{_sfx}", (_o * _gs[:, :1]).astype(np.float16))]:
+                save(_nm, _a)
+            cases.append(f"""check.case public @gdn_norm_gate_rs{_sfx} {{
+  %t = check.literal value(4) : index
+  %info = check.file.read.npy path("gnr_i{_sfx}{KS}.npy") : tensor<4x4xi32>
+  %raw = check.file.read.npy path("gnr_raw{KS}.npy") : tensor<4x{_VD}xf32>
+  %w = check.file.read.npy path("gnr_w{KS}.npy") : tensor<{_DV}xf32>
+  %z = check.file.read.npy path("gnr_z{KS}.npy") : tensor<4x{_VD}xf32>
+  %es = check.file.read.npy path("gnr_s{_sfx}{KS}.npy") : tensor<4x2xf32>
+  %eh = check.file.read.npy path("gnr_h{_sfx}{KS}.npy") : tensor<4x{_VD}xf16>
+  %s = check.generate.fill value(0.0) : tensor<4x2xf32>
+  %h = check.generate.fill value(0.0) : tensor<4x{_VD}xf16>
+  kernel.launch @g_gdn_norm_gate_rs[%t](%t, %info, %raw, %w, %z, %s, %h) : [index](index, tensor<4x4xi32>, tensor<4x{_VD}xf32>, tensor<{_DV}xf32>, tensor<4x{_VD}xf32>, tensor<4x2xf32>, tensor<4x{_VD}xf16>)
+  check.expect.close actual(%s) expected(%es) atol(0.0) rtol(0.0) nan(different) : tensor<4x2xf32>
+  check.expect.close actual(%h) expected(%eh) atol(1.0e-3) rtol(2.0e-3) nan(different) : tensor<4x{_VD}xf16>
+  check.return
+}}
+""")
+    if "g_post_add_norm_rs_live_noh" in _todo or "g_post_add_norm_rs_live_noh_lv" in _todo:
+        # g_post_add_norm_rs_live_noh (gen_llm POST_NORM_NOH): g_post_add_norm_rs_live without the f32 h store; every row live (the K_lv clone's reference)
+        _ni = np.zeros((3, 4), np.int32); _ni[:, 2] = 1
+        _ns = np.stack([2.0 ** -pa_e, 2.0 ** pa_e], 1).astype(np.float32)
+        for _nm, _a in [("pan_i", _ni), ("pan_s", _ns), ("pan_h16", (pa_h * _ns[:, :1]).astype(np.float16))]:
+            save(_nm, _a)
+        cases.append(f"""check.case public @post_add_norm_rs_live_noh {{
+  %rows = check.literal value(3) : index
+  %info = check.file.read.npy path("pan_i{KS}.npy") : tensor<3x4xi32>
+  %y = check.file.read.npy path("pa_y{KS}.npy") : tensor<3x{H}xf32>
+  %x = check.file.read.npy path("pa_x{KS}.npy") : tensor<3x{H}xf32>
+  %wp = check.file.read.npy path("pa_wp{KS}.npy") : tensor<{H}xf32>
+  %wn = check.file.read.npy path("pa_wn{KS}.npy") : tensor<{H}xf32>
+  %ex = check.file.read.npy path("pa_xe{KS}.npy") : tensor<3x{H}xf32>
+  %es = check.file.read.npy path("pan_s{KS}.npy") : tensor<3x2xf32>
+  %eh16 = check.file.read.npy path("pan_h16{KS}.npy") : tensor<3x{H}xf16>
+  %h = check.generate.fill value(0.0) : tensor<3x{H}xf32>
+  %s = check.generate.fill value(0.0) : tensor<3x2xf32>
+  %h16 = check.generate.fill value(0.0) : tensor<3x{H}xf16>
+  kernel.launch @g_post_add_norm_rs_live_noh[%rows](%rows, %info, %y, %wp, %x, %wn, %h, %s, %h16) : [index](index, tensor<3x4xi32>, tensor<3x{H}xf32>, tensor<{H}xf32>, tensor<3x{H}xf32>, tensor<{H}xf32>, tensor<3x{H}xf32>, tensor<3x2xf32>, tensor<3x{H}xf16>)
+  check.expect.close actual(%x) expected(%ex) atol(1.0e-5) rtol(1.0e-5) nan(different) : tensor<3x{H}xf32>
+  check.expect.close actual(%s) expected(%es) atol(0.0) rtol(0.0) nan(different) : tensor<3x2xf32>
+  check.expect.close actual(%h16) expected(%eh16) atol(1.0e-3) rtol(1.0e-3) nan(different) : tensor<3x{H}xf16>
+  check.return
+}}
+""")
     import ktest_variants  # noqa: E402  K_lv variants from their direct kernels' cases; kt_ copies of kernels a case root cannot run
     _lib = _pkg_llm_text() or ""
     _todo = pkg_launched() - cases_launched()
