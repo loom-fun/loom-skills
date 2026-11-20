@@ -1,5 +1,12 @@
 # Facet: hybrid-gdn: prefill and decode (gated delta-net recurrence)
 
+## Contents
+
+- Gated delta-net recurrence
+- Producer fusions on the 27B hybrid, Strix Halo
+- gfx12 chunked
+- gfx11 chunked prefill on Strix Halo
+
 ## Gated delta-net recurrence (`gen_gdn.py`) and the f16 row scale
 
 - **Loom's backend orders every global load after earlier global stores** (`s_waitcnt_vscnt 0` before the
