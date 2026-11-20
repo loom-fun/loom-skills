@@ -1,0 +1,10 @@
+{
+ "gguf": "/home/soulafein83/loom/gemma4-e4b/parameter/gemma-4-E4B-it-Q4_K_M.gguf",
+ "ranked": [
+  {
+   "decode_tps": 101.8,
+   "prefill_1k_tps": 3051.0,
+   "dir": "/home/soulafein83/llamacpp-rocm/b1380"
+  }
+ ]
+}

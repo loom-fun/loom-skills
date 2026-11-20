@@ -1,0 +1,6 @@
+{
+ "admitted": true,
+ "tokens": 73653,
+ "context": 73728,
+ "detail": "ADMITTED 73653 tokens of a 73728-token context (31.0s, then cancelled)"
+}
