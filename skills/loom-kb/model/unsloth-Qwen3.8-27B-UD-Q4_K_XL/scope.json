@@ -143,7 +143,7 @@
    "set": {
     "decode.iq4.act_q8": true
    },
-   "evidence": "q38xl dec lane (PR #1332): IQ4_XS / IQ4_NL (33 % of trunk bytes) verify matvecs ran on f32 activations at 138 GB/s vs 225 for the int8 K-quant matvecs (drafted-decode HAL profile, DevLab Strix run 44825902062); with int8 activations iq4_xs/iq4_nl reach 226/225 GB/s, step 108.5 -> 96.3 ms. Same-job ABBA (DevLab 85 W, 2 sessions each): decode 23.88 -> 26.38 tok/s (+10.5 %), decode_32k 20.7 -> 22.33 (+7.9 %), 4 streams 40.65 -> 45.8 (+12.7 %), prefill tie; ktest 206/206. ISA (K=5120 t4): 762 instr / 179 VGPR -> 438 / 67 (q4_k int8: 413 / 67)."
+   "evidence": "q38xl dec lane (PR #1332): IQ4_XS / IQ4_NL (33 % of trunk bytes) verify matvecs ran on f32 activations at 138 GB/s vs 225 for the int8 K-quant matvecs (drafted-decode HAL profile, DevLab Strix run 44825902062); with int8 activations iq4_xs/iq4_nl reach 226/225 GB/s, step 108.5 -> 96.3 ms. Same-job ABBA (DevLab 85 W, 2 sessions each): decode 23.88 -> 26.38 tok/s (+10.5 %), decode_32k 20.7 -> 22.33 (+7.9 %), 4 streams 40.65 -> 45.8 (+12.7 %), prefill tie; ktest 206/206. ISA (K=5120 t4): 762 instr / 179 VGPR -> 438 / 67 (q4_k int8: 413 / 67). Local 123 W same-job ABBA on q38xl-fmt 3b47ecd0 (2 sessions each): decode 24.44 -> 26.51 (+8.5 %), decode_2k 23.74 -> 25.80 (+8.7 %), decode_32k 21.59 -> 22.85 (+5.8 %), 4 streams 41.55 -> 46.15 (+11.1 %), prefill 1k-32k tie; matvecs at 223 GB/s of 228 measured. Gates dev (local, vs llama.cpp ROCm b1374) PASS."
   }
  ]
 }
