@@ -1,5 +1,5 @@
 """A card's Strix rows measured on a local machine at a named power mode (methodology rule 18), with Gufo as a further
-engine running its own model: accepted as performance only with the power mode, rendered with the machine, the power per
+engine running its own model (or the card's own GGUF, said so): accepted as performance only with the power mode, rendered with the machine, the power per
 engine and the Gufo model, and Gufo never becomes the margin's baseline."""
 import json
 import os
@@ -59,6 +59,17 @@ class LocalPowerCard(unittest.TestCase):
         self.assertIn("not in the margin or the win / tie / loss counts", text)
         self.assertIn("drafting: DFlash2, not MTP", text)
         self.assertEqual(render_card.local_power_gpus(info(), ["strix-halo"]), ["strix-halo"])
+
+    def test_render_same_gguf(self):   # Gufo on the card's own file: said so, and still outside the margin (its drafting differs)
+        lines = []
+        feats = {"context": {"value": {"native": 262144}}, "speculative_decoding": {"status": "no"}}
+        facts = {"kind": "chat", "drafter": None, "spec": None, "checkpoint": {"sha256": "2a5f" + "0" * 60}}
+        render_card.perf_section(lines, info(), facts, feats, None, "strix-halo", "a" * 64, 262144)
+        text = "\n".join(lines)
+        self.assertIn("running this card's GGUF, the same file `unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q4_K_XL.gguf`", text)
+        self.assertNotIn("OWN model file", text)
+        self.assertIn("not in the margin or the win / tie / loss counts", text)
+        self.assertIn("+120 %", text)
 
     def test_perf_local_requires_power(self):
         with tempfile.TemporaryDirectory() as t:

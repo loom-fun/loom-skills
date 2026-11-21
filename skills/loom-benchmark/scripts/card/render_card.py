@@ -717,11 +717,13 @@ def perf_section(L, info, facts, feats, d, g, here, ctx):
         L.extend(remeasure_lines(rm, g, sources, "this package"))
     for b, x in extra.items():
         xb, xs = x["baseline"], x["session"]
-        if xb["name"] != "llama.cpp":   # another engine (Gufo): its own model file, its own drafting; never the margin's baseline
+        if xb["name"] != "llama.cpp":   # another engine (Gufo): its own drafting (and maybe its own model file); never the margin's baseline
             mdl = xb.get("model") or {}
+            same = bool(mdl.get("sha256")) and mdl["sha256"] == ((facts.get("checkpoint") or {}).get("sha256"))
             L.append(f"- {xnames[b]}: {xb['name']}" + (f" `{xb['version']}`" if xb.get("version") else "")
-                     + (f" running its OWN model file `{mdl['file']}`" + (f" (sha256 {short(mdl['sha256'])})" if mdl.get("sha256") else "")
-                        + ", not this card's GGUF" if mdl.get("file") else "")
+                     + ((f" running this card's GGUF, the same file `{mdl['file']}` (sha256 {short(mdl['sha256'])})" if same else
+                         f" running its OWN model file `{mdl['file']}`" + (f" (sha256 {short(mdl['sha256'])})" if mdl.get("sha256") else "")
+                         + ", not this card's GGUF") if mdl.get("file") else "")
                      + "; timed by the client like Loom" + (f"; server arguments `{xb['args']}`" if xb.get("args") else "")
                      + f"; measured {text(xs['date'])}; source: {src_text(sources[xs['source']])}. Shown for reference: not in the margin "
                      "or the win / tie / loss counts.")
