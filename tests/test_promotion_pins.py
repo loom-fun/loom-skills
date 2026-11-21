@@ -187,7 +187,7 @@ class UploadSafetyTests(unittest.TestCase):
 
     def upload(self):
         output = io.StringIO()
-        with patch.dict(sys.modules, self.hub), patch.object(PUBLISH, "check_card_text"), \
+        with patch.dict(sys.modules, self.hub), patch.object(PUBLISH, "check_card_text", return_value=None), \
                 patch.object(PUBLISH, "refuse_dirty"), patch.object(PUBLISH, "card_model", return_value=[]), \
                 contextlib.redirect_stdout(output):
             PUBLISH.cmd_upload(self.args)

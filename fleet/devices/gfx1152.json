@@ -1,0 +1,1918 @@
+{
+ "schema": "loom-device-results/1",
+ "device": "gfx1152",
+ "gpu": "AMD Radeon 860M (Krackan, gfx1152)",
+ "preset": {
+  "always": true
+ },
+ "sdk": {
+  "hrx_loom": "0.2.0"
+ },
+ "tool": "XSJ leased Windows hosts, existing Loom benchmark workloads and correctness gates",
+ "serve": {
+  "device": "amdgpu://?completion_spin_ns=4294967295"
+ },
+ "models": {
+  "unsloth-Qwen3.5-4B-loom": {
+   "fits": true,
+   "date": "2026-11-20",
+   "max_context": 40960,
+   "native_context": 262144,
+   "serve_args": [
+    "--pool_backing=fixed",
+    "--parameter_mode=preload"
+   ],
+   "execution": {
+    "rows": 4,
+    "prefill_capacity": 1024,
+    "draft_depth": 3
+   },
+   "note": "Completed a 40882-token request on the measured preset. Full-suite context admission: ADMITTED 40882 tokens of a 40960-token context, but the server did not cancel the request within 60s (WARN: later steps may stall)",
+   "evidence": [
+    {
+     "evidence": "loom-card-evidence/2",
+     "gpu": "gfx1152",
+     "performance": {
+      "baseline": {
+       "args": "-ngl 99 -cram 0 --device ROCm0 --spec-type draft-dflash --spec-draft-model hf:AtomicChat/Qwen3.5-4B-DFlash-GGUF@56b80828981c35dff23affb49820e9ef816048f0/Qwen3.5-4B-DFlash.Q8_0.gguf --spec-draft-n-max 7 -ngld 99 -c 40960 -np 1",
+       "differs": [
+        "Four-stream flags: -ngl 99 -cram 0 --device ROCm0 -c 40960 -kvu -np 4.",
+        "Loom: A 40,882-token context probe completed, and the server did not cancel a separate admitted request within 60 seconds."
+       ],
+       "name": "llama.cpp",
+       "version": "llamacpp-rocm/b1382"
+      },
+      "session": {
+       "aggregate": "median",
+       "commands": [],
+       "date": "2026-11-20",
+       "metrics": {
+        "decode": {
+         "acceptance": 0.327,
+         "baseline": 9.7,
+         "baseline_runs": [
+          10.36,
+          9.69,
+          9.48
+         ],
+         "loom": 16.1,
+         "loom_runs": [
+          16.15,
+          12.3,
+          20.47
+         ]
+        },
+        "decode_2k": {
+         "acceptance": 0.381,
+         "baseline": 10.6,
+         "baseline_runs": [
+          11.07,
+          10.57,
+          9.77
+         ],
+         "loom": 11.5,
+         "loom_runs": [
+          14.09,
+          11.46,
+          10.98
+         ]
+        },
+        "decode_32k": {
+         "acceptance": 0.391,
+         "baseline": 7.3,
+         "baseline_runs": [
+          8.07,
+          7.29,
+          7.11
+         ],
+         "loom": 10.5,
+         "loom_runs": [
+          10.38,
+          10.6,
+          10.49
+         ]
+        },
+        "prefill_16k": {
+         "baseline": 318.2,
+         "baseline_runs": [
+          306.9,
+          331.7,
+          318.2
+         ],
+         "loom": 476.6,
+         "loom_runs": [
+          494.9,
+          476.6,
+          451.3
+         ]
+        },
+        "prefill_1k": {
+         "baseline": 382.8,
+         "baseline_runs": [
+          382.8,
+          400.8,
+          381.6
+         ],
+         "loom": 554.1,
+         "loom_runs": [
+          554.1,
+          498.4,
+          629.3
+         ]
+        },
+        "prefill_2k": {
+         "baseline": 389.9,
+         "baseline_runs": [
+          379.8,
+          403.8,
+          389.9
+         ],
+         "loom": 557.4,
+         "loom_runs": [
+          557.4,
+          508.5,
+          583.8
+         ]
+        },
+        "prefill_32k": {
+         "baseline": 256.1,
+         "baseline_runs": [
+          245.2,
+          263.0,
+          256.1
+         ],
+         "loom": 348.3,
+         "loom_runs": [
+          365.8,
+          348.3,
+          347.4
+         ]
+        },
+        "prefill_8k": {
+         "baseline": 357.1,
+         "baseline_runs": [
+          351.5,
+          377.0,
+          357.1
+         ],
+         "loom": 503.6,
+         "loom_runs": [
+          529.3,
+          503.6,
+          494.5
+         ]
+        },
+        "streams4": {
+         "baseline": 24.9,
+         "baseline_runs": [
+          24.9,
+          25.5,
+          20.9
+         ],
+         "loom": 48.0,
+         "loom_runs": [
+          49.7,
+          44.3,
+          48.0
+         ]
+        }
+       },
+       "programs_sha256": "6a47f53f1466bb7cad142b6b2874ccf9c5ee8b96aa77490155252e5d8d7c8f62",
+       "runs": {
+        "decode_prefill": 3,
+        "streams4": 3
+       },
+       "source": {
+        "device": {
+         "arch": "gfx1152",
+         "cpu": "AMD Ryzen AI 7 350 w/ Radeon 860M",
+         "driver": "32.0.31041.1004",
+         "gpu": "AMD Radeon(TM) 860M Graphics",
+         "host": "amd-krk-1",
+         "os": "Windows 11 25H2"
+        },
+        "hrx_loom": {
+         "fingerprint": "70833302d4fb265c",
+         "hrx_loom": "0.2.0",
+         "verified": false
+        },
+        "kind": "xsj",
+        "run": "20261120-165434-x69y",
+        "url": null
+       }
+      }
+     }
+    },
+    {
+     "evidence": "loom-card-evidence/2",
+     "gpu": "gfx1152",
+     "performance": {
+      "backend": "vulkan",
+      "baseline": {
+       "args": "-ngl 99 -cram 0 --device Vulkan0 --spec-type draft-dflash --spec-draft-model hf:AtomicChat/Qwen3.5-4B-DFlash-GGUF@56b80828981c35dff23affb49820e9ef816048f0/Qwen3.5-4B-DFlash.Q8_0.gguf --spec-draft-n-max 7 -ngld 99 -c 36864 -np 1",
+       "differs": [
+        "Four-stream flags: -ngl 99 -cram 0 --device Vulkan0 -c 147456 -np 4."
+       ],
+       "name": "llama.cpp",
+       "sha256": "20954cbad1a4626436c6ebaed5e48477f68427b075934689f360301ac426a2f1",
+       "version": "llamacpp-vulkan/b12211"
+      },
+      "session": {
+       "aggregate": "median",
+       "date": "2026-11-20",
+       "metrics": {
+        "decode": {
+         "baseline": 7.8,
+         "baseline_runs": [
+          7.38,
+          8.67,
+          7.79
+         ]
+        },
+        "decode_2k": {
+         "baseline": 8.2,
+         "baseline_runs": [
+          7.42,
+          9.19,
+          8.22
+         ]
+        },
+        "decode_32k": {
+         "baseline": 5.6,
+         "baseline_runs": [
+          5.94,
+          5.35,
+          5.58
+         ]
+        },
+        "prefill_16k": {
+         "baseline": 244.8,
+         "baseline_runs": [
+          244.8,
+          238.4,
+          254.7
+         ]
+        },
+        "prefill_1k": {
+         "baseline": 295.5,
+         "baseline_runs": [
+          295.5,
+          286.8,
+          302.2
+         ]
+        },
+        "prefill_2k": {
+         "baseline": 298.7,
+         "baseline_runs": [
+          298.7,
+          295.4,
+          309.9
+         ]
+        },
+        "prefill_32k": {
+         "baseline": 201.7,
+         "baseline_runs": [
+          196.4,
+          201.9,
+          201.7
+         ]
+        },
+        "prefill_8k": {
+         "baseline": 280.4,
+         "baseline_runs": [
+          280.4,
+          272.9,
+          293.8
+         ]
+        },
+        "streams4": {
+         "baseline": 21.3,
+         "baseline_runs": [
+          24.4,
+          21.3,
+          20.8
+         ]
+        }
+       },
+       "programs_sha256": "6a47f53f1466bb7cad142b6b2874ccf9c5ee8b96aa77490155252e5d8d7c8f62",
+       "runs": {
+        "decode_prefill": 3,
+        "streams4": 3
+       },
+       "source": {
+        "device": {
+         "arch": "gfx1152",
+         "cpu": "AMD Ryzen AI 7 350 w/ Radeon 860M",
+         "driver": "32.0.31041.1004",
+         "gpu": "AMD Radeon(TM) 860M Graphics",
+         "host": "amd-krk-1",
+         "os": "Windows 11 25H2"
+        },
+        "hrx_loom": {
+         "fingerprint": "70833302d4fb265c",
+         "hrx_loom": "0.2.0",
+         "verified": false
+        },
+        "kind": "xsj",
+        "run": "20261120-165434-x69y",
+        "url": null
+       }
+      }
+     }
+    },
+    {
+     "evidence": "loom-card-evidence/2",
+     "gates": [
+      {
+       "detail": null,
+       "level": "full",
+       "name": "consistency",
+       "programs_sha256": "6a47f53f1466bb7cad142b6b2874ccf9c5ee8b96aa77490155252e5d8d7c8f62",
+       "source": {
+        "device": {
+         "arch": "gfx1152",
+         "cpu": "AMD Ryzen AI 7 350 w/ Radeon 860M",
+         "driver": "32.0.31041.1004",
+         "gpu": "AMD Radeon(TM) 860M Graphics",
+         "host": "amd-krk-1",
+         "os": "Windows 11 25H2"
+        },
+        "hrx_loom": {
+         "fingerprint": "70833302d4fb265c",
+         "hrx_loom": "0.2.0",
+         "verified": false
+        },
+        "kind": "xsj",
+        "run": "20261120-165434-x69y",
+        "url": null
+       },
+       "status": "pass",
+       "time": "2026-11-20T14:40:55"
+      },
+      {
+       "detail": null,
+       "level": "full",
+       "name": "spec",
+       "programs_sha256": "6a47f53f1466bb7cad142b6b2874ccf9c5ee8b96aa77490155252e5d8d7c8f62",
+       "source": {
+        "device": {
+         "arch": "gfx1152",
+         "cpu": "AMD Ryzen AI 7 350 w/ Radeon 860M",
+         "driver": "32.0.31041.1004",
+         "gpu": "AMD Radeon(TM) 860M Graphics",
+         "host": "amd-krk-1",
+         "os": "Windows 11 25H2"
+        },
+        "hrx_loom": {
+         "fingerprint": "70833302d4fb265c",
+         "hrx_loom": "0.2.0",
+         "verified": false
+        },
+        "kind": "xsj",
+        "run": "20261120-165434-x69y",
+        "url": null
+       },
+       "status": "pass",
+       "time": "2026-11-20T14:40:55"
+      },
+      {
+       "detail": null,
+       "level": "full",
+       "name": "golden",
+       "programs_sha256": "6a47f53f1466bb7cad142b6b2874ccf9c5ee8b96aa77490155252e5d8d7c8f62",
+       "source": {
+        "device": {
+         "arch": "gfx1152",
+         "cpu": "AMD Ryzen AI 7 350 w/ Radeon 860M",
+         "driver": "32.0.31041.1004",
+         "gpu": "AMD Radeon(TM) 860M Graphics",
+         "host": "amd-krk-1",
+         "os": "Windows 11 25H2"
+        },
+        "hrx_loom": {
+         "fingerprint": "70833302d4fb265c",
+         "hrx_loom": "0.2.0",
+         "verified": false
+        },
+        "kind": "xsj",
+        "run": "20261120-165434-x69y",
+        "url": null
+       },
+       "status": "pass",
+       "time": "2026-11-20T14:40:55"
+      },
+      {
+       "detail": null,
+       "level": "full",
+       "name": "compare",
+       "programs_sha256": "6a47f53f1466bb7cad142b6b2874ccf9c5ee8b96aa77490155252e5d8d7c8f62",
+       "source": {
+        "device": {
+         "arch": "gfx1152",
+         "cpu": "AMD Ryzen AI 7 350 w/ Radeon 860M",
+         "driver": "32.0.31041.1004",
+         "gpu": "AMD Radeon(TM) 860M Graphics",
+         "host": "amd-krk-1",
+         "os": "Windows 11 25H2"
+        },
+        "hrx_loom": {
+         "fingerprint": "70833302d4fb265c",
+         "hrx_loom": "0.2.0",
+         "verified": false
+        },
+        "kind": "xsj",
+        "run": "20261120-165434-x69y",
+        "url": null
+       },
+       "status": "pass",
+       "time": "2026-11-20T14:40:55"
+      },
+      {
+       "detail": null,
+       "level": "full",
+       "name": "vision",
+       "programs_sha256": "6a47f53f1466bb7cad142b6b2874ccf9c5ee8b96aa77490155252e5d8d7c8f62",
+       "source": {
+        "device": {
+         "arch": "gfx1152",
+         "cpu": "AMD Ryzen AI 7 350 w/ Radeon 860M",
+         "driver": "32.0.31041.1004",
+         "gpu": "AMD Radeon(TM) 860M Graphics",
+         "host": "amd-krk-1",
+         "os": "Windows 11 25H2"
+        },
+        "hrx_loom": {
+         "fingerprint": "70833302d4fb265c",
+         "hrx_loom": "0.2.0",
+         "verified": false
+        },
+        "kind": "xsj",
+        "run": "20261120-165434-x69y",
+        "url": null
+       },
+       "status": "pass",
+       "time": "2026-11-20T14:40:55"
+      },
+      {
+       "detail": null,
+       "level": "full",
+       "name": "agent",
+       "programs_sha256": "6a47f53f1466bb7cad142b6b2874ccf9c5ee8b96aa77490155252e5d8d7c8f62",
+       "source": {
+        "device": {
+         "arch": "gfx1152",
+         "cpu": "AMD Ryzen AI 7 350 w/ Radeon 860M",
+         "driver": "32.0.31041.1004",
+         "gpu": "AMD Radeon(TM) 860M Graphics",
+         "host": "amd-krk-1",
+         "os": "Windows 11 25H2"
+        },
+        "hrx_loom": {
+         "fingerprint": "70833302d4fb265c",
+         "hrx_loom": "0.2.0",
+         "verified": false
+        },
+        "kind": "xsj",
+        "run": "20261120-165434-x69y",
+        "url": null
+       },
+       "status": "pass",
+       "time": "2026-11-20T14:40:55"
+      },
+      {
+       "detail": null,
+       "level": "full",
+       "name": "agent_think_off",
+       "programs_sha256": "6a47f53f1466bb7cad142b6b2874ccf9c5ee8b96aa77490155252e5d8d7c8f62",
+       "source": {
+        "device": {
+         "arch": "gfx1152",
+         "cpu": "AMD Ryzen AI 7 350 w/ Radeon 860M",
+         "driver": "32.0.31041.1004",
+         "gpu": "AMD Radeon(TM) 860M Graphics",
+         "host": "amd-krk-1",
+         "os": "Windows 11 25H2"
+        },
+        "hrx_loom": {
+         "fingerprint": "70833302d4fb265c",
+         "hrx_loom": "0.2.0",
+         "verified": false
+        },
+        "kind": "xsj",
+        "run": "20261120-165434-x69y",
+        "url": null
+       },
+       "status": "pass",
+       "time": "2026-11-20T14:40:55"
+      },
+      {
+       "detail": null,
+       "level": "full",
+       "name": "sampling",
+       "programs_sha256": "6a47f53f1466bb7cad142b6b2874ccf9c5ee8b96aa77490155252e5d8d7c8f62",
+       "source": {
+        "device": {
+         "arch": "gfx1152",
+         "cpu": "AMD Ryzen AI 7 350 w/ Radeon 860M",
+         "driver": "32.0.31041.1004",
+         "gpu": "AMD Radeon(TM) 860M Graphics",
+         "host": "amd-krk-1",
+         "os": "Windows 11 25H2"
+        },
+        "hrx_loom": {
+         "fingerprint": "70833302d4fb265c",
+         "hrx_loom": "0.2.0",
+         "verified": false
+        },
+        "kind": "xsj",
+        "run": "20261120-165434-x69y",
+        "url": null
+       },
+       "status": "pass",
+       "time": "2026-11-20T14:40:55"
+      }
+     ],
+     "gpu": "gfx1152",
+     "performance": {
+      "session": {
+       "commands": [],
+       "date": "2026-11-20",
+       "metrics": {
+        "spec_acceptance": {
+         "loom": 0.57
+        }
+       },
+       "programs_sha256": "6a47f53f1466bb7cad142b6b2874ccf9c5ee8b96aa77490155252e5d8d7c8f62",
+       "runs": {
+        "decode_prefill": null,
+        "streams4": null
+       },
+       "source": {
+        "device": {
+         "arch": "gfx1152",
+         "cpu": "AMD Ryzen AI 7 350 w/ Radeon 860M",
+         "driver": "32.0.31041.1004",
+         "gpu": "AMD Radeon(TM) 860M Graphics",
+         "host": "amd-krk-1",
+         "os": "Windows 11 25H2"
+        },
+        "hrx_loom": {
+         "fingerprint": "70833302d4fb265c",
+         "hrx_loom": "0.2.0",
+         "verified": false
+        },
+        "kind": "xsj",
+        "run": "20261120-165434-x69y",
+        "url": null
+       }
+      }
+     }
+    },
+    {
+     "evidence": "loom-card-evidence/2",
+     "gpu": "gfx1152",
+     "roofline": {
+      "checkpoint": "Qwen3.5-4B-Q4_K_M.gguf",
+      "device": {
+       "bandwidth_bytes_per_s": 128000000000.0,
+       "name": "AMD Radeon 860M (gfx1152, LPDDR5X-8000 spec)",
+       "peak_flops": 12288000000000.0
+      },
+      "drafting": {
+       "acceptance": 0.57,
+       "depth": 3,
+       "method": "dflash",
+       "tokens_per_pass": 2.71
+      },
+      "metrics": {
+       "decode": {
+        "acceptance": 0.327,
+        "acceptance_from": "session",
+        "ceiling": 92.9,
+        "efficiency": 0.69,
+        "single_pass": 46.9,
+        "tokens_per_pass": 1.981
+       },
+       "decode_2k": {
+        "acceptance": 0.381,
+        "acceptance_from": "session",
+        "ceiling": 98.1,
+        "efficiency": 0.695,
+        "single_pass": 45.8,
+        "tokens_per_pass": 2.143
+       },
+       "decode_32k": {
+        "acceptance": 0.391,
+        "acceptance_from": "session",
+        "ceiling": 73.6,
+        "efficiency": 0.75,
+        "single_pass": 33.9,
+        "tokens_per_pass": 2.173
+       },
+       "prefill_16k": {
+        "ceiling": 1500.7,
+        "efficiency": 0.33
+       },
+       "prefill_1k": {
+        "ceiling": 1705.4,
+        "efficiency": 0.33
+       },
+       "prefill_2k": {
+        "ceiling": 1690.0,
+        "efficiency": 0.33
+       },
+       "prefill_32k": {
+        "ceiling": 1330.3,
+        "efficiency": 0.33
+       },
+       "prefill_8k": {
+        "ceiling": 1603.3,
+        "efficiency": 0.33
+       },
+       "streams4": {
+        "ceiling": 185.5,
+        "efficiency": 0.7
+       }
+      },
+      "tool": {
+       "script": "skills/loom-roofline/roofline.py",
+       "sha256": "89f99027ab117da473420a6c3484067dd4130efc90fa2eaf431f9070036e0e71",
+       "skills_commit": "16cd651c0fb8dcd5f7ba1f19f80e3e77e8819293"
+      }
+     }
+    }
+   ]
+  },
+  "unsloth-Qwen3.5-9B-loom": {
+   "fits": true,
+   "date": "2026-11-20",
+   "max_context": 40960,
+   "native_context": 262144,
+   "serve_args": [
+    "--pool_backing=elastic",
+    "--memory_bytes=14000000000",
+    "--parameter_mode=preload"
+   ],
+   "execution": {
+    "rows": 4,
+    "prefill_capacity": 1024,
+    "draft_depth": 3
+   },
+   "note": "Completed a 40882-token request on the measured preset. Full-suite context admission: ADMITTED 40882 tokens of a 40960-token context, but the server did not cancel the request within 60s (WARN: later steps may stall)",
+   "evidence": [
+    {
+     "evidence": "loom-card-evidence/2",
+     "gpu": "gfx1152",
+     "performance": {
+      "baseline": {
+       "args": "-ngl 99 -cram 0 --device ROCm0 --spec-type draft-dflash --spec-draft-model card:parameter/Qwen3.5-9B-DFlash.Q8_0.gguf --spec-draft-n-max 7 -ngld 99 -c 40960 -np 1",
+       "differs": [
+        "Four-stream flags: -ngl 99 -cram 0 --device ROCm0 -c 40960 -kvu -np 4.",
+        "Loom: A 40,882-token context probe completed, and the server did not cancel a separate admitted request within 60 seconds."
+       ],
+       "name": "llama.cpp",
+       "version": "llamacpp-rocm/b1382"
+      },
+      "session": {
+       "aggregate": "median",
+       "commands": [],
+       "date": "2026-11-20",
+       "metrics": {
+        "decode": {
+         "acceptance": 0.437,
+         "baseline": 6.7,
+         "baseline_runs": [
+          6.71,
+          6.39,
+          8.01
+         ],
+         "loom": 7.3,
+         "loom_runs": [
+          10.89,
+          6.87,
+          7.27
+         ]
+        },
+        "decode_2k": {
+         "acceptance": 0.443,
+         "baseline": 6.2,
+         "baseline_runs": [
+          6.24,
+          6.66,
+          6.2
+         ],
+         "loom": 8.4,
+         "loom_runs": [
+          8.41,
+          7.67,
+          8.65
+         ]
+        },
+        "decode_32k": {
+         "acceptance": 0.409,
+         "baseline": 5.1,
+         "baseline_runs": [
+          5.09,
+          5.18,
+          4.63
+         ],
+         "loom": 6.4,
+         "loom_runs": [
+          6.38,
+          6.25,
+          6.67
+         ]
+        },
+        "prefill_16k": {
+         "baseline": 150.8,
+         "baseline_runs": [
+          189.5,
+          150.8,
+          145.6
+         ],
+         "loom": 216.2,
+         "loom_runs": [
+          205.3,
+          216.2,
+          237.7
+         ]
+        },
+        "prefill_1k": {
+         "baseline": 203.4,
+         "baseline_runs": [
+          224.2,
+          171.8,
+          203.4
+         ],
+         "loom": 233.5,
+         "loom_runs": [
+          241.1,
+          226.8,
+          233.5
+         ]
+        },
+        "prefill_2k": {
+         "baseline": 190.5,
+         "baseline_runs": [
+          227.0,
+          172.6,
+          190.5
+         ],
+         "loom": 228.7,
+         "loom_runs": [
+          227.3,
+          228.7,
+          246.8
+         ]
+        },
+        "prefill_32k": {
+         "baseline": 128.0,
+         "baseline_runs": [
+          153.8,
+          128.0,
+          123.0
+         ],
+         "loom": 207.4,
+         "loom_runs": [
+          201.9,
+          211.6,
+          207.4
+         ]
+        },
+        "prefill_8k": {
+         "baseline": 164.1,
+         "baseline_runs": [
+          207.8,
+          164.1,
+          158.1
+         ],
+         "loom": 221.8,
+         "loom_runs": [
+          221.8,
+          213.2,
+          245.4
+         ]
+        },
+        "streams4": {
+         "baseline": 15.6,
+         "baseline_runs": [
+          16.0,
+          14.3,
+          15.6
+         ],
+         "loom": 17.0,
+         "loom_runs": [
+          17.0,
+          16.3,
+          17.8
+         ]
+        }
+       },
+       "programs_sha256": "4af7b6503c9a3219279ef9997dab7fe22287f491ad5ef89ae374741b5352d4d2",
+       "runs": {
+        "decode_prefill": 3,
+        "streams4": 3
+       },
+       "source": {
+        "device": {
+         "arch": "gfx1152",
+         "cpu": "AMD Ryzen AI 7 350 w/ Radeon 860M",
+         "driver": "32.0.31041.1004",
+         "gpu": "AMD Radeon(TM) 860M Graphics",
+         "host": "amd-krk-2",
+         "os": "Windows 11 26H2"
+        },
+        "hrx_loom": {
+         "fingerprint": "8d880a869db66852",
+         "hrx_loom": "0.2.0",
+         "verified": false
+        },
+        "kind": "xsj",
+        "run": "20261120-165434-94u8",
+        "url": null
+       }
+      }
+     }
+    },
+    {
+     "evidence": "loom-card-evidence/2",
+     "gpu": "gfx1152",
+     "performance": {
+      "backend": "vulkan",
+      "baseline": {
+       "args": "-ngl 99 -cram 0 --device Vulkan0 --spec-type draft-dflash --spec-draft-model card:parameter/Qwen3.5-9B-DFlash.Q8_0.gguf --spec-draft-n-max 7 -ngld 99 -c 36864 -np 1",
+       "differs": [
+        "Four-stream flags: -ngl 99 -cram 0 --device Vulkan0 -c 147456 -np 4."
+       ],
+       "name": "llama.cpp",
+       "sha256": "20954cbad1a4626436c6ebaed5e48477f68427b075934689f360301ac426a2f1",
+       "version": "llamacpp-vulkan/b12211"
+      },
+      "session": {
+       "aggregate": "median",
+       "date": "2026-11-20",
+       "metrics": {
+        "decode": {
+         "baseline": 6.2,
+         "baseline_runs": [
+          6.5,
+          6.17,
+          6.25
+         ]
+        },
+        "decode_2k": {
+         "baseline": 6.4,
+         "baseline_runs": [
+          6.44,
+          6.16,
+          6.62
+         ]
+        },
+        "decode_32k": {
+         "baseline": 4.4,
+         "baseline_runs": [
+          4.22,
+          4.42,
+          4.46
+         ]
+        },
+        "prefill_16k": {
+         "baseline": 158.7,
+         "baseline_runs": [
+          158.2,
+          158.7,
+          161.0
+         ]
+        },
+        "prefill_1k": {
+         "baseline": 175.7,
+         "baseline_runs": [
+          180.5,
+          175.3,
+          175.7
+         ]
+        },
+        "prefill_2k": {
+         "baseline": 178.9,
+         "baseline_runs": [
+          178.9,
+          177.8,
+          181.0
+         ]
+        },
+        "prefill_32k": {
+         "baseline": 138.9,
+         "baseline_runs": [
+          138.9,
+          138.9,
+          140.3
+         ]
+        },
+        "prefill_8k": {
+         "baseline": 171.7,
+         "baseline_runs": [
+          170.7,
+          171.7,
+          174.6
+         ]
+        },
+        "streams4": {
+         "baseline": 18.7,
+         "baseline_runs": [
+          19.2,
+          18.1,
+          18.7
+         ]
+        }
+       },
+       "programs_sha256": "4af7b6503c9a3219279ef9997dab7fe22287f491ad5ef89ae374741b5352d4d2",
+       "runs": {
+        "decode_prefill": 3,
+        "streams4": 3
+       },
+       "source": {
+        "device": {
+         "arch": "gfx1152",
+         "cpu": "AMD Ryzen AI 7 350 w/ Radeon 860M",
+         "driver": "32.0.31041.1004",
+         "gpu": "AMD Radeon(TM) 860M Graphics",
+         "host": "amd-krk-2",
+         "os": "Windows 11 26H2"
+        },
+        "hrx_loom": {
+         "fingerprint": "8d880a869db66852",
+         "hrx_loom": "0.2.0",
+         "verified": false
+        },
+        "kind": "xsj",
+        "run": "20261120-165434-94u8",
+        "url": null
+       }
+      }
+     }
+    },
+    {
+     "evidence": "loom-card-evidence/2",
+     "gates": [
+      {
+       "detail": null,
+       "level": "full",
+       "name": "golden",
+       "programs_sha256": "4af7b6503c9a3219279ef9997dab7fe22287f491ad5ef89ae374741b5352d4d2",
+       "source": {
+        "device": {
+         "arch": "gfx1152",
+         "cpu": "AMD Ryzen AI 7 350 w/ Radeon 860M",
+         "driver": "32.0.31041.1004",
+         "gpu": "AMD Radeon(TM) 860M Graphics",
+         "host": "amd-krk-2",
+         "os": "Windows 11 26H2"
+        },
+        "hrx_loom": {
+         "fingerprint": "8d880a869db66852",
+         "hrx_loom": "0.2.0",
+         "verified": false
+        },
+        "kind": "xsj",
+        "run": "20261120-165434-94u8",
+        "url": null
+       },
+       "status": "pass",
+       "time": "2026-11-20T15:29:51"
+      },
+      {
+       "detail": null,
+       "level": "full",
+       "name": "compare",
+       "programs_sha256": "4af7b6503c9a3219279ef9997dab7fe22287f491ad5ef89ae374741b5352d4d2",
+       "source": {
+        "device": {
+         "arch": "gfx1152",
+         "cpu": "AMD Ryzen AI 7 350 w/ Radeon 860M",
+         "driver": "32.0.31041.1004",
+         "gpu": "AMD Radeon(TM) 860M Graphics",
+         "host": "amd-krk-2",
+         "os": "Windows 11 26H2"
+        },
+        "hrx_loom": {
+         "fingerprint": "8d880a869db66852",
+         "hrx_loom": "0.2.0",
+         "verified": false
+        },
+        "kind": "xsj",
+        "run": "20261120-165434-94u8",
+        "url": null
+       },
+       "status": "pass",
+       "time": "2026-11-20T15:29:51"
+      },
+      {
+       "detail": null,
+       "level": "full",
+       "name": "vision",
+       "programs_sha256": "4af7b6503c9a3219279ef9997dab7fe22287f491ad5ef89ae374741b5352d4d2",
+       "source": {
+        "device": {
+         "arch": "gfx1152",
+         "cpu": "AMD Ryzen AI 7 350 w/ Radeon 860M",
+         "driver": "32.0.31041.1004",
+         "gpu": "AMD Radeon(TM) 860M Graphics",
+         "host": "amd-krk-2",
+         "os": "Windows 11 26H2"
+        },
+        "hrx_loom": {
+         "fingerprint": "8d880a869db66852",
+         "hrx_loom": "0.2.0",
+         "verified": false
+        },
+        "kind": "xsj",
+        "run": "20261120-165434-94u8",
+        "url": null
+       },
+       "status": "pass",
+       "time": "2026-11-20T15:29:51"
+      },
+      {
+       "detail": null,
+       "level": "full",
+       "name": "consistency",
+       "programs_sha256": "4af7b6503c9a3219279ef9997dab7fe22287f491ad5ef89ae374741b5352d4d2",
+       "source": {
+        "device": {
+         "arch": "gfx1152",
+         "cpu": "AMD Ryzen AI 7 350 w/ Radeon 860M",
+         "driver": "32.0.31041.1004",
+         "gpu": "AMD Radeon(TM) 860M Graphics",
+         "host": "amd-krk-2",
+         "os": "Windows 11 26H2"
+        },
+        "hrx_loom": {
+         "fingerprint": "8d880a869db66852",
+         "hrx_loom": "0.2.0",
+         "verified": false
+        },
+        "kind": "xsj",
+        "run": "20261120-165434-94u8",
+        "url": null
+       },
+       "status": "pass",
+       "time": "2026-11-20T15:29:51"
+      },
+      {
+       "detail": null,
+       "level": "full",
+       "name": "spec",
+       "programs_sha256": "4af7b6503c9a3219279ef9997dab7fe22287f491ad5ef89ae374741b5352d4d2",
+       "source": {
+        "device": {
+         "arch": "gfx1152",
+         "cpu": "AMD Ryzen AI 7 350 w/ Radeon 860M",
+         "driver": "32.0.31041.1004",
+         "gpu": "AMD Radeon(TM) 860M Graphics",
+         "host": "amd-krk-2",
+         "os": "Windows 11 26H2"
+        },
+        "hrx_loom": {
+         "fingerprint": "8d880a869db66852",
+         "hrx_loom": "0.2.0",
+         "verified": false
+        },
+        "kind": "xsj",
+        "run": "20261120-165434-94u8",
+        "url": null
+       },
+       "status": "pass",
+       "time": "2026-11-20T15:29:51"
+      },
+      {
+       "detail": null,
+       "level": "full",
+       "name": "agent",
+       "programs_sha256": "4af7b6503c9a3219279ef9997dab7fe22287f491ad5ef89ae374741b5352d4d2",
+       "source": {
+        "device": {
+         "arch": "gfx1152",
+         "cpu": "AMD Ryzen AI 7 350 w/ Radeon 860M",
+         "driver": "32.0.31041.1004",
+         "gpu": "AMD Radeon(TM) 860M Graphics",
+         "host": "amd-krk-2",
+         "os": "Windows 11 26H2"
+        },
+        "hrx_loom": {
+         "fingerprint": "8d880a869db66852",
+         "hrx_loom": "0.2.0",
+         "verified": false
+        },
+        "kind": "xsj",
+        "run": "20261120-165434-94u8",
+        "url": null
+       },
+       "status": "pass",
+       "time": "2026-11-20T15:29:51"
+      },
+      {
+       "detail": null,
+       "level": "full",
+       "name": "agent_think_off",
+       "programs_sha256": "4af7b6503c9a3219279ef9997dab7fe22287f491ad5ef89ae374741b5352d4d2",
+       "source": {
+        "device": {
+         "arch": "gfx1152",
+         "cpu": "AMD Ryzen AI 7 350 w/ Radeon 860M",
+         "driver": "32.0.31041.1004",
+         "gpu": "AMD Radeon(TM) 860M Graphics",
+         "host": "amd-krk-2",
+         "os": "Windows 11 26H2"
+        },
+        "hrx_loom": {
+         "fingerprint": "8d880a869db66852",
+         "hrx_loom": "0.2.0",
+         "verified": false
+        },
+        "kind": "xsj",
+        "run": "20261120-165434-94u8",
+        "url": null
+       },
+       "status": "pass",
+       "time": "2026-11-20T15:29:51"
+      },
+      {
+       "detail": null,
+       "level": "full",
+       "name": "sampling",
+       "programs_sha256": "4af7b6503c9a3219279ef9997dab7fe22287f491ad5ef89ae374741b5352d4d2",
+       "source": {
+        "device": {
+         "arch": "gfx1152",
+         "cpu": "AMD Ryzen AI 7 350 w/ Radeon 860M",
+         "driver": "32.0.31041.1004",
+         "gpu": "AMD Radeon(TM) 860M Graphics",
+         "host": "amd-krk-2",
+         "os": "Windows 11 26H2"
+        },
+        "hrx_loom": {
+         "fingerprint": "8d880a869db66852",
+         "hrx_loom": "0.2.0",
+         "verified": false
+        },
+        "kind": "xsj",
+        "run": "20261120-165434-94u8",
+        "url": null
+       },
+       "status": "pass",
+       "time": "2026-11-20T15:29:51"
+      }
+     ],
+     "gpu": "gfx1152",
+     "performance": {
+      "session": {
+       "commands": [],
+       "date": "2026-11-20",
+       "metrics": {
+        "spec_acceptance": {
+         "loom": 0.68
+        }
+       },
+       "programs_sha256": "4af7b6503c9a3219279ef9997dab7fe22287f491ad5ef89ae374741b5352d4d2",
+       "runs": {
+        "decode_prefill": null,
+        "streams4": null
+       },
+       "source": {
+        "device": {
+         "arch": "gfx1152",
+         "cpu": "AMD Ryzen AI 7 350 w/ Radeon 860M",
+         "driver": "32.0.31041.1004",
+         "gpu": "AMD Radeon(TM) 860M Graphics",
+         "host": "amd-krk-2",
+         "os": "Windows 11 26H2"
+        },
+        "hrx_loom": {
+         "fingerprint": "8d880a869db66852",
+         "hrx_loom": "0.2.0",
+         "verified": false
+        },
+        "kind": "xsj",
+        "run": "20261120-165434-94u8",
+        "url": null
+       }
+      }
+     }
+    },
+    {
+     "evidence": "loom-card-evidence/2",
+     "gpu": "gfx1152",
+     "roofline": {
+      "checkpoint": "Qwen3.5-9B-Q4_K_M.gguf",
+      "device": {
+       "bandwidth_bytes_per_s": 128000000000.0,
+       "name": "AMD Radeon 860M (gfx1152, LPDDR5X-8000 spec)",
+       "peak_flops": 12288000000000.0
+      },
+      "drafting": {
+       "acceptance": 0.68,
+       "depth": 3,
+       "method": "dflash",
+       "tokens_per_pass": 3.04
+      },
+      "metrics": {
+       "decode": {
+        "acceptance": 0.437,
+        "acceptance_from": "session",
+        "ceiling": 58.0,
+        "efficiency": 0.69,
+        "single_pass": 25.1,
+        "tokens_per_pass": 2.311
+       },
+       "decode_2k": {
+        "acceptance": 0.443,
+        "acceptance_from": "session",
+        "ceiling": 57.7,
+        "efficiency": 0.693,
+        "single_pass": 24.8,
+        "tokens_per_pass": 2.329
+       },
+       "decode_32k": {
+        "acceptance": 0.409,
+        "acceptance_from": "session",
+        "ceiling": 46.4,
+        "efficiency": 0.726,
+        "single_pass": 20.8,
+        "tokens_per_pass": 2.227
+       },
+       "prefill_16k": {
+        "ceiling": 825.4,
+        "efficiency": 0.33
+       },
+       "prefill_1k": {
+        "ceiling": 883.8,
+        "efficiency": 0.33
+       },
+       "prefill_2k": {
+        "ceiling": 879.6,
+        "efficiency": 0.33
+       },
+       "prefill_32k": {
+        "ceiling": 771.1,
+        "efficiency": 0.33
+       },
+       "prefill_8k": {
+        "ceiling": 855.5,
+        "efficiency": 0.33
+       },
+       "streams4": {
+        "ceiling": 99.9,
+        "efficiency": 0.7
+       }
+      },
+      "tool": {
+       "script": "skills/loom-roofline/roofline.py",
+       "sha256": "89f99027ab117da473420a6c3484067dd4130efc90fa2eaf431f9070036e0e71",
+       "skills_commit": "257e892437ce60add0e93182bd7f2948be137f81"
+      }
+     }
+    }
+   ]
+  },
+  "unsloth-Qwen3.5-2B-loom": {
+   "fits": true,
+   "date": "2026-11-21",
+   "max_context": 262144,
+   "native_context": 262144,
+   "serve_args": [
+    "--pool_backing=fixed",
+    "--parameter_mode=preload"
+   ],
+   "execution": {
+    "rows": 4,
+    "prefill_capacity": 1024
+   },
+   "note": "Completed a 262066-token request on the measured preset. Full-suite context admission: ADMITTED 262066 tokens of a 262144-token context, but the server did not cancel the request within 60s (WARN: later steps may stall)",
+   "evidence": [
+    {
+     "evidence": "loom-card-evidence/2",
+     "gpu": "gfx1152",
+     "performance": {
+      "baseline": {
+       "args": "-ngl 99 -cram 0 --device ROCm0 -c 65536 -np 1",
+       "differs": [
+        "Four-stream flags: -ngl 99 -cram 0 --device ROCm0 -c 65536 -kvu -np 4.",
+        "Loom: A 262,066-token context probe completed, and the server did not cancel a separate admitted request within 60 seconds."
+       ],
+       "name": "llama.cpp",
+       "version": "llamacpp-rocm/b1382"
+      },
+      "session": {
+       "aggregate": "median",
+       "commands": [],
+       "date": "2026-11-21",
+       "metrics": {
+        "decode": {
+         "baseline": 18.5,
+         "baseline_runs": [
+          17.6,
+          19.48,
+          17.7,
+          19.26,
+          19.29,
+          17.72
+         ],
+         "loom": 16.1,
+         "loom_runs": [
+          19.23,
+          16.99,
+          15.85,
+          15.25,
+          16.31,
+          15.56
+         ]
+        },
+        "decode_2k": {
+         "baseline": 18.3,
+         "baseline_runs": [
+          16.2,
+          17.91,
+          18.45,
+          18.94,
+          18.5,
+          18.06
+         ],
+         "loom": 15.7,
+         "loom_runs": [
+          17.72,
+          15.53,
+          14.79,
+          15.12,
+          15.82,
+          15.86
+         ]
+        },
+        "decode_32k": {
+         "baseline": 14.8,
+         "baseline_runs": [
+          14.57,
+          14.97,
+          13.84,
+          13.94,
+          16.0,
+          15.59
+         ],
+         "loom": 12.8,
+         "loom_runs": [
+          12.48,
+          12.61,
+          12.93,
+          13.1,
+          12.73,
+          14.94
+         ]
+        },
+        "prefill_16k": {
+         "baseline": 858.8,
+         "baseline_runs": [
+          813.0,
+          867.9,
+          852.3,
+          854.3,
+          863.2,
+          867.5
+         ],
+         "loom": 1574.8,
+         "loom_runs": [
+          1580.7,
+          1466.5,
+          1568.9,
+          1048.4,
+          1603.7,
+          1625.2
+         ]
+        },
+        "prefill_1k": {
+         "baseline": 992.3,
+         "baseline_runs": [
+          933.4,
+          998.0,
+          975.8,
+          992.7,
+          997.3,
+          991.9
+         ],
+         "loom": 1636.8,
+         "loom_runs": [
+          1678.6,
+          1523.5,
+          1627.2,
+          1070.3,
+          1646.3,
+          1689.4
+         ]
+        },
+        "prefill_2k": {
+         "baseline": 1010.2,
+         "baseline_runs": [
+          950.7,
+          1025.3,
+          999.8,
+          1006.6,
+          1013.8,
+          1015.5
+         ],
+         "loom": 1701.2,
+         "loom_runs": [
+          1743.2,
+          1554.5,
+          1678.8,
+          1206.9,
+          1723.5,
+          1753.4
+         ]
+        },
+        "prefill_32k": {
+         "baseline": 692.1,
+         "baseline_runs": [
+          657.6,
+          697.3,
+          687.3,
+          688.8,
+          695.5,
+          697.6
+         ],
+         "loom": 1312.6,
+         "loom_runs": [
+          1316.4,
+          1241.8,
+          1308.8,
+          911.9,
+          1337.7,
+          1356.1
+         ]
+        },
+        "prefill_8k": {
+         "baseline": 963.0,
+         "baseline_runs": [
+          908.9,
+          976.9,
+          956.5,
+          958.5,
+          967.5,
+          971.1
+         ],
+         "loom": 1721.2,
+         "loom_runs": [
+          1731.0,
+          1596.0,
+          1711.4,
+          1177.7,
+          1764.6,
+          1791.1
+         ]
+        },
+        "streams4": {
+         "baseline": 44.1,
+         "baseline_runs": [
+          42.6,
+          44.0,
+          43.2,
+          44.4,
+          44.3,
+          44.4
+         ],
+         "loom": 61.0,
+         "loom_runs": [
+          62.6,
+          56.5,
+          59.2,
+          64.8,
+          59.5,
+          62.7
+         ]
+        }
+       },
+       "programs_sha256": "afadca60b64c38add90ca325a86a289770f71191ad3faa5c3411c3755d4d8c60",
+       "runs": {
+        "decode_prefill": 6,
+        "samples": {
+         "decode_2k": 3,
+         "decode_32k": 3,
+         "prefill_8k": 3
+        },
+        "streams4": 6
+       },
+       "source": {
+        "device": {
+         "arch": "gfx1152",
+         "cpu": "AMD Ryzen AI 7 350 w/ Radeon 860M",
+         "driver": "32.0.31041.1004",
+         "gpu": "AMD Radeon(TM) 860M Graphics",
+         "host": "amd-krk-1",
+         "os": "Windows 11 25H2"
+        },
+        "hrx_loom": {
+         "fingerprint": "70833302d4fb265c",
+         "hrx_loom": "0.2.0",
+         "verified": false
+        },
+        "kind": "xsj",
+        "run": "20261120-165434-x69y",
+        "url": null
+       }
+      }
+     }
+    },
+    {
+     "evidence": "loom-card-evidence/2",
+     "gpu": "gfx1152",
+     "performance": {
+      "backend": "vulkan",
+      "baseline": {
+       "args": "-ngl 99 -cram 0 --device Vulkan0 -c 36864 -np 1",
+       "differs": [
+        "Four-stream flags: -ngl 99 -cram 0 --device Vulkan0 -c 147456 -np 4."
+       ],
+       "name": "llama.cpp",
+       "sha256": "20954cbad1a4626436c6ebaed5e48477f68427b075934689f360301ac426a2f1",
+       "version": "llamacpp-vulkan/b12211"
+      },
+      "session": {
+       "aggregate": "median",
+       "date": "2026-11-21",
+       "metrics": {
+        "decode": {
+         "baseline": 18.1,
+         "baseline_runs": [
+          16.81,
+          18.25,
+          18.68,
+          18.38,
+          17.7,
+          18.04
+         ]
+        },
+        "decode_2k": {
+         "baseline": 18.2,
+         "baseline_runs": [
+          38.77,
+          18.12,
+          19.9,
+          17.19,
+          17.64,
+          18.22
+         ]
+        },
+        "decode_32k": {
+         "baseline": 15.2,
+         "baseline_runs": [
+          14.42,
+          15.7,
+          26.29,
+          15.36,
+          14.84,
+          15.06
+         ]
+        },
+        "prefill_16k": {
+         "baseline": 761.2,
+         "baseline_runs": [
+          761.6,
+          760.1,
+          767.5,
+          760.8,
+          763.6,
+          756.7
+         ]
+        },
+        "prefill_1k": {
+         "baseline": 896.3,
+         "baseline_runs": [
+          898.1,
+          894.5,
+          901.2,
+          889.2,
+          908.2,
+          888.8
+         ]
+        },
+        "prefill_2k": {
+         "baseline": 922.6,
+         "baseline_runs": [
+          925.2,
+          921.5,
+          929.9,
+          920.9,
+          923.8,
+          912.9
+         ]
+        },
+        "prefill_32k": {
+         "baseline": 582.2,
+         "baseline_runs": [
+          582.5,
+          580.9,
+          621.1,
+          582.0,
+          584.3,
+          578.8
+         ]
+        },
+        "prefill_8k": {
+         "baseline": 879.8,
+         "baseline_runs": [
+          873.9,
+          879.6,
+          880.1,
+          880.0,
+          883.5,
+          871.4
+         ]
+        },
+        "streams4": {
+         "baseline": 49.4,
+         "baseline_runs": [
+          49.6,
+          49.1,
+          49.7,
+          60.6,
+          48.8,
+          48.6
+         ]
+        }
+       },
+       "programs_sha256": "afadca60b64c38add90ca325a86a289770f71191ad3faa5c3411c3755d4d8c60",
+       "runs": {
+        "decode_prefill": 6,
+        "samples": {
+         "decode_2k": 3,
+         "decode_32k": 3,
+         "prefill_8k": 3
+        },
+        "streams4": 6
+       },
+       "source": {
+        "device": {
+         "arch": "gfx1152",
+         "cpu": "AMD Ryzen AI 7 350 w/ Radeon 860M",
+         "driver": "32.0.31041.1004",
+         "gpu": "AMD Radeon(TM) 860M Graphics",
+         "host": "amd-krk-1",
+         "os": "Windows 11 25H2"
+        },
+        "hrx_loom": {
+         "fingerprint": "70833302d4fb265c",
+         "hrx_loom": "0.2.0",
+         "verified": false
+        },
+        "kind": "xsj",
+        "run": "20261120-165434-x69y",
+        "url": null
+       }
+      }
+     }
+    },
+    {
+     "evidence": "loom-card-evidence/2",
+     "gates": [
+      {
+       "detail": null,
+       "level": "full",
+       "name": "consistency",
+       "programs_sha256": "afadca60b64c38add90ca325a86a289770f71191ad3faa5c3411c3755d4d8c60",
+       "source": {
+        "device": {
+         "arch": "gfx1152",
+         "cpu": "AMD Ryzen AI 7 350 w/ Radeon 860M",
+         "driver": "32.0.31041.1004",
+         "gpu": "AMD Radeon(TM) 860M Graphics",
+         "host": "amd-krk-1",
+         "os": "Windows 11 25H2"
+        },
+        "hrx_loom": {
+         "fingerprint": "70833302d4fb265c",
+         "hrx_loom": "0.2.0",
+         "verified": false
+        },
+        "kind": "xsj",
+        "run": "20261120-165434-x69y",
+        "url": null
+       },
+       "status": "pass",
+       "time": "2026-11-20T17:15:42"
+      },
+      {
+       "detail": null,
+       "level": "full",
+       "name": "golden",
+       "programs_sha256": "afadca60b64c38add90ca325a86a289770f71191ad3faa5c3411c3755d4d8c60",
+       "source": {
+        "device": {
+         "arch": "gfx1152",
+         "cpu": "AMD Ryzen AI 7 350 w/ Radeon 860M",
+         "driver": "32.0.31041.1004",
+         "gpu": "AMD Radeon(TM) 860M Graphics",
+         "host": "amd-krk-1",
+         "os": "Windows 11 25H2"
+        },
+        "hrx_loom": {
+         "fingerprint": "70833302d4fb265c",
+         "hrx_loom": "0.2.0",
+         "verified": false
+        },
+        "kind": "xsj",
+        "run": "20261120-165434-x69y",
+        "url": null
+       },
+       "status": "pass",
+       "time": "2026-11-20T17:15:42"
+      },
+      {
+       "detail": null,
+       "level": "full",
+       "name": "compare",
+       "programs_sha256": "afadca60b64c38add90ca325a86a289770f71191ad3faa5c3411c3755d4d8c60",
+       "source": {
+        "device": {
+         "arch": "gfx1152",
+         "cpu": "AMD Ryzen AI 7 350 w/ Radeon 860M",
+         "driver": "32.0.31041.1004",
+         "gpu": "AMD Radeon(TM) 860M Graphics",
+         "host": "amd-krk-1",
+         "os": "Windows 11 25H2"
+        },
+        "hrx_loom": {
+         "fingerprint": "70833302d4fb265c",
+         "hrx_loom": "0.2.0",
+         "verified": false
+        },
+        "kind": "xsj",
+        "run": "20261120-165434-x69y",
+        "url": null
+       },
+       "status": "pass",
+       "time": "2026-11-20T17:15:42"
+      },
+      {
+       "detail": null,
+       "level": "full",
+       "name": "vision",
+       "programs_sha256": "afadca60b64c38add90ca325a86a289770f71191ad3faa5c3411c3755d4d8c60",
+       "source": {
+        "device": {
+         "arch": "gfx1152",
+         "cpu": "AMD Ryzen AI 7 350 w/ Radeon 860M",
+         "driver": "32.0.31041.1004",
+         "gpu": "AMD Radeon(TM) 860M Graphics",
+         "host": "amd-krk-1",
+         "os": "Windows 11 25H2"
+        },
+        "hrx_loom": {
+         "fingerprint": "70833302d4fb265c",
+         "hrx_loom": "0.2.0",
+         "verified": false
+        },
+        "kind": "xsj",
+        "run": "20261120-165434-x69y",
+        "url": null
+       },
+       "status": "pass",
+       "time": "2026-11-20T17:15:42"
+      },
+      {
+       "detail": null,
+       "level": "full",
+       "name": "agent",
+       "programs_sha256": "afadca60b64c38add90ca325a86a289770f71191ad3faa5c3411c3755d4d8c60",
+       "source": {
+        "device": {
+         "arch": "gfx1152",
+         "cpu": "AMD Ryzen AI 7 350 w/ Radeon 860M",
+         "driver": "32.0.31041.1004",
+         "gpu": "AMD Radeon(TM) 860M Graphics",
+         "host": "amd-krk-1",
+         "os": "Windows 11 25H2"
+        },
+        "hrx_loom": {
+         "fingerprint": "70833302d4fb265c",
+         "hrx_loom": "0.2.0",
+         "verified": false
+        },
+        "kind": "xsj",
+        "run": "20261120-165434-x69y",
+        "url": null
+       },
+       "status": "pass",
+       "time": "2026-11-20T17:15:42"
+      },
+      {
+       "detail": null,
+       "level": "full",
+       "name": "agent_think_off",
+       "programs_sha256": "afadca60b64c38add90ca325a86a289770f71191ad3faa5c3411c3755d4d8c60",
+       "source": {
+        "device": {
+         "arch": "gfx1152",
+         "cpu": "AMD Ryzen AI 7 350 w/ Radeon 860M",
+         "driver": "32.0.31041.1004",
+         "gpu": "AMD Radeon(TM) 860M Graphics",
+         "host": "amd-krk-1",
+         "os": "Windows 11 25H2"
+        },
+        "hrx_loom": {
+         "fingerprint": "70833302d4fb265c",
+         "hrx_loom": "0.2.0",
+         "verified": false
+        },
+        "kind": "xsj",
+        "run": "20261120-165434-x69y",
+        "url": null
+       },
+       "status": "pass",
+       "time": "2026-11-20T17:15:42"
+      },
+      {
+       "detail": null,
+       "level": "full",
+       "name": "sampling",
+       "programs_sha256": "afadca60b64c38add90ca325a86a289770f71191ad3faa5c3411c3755d4d8c60",
+       "source": {
+        "device": {
+         "arch": "gfx1152",
+         "cpu": "AMD Ryzen AI 7 350 w/ Radeon 860M",
+         "driver": "32.0.31041.1004",
+         "gpu": "AMD Radeon(TM) 860M Graphics",
+         "host": "amd-krk-1",
+         "os": "Windows 11 25H2"
+        },
+        "hrx_loom": {
+         "fingerprint": "70833302d4fb265c",
+         "hrx_loom": "0.2.0",
+         "verified": false
+        },
+        "kind": "xsj",
+        "run": "20261120-165434-x69y",
+        "url": null
+       },
+       "status": "pass",
+       "time": "2026-11-20T17:15:42"
+      }
+     ],
+     "gpu": "gfx1152"
+    },
+    {
+     "evidence": "loom-card-evidence/2",
+     "gpu": "gfx1152",
+     "roofline": {
+      "checkpoint": "Qwen3.5-2B-Q4_K_M.gguf",
+      "device": {
+       "bandwidth_bytes_per_s": 128000000000.0,
+       "name": "AMD Radeon 860M (gfx1152, LPDDR5X-8000 spec)",
+       "peak_flops": 12288000000000.0
+      },
+      "drafting": null,
+      "metrics": {
+       "decode": {
+        "ceiling": 100.8,
+        "efficiency": 0.9
+       },
+       "decode_2k": {
+        "ceiling": 98.9,
+        "efficiency": 0.901
+       },
+       "decode_32k": {
+        "ceiling": 77.0,
+        "efficiency": 0.916
+       },
+       "prefill_16k": {
+        "ceiling": 3914.0,
+        "efficiency": 0.33
+       },
+       "prefill_1k": {
+        "ceiling": 4434.7,
+        "efficiency": 0.33
+       },
+       "prefill_2k": {
+        "ceiling": 4395.7,
+        "efficiency": 0.33
+       },
+       "prefill_32k": {
+        "ceiling": 3478.3,
+        "efficiency": 0.33
+       },
+       "prefill_8k": {
+        "ceiling": 4175.4,
+        "efficiency": 0.33
+       },
+       "streams4": {
+        "ceiling": 399.6,
+        "efficiency": 0.7
+       }
+      },
+      "tool": {
+       "script": "skills/loom-roofline/roofline.py",
+       "sha256": "89f99027ab117da473420a6c3484067dd4130efc90fa2eaf431f9070036e0e71",
+       "skills_commit": "38b84928d947d45615439ffe54dc3d66899f7b0b"
+      }
+     }
+    }
+   ]
+  }
+ }
+}

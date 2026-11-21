@@ -44,8 +44,9 @@ and a new architecture can need the newest release (no installed build knew `fli
 **Vulkan, the second baseline.** Every card also carries the official ggml-org llama.cpp Vulkan build (`b12211`,
 sha256-pinned in `data/llamacpp-vulkan.sha256`) next to the ROCm one: `LLAMACPP_BACKEND=vulkan fetch_llamacpp.sh DIR
 b12211` and `llamacpp_server.sh` (same variable) run the same server arguments, drafting settings and workloads as the
-ROCm baseline. It is measured only in `devlab-perf` jobs (`llama@vulkan:N`, `llamac4@vulkan` steps, `loom-fleet` publish.md step 3)
-and recorded with `make_info.py perf --backend vulkan` under `performance.baselines.vulkan`; the card renders it as one
+ROCm baseline. On DevLab-backed devices, use `devlab-perf` (`llama@vulkan:N`, `llamac4@vulkan` steps, `loom-fleet` publish.md step 3).
+On a device whose only lab option is XSJ, follow the [leased hardware workflow](../loom-kb/topic/xsj.md). Record the
+baseline with `make_info.py perf --backend vulkan` under `performance.baselines.vulkan`. The card renders it as one
 more column. It never feeds a card value, a guardrail or an `org_status` action. A setting Vulkan cannot run
 is a "not supported" cell with the reason (`baseline.differs`, rendered on the card), never swapped silently
 (`reference/methodology.md` rules 1-6).
@@ -92,9 +93,9 @@ and writes `BENCH_DIR/gates.json` (verdict, level, seconds per gate; logs in `ga
   `LEVEL=dev` after each kept change. `dev` keeps the gates that found bugs at full strength and touches every
   other feature lightly, so a feature that breaks outright still fails in minutes.
 - **Where it runs:** the dev machine's GPU is scarce and sequential, DevLab Dispatch is a large elastic pool.
-  Locally: only what the inner loop needs. Long or deep checks and anything against published cards: DevLab CI.
-  Performance for a card comes only from a DevLab `devlab-perf` job (`loom-fleet` publish.md, "Performance: DevLab is the
-  source"); local runs are for development.
+  Locally: only what the inner loop needs. For DevLab-backed devices, use DevLab CI for deeper checks and published-card
+  comparisons, and `devlab-perf` for the card's standard performance evidence. Use the
+  [leased hardware workflow](../loom-kb/topic/xsj.md) where XSJ is the device's only lab option.
 - `quick` and `full` run **nightly** on the published cards (`.github/workflows/nightly-gates.yml`, below), and
   by hand only once on a new port that has no card yet (qualify.sh / finalize.sh).
 - A `dev` pass is never reused by `quick`/`full` (gates.sh only skips a gate that passed at the same or a
@@ -238,9 +239,10 @@ $T "$S/c4_steady.py" http://127.0.0.1:8160 4 --model <id>;  $T "$S/c4_steady.py"
 | c4_steady agg_tps | Tokens from all 4 streams inside the window where all 4 are decoding, after the untimed warm-up passes (rates in `warmup_agg_tps`). Use this for "N requests at once". A run in which a stream failed exits 1 and records nothing (`make_info.py` also skips a rate <= 0). |
 
 Rules:
-- A card's numbers come from `devlab-perf` jobs: Loom (card programs, active wait: `serve.sh` serves
+- A DevLab-backed device's standard card numbers come from `devlab-perf` jobs: Loom (card programs, active wait: `serve.sh` serves
   `--device=amdgpu` as `amdgpu://?completion_spin_ns=4294967295`, `LOOM_ACTIVE_WAIT=0` opts out for A/B only) and
-  llama.cpp on the same runner type (`loom-fleet` publish.md step 3).
+  llama.cpp on the same runner (`loom-fleet` publish.md step 3). An XSJ-only device uses the
+  [leased XSJ workflow](../loom-kb/topic/xsj.md) and the same comparison rules.
 - Stored rows are reused while their inputs are unchanged (methodology rule 17): a Loom-only change re-measures Loom only,
   and the card names each side's run.
 - Local runs are for development, never card numbers, and a Loom
