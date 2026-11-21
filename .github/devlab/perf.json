@@ -19,7 +19,7 @@
    ],
    "bundle": {
     "build": {
-     "extension": "loom-fun/loom-gufo-extension@347dd0e797d351f3feb18851b603fb52b57339a5",
+     "extension": "loom-fun/loom-gufo-extension@278c5eb185b94f3dd7d32cb591396fabd5896833",
      "gufo": "gufo-org/gufo@9cde650fa7e514b45ebcd756f9d02f3fdd2b06c4"
     }
    }
