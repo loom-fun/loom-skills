@@ -33,7 +33,8 @@ Drafting (rules 1-2); which configuration each row runs (3-6); reading the resul
 5. **Fair measurement.** Same GGUF, same runner and job, same prompts (nonce'd; no prompt-cache reuse), Loom with the active
    wait, timing source disclosed (Loom client-side, llama.cpp server `timings`), one pinned llama.cpp build per backend. Compare
    engines only within one runner/job (ratios, never across runners). Standard measurements use DevLab where it has a runner for the device.
-   For a device whose only lab option is XSJ, run `kb.py route --device <device> --topic xsj`. **Sampling, identical for Loom and llama.cpp (ROCm and
+   For a device whose only lab option is XSJ, run `kb.py route --arch <model-arch> --device <device> --topic xsj`.
+   **Sampling, identical for Loom and llama.cpp (ROCm and
    Vulkan): every metric is the MEDIAN over sessions (rounds); a session's value is the median of its samples.** A session is one
    serve session of the engine (a llama.cpp round: one `perf.py` run). A fast model (published or expected decode above ~100
    tok/s) gets 6 sessions, and `perf.py --repeat-rows 3` measures decode_2k, decode_32k and prefill_8k three times per session
