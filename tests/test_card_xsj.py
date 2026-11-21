@@ -259,6 +259,22 @@ class XsjEvidence(unittest.TestCase):
         initial = self.build()
         check(initial)
         initial_path = self.write("initial.json", initial)
+        measured_path = self.write("measured.json", measured)
+        unavailable_path = self.write("unavailable.json", unavailable)
+        standalone = self.build("--device-results", "none", "--evidence", unavailable_path)
+        self.assertEqual(standalone["devices"][GPU]["performance"]["baseline"], unavailable["performance"]["baseline"])
+        for output in (render_card.render(self.pkg), render_card.render_report(self.pkg)):
+            self.assertIn(reason, output)
+        standalone_path = self.write("standalone.json", standalone)
+        for opts in (("--evidence", unavailable_path, measured_path),
+                     ("--from-info", standalone_path, "--evidence", measured_path),
+                     ("--perf-from", f"{GPU}={standalone_path}", "--evidence", measured_path)):
+            with self.subTest(unavailable_first=opts[0]):
+                check(self.build("--device-results", "none", *opts))
+        reset = self.build("--from-info", initial_path, "--reset-performance", "--device-results", "none",
+                           "--evidence", measured_path)
+        self.assertEqual(reset["devices"][GPU]["performance"]["baseline"], base)
+
         self.write("loom.jsonl", {"time": f"{DAY}T17:19:00", "decode_tps_2k": 29})
         self.write("llama.jsonl", {"time": f"{DAY}T17:20:00", "decode_tps_2k": 25})
         compatible = self.perf(run="20261120-171817-b5x9", args=args)
@@ -268,6 +284,93 @@ class XsjEvidence(unittest.TestCase):
                 info = self.build(*history, "--device-results", "none", "--evidence", path)
                 self.assertEqual(len(info["devices"][GPU]["performance"]["sessions"]), 3)
                 check(info)
+
+    def test_compatible_rocm_history_keeps_unavailable_reasons(self):
+        args = "-ngl 99 -c 40960 -np 1"
+        measured = self.perf(args=args)
+        self.write("loom.jsonl", {"time": f"{DAY}T17:09:00", "prefill_long": [{"prompt_tokens": 32000, "prefill_tps": 290}]})
+        self.write("llama.jsonl", {"time": f"{DAY}T17:10:00"})
+        run = "20261120-170817-b5x9"
+        unavailable = self.perf(run=run, args=args)
+        reason = "prefill_32k was unavailable because the baseline could not admit its prompt."
+        unavailable["performance"]["baseline"]["differs"] = [reason]
+        measured_path = self.write("measured.json", measured)
+        unavailable_path = self.write("unavailable.json", unavailable)
+
+        def check(info):
+            perf = info["devices"][GPU]["performance"]
+            self.assertEqual(perf["baseline"]["version"], measured["performance"]["baseline"]["version"])
+            self.assertEqual(perf["baseline"]["args"], args)
+            session = next(s for s in perf["sessions"] if s["source"] == f"xsj-{run}")
+            self.assertIsNone(session["metrics"]["prefill_32k"]["baseline"])
+            for output in (render_card.render(self.pkg), render_card.render_report(self.pkg)):
+                self.assertIn(reason, output)
+                self.assertNotIn("separate ROCm configuration", output)
+
+        for evidence in ((measured_path, unavailable_path), (unavailable_path, measured_path)):
+            with self.subTest(evidence=evidence):
+                info = self.build("--evidence", *evidence)
+                self.assertIn(f"Limitations in XSJ lab run {run}", info["devices"][GPU]["performance"]["baseline"]["differs"])
+                check(info)
+
+        # Earlier cards used a flat notes list even for a mixed measured/unavailable history.
+        info["devices"][GPU]["performance"]["baseline"]["differs"] = [reason]
+        prior = self.write("prior.json", info)
+        self.write("loom.jsonl", {"time": f"{DAY}T17:19:00", "decode_tps_2k": 29})
+        self.write("llama.jsonl", {"time": f"{DAY}T17:20:00", "decode_tps_2k": 25})
+        recovery = self.write("recovery.json", self.perf(run="20261120-171817-b5x9", args=args))
+        for opts in (("--from-info", prior), ("--perf-from", f"{GPU}={prior}")):
+            with self.subTest(history=opts[0]):
+                check(self.build(*opts, "--evidence", recovery))
+
+    def test_rocm_differs_must_be_an_array_of_strings_in_supplied_evidence(self):
+        measured = self.perf()
+        first = self.write("measured.json", measured)
+        self.build("--evidence", first)
+        before = {name: (self.pkg / name).read_bytes() for name in ("info.json", "model.json")}
+        self.write("llama.jsonl", {"time": f"{DAY}T17:10:00"})
+        unavailable = self.perf(run="20261120-170817-b5x9", version="b9999")
+        for value, complaint in ((None, r"differs: expected an array of strings"),
+                                 ([None], r"differs\[0\]: expected a string"),
+                                 ("NA", r"differs: expected an array of strings")):
+            unavailable["performance"]["baseline"]["differs"] = value
+            bad = self.write("unavailable.json", unavailable)
+            self.write("devices/gfx1152.json", self.device_results(measured, unavailable))
+            with self.subTest(value=value, route="explicit"), self.assertRaisesRegex(
+                    SystemExit, rf"unavailable\.json\.performance\.baseline\.{complaint}"):
+                self.build("--device-results", "none", "--evidence", first, bad)
+            with self.subTest(value=value, route="device"), self.assertRaisesRegex(
+                    SystemExit, rf"devices .*\.models\.{SLUG}\.evidence\[1\]\.performance\.baseline\.{complaint}"):
+                self.build()
+            self.assertEqual({name: (self.pkg / name).read_bytes() for name in before}, before)
+
+    def test_separate_rocm_arguments_are_exact_or_rejected(self):
+        args = ("-ngl 99 -cram 0 --device ROCm0 --spec-type draft-dflash --spec-draft-model "
+                "hf:AtomicChat/Qwen3.5-4B-DFlash-GGUF@56b80828981c35dff23affb49820e9ef816048f0/"
+                "Qwen3.5-4B-DFlash.Q8_0.gguf --spec-draft-n-max 7 -ngld 99 -c 32768 -np 1")
+        run = "20261120-170817-b5x9"
+        reason = "prefill_32k exceeds the tested context capacity"
+        measured = self.write("measured.json", self.perf(args=args.replace("-c 32768", "-c 40960")))
+        self.write("loom.jsonl", {"time": f"{DAY}T17:09:00", "prefill_long": [{"prompt_tokens": 32000, "prefill_tps": 290}]})
+        self.write("llama.jsonl", {"time": f"{DAY}T17:10:00"})
+        unavailable = self.perf(run=run, version="b9999", args=args)
+        path = self.write("unavailable.json", unavailable)
+        self.build("--evidence", measured, path)
+        for output in (render_card.render(self.pkg), render_card.render_report(self.pkg)):
+            self.assertIn(f"b9999.\n- llama.cpp ROCm: Arguments `{args}`.\n- llama.cpp ROCm: {reason}.", output)
+
+        long_args = args + " --no-mmap --no-warmup"
+        self.assertEqual(len(long_args), 247)
+        unavailable["performance"]["baseline"]["args"] = long_args
+        path = self.write("unavailable.json", unavailable)
+        standalone = self.build("--evidence", path)
+        self.assertEqual(standalone["devices"][GPU]["performance"]["baseline"]["args"], long_args)
+        before = {name: (self.pkg / name).read_bytes() for name in ("info.json", "model.json")}
+        for evidence in ((measured, path), (path, measured)):
+            with self.subTest(evidence=evidence), self.assertRaisesRegex(
+                    SystemExit, rf"{run}.*cannot render the exact separate ROCm arguments"):
+                self.build("--evidence", *evidence)
+            self.assertEqual({name: (self.pkg / name).read_bytes() for name in before}, before)
 
     def test_retained_rocm_four_stream_flags_follow_the_measured_workload(self):
         decode = self.perf(run="20261120-170817-b5x9")
