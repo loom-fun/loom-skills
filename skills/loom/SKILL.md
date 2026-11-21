@@ -34,6 +34,7 @@ session rather than treating your current session as independent evidence.
 | Install the SDK + library, fetch a catalog model, start/stop `loom-serve`, NPU serving | `loom-setup` |
 | Browser playground (chat / ASR / TTS / image / embeddings) over running servers | `loom-demo-ui` |
 | Make an arbitrary GGUF LLM servable by loom-serve (write the program; image input too when the repo ships a supported vision projector) | `loom-port-llm` |
+| Make a diffusers text-to-image model (DiT, text encoder, VAE) servable on `/v1/images/generations`; benchmark it against stable-diffusion.cpp, thenoise and diffusers | `loom-port-image` (`"${LOOM_SKILL_DIR}/../loom-port-image/SKILL.md"`) |
 | What is possible for this model? Pick optimization targets (roofline vs llama.cpp) | `loom-roofline` (`"${LOOM_SKILL_DIR}/../loom-roofline/SKILL.md"`) |
 | Make a ported model faster without breaking correctness | `loom-optimize` |
 | Correctness gate vs llama.cpp, throughput methodology, reporting | `loom-benchmark` |
