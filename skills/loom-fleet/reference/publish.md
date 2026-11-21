@@ -125,9 +125,9 @@ the local GPU. Hand the card over and move the local GPU on to the next item.
 - A kernel path that wins at some KV-head counts can lose at others: gate paths by shape and A/B across the
   org's shapes, not one card.
 
-## Performance: DevLab is the source
+## Performance on DevLab-backed devices
 
-Every performance number on a card comes from a `devlab-perf` job (Loom with the card's programs and llama.cpp on the
+The standard performance source for DevLab-backed devices is a `devlab-perf` job (Loom with the card's programs and llama.cpp on the
 same runner). Loom used to measure well below a local session on DevLab (prefill -25 to -52 %): the DevLab runners'
 SMU firmware (BIOS 1.12, SMU 0x0a640600) lowers the memory-fabric clocks (FCLK/UCLK) while the CPU is idle, and Loom
 parked its CPU while the GPU worked. Loom is now served with an active wait (`serve.sh` turns `--device=amdgpu` into

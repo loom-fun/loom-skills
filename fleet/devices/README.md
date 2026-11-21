@@ -1,12 +1,16 @@
 # fleet/devices/: per-device results of GPUs with no DevLab runner
 
-One JSON file per GPU (`gfx1201-16gb.json`, `gfx1150.json`), schema `loom-device-results/1` in `device_results.schema.json` (the same
+One JSON file per GPU (`gfx1201-16gb.json`, `gfx1150.json`, `gfx1152.json`), schema `loom-device-results/1` in `device_results.schema.json` (the same
 subset of JSON Schema as `skills/loom-benchmark/scripts/card/info_schema.json`; `card_lib.validate_device_results` also checks what the schema
 cannot say). The file is the only source of that GPU's data on a card: `make_info.py build` reads the entry of the card's model and
 `render_card.py` shows the GPU only where the entry says the model fits. Rendering stays re-runnable from collected data (`regen.py ingest`
 builds cards the same way): nothing here is measured by the renderer.
 
     python3 skills/loom-benchmark/scripts/card/make_info.py devices        # validate fleet/devices/*.json and summarize them (CI-safe, no GPU)
+
+For a device whose only lab backend is XSJ, the registry enables `runner.backend: "xsj"` with empty DevLab labels.
+Use `kb.py route --arch <model-arch> --device <device> --topic xsj` for the lease and evidence workflow. Record
+`--source-kind xsj` with the lab run ID, recorded device and SDK files, and the program digest captured on the host.
 
 ## gfx1201 is configured by VRAM class
 
@@ -28,7 +32,7 @@ the 16 GB class; below that -> not supported yet. The same rule is in `skills/lo
 | key | what |
 |---|---|
 | `schema` | `loom-device-results/1` |
-| `device` | the GPU id (`gfx1201-16gb`, `gfx1150`): a `skills/loom-kb/device/<family>/<id>/device.json` row (name, arch, memory, roofline, `preset_suffix`) |
+| `device` | the GPU id (`gfx1201-16gb`, `gfx1150`, `gfx1152`): a `skills/loom-kb/device/<family>/<id>/device.json` row (name, arch, memory, roofline, `preset_suffix`) |
 | `gpu` | the board as the session found it, for readers of the file |
 | `same_programs_as` | optional: a GPU whose programs and preset this one serves (the gfx1201 16 GB class: `radeon-r9700`); its preset is derived from that GPU's preset when the package has one |
 | `share_section_with` | optional: `radeon-r9700` makes the card print ONE performance section headed `Radeon AI PRO R9700 / gfx1201 16 GB` (the R9700's table; this GPU adds no evidence, the validator refuses it). Absent/null: this GPU has its own section and its own `evidence` |
@@ -47,7 +51,7 @@ the 16 GB class; below that -> not supported yet. The same rule is in `skills/lo
 | `native_context` | informational |
 | `serve_args` | the `loom-serve` flags the Quick start prints for this GPU and model, e.g. `["--memory_bytes=15000000000", "--state_slab_bytes=4mib"]`, printed as they are. `[]`: the package's own memory budget (like gfx1150). Absent: the GPU's registry flags (`device.json` card.serve_args) plus `--parameter_mode=preload` where the device's `card.preload_max_weight_bytes` rule says so (the gfx1201 classes: every package) |
 | `execution` | preset overrides over the base preset (`prefill_capacity`, `context_capacity`, `rows`, `draft_depth`); written into the GPU's preset together with `context_capacity` = `max_context` |
-| `evidence` | when measured: `loom-card-evidence/2` documents of this GPU for this model, exactly what `make_info.py perf` / `gates` / `roofline` write, with a **`machine`** source (provenance: the named host, its device block and SDK). A performance session needs `--source-kind machine`; gates may use `machine` or `local` |
+| `evidence` | when measured: `loom-card-evidence/2` documents from `make_info.py perf`, `gates` or `roofline`. For devices registered as XSJ-only, use a leased `xsj` source for performance sessions and gates. For other devices in this directory, performance uses a `machine` source and gates can use `machine` or `local`. |
 | `note` | one factual line for file readers (not printed) |
 
 ## What a card does with an entry

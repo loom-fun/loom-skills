@@ -15,7 +15,9 @@ thresholds and baseline configuration defined in the benchmark methodology (`ski
    compiler or runner writes outside the run. Track those paths, including any pre-existing compiler cache.
    Keep dependencies, downloads, servers and output in the run directory. Ship an immutable kit revision
    and resolve public Hub and binary release revisions ahead of execution. Download on the leased host
-   without copying local credentials there.
+   without copying local credentials there. If a large bundle transfer drops, a leased host can fetch
+   the same immutable revision from a public repository. Verify the checked-out commit or the source
+   archive's commit metadata inside that run.
 3. Use `lab job` for durable work and `lab wait --save` for its observed exit and log. Exercise the exact
    package and preset that the card will advertise. Record the admitted context and deliberately run a
    completion near that limit. Preserve single-stream drafting classification and disable drafting in the
