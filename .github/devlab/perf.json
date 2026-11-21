@@ -1,47 +1,85 @@
 {
- "_comment": "R9700 per-model measurement (r9700_jobs.py): one job per model on one R9700 runner; loom-fun-staging card, llama.cpp ROCm b1375 + Vulkan b12211 with the matched drafting, reduced-context models served at served_context. Does not fit: none",
- "runner": "r9700",
- "memory_bytes": 34000000000,
- "llama_spec": "matched",
+ "_comment": "Round 4: the 4 models added to loom-gufo-extension (Qwen3.8-27B UD-Q4_K_XL, gemma-4 QAT 26B-A4B/31B, Flint) as users get them: gufo model install, then Gufo conformance on the installed model.",
+ "card": "loom-fun/unsloth-Qwen3.8-27B-UD-Q4_K_XL",
+ "memory_bytes": 17000000000,
+ "kit": null,
+ "llamacpp": "b1374",
  "jobs": [
   {
-   "name": "unsloth-qwen3-0-6b-loom",
-   "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
-   "kit": null,
-   "llamacpp": "b1375",
-   "llamacpp_vulkan": "b12211",
-   "memory_bytes_r9700": 17000000000,
+   "name": "gm-qwen3.8-27b-ud-q4_k_xl",
+   "card": "loom-fun/unsloth-Qwen3.8-27B-UD-Q4_K_XL",
+   "memory_bytes": 17000000000,
    "variants": [
     {
-     "name": "card",
-     "build": {}
-    },
-    {
-     "name": "nodraft",
-     "build": {},
-     "execution": {
-      "draft_depth": 0
-     }
+     "name": "card"
     }
    ],
    "steps": [
-    "func:card",
-    "ktest:card",
-    "gates:card:dev",
-    "perf:card:3",
-    "perf:card:3:long",
-    "c4:nodraft",
-    "llama@rocm.np1:3",
-    "llama@rocm.np1:3:long",
-    "llamac4@rocm.nodraft",
-    "llama@vulkan.np1:3",
-    "llama@vulkan.np1:3:long",
-    "llamac4@vulkan.perslot.nodraft"
-   ]
+    "gufomodel:qwen3.8-27b-ud-q4_k_xl-loom"
+   ],
+   "bundle": {
+    "build": {
+     "extension": "loom-fun/loom-gufo-extension@e9509150a93b51ca771f6f6514cc94348b912465",
+     "gufo": "gufo-org/gufo@029a156976867ba25021fd934636cfafe29149f6"
+    }
+   }
+  },
+  {
+   "name": "gm-gemma-4-26b-a4b-it-qat",
+   "card": "loom-fun/unsloth-gemma-4-26B-A4B-it-qat-loom",
+   "memory_bytes": 17000000000,
+   "variants": [
+    {
+     "name": "card"
+    }
+   ],
+   "steps": [
+    "gufomodel:gemma-4-26b-a4b-it-qat-loom"
+   ],
+   "bundle": {
+    "build": {
+     "extension": "loom-fun/loom-gufo-extension@e9509150a93b51ca771f6f6514cc94348b912465",
+     "gufo": "gufo-org/gufo@029a156976867ba25021fd934636cfafe29149f6"
+    }
+   }
+  },
+  {
+   "name": "gm-gemma-4-31b-it-qat",
+   "card": "loom-fun/unsloth-gemma-4-31B-it-qat-loom",
+   "memory_bytes": 17000000000,
+   "variants": [
+    {
+     "name": "card"
+    }
+   ],
+   "steps": [
+    "gufomodel:gemma-4-31b-it-qat-loom"
+   ],
+   "bundle": {
+    "build": {
+     "extension": "loom-fun/loom-gufo-extension@e9509150a93b51ca771f6f6514cc94348b912465",
+     "gufo": "gufo-org/gufo@029a156976867ba25021fd934636cfafe29149f6"
+    }
+   }
+  },
+  {
+   "name": "gm-flint",
+   "card": "loom-fun/ggml-org-Flint-loom",
+   "memory_bytes": 17000000000,
+   "variants": [
+    {
+     "name": "card"
+    }
+   ],
+   "steps": [
+    "gufomodel:flint-loom"
+   ],
+   "bundle": {
+    "build": {
+     "extension": "loom-fun/loom-gufo-extension@e9509150a93b51ca771f6f6514cc94348b912465",
+     "gufo": "gufo-org/gufo@029a156976867ba25021fd934636cfafe29149f6"
+    }
+   }
   }
- ],
- "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
- "kit": null,
- "llamacpp": "b1375",
- "llamacpp_vulkan": "b12211"
+ ]
 }
