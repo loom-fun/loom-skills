@@ -282,6 +282,19 @@ def column_name(b, x):
 ENGINE_NAMES = {"loom": "Loom", "llamacpp-rocm": "llama.cpp ROCm", "llamacpp-vulkan": "llama.cpp Vulkan", "gufo": "Gufo"}
 
 
+def xsj_baseline_notes(engine, baseline):
+    """Render the configured flags and keep other notes in their recorded wording."""
+    lines = []
+    for note in baseline.get("differs") or []:
+        if note.startswith("Four-stream flags: "):
+            flags = note.removeprefix("Four-stream flags: ").removesuffix(".")
+            lines.append(f"- {engine} four-stream server arguments: `{flags}`.")
+            continue
+        line = note if note.startswith("Loom:") else f"{engine}: {note}"
+        lines.append(f"- {line}" + ("" if line.endswith((".", "!", "?")) else "."))
+    return lines
+
+
 def local_power_line(psrc, g):
     """A local session at a named power mode (card_lib.perf_source_ok): where, at what power, and that every engine ran in that job."""
     pw = psrc.get("power") or {}
@@ -345,9 +358,13 @@ def methodology(base, extra, spec, drafter, values, runs_c4, machine=False, cros
         out.insert(1, baseline_reuse_note(base, cross))
     for n, b in engines:
         out.append(f"- {n} server arguments: " + (f"`{b['args']}`." if b.get("args") else "not recorded."))
-    ns = [u if u.startswith("Loom:") else f"{n}: {u}" for n, b in engines for u in (b.get("differs") or [])]
-    if ns:
-        out.append("- Not supported / not measured: " + "; ".join(ns) + ".")
+    if xsj:
+        for n, b in engines:
+            out.extend(xsj_baseline_notes(n, b))
+    else:
+        ns = [u if u.startswith("Loom:") else f"{n}: {u}" for n, b in engines for u in (b.get("differs") or [])]
+        if ns:
+            out.append("- Not supported / not measured: " + "; ".join(ns) + ".")
     return out
 
 
@@ -1094,6 +1111,7 @@ def report_gpu(L, info, facts, g, here, h, single):
     view = gpu_view(info, g)
     perf = view.get("performance") or {"baseline": {"name": "llama.cpp", "version": None, "args": None}, "sessions": []}
     base = perf["baseline"]
+    xsj = xsj_enabled(g)
 
     def prog(sha):
         if not sha:
@@ -1101,8 +1119,8 @@ def report_gpu(L, info, facts, g, here, h, single):
         rel = "" if here is None else (", the same as this repository's programs" if sha == here
                                        else ", not the same as this repository's programs")
         return f"sha256 `{sha}`{rel}"
-    if xsj_enabled(g) and base.get("differs"):
-        L += [f"- ROCm / Loom coverage: {u}." for u in base["differs"]] + [""]
+    if xsj and base.get("differs"):
+        L += xsj_baseline_notes(f"{base['name']} ROCm", base) + [""]
     labels = dict(METRICS)
     for i, s in enumerate(perf["sessions"], 1):
         src = sources[s["source"]]
@@ -1139,7 +1157,10 @@ def report_gpu(L, info, facts, g, here, h, single):
         if src["kind"] == "xsj":
             L += [f"- Loom SDK: hrx-loom {sdk_text(src['hrx_loom'])}.",
                   f"- Package programs: {prog(xs.get('programs_sha256'))}."]
-        L += [f"- Differs from {base['name']}: {u}." for u in xb.get("differs") or []]
+        if xsj:
+            L.extend(xsj_baseline_notes(title, xb))
+        else:
+            L += [f"- Differs from {base['name']}: {u}." for u in xb.get("differs") or []]
         L += ["", "| metric | runs | value |", "|---|---|---|"]
         order = [k for k, _ in METRICS]
         for k, m in sorted(xs["metrics"].items(), key=lambda kv: (order.index(kv[0]) if kv[0] in labels else len(order), kv[0])):
