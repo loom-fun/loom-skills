@@ -766,9 +766,8 @@ def render(d):
     output = card.get("output") or facts["output"] or facts["name"]
     native = native_context(feats)
 
-    L = ["---", f"base_model: {c['repo']}"]
-    if card.get("license"):
-        L.append(f"license: {card['license']}")
+    # The package (its Loom programs and card) is MIT; the weights keep the checkpoint's license (base_model).
+    L = ["---", f"base_model: {c['repo']}", "license: mit"]
     tags = derived_tags(feats, named) + [t for t in card.get("tags") or [] if t not in derived_tags(feats, named)]
     st = c["file"].endswith(".safetensors")   # an HF safetensors checkpoint (inspect_safetensors.py), not a GGUF
     if st:

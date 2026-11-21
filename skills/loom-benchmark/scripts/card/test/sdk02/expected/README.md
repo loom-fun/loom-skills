@@ -1,5 +1,6 @@
 ---
 base_model: unsloth/Qwen3-0.6B-GGUF
+license: mit
 tags:
 - loom
 - loom-serve
