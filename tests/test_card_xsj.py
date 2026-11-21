@@ -158,6 +158,17 @@ class XsjEvidence(unittest.TestCase):
             self.assertIn("- Loom: not measured: a longer request exceeded the preset.\n", output)
             self.assertIn("- llama.cpp Vulkan: not supported: this build could not load the model.\n", output)
 
+    def test_matched_draft_method_keeps_distinct_artifacts(self):
+        rocm = {"name": "llama.cpp", "version": "b1382",
+                "args": "--spec-type draft-dflash --spec-draft-model hf:atomic/model.gguf --spec-draft-n-max 7"}
+        args = (rocm, {}, ("dflash", 3), "magnitude/model.gguf", "Median of 3 sessions.", 3)
+        xsj = "\n".join(render_card.methodology(*args, xsj=True))
+        self.assertIn("DFlash on both engines, using magnitude/model.gguf in Loom", xsj)
+        self.assertIn("hf:atomic/model.gguf", xsj)
+        self.assertNotIn("DFlash (magnitude/model.gguf) on both engines", xsj)
+        regular = "\n".join(render_card.methodology(*args))
+        self.assertIn("DFlash (magnitude/model.gguf) on both engines", regular)
+
     def test_vulkan_only_is_retained(self):
         self.write("devices/gfx1152.json", self.device_results(self.perf("vulkan")))
         perf = self.build()["devices"][GPU]["performance"]

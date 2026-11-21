@@ -327,8 +327,12 @@ def methodology(base, extra, spec, drafter, values, runs_c4, machine=False, cros
         draft = f"no drafting on either engine ({no_draft_reason(repo)})"
         depth = ""
     elif spec and all(m is not None and (m == loom_m or (loom_m == "assistant drafter" and m == "MTP")) for _, m, _ in ll):
-        d = f" ({drafter})" if drafter else ""
-        draft = f"{loom_m}{d} on both engines"
+        if xsj and drafter:
+            draft = (f"{loom_m} on both engines, using {drafter} in Loom and the drafter files listed in the "
+                     "llama.cpp server arguments")
+        else:
+            d = f" ({drafter})" if drafter else ""
+            draft = f"{loom_m}{d} on both engines"
         depth = "; draft depth: Loom " + str(spec[1]) + ", llama.cpp --spec-draft-n-max " + " / ".join(
             (str(n) if n else "llama.cpp default") for _, _, n in ll[:1]) + " (each engine its own)"
     else:
