@@ -1550,6 +1550,41 @@
     }
    }
   },
+  "unsloth-Qwen3.8-27B-UD-Q4_K_XL": {
+   "staging": {
+    "repo": "loom-fun-staging/unsloth-Qwen3.8-27B-UD-Q4_K_XL",
+    "revision": null
+   },
+   "model_id": "qwen3.8-27b-ud-q4_k_xl",
+   "kit": null,
+   "arch": "qwen35",
+   "build": {
+    "preset": "chat",
+    "context": 262144,
+    "prefill": 1024,
+    "rows": 4,
+    "max_tokens": 4096,
+    "draft_depth": 3
+   },
+   "files": {
+    "Qwen3.8-27B-UD-Q4_K_XL.gguf": {
+     "origin": "checkpoint",
+     "repo": "unsloth/Qwen3.8-27B-GGUF",
+     "revision": "4af51b3542f775b0a8e4b310bfb3f17e01c306c9",
+     "path": "Qwen3.8-27B-UD-Q4_K_XL.gguf",
+     "size": 17659407264,
+     "dump": "unsloth-Qwen3.8-27B-UD-Q4_K_XL/gguf/Qwen3.8-27B-UD-Q4_K_XL.gguf.json.gz"
+    },
+    "mmproj-Qwen3.8-27B-f16.gguf": {
+     "origin": "vision",
+     "repo": "bartowski/Qwen3.8-27B-GGUF",
+     "revision": "87410e7b9a5c21e6ca70c0c9cc5237de909fe621",
+     "path": "mmproj-Qwen3.8-27B-f16.gguf",
+     "size": 927607008,
+     "dump": "unsloth-Qwen3.8-27B-UD-Q4_K_XL/gguf/mmproj-Qwen3.8-27B-f16.gguf.json.gz"
+    }
+   }
+  },
   "unsloth-Qwen3.8-Flash-Next-loom": {
    "staging": {
     "repo": "loom-fun-staging/unsloth-Qwen3.8-Flash-Next-loom",

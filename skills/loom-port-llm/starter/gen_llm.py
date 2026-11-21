@@ -176,7 +176,7 @@ def yarn_constants(y, rd, theta):
     mscale = y.get("attn_factor", 1.0) * (1.0 + 0.1 * math.log(f))
     return low, 1.0 / max(0.001, high - low), 1.0 - 1.0 / f, mscale
 
-from formats import FMT, SB, LOWBIT, ICODES as IQ_FMTS, SPLIT, SCALE_DIV  # noqa: E402  bytes / values per block of each decoded format
+from formats import FMT, SB, LOWBIT, ICODES as IQ_FMTS, SPLIT, SCALE_DIV, ONE_SCALE  # noqa: E402  bytes / values per block of each decoded format
 
 
 def row_bytes(fmt, k):
@@ -892,6 +892,50 @@ func.def inline @g_mxfp4s_values(%w: buffer, %ws: buffer, %origin: offset, %scal
 """
 
 
+# choice decode.iq4.act_q8 (IQ4_Q8): integer codes of IQ4_XS / IQ4_NL groups for the int8 matvecs, as llama.cpp's
+# vec_dot_iq4_xs_q8_1: the kvalues codes (int8, -127..113) and the group's scale (IQ4_NL: d; IQ4_XS: d (ls - 32)).
+# Uses quant_values.loom's @g_iq4_codes16 / @g_iq4_xs_scale (appended for every low-bit file); emitted only when used.
+IQ4_ICODES = r"""
+func.def inline @g_iq4_icodes32(%payload: vector<16xi8>) -> (vector<32xi8>) {
+  %mask = vector.splati 15 : vector<16xi8>
+  %four = vector.splati 4 : vector<16xi8>
+  %lower = vector.andi %payload, %mask : vector<16xi8>
+  %shifted = vector.shrui %payload, %four : vector<16xi8>
+  %upper = vector.andi %shifted, %mask : vector<16xi8>
+  %lo = func.call @g_iq4_codes16(%lower) : (vector<16xi8>) -> (vector<16xi8>)
+  %hi = func.call @g_iq4_codes16(%upper) : (vector<16xi8>) -> (vector<16xi8>)
+  %codes = vector.concat<0> %lo, %hi : vector<16xi8>, vector<16xi8> -> vector<32xi8>
+  func.return %codes : vector<32xi8>
+}
+
+func.def inline @g_iq4_nl_icodes(%w: buffer, %origin: offset, %group: index) -> (vector<32xi8>, f32) {
+  %two = index.constant 2 : offset
+  %scale_view = buffer.view %w[%origin] : buffer -> view<1xf16>
+  %code_origin = index.add %origin, %two : offset
+  %code_view = buffer.view %w[%code_origin] : buffer -> view<16xi8>
+  %d_half = view.load %scale_view[0] : view<1xf16> -> f16
+  %d = scalar.extf %d_half : f16 to f32
+  %payload = vector.load %code_view[0] : view<16xi8> -> vector<16xi8>
+  %codes = func.call @g_iq4_icodes32(%payload) : (vector<16xi8>) -> (vector<32xi8>)
+  func.return %codes, %d : vector<32xi8>, f32
+}
+
+func.def inline @g_iq4_xs_icodes(%w: buffer, %origin: offset, %group: index) -> (vector<32xi8>, f32) {
+  %g = index.assume %group [range(%group, 0, 7)] : index
+  %dl = func.call @g_iq4_xs_scale(%w, %origin, %g) : (buffer, offset, index) -> (f32)
+  %qs_base = index.constant 8 : offset
+  %sixteen = index.constant 16 : offset
+  %qs_add = index.scale %g, %sixteen : index, offset -> offset
+  %qs0 = index.add %origin, %qs_base : offset
+  %qs_origin = index.add %qs0, %qs_add : offset
+  %code_view = buffer.view %w[%qs_origin] : buffer -> view<16xi8>
+  %payload = vector.load %code_view[0] : view<16xi8> -> vector<16xi8>
+  %codes = func.call @g_iq4_icodes32(%payload) : (vector<16xi8>) -> (vector<32xi8>)
+  func.return %codes, %dl : vector<32xi8>, f32
+}
+"""
+
+
 # emitted only when a Q5_0 tensor is used (see main): llama.cpp's Q4_K_M keeps projections whose rows are not a multiple
 # of 256 in Q5_0 (Qwen2.5-0.5B: hidden 896). Integer codes for the int8 matvecs and head (ACT_Q8), values for the rest
 # (embedding, f32 matvecs, the GEMM's dequant16 through gen_gemm.HELPER).
@@ -966,7 +1010,7 @@ func.def inline @g_q5_0_values(%w: buffer, %origin: offset, %group: index) -> (v
 def iq_decode(fmt, wi, w, ok, o, within):
     """ACT_Q8 weight side: integer codes %wq{wi} (+ scale %sc{wi}, and %mn{wi}: Q4_K/Q5_K minimum, Q6_K second
     half scale) of the lane's 32-value group, once per row."""
-    two = fmt not in ("q8_0", "mxfp4s")
+    two = fmt not in ONE_SCALE
     rt = "vector<32xi8>, f32, f32" if two else "vector<32xi8>, f32"
     split = fmt in SPLIT   # split planes: the scale plane's view and the block's scale offset %so (_mv)
     return (f"""    %wq{wi}, %sc{wi}""" + (f", %mn{wi}" if two else "") + f""" = scf.if {ok} -> ({rt}) {{
@@ -1000,7 +1044,7 @@ def iq_dot(fmt, wi, j, out):
         return "\n".join(t)
     t, di = chain(0, 8, "")
     t.append(f"    %df{wi}_{j} = scalar.sitofp {di} : i32 to f32")
-    if fmt in ("q8_0", "mxfp4s"):
+    if fmt in ONE_SCALE:
         t.append(f"""    %wd{wi}_{j} = scalar.mulf %sc{wi}, %da{j} : f32
     {out} = scalar.mulf %wd{wi}_{j}, %df{wi}_{j} : f32""")
     else:
@@ -2133,6 +2177,31 @@ def noh_dead_h(text):
     return text[:a] + "\n".join(out) + text[b:], n
 
 
+def prune_gemm(text):
+    """GEMM_PRUNE (choice prefill.gemm.prune): drop g_gemm_* kernel definitions nothing launches or calls (and the gfx12 twin of each,
+    `<name>_rdna4`): a program rewrite (f16o swiglu, qg split, residual epilogue) leaves the kernel it replaced in the library.
+    Keeps the library under hrx-loom's 16-bit encoding value ids (dual_target.encodings_first) when a format mix adds kernels.
+    Returns (text, pruned names)."""
+    parts = re.split(r"(?m)^(?=kernel\.def |func\.def |template\.|command\.def )", text)
+    defs = {}
+    for i, p in enumerate(parts):
+        m = re.match(r"kernel\.def (?:target\(@\w+\) )?(?:export\(\"[^\"]+\"\) )?@(g_gemm_\w+)\(", p)
+        if m:
+            defs[m.group(1)] = i
+    fam = {}   # base name -> its definitions (the kernel and its gfx12 twin)
+    for name, i in defs.items():
+        fam.setdefault(name[:-len("_rdna4")] if name.endswith("_rdna4") else name, []).append(i)
+    ref = re.compile(r"@(g_gemm_\w+?)(?:_rdna4)?[\[(]")
+    used = set()
+    for i, p in enumerate(parts):   # references outside a kernel's own definitions
+        for m in ref.finditer(p):
+            if i not in fam.get(m.group(1), ()):
+                used.add(m.group(1))
+    drop = {i for base, ix in fam.items() if base not in used for i in ix}
+    pruned = sorted(n for n, i in defs.items() if i in drop)
+    return "".join(p for i, p in enumerate(parts) if i not in drop), pruned
+
+
 def qg_split_on():
     """QG_SPLIT (choice prefill.fuse.qg_split): fused query+gate projections (attn_gate fused_q) store q and gate straight from the 256-row GEMM's
     epilogue (gen_gemm.qg_split) in whole 256-row epochs; g_split_qgate runs only in the other GEMM epochs."""
@@ -2148,8 +2217,20 @@ def qg_split(text):
     body = text[a:b]
     body, n1 = re.subn(r"(?m)^(?P<ind>\s*)kernel\.launch @g_gemm_(?P<f>\w+?)_store_m256\[(?P<g>[^\]]*)\]\((?P<args>.*), %qg\) : (?P<ty>.*), buffer\)$",
                        lambda m: f"{m.group('ind')}kernel.launch @g_gemm_{m.group('f')}_store_m256_qgs[{m.group('g')}]({m.group('args')}, %q, %gate) : {m.group('ty')}, buffer, buffer)", body)
-    body, n2 = re.subn(r"(?m)^  scf\.if %gemm \{\n\s*kernel\.launch @g_split_qgate(?:_lv)?\[[^\n]*\n  \} else \{\n[^\n]*\n  \}\n",
-                       lambda m: "  scf.if %qgs_nhuge {\n" + "\n".join("  " + l for l in m.group(0).rstrip("\n").split("\n")) + "\n  }\n", body)
+    # wrap the split of each layer whose q GEMM got the epilogue split; a layer whose q weight has no m256 kernel (a format
+    # without one, e.g. unsloth UD's iq4_xs q projections) keeps its unconditional split
+    split = re.compile(r"(?m)^  scf\.if %gemm \{\n\s*kernel\.launch @g_split_qgate(?:_lv)?\[[^\n]*\n  \} else \{\n[^\n]*\n  \}\n")
+    parts, pos, n2 = [], 0, 0
+    for m in split.finditer(body):
+        layer = body[pos:m.start()]   # since the previous layer's split: this layer's q GEMM launches
+        parts.append(layer)
+        if "_m256_qgs[" in layer:
+            parts.append("  scf.if %qgs_nhuge {\n" + "\n".join("  " + l for l in m.group(0).rstrip("\n").split("\n")) + "\n  }\n")
+            n2 += 1
+        else:
+            parts.append(m.group(0))
+        pos = m.end()
+    body = "".join(parts) + body[pos:]
     assert n1 == n2, (n1, n2)
     assert all("g_split_qgate" in l for l in body.split("\n") if "%qg, " in l and "kernel.launch" in l), "qg_split: another %qg reader"
     if not n1:
@@ -5034,6 +5115,10 @@ USED_GEMM = {}       # fmt -> set of GEMM modes
 # on whole 256-row epochs, one f16-output swiglu m256 kernel over both weights (gen_gemm.gemm_big256 fmt2 + f16out_m256)
 # instead of two f32 GEMMs + g_silu_mul + the row scale of f
 M256_MIXED = os.environ.get("GEMM_M256_MIXED_F16O", "0").lower() not in ("", "0", "false", "no", "off")
+# the formats the mixed kernel stages (256-value blocks with an inline dequant): the K-quants, and IQ4_XS under prefill.gemm.iq4_native
+M256_MIXED_FMTS = {"q4_k", "q5_k", "q6_k"} | ({"iq4_xs"} if __import__("gen_gemm").IQ4_NATIVE else set()) \
+    | ({"iq4_nl"} if __import__("gen_gemm").IQ4_NATIVE and os.environ.get("GEMM_M256_MIXED_NL", "0").strip().lower() not in ("", "0", "false", "no", "off") else set()) \
+    | ({"q3_k"} if __import__("gen_gemm").Q3_K_NATIVE else set())
 MIXED_PAIRS = set()  # (gate fmt, up fmt) the mixed kernels are generated for
 USED_MVQ = set()     # (fmt, K, swiglu, R, TG) of the int8-activation matvecs (ACT_Q8); swiglu 2 = pair (PAIR_PROJ)
 
@@ -5213,6 +5298,7 @@ USED_MOEF = set()
 def moe_iq(gu, fd, x):
     """Whether this layer's decode expert matvecs take int8 activations (needs the router input as %h: its h16q)."""
     return (ACT_Q8 and MOE_Q8 and x == "%h" and "+" not in gu and gu in IQ_FMTS and fd in IQ_FMTS
+            and not {gu, fd} & {"iq4_xs", "iq4_nl"}   # decode.iq4.act_q8 covers dense matvecs and the head only (gen_moe has no IQ4 codes path)
             and H // 32 <= 1024 and MOE["ffn"] // 32 <= 1024 and not MOE.get("expert_bias"))
 
 
@@ -6184,7 +6270,7 @@ command.def public @llm_advance() launch(%weights: buffer, %residual: buffer, %m
           if fg == fu:
               T.append("  " + lin(fg, "%h", "%s_h", (f"%w_gate_{i}", f"%w_up_{i}"), sz("ffn_gate"), "%f", "%nH", nff(i), H, mode="swiglu") + "\n")
           else:   # gate and up in different formats (unsloth UD mixes): two projections, then silu(gate) * up
-              mixed = (M256_MIXED and GEMM_M256 and {fg, fu} <= {"q4_k", "q5_k", "q6_k"} and int(NVAL.get(nff(i), 0) or 0) % 64 == 0
+              mixed = (M256_MIXED and GEMM_M256 and {fg, fu} <= M256_MIXED_FMTS and int(NVAL.get(nff(i), 0) or 0) % 64 == 0
                        and int(NVAL.get(nff(i), 0) or 0) > 0)
               if mixed:
                   MIXED_PAIRS.add((fg, fu))
@@ -6371,6 +6457,8 @@ if __name__ == "__main__":
         from gen_mxfp4s import mxfp4s_icodes as _mx_icodes
         COMMON += _mx_icodes()
     if USED_MVQ or USED_MOEQ or PH_ONLY:   # ACT_Q8: int8-activation matvecs, their weight-code helpers and g_quant_q8
+        if ({f for f, *_ in USED_MVQ} | {head_fmt}) & {"iq4_xs", "iq4_nl"}:   # choice decode.iq4.act_q8 (trunk matvecs or an IQ4 head)
+            COMMON += IQ4_ICODES
         COMMON += ICODES + "".join(mv(fmt, K, R=R, TG=TG, swiglu=sw == 1, pair=sw == 2, suffix=f"_r{R}" if R != 16 else "", iq=True)
                                    for fmt, K, sw, R, TG in sorted(USED_MVQ))
         program = quant_wiring_mtp_only(program) if MTP_ONLY_Q8 else quant_wiring(program)
@@ -6511,7 +6599,7 @@ if __name__ == "__main__":
         if _nab:
             _first = text.index("command.def ")   # kernels (and their gfx12 twins) before the programs that launch them
             _first = text.rfind("\n", 0, _first) + 1
-            text = text[:_first] + gen_gdn_ab.kernel(H, GDN["HV"]) + "\n" + text[_first:]
+            text = text[:_first] + "".join(gen_gdn_ab.kernel(H, GDN["HV"], _f) + "\n" for _f in sorted(gen_gdn_ab.USED)) + text[_first:]
         print("alpha/beta wmma layers:", _nab)
     if os.environ.get("POST_NORM_NOH_ALL", "0").strip().lower() not in ("", "0", "false", "no", "off"):   # choice prefill.fuse.post_norm_noh_all
         text, _nnoh = noh_dead_h(text)
@@ -6585,6 +6673,9 @@ if __name__ == "__main__":
             V, CHUNKS = _V, _CH
             _pk.append(f"// head pieces: {_prefix} rows={_rows} piece={_sizes[0]} n={len(_sizes)} fmt={_pfmt} suffix={_suf} on {_root}\n")
         text += "\n" + "".join(_pk)
+    if os.environ.get("GEMM_PRUNE", "0").strip().lower() not in ("", "0", "false", "no", "off"):   # choice prefill.gemm.prune
+        text, _pruned = prune_gemm(text)
+        print("pruned unlaunched GEMM kernels:", _pruned)
     out = os.path.join(out_dir, "model.loom")
     open(out, "w", newline="\n").write(text)
     print("wrote", out)

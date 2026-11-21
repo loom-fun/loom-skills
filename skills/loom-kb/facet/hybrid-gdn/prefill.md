@@ -137,3 +137,7 @@ tok/s (+2.9/+2.6/+2.5 %), decode tie; pf8k busy 1.542 -> 1.523 ms/token.
   +0.6..0.7 % e2e); alpha/beta 20.7 (`g_mv_f32_k5120_t4`) -> 13.4 (`g_gemm_ab_f32w`); row scale 12.4 -> 3.1 (attn o only); split_qgate 7.6 -> 0.
 - What does not pay: batching the acc epilogue's loads (`GEMM_ACC_BATCH` 16 vs 0: 277.4 vs 278.4 us/token, bound by the 20 KB/row x
   read, not latency); `FLASH2_G11=pfu` (unconditional clamped K/V prefetch on top of kt16): flash2 +8.5 %, prefill -0.7..-2.8 %.
+
+- `prefill.gdn.ab_wmma` also covers Q8_0 ssm_alpha/ssm_beta (unsloth UD quants): `g_gemm_ab_q8_0w` stages each 16-value half-block as
+  codes * d in F16 (the F32 kernel's operand rounding), carried as raw codes + scale through the K loop. Qwen3.8-27B UD-Q4_K_XL pf8k:
+  0.0069 ms/token (the Q8_0 t4 matvec it replaces was not profiled separately).

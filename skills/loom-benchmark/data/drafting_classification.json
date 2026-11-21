@@ -695,5 +695,18 @@
   "llama_n_max": 4,
   "nmax_src": "unsloth/gemma-4-26B-A4B-it-qat-GGUF MTP/README.md (--spec-draft-n-max 4)",
   "llama_spec": "--spec-type draft-mtp --spec-draft-model {drafter} --spec-draft-n-max 4 -ngld 99"
+ },
+ "loom-fun/unsloth-Qwen3.8-27B-UD-Q4_K_XL": {
+  "card": "loom-fun/unsloth-Qwen3.8-27B-UD-Q4_K_XL",
+  "live_kind": "mtp",
+  "live_depth": 3,
+  "choice": "mtp",
+  "provenance": [
+   "https://huggingface.co/unsloth/Qwen3.8-27B-GGUF"
+  ],
+  "evidence": "qwen35.nextn_predict_layers=1, 4 nextn tensors (Qwen3.8-27B-UD-Q4_K_XL.gguf)",
+  "llama_spec": "--spec-type draft-mtp",
+  "llama_n_max": null,
+  "nmax_src": "llama.cpp default"
  }
 }

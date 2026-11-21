@@ -1,0 +1,276 @@
+{
+ "name": "Qwen3.8-27B",
+ "arch": "qwen35",
+ "gguf": "Qwen3.8-27B-UD-Q4_K_XL.gguf",
+ "hidden": 5120,
+ "layers": 64,
+ "heads": 24,
+ "kv_heads": 4,
+ "head_dim": 256,
+ "ffn": 17408,
+ "vocab": 248320,
+ "context_length": 262144,
+ "rms_eps": 9.999999974752427e-07,
+ "rope_theta": 10000000.0,
+ "rope_type": "neox",
+ "qk_norm": true,
+ "attn_gate": "fused_q",
+ "post_norms": false,
+ "embed_norm": false,
+ "embed_scale": null,
+ "sliding_window": 0,
+ "sliding_layers": [],
+ "nope_layers": [],
+ "tied_embeddings": false,
+ "eos_id": 248046,
+ "extra_eos_ids": [
+  248044
+ ],
+ "bos_id": null,
+ "chat": {
+  "bos": "",
+  "system_prefix": "<|im_start|>system\n",
+  "suffix": "<|im_end|>\n",
+  "user_prefix": "<|im_start|>user\n",
+  "assistant_prefix": "<|im_start|>assistant\n",
+  "default_system": "",
+  "reasoning_instructions": {
+   "low": "Reasoning effort is set to low. Keep your thinking brief and focused, moving directly to the conclusion without unnecessary elaboration.",
+   "medium": "",
+   "high": "Reasoning effort is set to xhigh. Please think carefully through the task, validate key assumptions, consider plausible alternatives, and prioritize correctness, consistency, and clarity in the final answer.",
+   "xhigh": "Reasoning effort is set to xhigh. Please think carefully through the task, validate key assumptions, consider plausible alternatives, and prioritize correctness, consistency, and clarity in the final answer."
+  },
+  "reasoning_effort_default": "xhigh",
+  "reasoning_separator": "\n\n",
+  "trim_content": true,
+  "think_open": "<think>\n",
+  "think_close": "\n</think>\n\n",
+  "history_think": "always",
+  "history_think_scope": "all",
+  "generation_prompt": "<|im_start|>assistant\n<think>\n",
+  "generation_prompt_plain": "<|im_start|>assistant\n<think>\n\n</think>\n\n",
+  "thinking": "toggle",
+  "thinking_default": true,
+  "starts_in_reasoning": true,
+  "think_end": "</think>",
+  "tools_function_only": false,
+  "tool_line_prefix": "\n",
+  "tool_separator": "",
+  "tools_after_system": false,
+  "tools_prefix": "# Tools\n\nYou have access to the following functions:\n\n<tools>",
+  "tools_system_separator": "\n\n",
+  "tools_suffix": "\n</tools>\n\nIf you choose to call a function ONLY reply in the following format with NO suffix:\n\n<tool_call>\n<function=example_function_name>\n<parameter=example_parameter_1>\nvalue_1\n</parameter>\n<parameter=example_parameter_2>\nThis is the value for the second parameter\nthat can span\nmultiple lines\n</parameter>\n</function>\n</tool_call>\n\n<IMPORTANT>\nReminder:\n- Function calls MUST follow the specified format: an inner <function=...></function> block must be nested within <tool_call></tool_call> XML tags\n- Required parameters MUST be specified\n- You may provide optional reasoning for your function call in natural language BEFORE the function call, but NOT after\n- If there is no function call available, answer the question like normal with your current knowledge and do not tell the user about function calls\n</IMPORTANT>",
+  "call_format": "qwen_xml",
+  "calls_open": "",
+  "calls_close": "",
+  "call_end": "",
+  "call_marker": "<tool_call>",
+  "content_call_separator": "\n\n",
+  "call_separator": "\n",
+  "tool_turn_prefix": "<|im_start|>user",
+  "tool_item_prefix": "\n<tool_response>\n",
+  "tool_item_suffix": "\n</tool_response>",
+  "tool_turn_suffix": "<|im_end|>\n",
+  "terminal": "<|im_end|>"
+ },
+ "rope_dims": 64,
+ "recurrent_layers": [
+  0,
+  1,
+  2,
+  4,
+  5,
+  6,
+  8,
+  9,
+  10,
+  12,
+  13,
+  14,
+  16,
+  17,
+  18,
+  20,
+  21,
+  22,
+  24,
+  25,
+  26,
+  28,
+  29,
+  30,
+  32,
+  33,
+  34,
+  36,
+  37,
+  38,
+  40,
+  41,
+  42,
+  44,
+  45,
+  46,
+  48,
+  49,
+  50,
+  52,
+  53,
+  54,
+  56,
+  57,
+  58,
+  60,
+  61,
+  62
+ ],
+ "gdn": {
+  "conv_kernel": 4,
+  "k_heads": 16,
+  "v_heads": 48,
+  "head_k": 128,
+  "inner": 6144,
+  "head_v": 128
+ },
+ "kv_layers": 16,
+ "ffn_norm_tensor": "post_attention_norm",
+ "mtp": {
+  "layers": [
+   64
+  ]
+ },
+ "attn_sinks": false,
+ "mrope": {
+  "sections": [
+   11,
+   11,
+   10,
+   0
+  ],
+  "interleaved": true
+ },
+ "vision": {
+  "mmproj": "mmproj-Qwen3.8-27B-f16.gguf",
+  "family": "qwen3vl_merger",
+  "img_begin": "<|vision_start|>",
+  "img_end": "<|vision_end|>",
+  "mrope": true
+ },
+ "sdk": {
+  "hrx_loom": "0.2.0",
+  "source": "pypi",
+  "wheel_sha256": "5148f9e3a264af400ec4bae38bd7b06bf551d28cc33b7a61d67f7bcefa590438",
+  "hrx_system_sha": "0cd370f2baaa0cfef47cc23007f1a109906f8a52"
+ },
+ "reference": {
+  "repo": "loom-fun/bartowski-Qwen3.8-27B-loom",
+  "revision": "84edae805a375195bc411169350fe36a340b570d",
+  "category": "A",
+  "score": 192.0,
+  "reasons": [
+   "same architecture (qwen35)",
+   "same family (qwen3.8)",
+   "recurrent hybrid layers",
+   "MTP block",
+   "tool-call format qwen_xml",
+   "thinking switch",
+   "vision tower (qwen3vl_merger)",
+   "drafter type mtp",
+   "head_dim 256"
+  ],
+  "generator": {
+   "skills_commit": "d5b55e206c57a04363974aa35ba2154e829ffa39",
+   "kit": {
+    "example": null,
+    "modified": false
+   },
+   "hrx_loom": "unknown"
+  },
+  "kit_example": null,
+  "taken": [
+   "sdk",
+   "resolved"
+  ],
+  "differs": [
+   "chat"
+  ],
+  "prior": {
+   "drafter": {
+    "kind": "mtp",
+    "depth": 3,
+    "tuned": [
+     {
+      "kind": "none",
+      "depth": 0,
+      "decode_tps": 12.84,
+      "rows": {
+       "work0": 13.2,
+       "work1": 13.21,
+       "work3": 13.2,
+       "work4": 13.18,
+       "long": 11.59,
+       "streams4": 48.17
+      },
+      "seconds": 286,
+      "baseline": "no-draft package",
+      "margin_llama": 0.602
+     },
+     {
+      "kind": "mtp",
+      "depth": 3,
+      "decode_tps": 29.69,
+      "rows": {
+       "work0": 25.04,
+       "work1": 36.08,
+       "work3": 35.08,
+       "work4": 38.73,
+       "long": 21.53,
+       "streams4": 46.95
+      },
+      "seconds": 228,
+      "margin_llama": 0.922,
+      "margin": 0.922,
+      "geomean": 1.099,
+      "checked": "ok (exact, concurrent)"
+     },
+     {
+      "kind": "mtp",
+      "depth": 4,
+      "decode_tps": 28.89,
+      "rows": {
+       "work0": 23.08,
+       "work1": 36.05,
+       "work3": 36.66,
+       "work4": 41.26,
+       "long": 19.8,
+       "streams4": 46.92
+      },
+      "seconds": 230,
+      "margin_llama": 0.922,
+      "margin": 0.922,
+      "geomean": 1.04
+     },
+     {
+      "kind": "mtp",
+      "depth": 2,
+      "decode_tps": 25.94,
+      "rows": {
+       "work0": 24.54,
+       "work1": 29.98,
+       "work3": 30.3,
+       "work4": 30.87,
+       "long": 18.79,
+       "streams4": 46.96
+      },
+      "seconds": 234,
+      "margin_llama": 0.923,
+      "margin": 0.923,
+      "geomean": 1.043
+     }
+    ]
+   }
+  }
+ },
+ "slug": "unsloth-Qwen3.8-27B-UD-Q4_K_XL",
+ "model_id": "qwen3.8-27b-ud-q4_k_xl"
+}

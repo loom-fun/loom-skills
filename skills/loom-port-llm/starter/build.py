@@ -11,6 +11,7 @@ parameter/<gguf> (symlink)}. Serve it with
   loom-serve --model=PACKAGE_DIR/model.json '--device=amdgpu://?completion_spin_ns=4294967295' --memory_bytes=... --listen=...
 """
 import argparse
+import glob
 import json
 import os
 import re
@@ -973,6 +974,16 @@ for dev, n in chunks.items():
 # Dual-target (RDNA3 + RDNA4) programs: every program file that has a `K_rdna4` twin kernel selects it per device
 # (dual_target.py; LOOM_RDNA4=0 turns it off, and files without twins are left as they are).
 dual_target.apply_dir(os.path.join(pkg, "program"))
+# A library too deep for hrx-loom's 16-bit encoding value ids (more encoding kernels than ~60,000 values): its encoding kernels
+# move to program/llm_kernels_N.loom libraries (split_library.py, choice target.library.split; smaller files are left as they are).
+import split_library  # noqa: E402
+_split = split_library.split_dir(pkg, card)
+if _split:
+    print("kernel library split:", ", ".join(_split))
+for _pf in sorted(glob.glob(os.path.join(pkg, "program", "*.loom"))):   # every program file (vision_*, draft, kernel files): hrx-loom truncates deeper ids
+    _d = dual_target._enc_depth(open(_pf, encoding="utf-8").read())
+    if _d > dual_target.ENC_LIMIT:
+        raise SystemExit(f"{_pf}: encoding-typed lines lie {_d} SSA values deep (limit {dual_target.ENC_LIMIT}); only llm.loom is split")
 json.dump(card, open(os.path.join(pkg, "model.json"), "w"), indent=1)
 # The benchmark scripts read the chat format and model id from here.
 bench = {k: v for k, v in cfg.items() if k != "tensors"}
