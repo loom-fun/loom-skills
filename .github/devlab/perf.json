@@ -1,13 +1,13 @@
 {
- "_comment": "Round 4: the 4 models added to loom-gufo-extension (Qwen3.8-27B UD-Q4_K_XL, gemma-4 QAT 26B-A4B/31B, Flint) as users get them: gufo model install, then Gufo conformance on the installed model.",
- "card": "loom-fun/unsloth-Qwen3.8-27B-UD-Q4_K_XL",
+ "_comment": "Round 5: Inkling-2-Mini added to loom-gufo-extension, as users get it: gufo model install, then Gufo conformance on the installed model.",
+ "card": "loom-fun/unsloth-Inkling-2-Mini-loom",
  "memory_bytes": 17000000000,
  "kit": null,
  "llamacpp": "b1374",
  "jobs": [
   {
-   "name": "gm-qwen3.8-27b-ud-q4_k_xl",
-   "card": "loom-fun/unsloth-Qwen3.8-27B-UD-Q4_K_XL",
+   "name": "gm-inkling-2-mini",
+   "card": "loom-fun/unsloth-Inkling-2-Mini-loom",
    "memory_bytes": 17000000000,
    "variants": [
     {
@@ -15,69 +15,12 @@
     }
    ],
    "steps": [
-    "gufomodel:qwen3.8-27b-ud-q4_k_xl-loom"
+    "gufomodel:inkling-2-mini-loom"
    ],
    "bundle": {
     "build": {
-     "extension": "loom-fun/loom-gufo-extension@e9509150a93b51ca771f6f6514cc94348b912465",
-     "gufo": "gufo-org/gufo@029a156976867ba25021fd934636cfafe29149f6"
-    }
-   }
-  },
-  {
-   "name": "gm-gemma-4-26b-a4b-it-qat",
-   "card": "loom-fun/unsloth-gemma-4-26B-A4B-it-qat-loom",
-   "memory_bytes": 17000000000,
-   "variants": [
-    {
-     "name": "card"
-    }
-   ],
-   "steps": [
-    "gufomodel:gemma-4-26b-a4b-it-qat-loom"
-   ],
-   "bundle": {
-    "build": {
-     "extension": "loom-fun/loom-gufo-extension@e9509150a93b51ca771f6f6514cc94348b912465",
-     "gufo": "gufo-org/gufo@029a156976867ba25021fd934636cfafe29149f6"
-    }
-   }
-  },
-  {
-   "name": "gm-gemma-4-31b-it-qat",
-   "card": "loom-fun/unsloth-gemma-4-31B-it-qat-loom",
-   "memory_bytes": 17000000000,
-   "variants": [
-    {
-     "name": "card"
-    }
-   ],
-   "steps": [
-    "gufomodel:gemma-4-31b-it-qat-loom"
-   ],
-   "bundle": {
-    "build": {
-     "extension": "loom-fun/loom-gufo-extension@e9509150a93b51ca771f6f6514cc94348b912465",
-     "gufo": "gufo-org/gufo@029a156976867ba25021fd934636cfafe29149f6"
-    }
-   }
-  },
-  {
-   "name": "gm-flint",
-   "card": "loom-fun/ggml-org-Flint-loom",
-   "memory_bytes": 17000000000,
-   "variants": [
-    {
-     "name": "card"
-    }
-   ],
-   "steps": [
-    "gufomodel:flint-loom"
-   ],
-   "bundle": {
-    "build": {
-     "extension": "loom-fun/loom-gufo-extension@e9509150a93b51ca771f6f6514cc94348b912465",
-     "gufo": "gufo-org/gufo@029a156976867ba25021fd934636cfafe29149f6"
+     "extension": "loom-fun/loom-gufo-extension@f7e7359c3320b95c4758e89017f19598f90443a1",
+     "gufo": "gufo-org/gufo@9cde650fa7e514b45ebcd756f9d02f3fdd2b06c4"
     }
    }
   }
