@@ -42,6 +42,11 @@ and verify the live program digest, source and preset after upload. Where the GP
 benchmark context or an engine cannot meet the baseline configuration, report the corresponding cell
 with its capability reason. Measurements on one host describe that host's configuration.
 
+Follow the [Windows comparison runner recipe](../../loom-benchmark/reference/xsj-perf.md) and the
+[per-device evidence ingestion reference](../../../fleet/devices/README.md). For a near-limit completion,
+allow enough time for both the probe and its HTTP read deadline. Retain the actual result so an HTTP client
+timeout and a server refusal can be distinguished.
+
 On Windows, use Git Bash where an existing benchmark harness expects Bash, or a native Windows
 orchestrator using the same workloads. Launch Windows processes under the lab job, check native exit
 codes in PowerShell, and stop only the run's own processes. Point Python explicitly at a real interpreter
