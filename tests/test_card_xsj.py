@@ -75,11 +75,12 @@ class XsjEvidence(unittest.TestCase):
                   "hrx-loom": self.sdk_path, "package": self.pkg, "fetched-programs": self.digest, **overrides}
         return [arg for k, v in fields.items() if v is not None for arg in (f"--{k}", str(v))]
 
-    def perf(self, backend="rocm", **overrides):
+    def perf(self, backend="rocm", *, version=None, args=None, **overrides):
         path = self.tmp / f"{backend}.json"
         main = ["--loom-jsonl", str(self.loom)] if backend == "rocm" else []
+        baseline_args = [f"--baseline-args={args}"] if args is not None else []
         make_info.main(["perf", "--backend", backend, *main, "--llama-jsonl", str(self.llama),
-                        "--baseline-version", "b1382" if main else "b12211",
+                        "--baseline-version", version or ("b1382" if main else "b12211"), *baseline_args,
                         "--differs", "prefill_32k exceeds the tested context capacity",
                         *self.identity_args(**overrides), "-o", str(path)])
         return card_lib.load_json(path)
@@ -133,6 +134,110 @@ class XsjEvidence(unittest.TestCase):
             self.build()
         self.assertEqual(model.read_bytes(), before)
         self.assertFalse((self.pkg / "info.json").exists())
+
+    def test_retained_rocm_baseline_descriptors_must_match(self):
+        first = self.perf(args="-ngl 99 -c 32768 -np 1")
+        card_path = self.pkg / "info.json"
+        first_path = self.write("first.json", first)
+        self.build("--evidence", first_path)
+        original = card_path.read_bytes()
+        other_run = "20261120-170817-b5x9"
+        replacement = self.perf(run=other_run, version="b9999", args="-ngl 99 -c 40960 -np 1")
+        self.write("loom.jsonl", {"time": f"{DAY}T17:09:00", "decode_tps_2k": 29})
+        self.write("llama.jsonl", {"time": f"{DAY}T17:10:00", "decode_tps_2k": 25})
+        partial = self.perf(run=other_run, version="b9999", args="-ngl 99 -c 40960 -np 1")
+        self.assertEqual(set(first["performance"]["session"]["metrics"]), {"decode"})
+        self.assertEqual(set(partial["performance"]["session"]["metrics"]), {"decode_2k"})
+        path = self.write("partial.json", partial)
+        self.write("devices/gfx1152.json", self.device_results(first, partial))
+        model = (self.pkg / "model.json").read_bytes()
+        conflict = "incompatible XSJ ROCm baseline descriptors"
+        with self.assertRaisesRegex(SystemExit, conflict):
+            self.build()
+        self.assertEqual((self.pkg / "model.json").read_bytes(), model)
+        self.assertEqual(card_path.read_bytes(), original)
+        for previous in (("--from-info", card_path), ("--perf-from", f"{GPU}={card_path}")):
+            with self.subTest(previous=previous[0]), self.assertRaisesRegex(SystemExit, conflict):
+                self.build(*previous, "--device-results", "none", "--evidence", path)
+
+        baseline = first["performance"]["baseline"]
+        for changes in ({"name": "Gufo"}, {"version": "llamacpp-rocm/b9999"}, {"args": "-np 4"}, None):
+            with self.subTest(changes=changes):
+                candidate = copy.deepcopy(partial)
+                if changes is None:
+                    del candidate["performance"]["baseline"]
+                else:
+                    candidate["performance"]["baseline"] = dict(baseline, **changes)
+                with self.assertRaisesRegex(SystemExit, conflict):
+                    self.build("--from-info", card_path, "--device-results", "none", "--evidence",
+                               self.write("candidate.json", candidate))
+
+        # Even a superseded README row survives in the report. Replace the dataset explicitly.
+        replace_path = self.write("replacement.json", replacement)
+        with self.assertRaisesRegex(SystemExit, conflict):
+            self.build("--from-info", card_path, "--device-results", "none", "--evidence", replace_path)
+        self.write("devices/gfx1152.json", self.device_results(partial))
+        for opts, incoming in (((), partial), (("--device-results", "none", "--reset-performance", "--evidence",
+                                                replace_path), replacement)):
+            with self.subTest(opts=opts):
+                card_path.write_bytes(original)
+                perf = self.build("--from-info", card_path, *opts)["devices"][GPU]["performance"]
+                self.assertEqual(perf["baseline"], incoming["performance"]["baseline"])
+                self.assertEqual([s["source"] for s in perf["sessions"]], [f"xsj-{other_run}"])
+
+    def test_compatible_rocm_and_supplemental_evidence_keep_their_rows(self):
+        first = self.perf(args="-ngl 99 -c 32768 -np 1")
+        other_run = "20261120-170817-b5x9"
+        self.write("loom.jsonl", {"time": f"{DAY}T17:09:00", "decode_tps_2k": 29})
+        self.write("llama.jsonl", {"time": f"{DAY}T17:10:00", "decode_tps_2k": 25})
+        partial = self.perf(run=other_run, args="-ngl 99 -c 32768 -np 1")
+        self.write("gates.json", {"ts": f"{DAY}T17:12:00", "level": "full", "gates": {"spec": {"pass": True}}})
+        (self.tmp / "gates_spec.log").write_text("acceptance 63% of 100 proposals\n", encoding="utf-8")
+        spec = self.gate_evidence(run="20261120-171817-b5x9")
+        self.assertEqual(spec["performance"]["session"]["metrics"], {"spec_acceptance": {"loom": 0.63}})
+        self.write("devices/gfx1152.json", self.device_results(first, partial, spec))
+        perf = self.build()["devices"][GPU]["performance"]
+        self.assertEqual(perf["baseline"], first["performance"]["baseline"])
+        self.assertEqual([set(s["metrics"]) for s in perf["sessions"]], [{"decode"}, {"decode_2k"}, {"spec_acceptance"}])
+        readme = render_card.render(self.pkg)
+        for run in (RUN, other_run):
+            self.assertIn(f"XSJ lab run {run}", readme)
+        self.assertIn("llamacpp-rocm/b1382", readme)
+
+    def test_unmeasured_rocm_descriptor_cannot_relabel_measured_rows(self):
+        measured = self.perf(args="-ngl 99 -c 32768 -np 1")
+        other_run = "20261120-170817-b5x9"
+        self.write("loom.jsonl", {"time": f"{DAY}T17:09:00", "decode_tps_2k": 29})
+        self.write("llama.jsonl", {"time": f"{DAY}T17:10:00"})
+        unavailable = self.perf(run=other_run, version="b9999", args="-ngl 99 -c 40960 -np 1")
+        self.assertIsNone(unavailable["performance"]["session"]["metrics"]["decode_2k"]["baseline"])
+        self.write("devices/gfx1152.json", self.device_results(unavailable))
+        perf = self.build()["devices"][GPU]["performance"]
+        self.assertEqual(perf["baseline"], unavailable["performance"]["baseline"])
+        for sessions in ((measured, unavailable), (unavailable, measured)):
+            with self.subTest(first=sessions[0]["performance"]["baseline"]["version"]):
+                self.write("devices/gfx1152.json", self.device_results(*sessions))
+                perf = self.build()["devices"][GPU]["performance"]
+                self.assertEqual(perf["baseline"], measured["performance"]["baseline"])
+                self.assertEqual(len(perf["sessions"]), 2)
+
+    def test_retained_rocm_four_stream_flags_follow_the_measured_workload(self):
+        decode = self.perf(run="20261120-170817-b5x9")
+        self.write("loom.jsonl", {"time": f"{DAY}T16:10:00", "agg_tps": 51})
+        self.write("llama.jsonl", {"time": f"{DAY}T16:11:00", "agg_tps": 45})
+        four_streams = self.perf()
+        flags = "-ngl 99 -c 40960 -np 4"
+        four_streams["performance"]["baseline"]["differs"] = [f"Four-stream flags: {flags}."]
+        self.write("devices/gfx1152.json", self.device_results(four_streams, decode))
+        self.build()
+        for output in (render_card.render(self.pkg), render_card.render_report(self.pkg)):
+            self.assertIn(f"- llama.cpp ROCm four-stream server arguments: `{flags}`.", output)
+
+        other = self.perf(run="20261120-170817-b5x9")
+        other["performance"]["baseline"]["differs"] = ["Four-stream flags: -ngl 99 -c 32768 -np 4."]
+        self.write("devices/gfx1152.json", self.device_results(four_streams, other))
+        with self.assertRaisesRegex(SystemExit, "four-stream server arguments differ"):
+            self.build()
 
     def test_measured_backends_show_their_own_four_stream_flags(self):
         rocm, vulkan = self.perf(), self.perf("vulkan")

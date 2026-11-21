@@ -102,8 +102,9 @@ Evidence file (loom-card-evidence/2), every block optional:
    "roofline": {"device", "tool", "checkpoint", "drafting", "metrics"}}
   SOURCE: {"kind", "run", "url", "device", "hrx_loom"}
 Merge rules: card keys and versions: the later file wins. performance: sessions append in order and per metric
-the last session that measured it is the card's value (card_lib card_metrics); the baseline is the last one given. gates: per gate the
-latest evidence wins (gate_supersedes: a published date-only gate is older than new evidence of that day; equal
+the last session that measured it is the card's value (card_lib card_metrics); the baseline is the last one given.
+For XSJ, the descriptor must match across retained ROCm measurements, which take precedence over unmeasured descriptors.
+gates: per gate the latest evidence wins (gate_supersedes: a published date-only gate is older than new evidence of that day; equal
 times: the later file), except that on the same programs_sha256 a later pass at a lower level (dev < fast < quick <
 full) does not replace a pass at a higher level; a later failure always does. roofline: the later file wins. A "devlab"
 block (an older Loom-only sweep) is ignored. Unknown metric and gate names are kept.
@@ -335,6 +336,45 @@ def device_meta(gpu, doc, entry, feats, weight_bytes=None):
     return m
 
 
+def merge_xsj_rocm_baseline(previous, sessions, incoming, session, path, gpu):
+    # The report keeps every session, including samples for rows replaced in the README.
+    def measured(rows):
+        return {k for s in rows for k, m in s["metrics"].items()
+                if m.get("baseline") is not None or m.get("baseline_runs")}
+
+    def descriptor(baseline):
+        b = baseline or {}
+        return b.get("name", "llama.cpp"), b.get("version"), b.get("args")
+
+    def conflict(detail):
+        sys.exit(f"{path}: incompatible XSJ ROCm baseline descriptors for {gpu}: {detail}. "
+                 "Use --reset-performance with --from-info, or replace the GPU's device results.")
+
+    retained_rows = measured(sessions)
+    new_rows = measured([session] if session else [])
+    if not retained_rows:
+        return incoming if new_rows else incoming or previous
+    old_descriptor, new_descriptor = descriptor(previous), descriptor(incoming)
+    if old_descriptor != new_descriptor:
+        if new_rows:
+            conflict(f"retained {old_descriptor!r}, incoming {new_descriptor!r}")
+        return previous
+    if not incoming or "streams4" not in retained_rows:
+        return incoming or previous
+
+    # The shared notes also carry the exact flags of the separate four-stream workload.
+    prefix = "Four-stream flags: "
+    old_flags = [n for n in (previous or {}).get("differs", []) if n.startswith(prefix)]
+    new_notes = incoming.get("differs", [])
+    if "streams4" in new_rows:
+        new_flags = [n for n in new_notes if n.startswith(prefix)]
+        if {n.removesuffix(".") for n in old_flags} != {n.removesuffix(".") for n in new_flags}:
+            conflict("the retained and incoming four-stream server arguments differ")
+        return incoming
+    notes = [n for n in new_notes if not n.startswith(prefix)] + old_flags
+    return dict(incoming, differs=notes) if notes != new_notes else incoming
+
+
 def cmd_build(a):
     pkg = load_package(a.pkg)
     measured_programs = programs_sha256(a.pkg) or ""
@@ -444,24 +484,26 @@ def cmd_build(a):
         if (ev.get("versions") or {}).get("package"):
             versions.setdefault("package", {}).update(ev["versions"]["package"])
         perf = ev.get("performance") or {}
-        if perf.get("session"):
-            st = gpu_state(evidence_gpu(ev, perf["session"].get("source")))
-        else:
-            st = gpu_state(evidence_gpu(ev))
+        session = perf.get("session")
+        gpu = evidence_gpu(ev, (session or {}).get("source"))
+        st = gpu_state(gpu)
         # Package feature/version metadata alone is not a device measurement.
         # Gates and rooflines mark their own source GPU below.
-        if perf.get("session"):
+        if session:
             st["data"] = True
         if ev.get("serve"):   # how this GPU serves the package: {"memory_bytes", "served_context"}
             st["meta"].update({k: v for k, v in ev["serve"].items() if v is not None})
         if perf.get("backend"):   # a further llama.cpp backend (make_info.py perf --backend): kept apart from the sessions
-            sess = dict(perf["session"], source=sources.add(perf["session"]["source"]))
+            sess = dict(session, source=sources.add(session["source"]))
             st["baselines"][perf["backend"]] = {"baseline": perf["baseline"], "session": sess}
         else:
-            if perf.get("baseline"):
+            if perf and xsj_enabled(gpu):
+                st["baseline"] = merge_xsj_rocm_baseline(st["baseline"], st["sessions"],
+                                                         perf.get("baseline"), session, path, gpu)
+            elif perf.get("baseline"):
                 st["baseline"] = perf["baseline"]
-            if perf.get("session"):
-                s = dict(perf["session"])
+            if session:
+                s = dict(session)
                 s["source"] = sources.add(s["source"])
                 s["metrics"] = {k: (dict(m, baseline_from=dict(m["baseline_from"], source=sources.add(m["baseline_from"]["source"])))
                                     if m.get("baseline_from") else m) for k, m in s["metrics"].items()}
