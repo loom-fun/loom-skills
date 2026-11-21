@@ -137,6 +137,17 @@
     "prefill.gemm.q3_k_native": true
    },
    "evidence": "q38xl-fmt (PR #1330): the 5 FFN layers pairing IQ4_NL or Q3_K with another format run one mixed f16o swiglu m256 kernel (iq4_nl+q5_k x2, q5_k+iq4_nl, iq4_nl+iq4_xs, iq4_xs+q3_k) instead of two GEMMs + silu_mul_rs. DevLab Strix run 44825536379, same-job ABBA (2 sessions each): prefill 1k/2k 510.6/514.0 -> 515.1/518.6 (+0.9 %), 8k/16k/32k 525.6/507.5/466.3 -> 530.1/511.9/469.9 (+0.9/+0.9/+0.8 %), decode 23.90/23.88 and decode_32k 20.21/20.34 ties; pf8k busy 1.8983 -> 1.8848 ms/token (-0.7 %; gate/up+silu 1023 -> 803 ms over the run). ktest 204/204 (gm_iq4_nl_q5_k / q5_k_iq4_nl / iq4_nl_iq4_xs / iq4_xs_q3_k sw_512_f16o, gm_q3_k_st_512), func pass. Whole-build choice (programs shared by both targets): the gfx12 twins compile (gfx1201) and the R9700 is untimed."
+  },
+  {
+   "when": {
+    "devices": [
+     "rdna3"
+    ]
+   },
+   "set": {
+    "prefill.gemm.iq4_g32": true
+   },
+   "evidence": "q38xl-iq4 (PR #1331): IQ4_XS/IQ4_NL m256 GEMMs decode the whole 32-weight group per thread with an unsigned nibble book, the 0x64 byte->f16 magic and one f16 fma per pair (loop VALU 467 -> ~180 per 64 WMMA, scratch spills gone). Local Strix 123 W same-session ABBA vs q38xl-fmt 3b47ecd0: prefill 1k/2k/8k/16k/32k +12.8/+12.0/+12.8/+11.1/+10.2 % (8k 574 -> 647 tok/s); decode 24.42 -> 23.88 (acceptance .49 -> .47 of the fixed prompt: f16(dl) rounding changes the greedy text), decode_32k 21.4 -> 21.6. DevLab Strix 85 W run 44830646304 (vs q38xl-port): prefill +9.5..+12.4 %, pf8k busy 1.920 -> 1.716 ms/token. ktest 200/200, gates dev: see LOG."
   }
  ]
 }
