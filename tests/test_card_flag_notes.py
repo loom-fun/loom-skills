@@ -1,6 +1,9 @@
 """Per-GPU quickstart flag explanations belong to source cards, alongside their commands."""
+import json
 import re
+import shutil
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -46,6 +49,34 @@ class QuickstartFlagNotes(unittest.TestCase):
                     self.assertNotIn('commits the preset', block)
                 if '--parameter_mode=preload' not in serve:
                     self.assertNotIn('only changes how the weights', block)
+
+    def test_rendered_served_context_uses_recorded_backing_and_budget(self):
+        fixture = CARD / 'test' / 'flint'
+        info = json.loads((fixture / 'expected' / 'info.json').read_text(encoding='utf-8'))
+        context = info['card']['features']['context']['value']
+        context['native'] = context['tokens']
+        gpu = info['devices']['strix-halo']
+        gpu['served_context'] = 40960
+        budget = '--memory_bytes=14000000000'
+        elastic = '--pool_backing=elastic'
+        fixed = '--pool_backing=fixed'
+        cases = [
+            ([elastic, budget, '--parameter_mode=preload'],
+             f'`{elastic}` grows the memory pool as needed within the `{budget}` budget'),
+            ([elastic], f'`{elastic}` grows the memory pool as needed'),
+            ([fixed], f"the package's preset sizes the memory pool (`{fixed}` commits it up front)"),
+            ([budget], f'`{budget}` bounds the memory pool'),
+        ]
+        with tempfile.TemporaryDirectory() as work:
+            shutil.copytree(fixture / 'pkg', work, dirs_exist_ok=True)
+            path = Path(work) / 'info.json'
+            for args, description in cases:
+                with self.subTest(args=args):
+                    gpu['quick_start']['args'] = args
+                    path.write_text(json.dumps(info), encoding='utf-8')
+                    text = R.render(work)
+                    self.assertIn(f'{description}: this package serves up to 40,960 tokens', text)
+                    self.assertNotIn(f'`{elastic}` commits it up front', text)
 
 
 if __name__ == '__main__':

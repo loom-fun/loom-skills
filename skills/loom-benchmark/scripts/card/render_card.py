@@ -859,10 +859,16 @@ def render(d):
         if not sc:
             return None
         qa = recorded_quick_start(info, facts, g)["args"]   # the flags the Quick start serves this GPU with
-        pool = next((a for a in qa if a.startswith("--pool_backing")), None)
-        mem = next((a for a in qa if a.startswith("--memory_bytes=")), f"--memory_bytes={gpu_memory(info, facts['memory_bytes'], g)}")
-        bound = (f"the package's preset sizes the memory pool (`{pool}` commits it up front)" if pool
-                 else f"`{mem}` bounds the memory pool")
+        mem = next((a for a in qa if a.startswith("--memory_bytes=")), None)
+        if "--pool_backing=fixed" in qa:
+            bound = "the package's preset sizes the memory pool (`--pool_backing=fixed` commits it up front)"
+        elif "--pool_backing=elastic" in qa:
+            bound = "`--pool_backing=elastic` grows the memory pool as needed"
+            if mem:
+                bound += f" within the `{mem}` budget"
+        else:
+            mem = mem or f"--memory_bytes={gpu_memory(info, facts['memory_bytes'], g)}"
+            bound = f"`{mem}` bounds the memory pool"
         if here:
             return f"On this GPU, {bound}: this package serves up to {sc:,} tokens per request (its native context is {native:,})."
         return (f"On the {GPUS[g]['name']}, {bound}: this package serves up to {sc:,} tokens per request there "
