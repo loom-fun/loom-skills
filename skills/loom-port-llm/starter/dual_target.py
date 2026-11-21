@@ -339,7 +339,8 @@ def encodings_first(text):
     deep). A file with an encoding-typed line that deep gets its top-level definitions reordered, stably: the funcs that
     lead the file, then every kernel that uses encodings (wherever it was: a weight-converter command program can sit in
     the middle of the kernels), then everything else in its order. Kernel texts are unchanged; smaller files are returned
-    as they are. Raises ValueError when the encoding kernels alone are too deep (split the library)."""
+    as they are. When the encoding kernels alone are too deep, split_library.py (run by build.py after this pass) moves them
+    into kernel files; with that split off (LOOM_LIBRARY_SPLIT=off) this raises ValueError."""
     if _enc_depth(text) <= ENC_LIMIT:
         return text
     parts = re.split(r"(?m)^(?=kernel\.def |func\.def |template\.|command\.def )", text)
@@ -349,7 +350,7 @@ def encodings_first(text):
     enc = [i for i, p in enumerate(rest) if p.startswith("kernel.def") and _is_enc(p)]
     moved = set(funcs) | set(enc)
     out = head + "".join([rest[i] for i in funcs + enc] + [p for i, p in enumerate(rest) if i not in moved])
-    if _enc_depth(out) > ENC_LIMIT:
+    if _enc_depth(out) > ENC_LIMIT and os.environ.get("LOOM_LIBRARY_SPLIT", "auto").strip().lower() in ("off", "0", "no", "false"):
         raise ValueError(f"encoding-typed lines still lie {_enc_depth(out)} values deep after reordering (limit {ENC_LIMIT}): "
                          "hrx-loom truncates SSA encoding value ids to 16 bits; split the kernel library into more files")
     return out
@@ -377,8 +378,9 @@ def apply_dir(program_dir):
         for n, t in files.items():
             if "target.decl @device" in t:
                 continue
+            declared = set(re.findall(r"(?m)^kernel\.decl @(\w+)\(", t))   # kernels split_library.py moved to a kernel file
             for m in (LAUNCH.match(l) for l in t.split("\n")):
-                if m and m.group(2) in owner and owner[m.group(2)] != n:
+                if m and m.group(2) in owner and owner[m.group(2)] != n and m.group(2) not in declared:
                     raise ValueError(f"program/{n} launches @{m.group(2)}, whose {SUFFIX} twin is defined in program/{owner[m.group(2)]}: "
                                      "a dual-target kernel must be launched from the file that defines it")
     return [n for n in files if apply_file(os.path.join(program_dir, n))]

@@ -22,7 +22,20 @@ SHAPES = [  # (shape name, fmt, mode, rows, K, N, weight npy names)
     ("attnout8", "q8_0", "store", 1024, 6144, 5120, ["attnout_q80"]),
     ("mixed", "q4_k:q6_k", "swiglu", 1024, 5120, 17408, ["gate_q4k", "up_q6k"]),   # gate q4_k + up q6_k in one kernel
 ]
-WB = {"q4_k": (144, 256), "q6_k": (210, 256), "q8_0": (34, 32)}
+# Q38_SET=udxl: the IQ4 shapes of unsloth UD-Q4_K_XL (campaign q38xl, lane iq4); run with GEMM_IQ4_NATIVE=1 in the environment
+# (gen_gemm reads it at import).
+if os.environ.get("Q38_SET") == "udxl":
+    SHAPES = [
+        ("down_x", "iq4_xs", "acc", 1024, 17408, 5120, ["down_iq4xs"]),
+        ("sw_x", "iq4_xs", "swiglu", 1024, 5120, 17408, ["gate_iq4xs", "up_iq4xs"]),
+        ("qkv_x", "iq4_xs", "store", 1024, 5120, 10240, ["qkv_iq4xs"]),
+        ("down_nl", "iq4_nl", "acc", 1024, 17408, 5120, ["down_iq4nl"]),
+        ("mx_x5", "iq4_xs:q5_k", "swiglu", 1024, 5120, 17408, ["gate_iq4xs7", "up_q5k7"]),
+        ("mx_4x", "q4_k:iq4_xs", "swiglu", 1024, 5120, 17408, ["gate_q4k10", "up_iq4xs10"]),
+        ("downst_x", "iq4_xs", "store", 1024, 17408, 5120, ["down_iq4xs"]),       # acc vs store on the same weight
+        ("down_q5", "q5_k", "acc", 1024, 17408, 5120, ["down_q5k3"]),            # control: the q5_k down at ~36 TFLOP/s in production
+    ]
+WB = {"q4_k": (144, 256), "q6_k": (210, 256), "q8_0": (34, 32), "iq4_xs": (136, 256), "iq4_nl": (18, 32), "q5_k": (176, 256)}
 
 
 def helpers():
@@ -64,6 +77,7 @@ def ablate(t, abl):
 def kernel(fmt, mode, env):
     env = dict(env)
     abl = env.pop("ABL", "")
+    nf = env.pop("Q38_NF", None)
     old = {k: os.environ.get(k) for k in env}
     os.environ.update(env)
     try:
@@ -73,7 +87,7 @@ def kernel(fmt, mode, env):
         for k, v in old.items():
             if v is None: os.environ.pop(k, None)
             else: os.environ[k] = v
-    if os.environ.get("Q38_NF", "1") != "0":   # production order (gen_gemm GEMM_N_FASTEST, the program default): output tiles fastest
+    if (nf if nf is not None else os.environ.get("Q38_NF", "1")) != "0":   # production order (gen_gemm GEMM_N_FASTEST, the program default): output tiles fastest
         t = t.replace("workgroups(%row_tiles, %out_tiles, %c1)", "workgroups(%out_tiles, %row_tiles, %c1)")
         t = t.replace("  %row_group_id = kernel.workgroup.id<x> : index\n  %out_group_id = kernel.workgroup.id<y> : index",
                       "  %row_group_id = kernel.workgroup.id<y> : index\n  %out_group_id = kernel.workgroup.id<x> : index")
@@ -131,7 +145,7 @@ check.benchmark<@{kn}_case> @{kn}_bm
 """
         for vn, _ in variants[1:]:
             ab.append(f"check.case public @ab_{vn} {{\n{head}  %yv = check.generate.fill value(0.0) : {ty}\n" + launch(f"k_base_{sh}", "%yb") + launch(f"k_{vn}_{sh}", "%yv") +
-                      f"  check.expect.approximate actual(%yv) expected(%yb) atol(1.0e-4) rtol(1.0e-4) nan(different) : {ty}, {ty}\n  check.return\n}}\n")
+                      f"  check.expect.approximate actual(%yv) expected(%yb) atol({os.environ.get("Q38_AB_TOL", "1.0e-4")}) rtol({os.environ.get("Q38_AB_TOL", "1.0e-4")}) nan(different) : {ty}, {ty}\n  check.return\n}}\n")
         ab.append(f"check.case public @ab_negative {{\n{head}  %z = check.generate.fill value(0.0) : {ty}\n" + launch(f"k_base_{sh}", "%yb") +
                   f"  check.expect.approximate actual(%yb) expected(%z) atol(0.0) rtol(0.0) nan(different) : {ty}, {ty}\n  check.return\n}}\n")
         open(os.path.join(OUT, f"ab_{sh}.loom-test"), "w").write("\n".join(ab))

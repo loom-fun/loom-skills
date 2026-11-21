@@ -25,7 +25,12 @@ import os as _os
 # vec_dot_q4_0_q8_1. Dense matvecs, the head and the MoE expert matvecs (MOE_Q8) of Q4_0 weights take the int8 path.
 _OFF = ("", "0", "false", "no", "off")
 ICODES = frozenset({"q8_0", "q4_k", "q5_k", "q6_k", "q5_0"} | ({"mxfp4s"} if _os.environ.get("MXFP4S_Q8", "0").lower() not in _OFF else set())
-                   | ({"q4_0"} if _os.environ.get("Q4_0_Q8", "0").lower() not in _OFF else set()))
+                   | ({"q4_0"} if _os.environ.get("Q4_0_Q8", "0").lower() not in _OFF else set())
+                   | ({"iq4_xs", "iq4_nl"} if _os.environ.get("IQ4_Q8", "0").lower() not in _OFF else set()))
+# IQ4_XS / IQ4_NL (choice decode.iq4.act_q8, env IQ4_Q8): opt-in by scope; @g_iq4_<fmt>_icodes (signed kvalues codes, one scale per
+# 32 values, no minimum), as llama.cpp's vec_dot_iq4_xs_q8_1 / vec_dot_iq4_nl_q8_1. Dense matvecs take the int8 path.
+# Formats whose int8 dot is codes x one scale (no minimum, no second scale): q8_0-like in gen_llm.iq_decode / iq_dot.
+ONE_SCALE = frozenset({"q8_0", "mxfp4s", "iq4_xs", "iq4_nl"})
 # Formats stored as two tensors (weight plane + scale plane): a call site passes two views, the second named <weight>_sc.
 SPLIT = frozenset({"mxfp4s"})
 SCALE_DIV = {"mxfp4s": 16}   # nibble-plane bytes per scale-plane byte

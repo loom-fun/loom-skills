@@ -13,9 +13,29 @@ fuse(text) -> (text, layers): @llm_advance's GEMM-epoch alpha matvec becomes the
 import re
 
 NAME = "g_gemm_ab_f32w"
+NAMES = {"f32": NAME, "q8_0": "g_gemm_ab_q8_0w"}   # Q8_0 alpha/beta (unsloth UD): 16 int8 codes + the block's F16 scale per staging slice
+USED = set()   # weight formats fuse() rewrote (gen_llm emits one kernel per format)
 
 
-def kernel(H, HV):
+def _q8_load(nm, view, row, col):
+    """Q8_0 slice of 16 values (half a 34-byte block) at row, col: (lines, [(name, type)]) with all loads; col % 16 == 0."""
+    return f'''%{nm}_blk = index.div {col}, %c32 : index
+    %{nm}_half = index.rem {col}, %c32 : index
+    %{nm}_rb = index.mul {row}, %q8_row_blocks : index
+    %{nm}_bi = index.add %{nm}_rb, %{nm}_blk : index
+    %{nm}_bo = index.scale %{nm}_bi, %q8_block_bytes : index, offset -> offset
+    %{nm}_so = buffer.view {view}[%{nm}_bo] : buffer -> view<1xf16>
+    %{nm}_hb = index.cast %{nm}_half : index to offset
+    %{nm}_co0 = index.add %{nm}_bo, %two_off : offset
+    %{nm}_co = index.add %{nm}_co0, %{nm}_hb : offset
+    %{nm}_cv = buffer.view {view}[%{nm}_co] : buffer -> view<16xi8>
+    %{nm}_d = view.load %{nm}_so[0] : view<1xf16> -> f16
+    %{nm}_q = vector.load %{nm}_cv[0] : view<16xi8> -> vector<16xi8>'''
+
+
+def kernel(H, HV, fmt="f32"):
+    if fmt != "f32":
+        return _kernel_q8(H, HV, fmt)
     assert HV % 16 == 0 and H % 64 == 0, (H, HV)
     NC = 2 * HV            # stacked output columns (alpha | beta)
     FR = HV // 16          # 16-column fragments per wave (one weight per wave column group)
@@ -154,7 +174,48 @@ def kernel(H, HV):
     return _r4.with_twins(gfx11)
 
 
-_ALPHA = re.compile(r"(?m)^(?P<ind> *)kernel\.launch @g_mv_f32_k(?P<k>\d+)_t4\[%nHV, %t\]\(%nHV, %t, %zero_i32, %h, (?P<wa>%walpha_(?P<l>\d+)), %galpha\) : \[index, index\]\(index, index, i32, buffer, (?P<va>view<\d+xi8>), buffer\)\n")
+def _kernel_q8(H, HV, fmt):
+    """The Q8_0-weight kernel: the f32 kernel with each weight slot's 16-value load replaced by the Q8_0 half-block (codes + scale,
+    carried through the loop) and the staging conversion by codes * d in F16 (one rounding, the value of the f32 path's fptrunc)."""
+    assert fmt == "q8_0", fmt
+    t = kernel(H, HV, "f32")
+    gfx11 = t[: t.index("kernel.def target(")] if "kernel.def target(" in t else t
+    name = NAMES[fmt]
+    g = gfx11.replace(f'export("{NAME}") @{NAME}(', f'export("{name}") @{name}(')
+    g = g.replace("  %w0_view = buffer.view %w0_buf[%origin] : buffer -> view<" + f"{HV}x{H}xf32>\n", "")
+    g = g.replace("  %w1_view = buffer.view %wb[%origin] : buffer -> view<" + f"{HV}x{H}xf32>\n", "")
+    consts = ("  %c32 = index.constant 32 : index\n" f"  %q8_row_blocks = index.constant {H // 32} : index\n  %q8_block_bytes = index.constant 34 : offset\n"
+              "  %two_off = index.constant 2 : offset\n")
+    g = g.replace("  %zero8 = vector.splatf 0.0 : vector<8xf32>\n", consts + "  %zero8 = vector.splatf 0.0 : vector<8xf32>\n", 1)
+    first = (f"  %w0_first = vector.load %w0_view[%w0_row, %stage_col] : view<{HV}x{H}xf32> -> vector<16xf32>\n"
+             f"  %w1_first = vector.load %w1_view[%w1_row, %stage_col] : view<{HV}x{H}xf32> -> vector<16xf32>")
+    assert first in g
+    g = g.replace(first, "  " + _q8_load("w0f", "%w0_buf", "%w0_row", "%stage_col") + "\n  " + _q8_load("w1f", "%wb", "%w1_row", "%stage_col"))
+    loop_in = ", %w0_cur = %w0_first : vector<16xf32>, %w1_cur = %w1_first : vector<16xf32>) -> ("
+    assert loop_in in g
+    g = g.replace(loop_in, ", %w0_cd = %w0f_d : f16, %w0_cq = %w0f_q : vector<16xi8>, %w1_cd = %w1f_d : f16, %w1_cq = %w1f_q : vector<16xi8>) -> (")
+    g = g.replace(", %x_end, %w0_end, %w1_end = scf.for", ", %x_end, %w0_end_d, %w0_end_q, %w1_end_d, %w1_end_q = scf.for")
+    g = g.replace(", vector<16xf16>, vector<16xf32>, vector<16xf32>) {", ", vector<16xf16>, f16, vector<16xi8>, f16, vector<16xi8>) {")
+    conv = ("    %w0_h = vector.fptrunc %w0_cur : vector<16xf32> to vector<16xf16>\n"
+            "    %w1_h = vector.fptrunc %w1_cur : vector<16xf32> to vector<16xf16>\n")
+    assert conv in g
+    g = g.replace(conv, "".join(f"    %{w}_qf = vector.sitofp %{w}_cq : vector<16xi8> to vector<16xf16>\n    %{w}_ds = vector.splat %{w}_cd : vector<16xf16>\n"
+                                f"    %{w}_h = vector.mulf %{w}_qf, %{w}_ds : vector<16xf16>\n" for w in ("w0", "w1")))
+    nx = (f"    %w0_nx = vector.load %w0_view[%w0_row, %n_col] : view<{HV}x{H}xf32> -> vector<16xf32>\n"
+          f"    %w1_nx = vector.load %w1_view[%w1_row, %n_col] : view<{HV}x{H}xf32> -> vector<16xf32>")
+    assert nx in g
+    g = g.replace(nx, "    " + _q8_load("w0n", "%w0_buf", "%w0_row", "%n_col").replace("\n    ", "\n    ") + "\n    "
+                  + _q8_load("w1n", "%wb", "%w1_row", "%n_col"))
+    y_old = ", %x_nx, %w0_nx, %w1_nx : "
+    assert y_old in g
+    g = g.replace(y_old, ", %x_nx, %w0n_d, %w0n_q, %w1n_d, %w1n_q : ")
+    g = g.replace(", vector<16xf16>, vector<16xf32>, vector<16xf32>\n  }", ", vector<16xf16>, f16, vector<16xi8>, f16, vector<16xi8>\n  }")
+    assert "xf32> -> vector<16xf32>" not in g.split("%zero8")[1].split("%inv_view")[0], "q8 ab: an f32 weight load left"
+    import gen_gemm_rdna4 as _r4
+    return _r4.with_twins(g)
+
+
+_ALPHA = re.compile(r"(?m)^(?P<ind> *)kernel\.launch @g_mv_(?P<fmt>f32|q8_0)_k(?P<k>\d+)_t4\[%nHV, %t\]\(%nHV, %t, %zero_i32, %h, (?P<wa>%walpha_(?P<l>\d+)), %galpha\) : \[index, index\]\(index, index, i32, buffer, (?P<va>view<\d+xi8>), buffer\)\n")
 
 
 def fuse(text):
@@ -170,11 +231,12 @@ def fuse(text):
     for m in _ALPHA.finditer(body):
         l = m.group("l")
         assert body[:m.start()].rstrip(" ").endswith("scf.if %gemm {\n"), f"ab: layer {l}: alpha launch not under scf.if %gemm"
-        beta = re.compile(r"(?m)^(?P<ind> *)scf\.if %gemm \{\n *kernel\.launch @g_mv_f32_k\d+_t4\[%nHV, %t\]\(%nHV, %t, %zero_i32, %h, %wbeta_" + l
+        beta = re.compile(r"(?m)^(?P<ind> *)scf\.if %gemm \{\n *kernel\.launch @g_mv_" + m.group("fmt") + r"_k\d+_t4\[%nHV, %t\]\(%nHV, %t, %zero_i32, %h, %wbeta_" + l
                           + r", %gbeta\) : [^\n]*\n *\} else \{\n")
         bm = beta.search(body, m.end())
         assert bm, f"ab: layer {l}: beta block"
-        launch = (f"{m.group('ind')}kernel.launch @{NAME}[%tp](%tp, %h16, %s_h, {m.group('wa')}, %wbeta_{l}, %galpha, %gbeta) : "
+        USED.add(m.group("fmt"))
+        launch = (f"{m.group('ind')}kernel.launch @{NAMES[m.group('fmt')]}[%tp](%tp, %h16, %s_h, {m.group('wa')}, %wbeta_{l}, %galpha, %gbeta) : "
                   f"[index](index, buffer, buffer, {m.group('va')}, {m.group('va')}, buffer, buffer)\n")
         out.append(body[pos:m.start()] + launch + body[m.end():bm.start()] + f"{bm.group('ind')}scf.if %ab_ngemm {{\n")
         # the beta block's else branch stays; its closing `}` now closes scf.if %ab_ngemm

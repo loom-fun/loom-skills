@@ -43,12 +43,250 @@ HELPER = {"q4_0", "q5_0", "iq4_nl", "iq4_xs", "q3_k", "iq3_s", "f16", "mxfp4", "
 Q4_0_NATIVE = os.environ.get("GEMM_Q4_0_NATIVE", "0").strip().lower() not in ("", "0", "false", "no", "off")
 if Q4_0_NATIVE:
     HELPER = HELPER - {"q4_0"}
+# GEMM_IQ4_NATIVE (choice prefill.gemm.iq4_native): IQ4_XS / IQ4_NL decode their 16-value half-group inline (iq4_dequant16: the
+# loads exposed, so the 128/256-row kernels prefetch them and the mixed-format m256 swiglu takes iq4_xs) instead of through the
+# @g_<fmt>_values helper, which limits them to the 64-row tile. Same values as the helper + fptrunc.
+IQ4_NATIVE = os.environ.get("GEMM_IQ4_NATIVE", "0").strip().lower() not in ("", "0", "false", "no", "off")
+if IQ4_NATIVE:
+    HELPER = HELPER - {"iq4_xs", "iq4_nl"}
+
+# GEMM_Q3_K_NATIVE (choice prefill.gemm.q3_k_native): Q3_K decodes its 16-value half-group inline (q3_k_dequant16) and gets the
+# 128/256-row kernels and the mixed-format swiglu m256 (unsloth UD: one ffn_up); off: @g_q3_k_values and the 64/128-row tiles.
+Q3_K_NATIVE = os.environ.get("GEMM_Q3_K_NATIVE", "0").strip().lower() not in ("", "0", "false", "no", "off")
+if Q3_K_NATIVE:
+    HELPER = HELPER - {"q3_k"}
+
+
+def q3_k_dequant16(w, out):
+    """Q3_K (110-byte superblocks of 256: hmask[32], qs[64], scales[12], F16 d): 16 consecutive weights of row %w_row_origin at
+    column %w_col -> F16 vector %{out}, all loads first. Half h of group g (scale 2g + h): l = 16h..16h+15,
+    q = ((qs[32 (g/4) + l] >> 2 (g%4)) & 3) | ((hmask[l] >> g) & 1) << 2, value (q - 4) * d * (scale - 32) in F32 then fptrunc
+    (the arithmetic of @g_q3_k_values / @g_q3_k_scale)."""
+    o = out
+    return f'''
+      %{o}_c4 = index.constant 4 : index
+      %{o}_c8 = index.constant 8 : index
+      %{o}_c256 = index.constant 256 : index
+      %{o}_block = index.div %w_col, %{o}_c256 : index
+      %{o}_within = index.rem %w_col, %{o}_c256 : index
+      %{o}_group_value = index.div %{o}_within, %c32 : index
+      %{o}_group = index.assume %{o}_group_value [range(%{o}_group_value, 0, 7)] : index
+      %{o}_in_group = index.rem %{o}_within, %c32 : index
+      %{o}_half = index.div %{o}_in_group, %c16 : index
+      %{o}_l = index.mul %{o}_half, %c16 : index
+      %{o}_n = index.div %{o}_group, %{o}_c4 : index
+      %{o}_j = index.rem %{o}_group, %{o}_c4 : index
+      %{o}_qs_pos0 = index.madd %{o}_n, %c32, %c32 : index
+      %{o}_qs_pos = index.add %{o}_qs_pos0, %{o}_l : index
+      %{o}_s0 = index.mul %{o}_group, %c2 : index
+      %{o}_s_value = index.add %{o}_s0, %{o}_half : index
+      %{o}_s = index.assume %{o}_s_value [range(%{o}_s_value, 0, 15)] : index
+      %{o}_lo_idx = index.rem %{o}_s, %{o}_c8 : index
+      %{o}_nib = index.div %{o}_s, %{o}_c8 : index
+      %{o}_hi_idx0 = index.rem %{o}_s, %{o}_c4 : index
+      %{o}_hi_sh = index.div %{o}_s, %{o}_c4 : index
+      %{o}_c96 = index.constant 96 : index
+      %{o}_c104 = index.constant 104 : index
+      %{o}_lo_pos = index.add %{o}_c96, %{o}_lo_idx : index
+      %{o}_hi_pos = index.add %{o}_c104, %{o}_hi_idx0 : index
+      %{o}_block_add = index.scale %{o}_block, %block_bytes : index, offset -> offset
+      %{o}_block_origin = index.add %w_row_origin, %{o}_block_add : offset
+      %{o}_l_off = index.cast %{o}_l : index to offset
+      %{o}_qs_off = index.cast %{o}_qs_pos : index to offset
+      %{o}_lo_off = index.cast %{o}_lo_pos : index to offset
+      %{o}_hi_off = index.cast %{o}_hi_pos : index to offset
+      %{o}_hm_origin = index.add %{o}_block_origin, %{o}_l_off : offset
+      %{o}_qs_origin = index.add %{o}_block_origin, %{o}_qs_off : offset
+      %{o}_lo_origin = index.add %{o}_block_origin, %{o}_lo_off : offset
+      %{o}_hi_origin = index.add %{o}_block_origin, %{o}_hi_off : offset
+      %{o}_d_bytes = index.constant 108 : offset
+      %{o}_d_origin = index.add %{o}_block_origin, %{o}_d_bytes : offset
+      %{o}_hm_view = buffer.view %{w}[%{o}_hm_origin] : buffer -> view<16xi8>
+      %{o}_qs_view = buffer.view %{w}[%{o}_qs_origin] : buffer -> view<16xi8>
+      %{o}_lo_view = buffer.view %{w}[%{o}_lo_origin] : buffer -> view<1xi8>
+      %{o}_hi_view = buffer.view %{w}[%{o}_hi_origin] : buffer -> view<1xi8>
+      %{o}_d_view = buffer.view %{w}[%{o}_d_origin] : buffer -> view<1xf16>
+      %{o}_hm = vector.load %{o}_hm_view[0] : view<16xi8> -> vector<16xi8>
+      %{o}_qs = vector.load %{o}_qs_view[0] : view<16xi8> -> vector<16xi8>
+      %{o}_lo_b = view.load %{o}_lo_view[0] : view<1xi8> -> i8
+      %{o}_hi_b = view.load %{o}_hi_view[0] : view<1xi8> -> i8
+      %{o}_d_half = view.load %{o}_d_view[0] : view<1xf16> -> f16
+      %{o}_lo32 = scalar.extui %{o}_lo_b : i8 to i32
+      %{o}_hi32 = scalar.extui %{o}_hi_b : i8 to i32
+      %{o}_nib32 = index.cast %{o}_nib : index to i32
+      %{o}_hsh32 = index.cast %{o}_hi_sh : index to i32
+      %{o}_i4 = scalar.constant 4 : i32
+      %{o}_i2 = scalar.constant 2 : i32
+      %{o}_i15 = scalar.constant 15 : i32
+      %{o}_i3 = scalar.constant 3 : i32
+      %{o}_i32 = scalar.constant 32 : i32
+      %{o}_lsh = scalar.muli %{o}_nib32, %{o}_i4 : i32
+      %{o}_hsh = scalar.muli %{o}_hsh32, %{o}_i2 : i32
+      %{o}_lo_s = scalar.shrui %{o}_lo32, %{o}_lsh : i32
+      %{o}_lo = scalar.andi %{o}_lo_s, %{o}_i15 : i32
+      %{o}_hi_s = scalar.shrui %{o}_hi32, %{o}_hsh : i32
+      %{o}_hi_m = scalar.andi %{o}_hi_s, %{o}_i3 : i32
+      %{o}_hi = scalar.shli %{o}_hi_m, %{o}_i4 : i32
+      %{o}_sc = scalar.ori %{o}_lo, %{o}_hi : i32
+      %{o}_centered_s = scalar.subi %{o}_sc, %{o}_i32 : i32
+      %{o}_scf = scalar.sitofp %{o}_centered_s : i32 to f32
+      %{o}_d = scalar.extf %{o}_d_half : f16 to f32
+      %{o}_dl = scalar.mulf %{o}_d, %{o}_scf : f32
+      %{o}_jq = index.mul %{o}_j, %c2 : index
+      %{o}_jq32 = index.cast %{o}_jq : index to i32
+      %{o}_jq8 = scalar.trunci %{o}_jq32 : i32 to i8
+      %{o}_shift_q = vector.splat %{o}_jq8 : vector<16xi8>
+      %{o}_g32 = index.cast %{o}_group : index to i32
+      %{o}_g8 = scalar.trunci %{o}_g32 : i32 to i8
+      %{o}_shift_h = vector.splat %{o}_g8 : vector<16xi8>
+      %{o}_three = vector.splati 3 : vector<16xi8>
+      %{o}_one = vector.splati 1 : vector<16xi8>
+      %{o}_two8 = vector.splati 2 : vector<16xi8>
+      %{o}_qsh = vector.shrui %{o}_qs, %{o}_shift_q : vector<16xi8>
+      %{o}_low = vector.andi %{o}_qsh, %{o}_three : vector<16xi8>
+      %{o}_hmsh = vector.shrui %{o}_hm, %{o}_shift_h : vector<16xi8>
+      %{o}_hbit = vector.andi %{o}_hmsh, %{o}_one : vector<16xi8>
+      %{o}_hb2 = vector.shli %{o}_hbit, %{o}_two8 : vector<16xi8>
+      %{o}_code = vector.ori %{o}_low, %{o}_hb2 : vector<16xi8>
+      %{o}_codef = vector.uitofp %{o}_code : vector<16xi8> to vector<16xf32>
+      %{o}_four = vector.splatf 4.0 : vector<16xf32>
+      %{o}_centered = vector.subf %{o}_codef, %{o}_four : vector<16xf32>
+      %{o}_dls = vector.splat %{o}_dl : vector<16xf32>
+      %{o}_scaled = vector.mulf %{o}_centered, %{o}_dls : vector<16xf32>
+      %{o} = vector.fptrunc %{o}_scaled : vector<16xf32> to vector<16xf16>'''
+
+
+_IQ4_KVALUES = (-127, -104, -83, -65, -49, -35, -22, -10, 1, 13, 25, 38, 53, 69, 89, 113)   # ggml kvalues_iq4nl
+
+
+def _iq4_f16lut_on():
+    """GEMM_IQ4_F16LUT (choice prefill.gemm.iq4_f16lut): iq4_dequant16 with the unsigned book (kvalue + 128), the 0x64 magic
+    byte -> f16 conversion and one f16 fma per value pair (as _g32_iq4) instead of sign-extend + F32 convert/multiply/round.
+    GEMM_IQ4_G32 requires it (set by the model's scope rule for the whole build, gfx12 twins included), so every tile size of a model
+    stages the same f16 weights (_g32_iq4's values); a device-scoped G32 never changes the other target's kernels."""
+    on = os.environ.get("GEMM_IQ4_F16LUT", "0").strip().lower() not in ("", "0", "false", "no", "off")
+    if _g32_iq4_on() and IQ4_NATIVE and not on:
+        raise SystemExit("GEMM_IQ4_G32 needs GEMM_IQ4_F16LUT (choice prefill.gemm.iq4_f16lut): every tile size must stage the same IQ4 values")
+    return on
+
+
+def _iq4_f16_tail(o, dl, pre="", dl32=None):
+    """unsigned-book lookup of %{o}_idx (vector<16xi8>, 0..15) -> %{o} = (book - 128) * dl, dl an f16 SSA value"""
+    book = "\n".join(f"      %{o}_k{i} = scalar.constant {v + 128 - (256 if v + 128 > 127 else 0)} : i8" for i, v in enumerate(_IQ4_KVALUES))
+    return f'''
+{book}
+{pre}      %{o}_book = vector.from_elements {", ".join(f"%{o}_k{i}" for i in range(16))} : vector<16xi8>
+      %{o}_ucodes = vector.table.lookup %{o}_book[%{o}_idx] : vector<16xi8>, vector<16xi8> -> vector<16xi8>
+      %{o}_uf = vector.uitofp %{o}_ucodes : vector<16xi8> to vector<16xf16>
+      %{o}_m128 = scalar.constant -128.0 : f32
+      %{o}_off32 = scalar.mulf {dl32}, %{o}_m128 : f32
+      %{o}_off_h = scalar.fptrunc %{o}_off32 : f32 to f16
+      %{o}_scl = vector.splat {dl} : vector<16xf16>
+      %{o}_offs = vector.splat %{o}_off_h : vector<16xf16>
+      %{o} = vector.fmaf %{o}_uf, %{o}_scl, %{o}_offs : vector<16xf16>'''
+
+
+def iq4_dequant16(fmt, w, out):
+    """IQ4_XS / IQ4_NL: 16 consecutive weights of row %w_row_origin at column %w_col -> F16 vector %{out}. All loads first.
+    IQ4_NL (18-byte blocks of 32): d * kvalues[q], one F16 multiply (int8 code times an F16 scale is exact in F32: same rounding).
+    IQ4_XS (136-byte superblocks of 256): dl = d * (ls - 32) per 32-group (ls: 4 low bits from scales_l, 2 high from scales_h),
+    dl * kvalues[q] in F32 then fptrunc (as @g_iq4_xs_values)."""
+    o = out
+    book = "\n".join(f"      %{o}_k{i} = scalar.constant {v} : i8" for i, v in enumerate(_IQ4_KVALUES))
+    lookup = f'''
+{book}
+      %{o}_book = vector.from_elements {", ".join(f"%{o}_k{i}" for i in range(16))} : vector<16xi8>
+      %{o}_shift_bits = index.mul %{o}_half, %{o}_c4 : index
+      %{o}_shift_i8 = index.cast %{o}_shift_bits : index to i8
+      %{o}_shift = vector.splat %{o}_shift_i8 : vector<16xi8>
+      %{o}_shifted = vector.shrui %{o}_packed, %{o}_shift : vector<16xi8>
+      %{o}_mask = vector.splati 15 : vector<16xi8>
+      %{o}_idx = vector.andi %{o}_shifted, %{o}_mask : vector<16xi8>
+      %{o}_codes = vector.table.lookup %{o}_book[%{o}_idx] : vector<16xi8>, vector<16xi8> -> vector<16xi8>'''
+    f16 = _iq4_f16lut_on()
+    lookup_idx = lookup[lookup.index(f"\n      %{o}_shift_bits = "): lookup.index(f"\n      %{o}_codes = ")]
+    if fmt == "iq4_nl":
+        head = f'''
+      %{o}_c4 = index.constant 4 : index
+      %{o}_block = index.div %w_col, %c32 : index
+      %{o}_in_block = index.rem %w_col, %c32 : index
+      %{o}_half = index.div %{o}_in_block, %c16 : index
+      %{o}_block_add = index.scale %{o}_block, %block_bytes : index, offset -> offset
+      %{o}_block_origin = index.add %w_row_origin, %{o}_block_add : offset
+      %{o}_two = index.constant 2 : offset
+      %{o}_code_origin = index.add %{o}_block_origin, %{o}_two : offset
+      %{o}_scale_view = buffer.view %{w}[%{o}_block_origin] : buffer -> view<1xf16>
+      %{o}_code_view = buffer.view %{w}[%{o}_code_origin] : buffer -> view<16xi8>
+      %{o}_scale = view.load %{o}_scale_view[0] : view<1xf16> -> f16
+      %{o}_packed = vector.load %{o}_code_view[0] : view<16xi8> -> vector<16xi8>'''
+        if f16:
+            return head + lookup_idx + _iq4_f16_tail(o, f"%{o}_scale", f"      %{o}_scale32 = scalar.extf %{o}_scale : f16 to f32\n", f"%{o}_scale32")
+        return head + lookup + f'''
+      %{o}_values = vector.sitofp %{o}_codes : vector<16xi8> to vector<16xf16>
+      %{o}_scales = vector.splat %{o}_scale : vector<16xf16>
+      %{o} = vector.mulf %{o}_values, %{o}_scales : vector<16xf16>'''
+    assert fmt == "iq4_xs", fmt
+    head = f'''
+      %{o}_c4 = index.constant 4 : index
+      %{o}_c256 = index.constant 256 : index
+      %{o}_block = index.div %w_col, %{o}_c256 : index
+      %{o}_within = index.rem %w_col, %{o}_c256 : index
+      %{o}_group_value = index.div %{o}_within, %c32 : index
+      %{o}_group = index.assume %{o}_group_value [range(%{o}_group_value, 0, 7)] : index
+      %{o}_in_group = index.rem %{o}_within, %c32 : index
+      %{o}_half = index.div %{o}_in_group, %c16 : index
+      %{o}_block_add = index.scale %{o}_block, %block_bytes : index, offset -> offset
+      %{o}_block_origin = index.add %w_row_origin, %{o}_block_add : offset
+      %{o}_qs_base = index.constant 8 : offset
+      %{o}_sixteen = index.constant 16 : offset
+      %{o}_qs_add = index.scale %{o}_group, %{o}_sixteen : index, offset -> offset
+      %{o}_qs0 = index.add %{o}_block_origin, %{o}_qs_base : offset
+      %{o}_qs_origin = index.add %{o}_qs0, %{o}_qs_add : offset
+      %{o}_header_view = buffer.view %{w}[%{o}_block_origin] : buffer -> view<2xi32>
+      %{o}_code_view = buffer.view %{w}[%{o}_qs_origin] : buffer -> view<16xi8>
+      %{o}_header = vector.load %{o}_header_view[0] : view<2xi32> -> vector<2xi32>
+      %{o}_packed = vector.load %{o}_code_view[0] : view<16xi8> -> vector<16xi8>
+      %{o}_halves = vector.bitcast %{o}_header : vector<2xi32> to vector<4xf16>
+      %{o}_d_half = vector.extract %{o}_halves[0] : vector<4xf16> -> f16
+      %{o}_d = scalar.extf %{o}_d_half : f16 to f32
+      %{o}_word0 = vector.extract %{o}_header[0] : vector<2xi32> -> i32
+      %{o}_word1 = vector.extract %{o}_header[1] : vector<2xi32> -> i32
+      %{o}_i16 = scalar.constant 16 : i32
+      %{o}_i15 = scalar.constant 15 : i32
+      %{o}_i3 = scalar.constant 3 : i32
+      %{o}_i4 = scalar.constant 4 : i32
+      %{o}_i2 = scalar.constant 2 : i32
+      %{o}_i32 = scalar.constant 32 : i32
+      %{o}_g32 = index.cast %{o}_group : index to i32
+      %{o}_scales_h = scalar.shrui %{o}_word0, %{o}_i16 : i32
+      %{o}_lo_shift = scalar.muli %{o}_g32, %{o}_i4 : i32
+      %{o}_hi_shift = scalar.muli %{o}_g32, %{o}_i2 : i32
+      %{o}_lo_s = scalar.shrui %{o}_word1, %{o}_lo_shift : i32
+      %{o}_lo = scalar.andi %{o}_lo_s, %{o}_i15 : i32
+      %{o}_hi_s = scalar.shrui %{o}_scales_h, %{o}_hi_shift : i32
+      %{o}_hi_m = scalar.andi %{o}_hi_s, %{o}_i3 : i32
+      %{o}_hi = scalar.shli %{o}_hi_m, %{o}_i4 : i32
+      %{o}_ls = scalar.ori %{o}_lo, %{o}_hi : i32
+      %{o}_centered = scalar.subi %{o}_ls, %{o}_i32 : i32
+      %{o}_lf = scalar.sitofp %{o}_centered : i32 to f32
+      %{o}_dl = scalar.mulf %{o}_d, %{o}_lf : f32'''
+    if f16:
+        return head + lookup_idx + _iq4_f16_tail(o, f"%{o}_dlh", f"      %{o}_dlh = scalar.fptrunc %{o}_dl : f32 to f16\n      %{o}_dlh32 = scalar.extf %{o}_dlh : f16 to f32\n", f"%{o}_dlh32")
+    return head + lookup + f'''
+      %{o}_wide = vector.sitofp %{o}_codes : vector<16xi8> to vector<16xf32>
+      %{o}_dls = vector.splat %{o}_dl : vector<16xf32>
+      %{o}_scaled = vector.mulf %{o}_wide, %{o}_dls : vector<16xf32>
+      %{o} = vector.fptrunc %{o}_scaled : vector<16xf32> to vector<16xf16>'''
 
 def dequant16(fmt, w, view_name, out):
     """Loom snippet: dequantize 16 consecutive weights of row %w_row at column %w_col into F16 vector %{out}."""
     if fmt == "q4_0" and Q4_0_NATIVE:
         import moe_q4_0
         return moe_q4_0.dequant16(w, out)
+    if fmt in ("iq4_xs", "iq4_nl") and IQ4_NATIVE:
+        return iq4_dequant16(fmt, w, out)
+    if fmt == "q3_k" and Q3_K_NATIVE:
+        return q3_k_dequant16(w, out)
     if fmt in HELPER:   # 16 consecutive weights = one half of a 32-value group from the shared value helper
         bv = FMT[fmt]["block_values"]
         sc_setup = f"""      %{out}_sidx = index.madd %bounded_w_out_row, %blocks, %{out}_block : index
@@ -686,7 +924,8 @@ def _split_dequant(fmt, wsrc, out, col):
 
 # q6_k: correct but 5-7 % slower (local kbench 2026-11-19); opt in with GEMM_M256_G32_FMTS=q4_k,q6_k
 def _g32_fmts():
-    return tuple(os.environ.get("GEMM_M256_G32_FMTS", "q4_k").split(","))
+    f = tuple(os.environ.get("GEMM_M256_G32_FMTS", "q4_k").split(","))
+    return f + ("iq4_xs", "iq4_nl") if _g32_iq4_on() and IQ4_NATIVE else f
 
 
 def _g32_dequant(fmt, w, out, col):
@@ -781,6 +1020,8 @@ def _g32_dequant(fmt, w, out, col):
       %{o}_offsets{h} = vector.splat %{o}_offset_h{h} : vector<16xf16>
       %{o}_c{h} = vector.slice %{o}_codes[{16 * h}] : vector<32xf16> -> vector<16xf16>
       %{o}_v{h} = vector.fmaf %{o}_c{h}, %{o}_scales{h}, %{o}_offsets{h} : vector<16xf16>'''
+    elif fmt in ("iq4_xs", "iq4_nl"):
+        text = _g32_iq4(fmt, w, o, col)
     else:
         raise ValueError(fmt)
     lines = [l for l in text.strip("\n").split("\n") if l.strip()]
@@ -788,6 +1029,98 @@ def _g32_dequant(fmt, w, out, col):
     addr = lines[: last + 1]
     loads = [(_re.match(r"\s*(%\S+) = ", l).group(1), l.split("-> ")[-1].strip()) for l in addr if ".load " in l]
     return lines, addr, loads
+
+
+def _g32_iq4(fmt, w, o, col):
+    """GEMM_IQ4_G32 (choice prefill.gemm.iq4_g32): the thread's whole 32-weight IQ4 group (group = col / 32 + %stage_ks) as
+    %{o}_v0 (weights 0-15: low nibbles) and %{o}_v1 (16-31: high nibbles). The nibble book holds kvalue + 128 (unsigned
+    1..241), so the byte -> f16 conversion is the 0x64 magic (v_perm + pk_add) instead of sign-extend + cvt_f32 + mul_f32 +
+    cvt_f16; the scale goes on as one f16 fma per value pair: (u - 128) * dl = fma(u, dl, -128 dl), and -128 dl is exact in
+    f16, so the value is round_f16(kvalue * f16(dl)) (one rounding of the f16 scale product, as the K-quant kernels).
+    IQ4_XS: dl = d * (ls - 32) in F32 (one header decode per group, not per 16 values); IQ4_NL: dl = d."""
+    book = "\n".join(f"      %{o}_k{i} = scalar.constant {v + 128 - (256 if v + 128 > 127 else 0)} : i8" for i, v in enumerate(_IQ4_KVALUES))
+    if fmt == "iq4_nl":
+        head = f'''
+      %{o}_bq = index.div {col}, %c32 : index
+      %{o}_bi = index.add %{o}_bq, %stage_ks : index
+      %{o}_block_add = index.scale %{o}_bi, %block_bytes : index, offset -> offset
+      %{o}_block_origin = index.add %w_row_origin, %{o}_block_add : offset
+      %{o}_two = index.constant 2 : offset
+      %{o}_code_origin = index.add %{o}_block_origin, %{o}_two : offset
+      %{o}_scale_view = buffer.view %{w}[%{o}_block_origin] : buffer -> view<1xf16>
+      %{o}_code_view = buffer.view %{w}[%{o}_code_origin] : buffer -> view<16xi8>
+      %{o}_dh = view.load %{o}_scale_view[0] : view<1xf16> -> f16
+      %{o}_packed8 = vector.load %{o}_code_view[0] : view<16xi8> -> vector<16xi8>'''
+        dl, dl32 = f"%{o}_dh", f"%{o}_d32"
+        head += f"\n      %{o}_d32 = scalar.extf %{o}_dh : f16 to f32"
+    else:
+        head = f'''
+      %{o}_super = index.div {col}, %c256 : index
+      %{o}_within = index.rem {col}, %c256 : index
+      %{o}_gq = index.div %{o}_within, %c32 : index
+      %{o}_gv = index.add %{o}_gq, %stage_ks : index
+      %{o}_group = index.assume %{o}_gv [range(%{o}_gv, 0, 7)] : index
+      %{o}_block_add = index.scale %{o}_super, %block_bytes : index, offset -> offset
+      %{o}_block_origin = index.add %w_row_origin, %{o}_block_add : offset
+      %{o}_qs_base = index.constant 8 : offset
+      %{o}_sixteen = index.constant 16 : offset
+      %{o}_qs_add = index.scale %{o}_group, %{o}_sixteen : index, offset -> offset
+      %{o}_qs0 = index.add %{o}_block_origin, %{o}_qs_base : offset
+      %{o}_qs_origin = index.add %{o}_qs0, %{o}_qs_add : offset
+      %{o}_header_view = buffer.view %{w}[%{o}_block_origin] : buffer -> view<2xi32>
+      %{o}_code_view = buffer.view %{w}[%{o}_qs_origin] : buffer -> view<16xi8>
+      %{o}_header = vector.load %{o}_header_view[0] : view<2xi32> -> vector<2xi32>
+      %{o}_packed8 = vector.load %{o}_code_view[0] : view<16xi8> -> vector<16xi8>
+      %{o}_halves = vector.bitcast %{o}_header : vector<2xi32> to vector<4xf16>
+      %{o}_d_half = vector.extract %{o}_halves[0] : vector<4xf16> -> f16
+      %{o}_d = scalar.extf %{o}_d_half : f16 to f32
+      %{o}_word0 = vector.extract %{o}_header[0] : vector<2xi32> -> i32
+      %{o}_word1 = vector.extract %{o}_header[1] : vector<2xi32> -> i32
+      %{o}_i16 = scalar.constant 16 : i32
+      %{o}_i15 = scalar.constant 15 : i32
+      %{o}_i3 = scalar.constant 3 : i32
+      %{o}_i4 = scalar.constant 4 : i32
+      %{o}_i2 = scalar.constant 2 : i32
+      %{o}_i32 = scalar.constant 32 : i32
+      %{o}_g32 = index.cast %{o}_group : index to i32
+      %{o}_scales_h = scalar.shrui %{o}_word0, %{o}_i16 : i32
+      %{o}_lo_shift = scalar.muli %{o}_g32, %{o}_i4 : i32
+      %{o}_hi_shift = scalar.muli %{o}_g32, %{o}_i2 : i32
+      %{o}_lo_s = scalar.shrui %{o}_word1, %{o}_lo_shift : i32
+      %{o}_lo = scalar.andi %{o}_lo_s, %{o}_i15 : i32
+      %{o}_hi_s = scalar.shrui %{o}_scales_h, %{o}_hi_shift : i32
+      %{o}_hi_m = scalar.andi %{o}_hi_s, %{o}_i3 : i32
+      %{o}_hi = scalar.shli %{o}_hi_m, %{o}_i4 : i32
+      %{o}_ls = scalar.ori %{o}_lo, %{o}_hi : i32
+      %{o}_centered = scalar.subi %{o}_ls, %{o}_i32 : i32
+      %{o}_lf = scalar.sitofp %{o}_centered : i32 to f32
+      %{o}_dl = scalar.mulf %{o}_d, %{o}_lf : f32
+      %{o}_dlh = scalar.fptrunc %{o}_dl : f32 to f16
+      %{o}_dlh32 = scalar.extf %{o}_dlh : f16 to f32'''
+        dl, dl32 = f"%{o}_dlh", f"%{o}_dlh32"   # the offset from the rounded scale: (u - 128) * f16(dl) exactly, subnormal dl too
+    return head + f'''
+{book}
+      %{o}_book = vector.from_elements {", ".join(f"%{o}_k{i}" for i in range(16))} : vector<16xi8>
+      %{o}_m15 = vector.splati 15 : vector<16xi8>
+      %{o}_f4 = vector.splati 4 : vector<16xi8>
+      %{o}_lo_i = vector.andi %{o}_packed8, %{o}_m15 : vector<16xi8>
+      %{o}_hn_s = vector.shrui %{o}_packed8, %{o}_f4 : vector<16xi8>
+      %{o}_hi_i = vector.andi %{o}_hn_s, %{o}_m15 : vector<16xi8>
+      %{o}_lo_u = vector.table.lookup %{o}_book[%{o}_lo_i] : vector<16xi8>, vector<16xi8> -> vector<16xi8>
+      %{o}_hi_u = vector.table.lookup %{o}_book[%{o}_hi_i] : vector<16xi8>, vector<16xi8> -> vector<16xi8>
+      %{o}_lo_f = vector.uitofp %{o}_lo_u : vector<16xi8> to vector<16xf16>
+      %{o}_hi_f = vector.uitofp %{o}_hi_u : vector<16xi8> to vector<16xf16>
+      %{o}_m128 = scalar.constant -128.0 : f32
+      %{o}_off32 = scalar.mulf {dl32}, %{o}_m128 : f32
+      %{o}_off_h = scalar.fptrunc %{o}_off32 : f32 to f16
+      %{o}_scales = vector.splat {dl} : vector<16xf16>
+      %{o}_offsets = vector.splat %{o}_off_h : vector<16xf16>
+      %{o}_v0 = vector.fmaf %{o}_lo_f, %{o}_scales, %{o}_offsets : vector<16xf16>
+      %{o}_v1 = vector.fmaf %{o}_hi_f, %{o}_scales, %{o}_offsets : vector<16xf16>'''
+
+
+def _g32_iq4_on():
+    return os.environ.get("GEMM_IQ4_G32", "0").strip().lower() not in ("", "0", "false", "no", "off")
 
 
 def _g32_stores(fmt, out):
@@ -913,9 +1246,13 @@ def gemm_big256(fmt, mode, fmt2=None, g32=None, bal=None, a32_=None):
     wave_cols = 16 * cfr
     WVR = TW - (TN - wave_cols) - 15
     name = f"{PREFIX}_gemm_{fmt}_{mode}_m256" if fmt2 is None else f"{PREFIX}_gemm_{fmt}_{fmt2}_{mode}_m256"
-    assert fmt2 is None or (f["block_values"] == 256 and FMT[fmt2]["block_values"] == 256), (fmt, fmt2)
+    # GEMM_M256_MIXED_NL (choice prefill.gemm.m256_mixed_nl): a 32-value-block weight (IQ4_NL, inline under prefill.gemm.iq4_native)
+    # on either side of the mixed kernel; its row bytes come from its own block count (%blocks2 when the formats' blocks differ)
+    nl = os.environ.get("GEMM_M256_MIXED_NL", "0").strip().lower() not in ("", "0", "false", "no", "off")
+    assert fmt2 is None or (f["block_values"] == 256 and FMT[fmt2]["block_values"] == 256) \
+        or (nl and {f["block_values"], FMT[fmt2]["block_values"]} <= {32, 256}), (fmt, fmt2)
     weights = ["w", "w2"] if two_w else ["w"]
-    k_min = 256 if f["block_values"] == 256 else 64
+    k_min = 256 if 256 in (f["block_values"], FMT[fmt2 or fmt]["block_values"]) else 64
     L = []
     L.append(f'''kernel.def export("{name}") @{name}(%rows: index, %n: index) {{
   %c1 = index.constant 1 : index
@@ -968,7 +1305,7 @@ def gemm_big256(fmt, mode, fmt2=None, g32=None, bal=None, a32_=None):
   %wave_col = index.assume %wave_col_value [range(%wave_col_value, 0, {TN - wave_cols})] : index
   %row_origin = index.mul %row_group, %c256 : index
   %out_origin = index.mul %out_group, %tn : index
-  %blocks = index.div %k, %c{f["block_values"]} : index
+  %blocks = index.div %k, %c{f["block_values"]} : index{"" if not fmt2 or FMT[fmt2]["block_values"] == f["block_values"] else chr(10) + "  %blocks2 = index.div %k, %c" + str(FMT[fmt2]["block_values"]) + " : index"}
   %row_bytes = index.scale %blocks, %block_bytes : index, offset -> offset
   %x_view = buffer.view %x[%origin] : buffer -> view<[%rows]x[%k]xf16>
   %s_view = buffer.view %scales[%origin] : buffer -> view<[%rows]x2xf32>
@@ -1011,7 +1348,7 @@ def gemm_big256(fmt, mode, fmt2=None, g32=None, bal=None, a32_=None):
         L.append("  %w_out_row_value = index.add %out_origin, %stage_row : index")
     L.append(f'''  %w_out_row = index.assume %w_out_row_value [lt(%w_out_row_value, %n)] : index
   %w_row_origin = index.scale %w_out_row, %row_bytes : index, offset -> offset
-  %row_bytes2 = index.scale %blocks, %block_bytes2 : index, offset -> offset
+  %row_bytes2 = index.scale %blocks{"2" if fmt2 and FMT[fmt2]["block_values"] != f["block_values"] else ""}, %block_bytes2 : index, offset -> offset
   %w2_row_origin = index.scale %w_out_row, %row_bytes2 : index, offset -> offset
   %zero8 = vector.splatf 0.0 : vector<8xf32>
   %init = vector.fragment<init> %zero8 shape [%c16, %c16] : vector<8xf32>

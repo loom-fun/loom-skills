@@ -123,6 +123,9 @@ class Migration(unittest.TestCase):
                 "ctx_cap": 10240, "r9700_execution": {"context_capacity": 10240, "prefill_capacity": 512}},
             "unsloth-gemma-4-26B-A4B-it-qat-loom": {
                 "ctx_cap": 36864, "r9700_execution": {"context_capacity": 36864, "prefill_capacity": 2048}},
+            # added after the snapshot: fit.py-derived MTP row (R9700 func/ktest/gates:dev at this context)
+            "unsloth-Qwen3.8-27B-UD-Q4_K_XL": {
+                "ctx_cap": 116736, "r9700_execution": {"context_capacity": 116736, "prefill_capacity": 1024}},
         })
         before = {s: r for s, r in before.items() if r}
         self.assertEqual(got, before)

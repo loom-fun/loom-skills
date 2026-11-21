@@ -24,6 +24,14 @@
   "^g_gemm_q[2-6]_"
  ],
  [
+  "GEMM iq4 (IQ4_XS / IQ4_NL tiles and their mixed swiglu with K-quants; unsloth UD)",
+  "^g_gemm_iq4_"
+ ],
+ [
+  "GDN alpha/beta GEMM (WMMA)",
+  "^g_gemm_ab_"
+ ],
+ [
   "GDN chunk (recurrence)",
   "^g_gdn_recurrence|^g_gdn_chunk"
  ],
@@ -82,5 +90,9 @@
  [
   "spec misc (mtp concat, rmsnorm, sampling)",
   "^g_spec|^g_mtp|^g_sample|^g_argmax"
+ ],
+ [
+  "matvecs, other formats (decode/verify; rows beyond the GEMM tiles)",
+  "^g_mv_"
  ]
 ]

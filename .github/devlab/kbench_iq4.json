@@ -1,0 +1,54 @@
+{
+ "repeats": 3,
+ "suites": [
+  {
+   "suite": "gemm_iq4_udxl",
+   "dir": "gemm_q38",
+   "gen": "gemm_q38/gen_udxl.py",
+   "gen_variants": [
+    "base",
+    "g32",
+    "lut"
+   ],
+   "files": [
+    "bench.loom",
+    "bench_g32.loom",
+    "bench_lut.loom"
+   ],
+   "device": "amdgpu://?completion_spin_ns=4294967295",
+   "config": [],
+   "args": [
+    "--measure=dispatch_complete",
+    "--batch-size=4",
+    "--profile-final-batch=true"
+   ],
+   "repeats": 5
+  },
+  {
+   "suite": "gemm_iq4_order",
+   "dir": "gemm_q38",
+   "gen": "gemm_q38/gen_udxl.py",
+   "gen_variants": [
+    "base",
+    "g32",
+    "g32nf0",
+    "g32swz10",
+    "shapes:down_x,downst_x,down_q5,sw_x"
+   ],
+   "files": [
+    "bench.loom",
+    "bench_g32.loom",
+    "bench_g32nf0.loom",
+    "bench_g32swz10.loom"
+   ],
+   "device": "amdgpu://?completion_spin_ns=4294967295",
+   "config": [],
+   "args": [
+    "--measure=dispatch_complete",
+    "--batch-size=4",
+    "--profile-final-batch=true"
+   ],
+   "repeats": 5
+  }
+ ]
+}
