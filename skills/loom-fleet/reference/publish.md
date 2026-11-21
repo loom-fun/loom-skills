@@ -142,7 +142,7 @@ ONE local job that measures every engine of that GPU's table at that power, inte
 `WORK=DIR LOCAL_HF_CACHE=1 POWER_LOG=1 POWER_BAND="120 125" MIN_MEMAVAIL_GB=40 flock GPU.lock .github/scripts/devlab_perf.sh EXP.json JOB`
 with the card's normal steps (`perf:card:1` x3 short and long, `c4:nodraft`, `llama@rocm.np1:1` / `llama@vulkan.np1:1` rounds,
 `llamac4@rocm.nodraft`, `llamac4@vulkan.perslot.nodraft`) in ABBA rounds, plus `gufoperf:1[:long]` / `gufoc4` when the card shows
-Gufo (experiment field `gufo`: its pinned container image, ITS OWN model file and drafter; devlab_perf.sh header). Ingest each engine
+Gufo (experiment field `gufo`: its pinned container image, ITS OWN model file and drafter; devlab_perf.sh header; when that file is the card's GGUF, i.e. `--baseline-model-sha256` equals the card's, the card says "same file"; Gufo stays outside the margin either way, its drafting differs). Ingest each engine
 with `make_info.py perf --source-kind local --power-mode 123w --power-evidence OUT/power_steps.json --run JOB --device DEV.json`
 (DEV.json names the machine; Vulkan and Gufo with `--backend vulkan|gufo`, Gufo also `--baseline-name Gufo --baseline-model
 OWNER/REPO/FILE --baseline-model-sha256 SHA --baseline-label "Gufo (UD-Q4_K_XL)"` and `--differs` lines for its drafting), the
