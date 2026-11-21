@@ -22,3 +22,11 @@ the K-quant kernels; `-128 dl` must be computed in F32 then fptrunc). Loop VALU 
 0.2.0): a `vector.table.lookup` index masked as i32 words then bitcast to i8 lowers to 480 cmp + cndmask (mask on `vector<16xi8>` so the
 index range is provable); a scalar `scalar.mulf ... : f16` feeding a splat was miscompiled (result into a `.h` half of a live VGPR, the
 fma read an unwritten register: every G32 m256 ktest failed).
+
+## Decode matvecs: int8 activations (`decode.iq4.act_q8`, IQ4_Q8)
+
+Without the choice IQ4_XS / IQ4_NL decode and verify matvecs take f32 activations: at the 4-token verify of a drafted step they ran at
+138 GB/s against 225 for the int8 K-quant matvecs (179 VGPR, 762 instructions at K=5120 t4), and 4 streams re-read the weights per
+4 tokens. `@g_iq4_<fmt>_icodes` gives the kvalues codes and one scale per 32 values (llama.cpp's vec_dot_iq4_xs_q8_1), so the dot4 path
+applies as for Q8_0 (67 VGPR, 438 instructions). Qwen3.8-27B UD-Q4_K_XL (33 % IQ4 bytes): decode +10.5 %, 32k +7.9 %, 4 streams +12.7 %
+(model node). Opt-in per model: it changes the verify numerics (int8 activations), so the model's gates run with it.
