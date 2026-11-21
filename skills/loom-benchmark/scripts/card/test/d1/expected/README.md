@@ -1,6 +1,6 @@
 ---
 base_model: LiquidAI/d1-2B-GGUF
-license: other
+license: mit
 tags:
 - loom
 - loom-serve

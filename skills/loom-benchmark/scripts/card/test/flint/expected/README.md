@@ -1,5 +1,6 @@
 ---
 base_model: ggml-org/Flint-GGUF
+license: mit
 tags:
 - loom
 - loom-serve
