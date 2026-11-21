@@ -210,6 +210,7 @@ class XsjEvidence(unittest.TestCase):
         self.write("loom.jsonl", {"time": f"{DAY}T17:09:00", "decode_tps_2k": 29})
         self.write("llama.jsonl", {"time": f"{DAY}T17:10:00"})
         unavailable = self.perf(run=other_run, version="b9999", args="-ngl 99 -c 40960 -np 1")
+        del unavailable["performance"]["baseline"]["differs"]
         self.assertIsNone(unavailable["performance"]["session"]["metrics"]["decode_2k"]["baseline"])
         self.write("devices/gfx1152.json", self.device_results(unavailable))
         perf = self.build()["devices"][GPU]["performance"]
@@ -220,6 +221,53 @@ class XsjEvidence(unittest.TestCase):
                 perf = self.build()["devices"][GPU]["performance"]
                 self.assertEqual(perf["baseline"], measured["performance"]["baseline"])
                 self.assertEqual(len(perf["sessions"]), 2)
+
+    def test_separate_unmeasured_rocm_run_keeps_its_limitations(self):
+        args = "-ngl 99 -c 40960 -np 1"
+        flags = "-ngl 99 -c 40960 -np 4"
+        self.write("loom.jsonl", {"time": f"{DAY}T16:10:00", "decode_tps": 27, "agg_tps": 51})
+        self.write("llama.jsonl", {"time": f"{DAY}T16:11:00", "decode_tps": 23, "agg_tps": 45})
+        measured = self.perf(args=args)
+        base = measured["performance"]["baseline"]
+        base["differs"] = [f"Four-stream flags: {flags}."]
+
+        other_run = "20261120-170817-b5x9"
+        other_args = "-ngl 99 -c 32768 -np 1"
+        other_flags = "-ngl 99 -c 32768 -np 4"
+        self.write("loom.jsonl", {"time": f"{DAY}T17:09:00", "prefill_long": [{"prompt_tokens": 32000, "prefill_tps": 290}]})
+        self.write("llama.jsonl", {"time": f"{DAY}T17:10:00"})
+        unavailable = self.perf(run=other_run, version="b9999", args=other_args)
+        reason = "prefill_32k was unavailable because the baseline could not admit its prompt."
+        unavailable["performance"]["baseline"]["differs"] = [reason, f"Four-stream flags: {other_flags}."]
+        self.write("devices/gfx1152.json", self.device_results(measured, unavailable))
+
+        def check(info):
+            perf = info["devices"][GPU]["performance"]
+            self.assertEqual({k: perf["baseline"][k] for k in ("name", "version", "args")},
+                             {k: base[k] for k in ("name", "version", "args")})
+            session = next(s for s in perf["sessions"] if s["source"] == f"xsj-{other_run}")
+            self.assertIsNone(session["metrics"]["prefill_32k"]["baseline"])
+            self.assertEqual(session["metrics"]["prefill_32k"]["loom"], 290)
+            for output in (render_card.render(self.pkg), render_card.render_report(self.pkg)):
+                self.assertIn("prefill tok/s, 32k document", output)
+                self.assertIn(f"Limitations in XSJ lab run {other_run} with a separate ROCm configuration "
+                              f"b9999 `{other_args}`.\n- llama.cpp ROCm: {reason}", output)
+                self.assertIn(f"- llama.cpp ROCm four-stream server arguments: `{flags}`.", output)
+                self.assertNotIn(other_flags, output)
+                self.assertEqual(output.count(reason), 1)
+
+        initial = self.build()
+        check(initial)
+        initial_path = self.write("initial.json", initial)
+        self.write("loom.jsonl", {"time": f"{DAY}T17:19:00", "decode_tps_2k": 29})
+        self.write("llama.jsonl", {"time": f"{DAY}T17:20:00", "decode_tps_2k": 25})
+        compatible = self.perf(run="20261120-171817-b5x9", args=args)
+        path = self.write("compatible.json", compatible)
+        for history in (("--from-info", initial_path), ("--perf-from", f"{GPU}={initial_path}")):
+            with self.subTest(history=history[0]):
+                info = self.build(*history, "--device-results", "none", "--evidence", path)
+                self.assertEqual(len(info["devices"][GPU]["performance"]["sessions"]), 3)
+                check(info)
 
     def test_retained_rocm_four_stream_flags_follow_the_measured_workload(self):
         decode = self.perf(run="20261120-170817-b5x9")

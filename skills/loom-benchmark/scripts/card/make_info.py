@@ -126,7 +126,8 @@ from card_lib import (DEFAULT_GPU, DRAFTED_ROWS, EVIDENCE_ID, GPUS, METRIC_KEYS,
                       gpu_view, load_info, load_json, load_package, metric_applies, native_context, over_context, package_facts,
                       programs_sha256, require_valid, fixed_pool_capacity, gpu_preset_execution, gpu_preset_name, with_gpu_preset, served_context, fit_served_context, upstream_facts, with_gate_features, write_json,
                       SERVE_HEADROOM, registry, fit_rows, non_targets, load_device_results, validate_device_results, with_device_preset, DEVICE_RESULTS_ID, card_serve_args, quick_start, serves,
-                      historical_xsj_gate, xsj_enabled, xsj_evidence_errors, xsj_measurement_errors, xsj_vulkan_comparison_errors)
+                      historical_xsj_gate, xsj_enabled, xsj_evidence_errors, xsj_measurement_errors, xsj_vulkan_comparison_errors,
+                      CAVEAT_MAX, text_errors)
 
 
 # ---------------------------------------------------------------- sources
@@ -354,24 +355,47 @@ def merge_xsj_rocm_baseline(previous, sessions, incoming, session, path, gpu):
     new_rows = measured([session] if session else [])
     if not retained_rows:
         return incoming if new_rows else incoming or previous
+    flags_prefix = "Four-stream flags: "
+    limitations_prefix = "Limitations in XSJ lab run "
+    old_notes = (previous or {}).get("differs", [])
+    new_notes = (incoming or {}).get("differs", [])
     old_descriptor, new_descriptor = descriptor(previous), descriptor(incoming)
     if old_descriptor != new_descriptor:
         if new_rows:
             conflict(f"retained {old_descriptor!r}, incoming {new_descriptor!r}")
+        limitations = [note for note in new_notes if not note.startswith(flags_prefix)]
+        if not session or not limitations:
+            return previous
+        name, version, args = new_descriptor
+        run = session["source"]["run"]
+        context = f"{limitations_prefix}{run} with a separate ROCm configuration"
+        build = f"{context} {version or name}"
+        if not text_errors("XSJ configuration", build, CAVEAT_MAX):
+            context = build
+        if args:
+            with_args = f"{context} `{args}`"
+            if not text_errors("XSJ configuration", with_args, CAVEAT_MAX):
+                context = with_args
+            elif not text_errors("XSJ configuration", f"Arguments `{args}`", CAVEAT_MAX):
+                limitations.insert(0, f"Arguments `{args}`")
+        base = previous or dict(zip(("name", "version", "args"), old_descriptor))
+        return dict(base, differs=[*old_notes, context, *limitations])
+    if not incoming:
         return previous
-    if not incoming or "streams4" not in retained_rows:
-        return incoming or previous
 
-    # The shared notes also carry the exact flags of the separate four-stream workload.
-    prefix = "Four-stream flags: "
-    old_flags = [n for n in (previous or {}).get("differs", []) if n.startswith(prefix)]
-    new_notes = incoming.get("differs", [])
-    if "streams4" in new_rows:
-        new_flags = [n for n in new_notes if n.startswith(prefix)]
-        if {n.removesuffix(".") for n in old_flags} != {n.removesuffix(".") for n in new_flags}:
-            conflict("the retained and incoming four-stream server arguments differ")
-        return incoming
-    notes = [n for n in new_notes if not n.startswith(prefix)] + old_flags
+    notes = new_notes
+    if "streams4" in retained_rows:
+        # Keep the exact flags of the measured four-stream workload separate from the limitations.
+        old_flags = [n for n in old_notes if n.startswith(flags_prefix)]
+        if "streams4" in new_rows:
+            new_flags = [n for n in new_notes if n.startswith(flags_prefix)]
+            if {n.removesuffix(".") for n in old_flags} != {n.removesuffix(".") for n in new_flags}:
+                conflict("the retained and incoming four-stream server arguments differ")
+        else:
+            notes = [n for n in new_notes if not n.startswith(flags_prefix)] + old_flags
+    # Run-scoped limitations follow the shared descriptor's own notes and survive compatible updates.
+    start = next((i for i, note in enumerate(old_notes) if note.startswith(limitations_prefix)), len(old_notes))
+    notes = notes + old_notes[start:]
     return dict(incoming, differs=notes) if notes != new_notes else incoming
 
 
