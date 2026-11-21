@@ -117,8 +117,9 @@ For DevLab-backed devices, use the elastic pool to sweep cards' gates and perfor
 
 ## Regeneration safety
 
-- Before publishing, A/B it against the card's own published programs on the same runner: decode, decode_32k,
-  prefill 1k to 32k, streams4. Bisect main when a main build loses.
+- Before publishing, A/B against the card's own published programs on the same DevLab runner for a DevLab-backed device.
+  For an XSJ-only device, compare both revisions within one job on the same leased host. Measure decode, decode_32k,
+  prefill 1k to 32k and streams4. Bisect main when a main build loses.
 - Check that the card's generator commit is on main or in a merged PR (squash merges leave PR commits off main's
   history; `org_status` flags the rest). A card built from an unmerged branch silently loses that branch's features
   when regenerated from main (decode_32k halved this way); merge the feature first or keep the card.
