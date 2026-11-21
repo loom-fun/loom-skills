@@ -1291,7 +1291,7 @@ def main(argv=None):
                    "fleet/devices; none: no device files): a GPU with no DevLab runner is on the card where its file says this model fits")
     b.add_argument("--memory-bytes", type=int)
     b.add_argument("--output")
-    b.add_argument("--license")
+    b.add_argument("--license", help="recorded in info.json only; the rendered card is always MIT (the package), the weights keep the checkpoint's license")
     b.add_argument("--report", choices=["generated", "attached"])
     b.add_argument("--from-info", help="a published info.json to start from (regenerating a card with new evidence)")
     b.add_argument("--reset-performance", action="store_true", help="drop --from-info's performance sessions (re-measured from scratch)")
