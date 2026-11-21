@@ -327,7 +327,7 @@ CHOICE("prefill.gemm.iq4_g32", "bool", False, "GEMM_IQ4_G32", kernels=["g_gemm_i
        doc="gfx11 m256 IQ4_XS / IQ4_NL GEMM (needs prefill.gemm.iq4_native and prefill.gemm.m256_g32; the gfx12 twin keeps the "
            "16-value dequant): each thread decodes its whole 32-weight group once (one IQ4_XS scale decode per 32), the nibble "
            "book holds kvalue + 128 so bytes become f16 by the 0x64 magic, and the scale is one f16 fma per value pair "
-           "(round_f16(kvalue * f16(dl)), as the K-quant kernels; implies prefill.gemm.iq4_f16lut so every tile size stages the same values). Loop VALU 467 -> 174 per 64 WMMA, no scratch spills.")
+           "(round_f16(kvalue * f16(dl)), as the K-quant kernels; requires prefill.gemm.iq4_f16lut, set build-wide, so every tile size and target stages the same values). Loop VALU 467 -> 174 per 64 WMMA, no scratch spills.")
 CHOICE("prefill.gemm.iq4_f16lut", "bool", False, "GEMM_IQ4_F16LUT", kernels=["g_gemm_iq4_xs_*", "g_gemm_iq4_nl_*", "g_gemm_*_*_swiglu_m256_f16o"],
        rows=ROWS_PREFILL, from_pr="q38xl-iq4",
        doc="gen_gemm.iq4_dequant16 (the 16-value IQ4 staging of the 64/128-row tiles, the mixed-format swiglu m256 and the "

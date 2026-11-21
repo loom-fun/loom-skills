@@ -1,5 +1,5 @@
 {
- "_comment": "q38xl-all (port+fmt+iq4+dec) final checks: Strix func/ktest/gates:dev; R9700 func/ktest/gates:dev (gfx12 twins) + ABBA vs q38xl-port. Restore before merge.",
+ "_comment": "q38xl-all after review fixes (IQ4 offset from the f16 scale): Strix + R9700 func/ktest/gates:dev. Restore before merge.",
  "runner": "strix",
  "memory_bytes": 49000000000,
  "llama_spec": "matched",
@@ -42,31 +42,12 @@
       "context_capacity": 116736,
       "prefill_capacity": 1024
      }
-    },
-    {
-     "name": "base",
-     "build": {},
-     "ref": "d65f631b7f72d00c9869b55d94269f7f0c896b4e",
-     "context": 116736,
-     "cap_pool": 121856,
-     "execution": {
-      "context_capacity": 116736,
-      "prefill_capacity": 1024
-     }
     }
    ],
    "steps": [
     "func:all",
     "ktest:all",
-    "gates:all:dev",
-    "perf:base:1",
-    "perf:all:1",
-    "perf:all:1",
-    "perf:base:1",
-    "perf:base:1:long",
-    "perf:all:1:long",
-    "perf:all:1:long",
-    "perf:base:1:long"
+    "gates:all:dev"
    ]
   }
  ],

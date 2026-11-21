@@ -132,6 +132,8 @@ def split_text(text):
     prog = head + "".join(_decl(p) if i in mv else p for i, p in enumerate(rest))
     if dual_target._enc_depth(prog) > dual_target.ENC_LIMIT:
         prog = dual_target.encodings_first(prog)
+        if dual_target._enc_depth(prog) > dual_target.ENC_LIMIT:
+            raise ValueError("split_library: llm.loom is still deeper than the encoding limit after the split")
     return prog, out_files
 
 

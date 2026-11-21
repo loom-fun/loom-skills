@@ -5298,6 +5298,7 @@ USED_MOEF = set()
 def moe_iq(gu, fd, x):
     """Whether this layer's decode expert matvecs take int8 activations (needs the router input as %h: its h16q)."""
     return (ACT_Q8 and MOE_Q8 and x == "%h" and "+" not in gu and gu in IQ_FMTS and fd in IQ_FMTS
+            and not {gu, fd} & {"iq4_xs", "iq4_nl"}   # decode.iq4.act_q8 covers dense matvecs and the head only (gen_moe has no IQ4 codes path)
             and H // 32 <= 1024 and MOE["ffn"] // 32 <= 1024 and not MOE.get("expert_bias"))
 
 
@@ -6456,7 +6457,7 @@ if __name__ == "__main__":
         from gen_mxfp4s import mxfp4s_icodes as _mx_icodes
         COMMON += _mx_icodes()
     if USED_MVQ or USED_MOEQ or PH_ONLY:   # ACT_Q8: int8-activation matvecs, their weight-code helpers and g_quant_q8
-        if {f for f, *_ in USED_MVQ} & {"iq4_xs", "iq4_nl"}:   # choice decode.iq4.act_q8
+        if ({f for f, *_ in USED_MVQ} | {head_fmt}) & {"iq4_xs", "iq4_nl"}:   # choice decode.iq4.act_q8 (trunk matvecs or an IQ4 head)
             COMMON += IQ4_ICODES
         COMMON += ICODES + "".join(mv(fmt, K, R=R, TG=TG, swiglu=sw == 1, pair=sw == 2, suffix=f"_r{R}" if R != 16 else "", iq=True)
                                    for fmt, K, sw, R, TG in sorted(USED_MVQ))

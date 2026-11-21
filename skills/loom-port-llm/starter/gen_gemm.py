@@ -162,8 +162,12 @@ _IQ4_KVALUES = (-127, -104, -83, -65, -49, -35, -22, -10, 1, 13, 25, 38, 53, 69,
 def _iq4_f16lut_on():
     """GEMM_IQ4_F16LUT (choice prefill.gemm.iq4_f16lut): iq4_dequant16 with the unsigned book (kvalue + 128), the 0x64 magic
     byte -> f16 conversion and one f16 fma per value pair (as _g32_iq4) instead of sign-extend + F32 convert/multiply/round.
-    GEMM_IQ4_G32 implies it, so every tile size of a model stages the same f16 weights (_g32_iq4's values)."""
-    return os.environ.get("GEMM_IQ4_F16LUT", "0").strip().lower() not in ("", "0", "false", "no", "off") or _g32_iq4_on()
+    GEMM_IQ4_G32 requires it (set by the model's scope rule for the whole build, gfx12 twins included), so every tile size of a model
+    stages the same f16 weights (_g32_iq4's values); a device-scoped G32 never changes the other target's kernels."""
+    on = os.environ.get("GEMM_IQ4_F16LUT", "0").strip().lower() not in ("", "0", "false", "no", "off")
+    if _g32_iq4_on() and IQ4_NATIVE and not on:
+        raise SystemExit("GEMM_IQ4_G32 needs GEMM_IQ4_F16LUT (choice prefill.gemm.iq4_f16lut): every tile size must stage the same IQ4 values")
+    return on
 
 
 def _iq4_f16_tail(o, dl, pre="", dl32=None):
@@ -267,7 +271,7 @@ def iq4_dequant16(fmt, w, out):
       %{o}_lf = scalar.sitofp %{o}_centered : i32 to f32
       %{o}_dl = scalar.mulf %{o}_d, %{o}_lf : f32'''
     if f16:
-        return head + lookup_idx + _iq4_f16_tail(o, f"%{o}_dlh", f"      %{o}_dlh = scalar.fptrunc %{o}_dl : f32 to f16\n", f"%{o}_dl")
+        return head + lookup_idx + _iq4_f16_tail(o, f"%{o}_dlh", f"      %{o}_dlh = scalar.fptrunc %{o}_dl : f32 to f16\n      %{o}_dlh32 = scalar.extf %{o}_dlh : f16 to f32\n", f"%{o}_dlh32")
     return head + lookup + f'''
       %{o}_wide = vector.sitofp %{o}_codes : vector<16xi8> to vector<16xf32>
       %{o}_dls = vector.splat %{o}_dl : vector<16xf32>
@@ -1091,8 +1095,9 @@ def _g32_iq4(fmt, w, o, col):
       %{o}_centered = scalar.subi %{o}_ls, %{o}_i32 : i32
       %{o}_lf = scalar.sitofp %{o}_centered : i32 to f32
       %{o}_dl = scalar.mulf %{o}_d, %{o}_lf : f32
-      %{o}_dlh = scalar.fptrunc %{o}_dl : f32 to f16'''
-        dl, dl32 = f"%{o}_dlh", f"%{o}_dl"
+      %{o}_dlh = scalar.fptrunc %{o}_dl : f32 to f16
+      %{o}_dlh32 = scalar.extf %{o}_dlh : f16 to f32'''
+        dl, dl32 = f"%{o}_dlh", f"%{o}_dlh32"   # the offset from the rounded scale: (u - 128) * f16(dl) exactly, subnormal dl too
     return head + f'''
 {book}
       %{o}_book = vector.from_elements {", ".join(f"%{o}_k{i}" for i in range(16))} : vector<16xi8>
