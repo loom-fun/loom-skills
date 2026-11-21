@@ -65,9 +65,9 @@ class Status(unittest.TestCase):
         for path in (self.status_path, self.log_path):
             path.with_suffix(path.suffix + ".lock").touch()
 
-    def status(self, *args):
+    def status(self, *args, returncode=0):
         result = run([sys.executable, str(CAMP / "status.py"), "--dir", str(self.dir), *args], timeout=30)
-        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.returncode, returncode, result.stderr)
         return result.stdout
 
     def test_status_set_get_log(self):
@@ -84,6 +84,30 @@ class Status(unittest.TestCase):
         env = dict(os.environ)
         env.pop("CAMPAIGN_DIR", None)
         self.assertEqual(run(st + ["set", "only_a_path"], cwd=self.dir, env=env, timeout=30).returncode, 2)
+
+    def test_pointer_paths_round_trip_literal_keys(self):
+        slug = "unsloth-Qwen3.5-4B-loom"
+        device = {"run": "previous-run"}
+        self.status("set", "models", json.dumps({slug: {"gfx1152": device}}))
+        verdict = f"/models/{slug}/gfx1152/verdict"
+        other = "/workstreams/checks.v2~1native~01"
+        self.status("--pointer", "set", verdict, "passed", other, "7")
+        self.assertEqual(json.loads(self.status("--pointer", "get", verdict)), "passed")
+        self.assertEqual(json.loads(self.status("--pointer", "get", other)), 7)
+        self.assertEqual(json.loads(self.status("get")), {
+            "models": {slug: {"gfx1152": {**device, "verdict": "passed"}}},
+            "workstreams": {"checks.v2/native~1": 7},
+        })
+
+    def test_malformed_pointer_paths_leave_batch_unwritten(self):
+        original = self.status_path.read_bytes()
+        for malformed in ("", "workstreams.no_slash", "/workstreams/invalid~2", "/workstreams/stray~"):
+            with self.subTest(malformed=malformed):
+                self.status("--pointer", "get", malformed, returncode=2)
+                self.status("--pointer", "set", "/workstreams/valid", "7", malformed, "8", returncode=2)
+                self.assertEqual(self.status_path.read_bytes(), original)
+                self.assertFalse(self.status_path.with_suffix(".json.tmp").exists())
+        self.status("--pointer", "get", "/workstreams", "/models", returncode=2)
 
     def test_status_and_log_concurrent_writers(self):
         with ThreadPoolExecutor(max_workers=16) as pool:
