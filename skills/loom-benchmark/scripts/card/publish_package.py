@@ -20,8 +20,9 @@
       the Hub API's model sha): the upload fails if the repo has moved since (another worker published), instead
       of overwriting that card; re-read info.json and rebuild. Needs huggingface_hub and a write token (HF_TOKEN or
       ~/.cache/huggingface/token).
-      XSJ cards require the local package programs even for --card-only and --dry-run. A real card-only upload
-      also checks those programs against the pinned target parent.
+      XSJ cards require local programs and exact generated README.md and REPORT.md even for --card-only and
+      --dry-run. Current XSJ measurements must match the preset and serve flags from the validated device results
+      (fleet/devices by default, or LOOM_DEVICE_RESULTS). A real card-only upload also checks the pinned parent's programs.
       --init-new-repo explicitly creates an absent repo. A nonempty immutable seed SHA, seed-only files and
       one-commit history are required; otherwise stop without uploading. The initial package upload uses that seed
       as its server CAS parent. Writes print JSON {repo,parent_commit,commit,url} from the actual returned CommitInfo;
@@ -163,6 +164,59 @@ def target_repo(org, repo):
     return f"{org or DEFAULT_ORG}/{repo.split('/')[-1]}"
 
 
+def check_xsj_configuration(out, info, programs):
+    """Check the Quick start and the actual preset against the current, qualified device row."""
+    import card_lib
+    from make_info import device_meta
+
+    current = {}
+    for gpu, dev in info["devices"].items():
+        if not card_lib.xsj_enabled(gpu):
+            continue
+        perf = dev.get("performance") or {}
+        baselines = (perf.get("baselines") or {}).values()
+        rows = [*perf.get("sessions", []), *(b["session"] for b in baselines), *(dev.get("gates") or {}).values()]
+        runs = {info["sources"][row["source"]]["run"] for row in rows if row.get("programs_sha256") == programs}
+        if runs:
+            current[gpu] = runs
+    if not current:
+        return  # Historical gates are explicitly marked as evidence for different programs.
+
+    results = card_lib.load_device_results()
+    package = card_lib.load_package(out)
+    model, facts = package["model"], card_lib.package_facts(package)
+    slug = info["repo"].split("/")[-1]
+    for gpu, runs in current.items():
+        doc = results.get(gpu, {})
+        entry = doc.get("models", {}).get(slug) or {}
+        qualified = set()
+        for ev in entry.get("evidence") or []:
+            session = (ev.get("performance") or {}).get("session")
+            for row in [*(ev.get("gates") or []), *([session] if session else [])]:
+                if row.get("programs_sha256") == programs:
+                    qualified.add(row["source"]["run"])
+        if not entry.get("fits") or not runs <= qualified:
+            sys.exit(f"{out}: {gpu} XSJ publication requires qualified device results for {slug} and its current runs")
+
+        if not model.get("presets") or not card_lib.GPUS[gpu].get("preset_suffix"):
+            sys.exit(f"{out}/model.json: {gpu} XSJ publication requires a named device preset")
+        name = card_lib.gpu_preset_name(model, gpu)
+        base_gpu = doc.get("same_programs_as")
+        base = f"{next(iter(model['presets']))}{card_lib.GPUS[base_gpu].get('preset_suffix', '')}" if base_gpu in card_lib.GPUS else None
+        execution = {"context_capacity": entry["max_context"], **(entry.get("execution") or {})}
+        expected = card_lib.with_device_preset(model, gpu, execution, base)["presets"][name]
+        if model["presets"].get(name) != expected:
+            sys.exit(f"{out}/model.json: {name} differs from the qualified XSJ preset")
+
+        meta = device_meta(gpu, doc, entry, facts["features"], facts.get("weight_bytes"))
+        device = (doc.get("serve") or {}).get("device", card_lib.QUICK_START_DEVICE)
+        quick = {"preset": name, "device": device, "args": meta["serve_args"]}
+        dev = info["devices"][gpu]
+        if (dev.get("quick_start") != quick or card_lib.quick_start(info, facts, gpu) != quick
+                or dev.get("serve_args") != meta["serve_args"] or dev.get("served_context") != meta.get("served_context")):
+            sys.exit(f"{out}/info.json: {gpu} Quick start or serving settings differ from qualified XSJ device results")
+
+
 def check_card_text(out, repo=None):
     """Refuse to publish a card whose free text is not template output or a short factual caveat, or whose repo is
     not the one it is published to (its Quick start fetches from info.json's repo)."""
@@ -182,6 +236,17 @@ def check_card_text(out, repo=None):
                  f"{repo.split('/')[0]} (the Quick start fetches from the card's repo)")
     if info.get("report") != "generated":
         sys.exit("info.json: only a generated REPORT.md is published (an attached, hand-written report is narrative)")
+    if programs:
+        import render_card
+
+        check_xsj_configuration(out, card_lib.normalize(info), programs)
+        for name, render in (("README.md", render_card.render), ("REPORT.md", render_card.render_report)):
+            path = os.path.join(out, name)
+            if os.path.isfile(path):
+                with open(path, "rb") as f:
+                    if f.read() == render(out).encode("utf-8"):
+                        continue
+            sys.exit(f"{path}: missing or stale generated XSJ card text; rerun render_card.py")
     return programs
 
 

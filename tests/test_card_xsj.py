@@ -57,6 +57,7 @@ class XsjEvidence(unittest.TestCase):
         self.digest = card_lib.programs_sha256(self.pkg)
         self.devices = self.tmp / "devices"
         self.devices.mkdir()
+        self.enterContext(patch.dict(os.environ, {"LOOM_DEVICE_RESULTS": str(self.devices)}))
         self.device_path = self.write("device.json", HARDWARE)
         self.sdk_path = self.write("sdk.json", SDK)
         self.loom = self.write("loom.jsonl", {"time": f"{DAY}T16:10:00", "decode_tps": 27})
