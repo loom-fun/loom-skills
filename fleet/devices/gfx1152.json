@@ -36,7 +36,8 @@
       "baseline": {
        "args": "-ngl 99 -cram 0 --device ROCm0 --spec-type draft-dflash --spec-draft-model hf:AtomicChat/Qwen3.5-4B-DFlash-GGUF@56b80828981c35dff23affb49820e9ef816048f0/Qwen3.5-4B-DFlash.Q8_0.gguf --spec-draft-n-max 7 -ngld 99 -c 40960 -np 1",
        "differs": [
-        "Four-stream flags: -ngl 99 -cram 0 --device ROCm0 -c 40960 -kvu -np 4."
+        "Four-stream flags: -ngl 99 -cram 0 --device ROCm0 -c 40960 -kvu -np 4.",
+        "Loom: A 40,882-token context probe completed, and the server did not cancel a separate admitted request within 60 seconds."
        ],
        "name": "llama.cpp",
        "version": "llamacpp-rocm/b1382"
@@ -666,7 +667,8 @@
       "baseline": {
        "args": "-ngl 99 -cram 0 --device ROCm0 --spec-type draft-dflash --spec-draft-model card:parameter/Qwen3.5-9B-DFlash.Q8_0.gguf --spec-draft-n-max 7 -ngld 99 -c 40960 -np 1",
        "differs": [
-        "Four-stream flags: -ngl 99 -cram 0 --device ROCm0 -c 40960 -kvu -np 4."
+        "Four-stream flags: -ngl 99 -cram 0 --device ROCm0 -c 40960 -kvu -np 4.",
+        "Loom: A 40,882-token context probe completed, and the server did not cancel a separate admitted request within 60 seconds."
        ],
        "name": "llama.cpp",
        "version": "llamacpp-rocm/b1382"
@@ -1294,7 +1296,8 @@
       "baseline": {
        "args": "-ngl 99 -cram 0 --device ROCm0 -c 65536 -np 1",
        "differs": [
-        "Four-stream flags: -ngl 99 -cram 0 --device ROCm0 -c 65536 -kvu -np 4."
+        "Four-stream flags: -ngl 99 -cram 0 --device ROCm0 -c 65536 -kvu -np 4.",
+        "Loom: A 262,066-token context probe completed, and the server did not cancel a separate admitted request within 60 seconds."
        ],
        "name": "llama.cpp",
        "version": "llamacpp-rocm/b1382"
