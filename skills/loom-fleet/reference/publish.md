@@ -66,8 +66,8 @@ model dropped from the target list (reason first in the steps).
 
 ## 3. Sweep on DevLab Dispatch: missing gates, the roofline and the performance job
 
-DevLab is an elastic pool of Strix Halo runners; sweep many cards' gates and performance at once there, never on
-the local GPU. Hand the card over and move the local GPU on to the next item.
+For DevLab-backed devices, use the elastic pool to sweep cards' gates and performance in parallel. Use the
+[leased XSJ workflow](../../loom-kb/topic/xsj.md) for a device whose only lab measurement option is XSJ.
 
 1. The card is in `.github/nightly-models.json` (card, memory, kit, llama.cpp build; step 2). Run `nightly-gates.yml`
    (it runs on schedule, or `gh workflow run nightly-gates.yml -f models=loom-fun/REPO,... -f level=full`, or label
@@ -90,8 +90,8 @@ the local GPU. Hand the card over and move the local GPU on to the next item.
      repo comes from info.json, the generator commit from the checkout), `render_card.py DIR`, and
      `publish_package.py upload DIR --repo loom-fun/REPO --card-only --parent-commit $sha` (fails if another worker
      published since: re-read and rebuild).
-3. A card with metrics missing or measured on other programs (`sweep`, `remeasure`): one `devlab-perf` job per card
-   (required: it is the only source of card performance; llama.cpp steps are omitted when the card's stored llama.cpp rows are reusable, methodology rule 17) (`.github/devlab/perf.json`: card, memory_bytes, kit and llamacpp from `nightly-models.json`,
+3. A DevLab-backed device with metrics missing or measured on other programs (`sweep`, `remeasure`): one `devlab-perf` job per card
+   (omit llama.cpp steps when the card's stored llama.cpp rows are reusable, methodology rule 17) (`.github/devlab/perf.json`: card, memory_bytes, kit and llamacpp from `nightly-models.json`,
    llama_spec omitted = `matched`: llama.cpp gets the card's classified drafting choice (same method and drafter, its documented n-max;
    none if the classification says none; `../../loom-benchmark/reference/methodology.md`), an explicit `llama_spec` only overrides it (`{drafter}` = the
    card's drafter, `{hf:OWNER/REPO/FILE}` a Hub file, e.g. an MTP head the card doesn't ship); variant `{"name": "card"}`, steps `perf:card:1` x3 (6 for a fast model, decode > ~100 tok/s: also job field `"repeat_rows": 3`, perf.py `--repeat-rows`), the same count of `perf:card:1:long`, `c4:card`, `llama@rocm.np1:3 llama@rocm.np1:3:long` (6 for a fast model)
@@ -113,11 +113,11 @@ the local GPU. Hand the card over and move the local GPU on to the next item.
    programs than DIR's), then `make_info.py build --from-info` as above. Its numbers are another job's: compare
    engines by ratios, not across runners. KV layout (`vulkan_kv`, default auto): per-slot caches, except unified (as ROCm) for DFlash servers, where b12211 aborts on per-slot caches; the unified pool makes b12211 Vulkan attend with a dense mask (no GPU fused flash attention over K/V rows), so record that as a `--differs` line too. Every server argument that differs from the ROCm baseline, or that the Vulkan
    server could not run, goes in as `--differs "setting: reason"` (shown on the card), never changed silently. Nothing in `org_status` reads it.
-4. Missing metrics come from a devlab-perf job (item 3), never from a local session.
+4. For a DevLab-backed device, use the job in step 3 to fill missing standard measurements.
 
 ## Regeneration safety
 
-- Before publishing, A/B it against the card's own published programs on the same DevLab runner: decode, decode_32k,
+- Before publishing, A/B it against the card's own published programs on the same runner: decode, decode_32k,
   prefill 1k to 32k, streams4. Bisect main when a main build loses.
 - Check that the card's generator commit is on main or in a merged PR (squash merges leave PR commits off main's
   history; `org_status` flags the rest). A card built from an unmerged branch silently loses that branch's features
