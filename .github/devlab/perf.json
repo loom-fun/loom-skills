@@ -29,6 +29,7 @@
    "steps": [
     "func:card",
     "ktest:card",
+    "gates:card:dev",
     "perf:card:1",
     "perf:card:1",
     "perf:card:1",
