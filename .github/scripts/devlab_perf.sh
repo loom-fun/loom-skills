@@ -643,6 +643,11 @@ vllm_up() {   # vllm_up on|off: vLLM ROCm (vllm_server.sh --install: the pinned 
   done
   echo "vLLM did not come up in 30 min"; return 1
 }
+gufo_sha() {   # gufo_sha FILE -> its content sha256: an HF cache snapshot entry links to blobs/<sha256> (one level: a deduplicating
+  # store may link that blob on to a file named by another hash), else hash the file (a download into $WORK/hf)
+  local b; b=$(basename "$(readlink "$1" 2>/dev/null)")
+  if [[ $b =~ ^[0-9a-f]{64}$ ]]; then echo "$b"; else sha256sum "$1" | cut -d' ' -f1; fi
+}
 gufo_path() {   # gufo_path OWNER/REPO[@REV]/FILE -> a local file: the user's HF cache (LOCAL_HF_CACHE=1, never copied), else a download into $WORK/hf
   local f=$1 r rev=main name; r=${f%/*}; name=${f##*/}; [[ $r == *@* ]] && { rev=${r#*@}; r=${r%@*}; }
   if [ "${LOCAL_HF_CACHE:-0}" = 1 ]; then
@@ -675,7 +680,7 @@ gufo_up() {   # gufo_up on|off: Gufo's OpenAI server (gufo serve llm) in its rel
   local rargs=${args//$mf/$rmf}; [ -n "${df:-}" ] && rargs=${rargs//$df/$rdf}
   echo "$args" | sed -e "s#${HF_HOME:-$HOME/.cache/huggingface}/hub/#hfcache:#g" -e "s#$WORK/hf/#hf:#g" > "$out/gufo_args_$1.txt"
   { echo "image $img"; docker image inspect --format '{{index .RepoDigests 0}}' "${img%@*}" 2>/dev/null; docker run --rm "$img" gufo --version 2>/dev/null | head -3; } > "$out/gufo_version.txt"
-  { echo "model $model sha256 $(basename "$(readlink -f "$mf")")"; [ -n "${df:-}" ] && echo "draft $draft sha256 $(basename "$(readlink -f "$df")")"; } > "$out/gufo_model.txt"
+  { echo "model $model sha256 $(gufo_sha "$mf")"; [ -n "${df:-}" ] && echo "draft $draft sha256 $(gufo_sha "$df")"; } > "$out/gufo_model.txt"
   "$B/wait_vram.sh" "gufo serve ($1)" 1024 180 "$out/vram_log.txt"
   mem_guard "gufo $1" || return 1
   step "gufo serve ($1): $(cat "$out/gufo_args_$1.txt")"

@@ -30,6 +30,18 @@ class GufoPath(unittest.TestCase):
             self.assertEqual(r.stdout.strip(), str(snap / "m.gguf"))
             self.assertFalse(Path(t, "w").exists())   # never a copy of the cached file
 
+    def test_sha_through_dedup_store(self):   # snapshot -> blobs/<sha256> -> a store file named by another hash: the blob name counts
+        import hashlib
+        with tempfile.TemporaryDirectory() as t:
+            store = Path(t, "store/23/" + "2" * 64); store.parent.mkdir(parents=True); store.write_text("x")
+            sha = hashlib.sha256(b"x").hexdigest()
+            blob = Path(t, "hub/m/blobs", sha); blob.parent.mkdir(parents=True); blob.symlink_to(store)
+            snap = Path(t, "hub/m/snapshots/r/m.gguf"); snap.parent.mkdir(parents=True); snap.symlink_to(blob)
+            plain = Path(t, "plain.gguf"); plain.write_text("x")
+            sh = function("gufo_sha") + f'gufo_sha "{snap}"; gufo_sha "{plain}"'
+            r = subprocess.run(["bash", "-c", sh], capture_output=True, text=True)
+            self.assertEqual(r.stdout.split(), [sha, sha])
+
     def test_steps_exist(self):
         s = SCRIPT.read_text()
         for k in ("    gufoperf)", "    gufoc4)", "perf.py\" \"$gurl\" gufo --kind gufo", "--speculative off --sessions 4"):
