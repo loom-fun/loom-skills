@@ -1,24 +1,26 @@
 {
- "_comment": "R9700 per-model measurement (r9700_jobs.py): one job per model on one R9700 runner; loom-fun-staging card, llama.cpp ROCm b1375 + Vulkan b12211 with the matched drafting, reduced-context models served at served_context. Does not fit: none",
+ "_comment": "R9700 per-model measurement (r9700_jobs.py): one job per model on one R9700 runner; loom-fun-staging card, llama.cpp ROCm b1375 + Vulkan b12211 with the matched drafting, reduced-context models served at served_context. Does not fit: none | card-udxl: R9700 rows of the new unsloth UD-Q4_K_XL card (main f7ad9e65 package); do not merge",
  "runner": "r9700",
  "memory_bytes": 34000000000,
  "llama_spec": "matched",
  "jobs": [
   {
-   "name": "unsloth-qwen3-0-6b-loom",
-   "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
+   "name": "unsloth-qwen3-8-27b-ud-q4_k_xl",
+   "card": "loom-fun-staging/unsloth-Qwen3.8-27B-UD-Q4_K_XL@815c555854ab2f173d66a5b0acf05a7a8ef9058a",
+   "require_preset_r9700": true,
    "kit": null,
    "llamacpp": "b1375",
    "llamacpp_vulkan": "b12211",
-   "memory_bytes_r9700": 17000000000,
+   "memory_bytes_r9700": 34000000000,
+   "served_context": 116736,
    "variants": [
     {
      "name": "card",
-     "build": {}
+     "context": 116736
     },
     {
      "name": "nodraft",
-     "build": {},
+     "context": 116736,
      "execution": {
       "draft_depth": 0
      }
@@ -27,9 +29,12 @@
    "steps": [
     "func:card",
     "ktest:card",
-    "gates:card:dev",
-    "perf:card:3",
-    "perf:card:3:long",
+    "perf:card:1",
+    "perf:card:1",
+    "perf:card:1",
+    "perf:card:1:long",
+    "perf:card:1:long",
+    "perf:card:1:long",
     "c4:nodraft",
     "llama@rocm.np1:3",
     "llama@rocm.np1:3:long",
@@ -40,7 +45,7 @@
    ]
   }
  ],
- "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
+ "card": "loom-fun-staging/unsloth-Qwen3.8-27B-UD-Q4_K_XL@815c555854ab2f173d66a5b0acf05a7a8ef9058a",
  "kit": null,
  "llamacpp": "b1375",
  "llamacpp_vulkan": "b12211"
