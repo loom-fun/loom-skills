@@ -134,6 +134,30 @@ class XsjEvidence(unittest.TestCase):
         self.assertEqual(model.read_bytes(), before)
         self.assertFalse((self.pkg / "info.json").exists())
 
+    def test_measured_backends_show_their_own_four_stream_flags(self):
+        rocm, vulkan = self.perf(), self.perf("vulkan")
+        rocm_flags = "-ngl 99 -cram 0 --device ROCm0 -c 40960 -kvu -np 4"
+        vulkan_flags = "-ngl 99 -cram 0 --device Vulkan0 -c 147456 -np 4"
+        rocm["performance"]["baseline"]["differs"] = [f"Four-stream flags: {rocm_flags}."]
+        vulkan["performance"]["baseline"]["differs"] = [f"Four-stream flags: {vulkan_flags}"]
+        self.write("devices/gfx1152.json", self.device_results(rocm, vulkan))
+        self.build()
+        for output in (render_card.render(self.pkg), render_card.render_report(self.pkg)):
+            self.assertIn(f"- llama.cpp ROCm four-stream server arguments: `{rocm_flags}`.", output)
+            self.assertIn(f"- llama.cpp Vulkan four-stream server arguments: `{vulkan_flags}`.", output)
+            self.assertNotIn("Not supported / not measured:", output)
+
+    def test_xsj_notes_keep_coverage_reasons_and_punctuation(self):
+        rocm, vulkan = self.perf(), self.perf("vulkan")
+        rocm["performance"]["baseline"]["differs"] = ["Loom: not measured: a longer request exceeded the preset."]
+        vulkan["performance"]["baseline"]["differs"] = ["not supported: this build could not load the model."]
+        vulkan["performance"]["session"]["metrics"] = {}
+        self.write("devices/gfx1152.json", self.device_results(rocm, vulkan))
+        self.build()
+        for output in (render_card.render(self.pkg), render_card.render_report(self.pkg)):
+            self.assertIn("- Loom: not measured: a longer request exceeded the preset.\n", output)
+            self.assertIn("- llama.cpp Vulkan: not supported: this build could not load the model.\n", output)
+
     def test_vulkan_only_is_retained(self):
         self.write("devices/gfx1152.json", self.device_results(self.perf("vulkan")))
         perf = self.build()["devices"][GPU]["performance"]
