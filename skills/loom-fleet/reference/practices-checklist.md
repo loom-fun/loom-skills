@@ -15,6 +15,7 @@ the repo root; `campaign.md`, `targeted-fix.md` and `architecture.md` are in `sk
 - Hygiene
 - Optimization
 - SDK migrations
+- Image ports
 - Rules that are project history, not practice
 
 ## Goals and measures
@@ -142,6 +143,15 @@ the repo root; `campaign.md`, `targeted-fix.md` and `architecture.md` are in `sk
 | 72 | A new SDK release is migrated by one procedure with a version entry per adjacent pair: research first (release, migration table, upstream diff, the wheel), mechanical steps by idempotent script, fleet parse + link sweep, explained program diff, DevLab SDK A/B (old published card on the old SDK vs new package, ABBA, one job), staging publish | owner rule (sdk020) | `skills/loom-migrate/SKILL.md`; `skills/loom-migrate/versions/`; `scripts/sweep.py` |
 | 73 | Simplifications the release allows go in a ledger (landed or listed, measured when behavioural); optimizations it opens become issues with evidence, not work in the migration campaign | brief (sdk020) | `skills/loom-migrate/SKILL.md` steps 8 and 9 |
 | 74 | Every gotcha found is one line (symptom, cause, fix) in the version entry; a fresh agent migrates one card from the repo alone before the entry is final | brief (sdk020) | `skills/loom-migrate/versions/v0.1.0-to-v0.2.0.md` "Gotchas"; `skills/loom-migrate/SKILL.md` step 10 |
+
+## Image ports
+
+| # | Rule | Source | Where |
+|---|---|---|---|
+| 75 | An image port is judged against diffusers started from Loom's own Philox noise: PSNR and LPIPS within the bf16 reference's spread of fp32, before any digest is pinned | owner rule | `skills/loom-port-image/SKILL.md` steps 1, 5 and 6; `scripts/philox_noise.py`, `scripts/oracle_diffusers.py` |
+| 76 | Image backends are timed in block-alternating sessions (one resident model, block order rotated per repeat, cases seed-major), with the same size, steps and guidance sent to every backend | owner rule | `skills/loom-port-image/SKILL.md` "Timing fairly"; `scripts/bench_images.py --alternate` |
+| 77 | Backends that draw their own noise are compared on CLIPScore and PickScore with a paired bootstrap interval, never on PSNR or LPIPS | owner rule | `skills/loom-port-image/SKILL.md` step 6; `scripts/metrics.py scores --baseline` |
+| 78 | Image timings stay in the porter's local logs; library cards, Hugging Face READMEs and pull requests carry accuracy only | owner rule | `skills/loom-port-image/SKILL.md` steps 7 and 9, "Timing fairly"; `reference/card-template.md` |
 
 ## Rules that are project history, not practice
 
