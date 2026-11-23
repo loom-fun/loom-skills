@@ -10,7 +10,7 @@ jobs:
     runs-on: [strix-halo, devlab-dispatch, Linux, self-hosted]
     timeout-minutes: 85
     env:
-      WORK: ${{ github.workspace }}/../sdk030-${{ github.run_id }}-${{ github.run_attempt }}
+      WORK: ${{ github.workspace }}/.sdk030-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -89,7 +89,9 @@ jobs:
                   dst.parent.mkdir(parents=True, exist_ok=True)
                   dst.write_bytes(request(base + quote(file)))
               pin = json.loads(request(base + "llm_config.json")).get("sdk") if "llm_config.json" in files else None
+              info = json.loads(request(base + "info.json")) if "info.json" in files else {}
               return dict(
+                  devices=list(info.get("devices", {})),
                   repo=repo, revision=revision, sdk=pin,
                   model_json_sha256=hashlib.sha256(raw).hexdigest(),
                   services={key: {"kind": value.get("kind"), "version": value.get("version")}
@@ -147,6 +149,35 @@ jobs:
               printf '%s\n' "$status" > "$WORK/evidence/$corpus-$sdk.exit"
             done
           done
+          python3 - "$WORK" <<'PY'
+          import json, pathlib, sys
+          work = pathlib.Path(sys.argv[1])
+          evidence = work / "evidence"
+          result = {}
+          for corpus in ("published", "generated"):
+              before, after = (json.loads((evidence / f"{corpus}-{sdk}.json").read_text())["packages"]
+                               for sdk in ("0.2.0", "0.3.0"))
+              identical = before == after
+              issues = {slug: {"parse": row["parse"], "link": row["link"]}
+                        for slug, row in after.items() if row["parse"] or row["link"]}
+              result[corpus] = {"identical": identical, "issues": issues}
+              print(corpus, "package-by-package findings identical:", identical)
+              for slug, row in issues.items():
+                  for stage, failures in row.items():
+                      for f in failures:
+                          print(corpus, slug, stage, f.get("file") or f.get("where"), f["msg"])
+          inventory = json.loads((evidence / "inventory.json").read_text())
+          in_manifest = set(json.loads(pathlib.Path("fleet/manifest.json").read_text())["models"])
+          for row in inventory["packages"]:
+              slug = row["repo"].split("/")[-1]
+              row["manifest"] = slug in in_manifest
+              if not row["manifest"]:
+                  print("Manual lane:", row["repo"], row["revision"], row["services"])
+          (evidence / "inventory.json").write_text(json.dumps(inventory, indent=2))
+          (evidence / "comparison.json").write_text(json.dumps(result, indent=2))
+          assert len(inventory["packages"]) == 60 and not inventory["errors"]
+          assert all(row["identical"] for row in result.values())
+          PY
       - name: Upload proof
         if: always()
         uses: actions/upload-artifact@v4
