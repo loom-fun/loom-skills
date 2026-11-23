@@ -501,7 +501,18 @@ kernel.def export("g_mla_xexp") @g_mla_xexp(%count_buffer: buffer) {{
   kernel.return
 }}
 """)
-    return "\n".join(A)
+    text = "\n".join(A)
+    dbg = int(os.environ.get("MLA_XE_DBG", "0"))   # bisection of device faults (kbench only): 1 no K/V stores, 2 no k_pe copy, 4 no latent loads, 8 no W loads
+    import re as _re
+    if dbg & 1:
+        text = _re.sub(r"\n    vector\.fragment\.store<result> [^\n]*", "", text)
+    if dbg & 2:
+        text = _re.sub(r"\n    vector\.store %pval[^\n]*", "", text)
+    if dbg & 4:
+        text = _re.sub(r"(%lr\d) = vector\.load %kv\d\[%lane_col, %jc\] : view<16x576xf16> -> vector<16xf16>", r"\1 = vector.splatf 0.5 : vector<16xf16>", text)
+    if dbg & 8:
+        text = _re.sub(r"(%wr\d) = vector\.load %w_view\[[^\n]*", r"\1 = vector.splatf 0.25 : vector<16xf16>", text)
+    return text
 
 
 def xflash(QH, scale, QB=192, QD=576, VD=128, lds=None):

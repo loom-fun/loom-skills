@@ -21,7 +21,8 @@ HEAD = "amdgpu.target<gfx11-generic> @w32 {subgroup_size = 32}\n\n"
 QH, D, PB, KL, QB, VD = 32, 576, 1152, 512, 192, 128
 XCAP = 131072
 VARIANTS = {"x": {}, "xg": {"MLA_XF": "global"},   # x: LDS-staged flash (default); xg: fragments straight from the scratch
-            "t": {"MLA_XCAP": "4096"}, "tg": {"MLA_XCAP": "4096", "MLA_XF": "global"}}   # small-scratch twins for the staged tests
+            "t": {"MLA_XCAP": "4096"}, "tg": {"MLA_XCAP": "4096", "MLA_XF": "global"},
+            **{f"e{d}": {"MLA_XCAP": "4096", "MLA_XE_DBG": str(d)} for d in (1, 2, 3, 4, 8, 12, 15)}}   # g_mla_xexp fault bisection   # small-scratch twins for the staged tests
 
 
 def set_xcap(variant):
@@ -361,7 +362,7 @@ def tests(variants, kbd, vbd):
     return out
 
 
-def staged(v, kbd, vbd, kb_bytes):
+def staged(v, kbd, vbd, kb_bytes, only=None):
     """Per-stage cases of a small-scratch variant (one file each: a device fault in one stage does not hide the others):
     1 g_mla_xlist (lists), 2 g_mla_xdeq (W), 3 g_mla_xexp_d (scratch of the used rows), 4 the whole chain (vo)."""
     set_xcap(v)
@@ -437,6 +438,8 @@ def staged(v, kbd, vbd, kb_bytes):
 }}
 """)
     for k, body in files.items():
+        if only and k not in only:
+            continue
         open(os.path.join(OUT, f"test_{v}{k}.loom"), "w").write(HEAD + txt + "\n" + body)
 
 
@@ -454,6 +457,8 @@ if __name__ == "__main__" and len(sys.argv) > 2:
         open(os.path.join(OUT, "bench%s.loom" % ("" if v == "base" else "_" + v.replace("+", "_"))), "w").write(HEAD + "\n".join(bench(v, res)))
     for v in ("t", "tg"):
         staged(v, kbd, vbd, kb)
+    for d in (1, 2, 3, 4, 8, 12, 15):
+        staged(f"e{d}", kbd, vbd, kb, only=("3",))
     open(os.path.join(OUT, "test.loom"), "w").write(HEAD + "\n".join(tests(vs, kbd, vbd)))
     if _KIT:
         shutil.rmtree(os.path.dirname(_KIT), ignore_errors=True)
