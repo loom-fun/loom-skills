@@ -1,0 +1,109 @@
+name: SDK 0.3 Inkling Strix matched timing
+on:
+  push:
+    branches: [codex/sdk030-special-qualification]
+    paths: [.github/workflows/sdk030-inkling-strix-abba.yml]
+permissions:
+  contents: read
+jobs:
+  verify:
+    name: ${{ matrix.device }} ${{ matrix.slug }}
+    strategy:
+      max-parallel: 2
+      fail-fast: false
+      matrix:
+        include:
+          - slug: unsloth-Inkling-2-Mini-loom
+            device: strix-halo
+            labels: '["self-hosted","devlab-dispatch","strix-halo","Linux"]'
+    runs-on: ${{ fromJSON(matrix.labels) }}
+    timeout-minutes: 240
+    env:
+      SLUG: ${{ matrix.slug }}
+      SDK_GPU_KEY: ${{ matrix.device }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 4c28b772a8f22f121b3925788dae14b26c58511b
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Plan from the accepted production revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          export WORK="$(dirname "$GITHUB_WORKSPACE")/sdk030-wave-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$SDK_GPU_KEY-$SLUG"
+          mkdir -p "$WORK/receipt"
+          echo "WORK=$WORK" >> "$GITHUB_ENV"
+          python3 - <<'PY' >> "$GITHUB_ENV"
+          import json, os
+          from pathlib import Path
+          slug = os.environ['SLUG']
+          repo = 'loom-fun/' + slug
+          pins = json.loads(Path('skills/loom-migrate/versions/v0.2.0-to-v0.3.0-production.json').read_text())
+          job = dict(name='special', card=repo+'@'+pins[repo], sdk='0.3.0',
+                     variants=[
+                         dict(name='control', sdk='0.2.0'),
+                         dict(name='controlnd', sdk='0.2.0', execution=dict(draft_depth=0)),
+                         dict(name='staging', sdk='0.3.0'),
+                         dict(name='stagingnd', sdk='0.3.0', execution=dict(draft_depth=0)),
+                     ],
+                     steps=[
+                         *(f'perf:{v}:1' for v in ('control','staging','staging','control')),
+                         *(f'perf:{v}:1:long' for v in ('control','staging','staging','control')),
+                         *(f'c4:{v}' for v in ('controlnd','stagingnd','stagingnd','controlnd')),
+                     ])
+          plan=dict(runner='strix',memory_bytes=33000000000,jobs=[job])
+          out=Path(os.environ['WORK'])/'receipt'
+          (out/'experiment.json').write_text(json.dumps(plan,indent=2))
+          h=Path('.github/scripts/devlab_perf.sh')
+          source=h.read_text()
+          anchor='    ln -sfn "$vcard/parameter" "$pkg/parameter"'
+          assert source.count(anchor)==1
+          h.write_text(source.replace(anchor,'    rsync -a --exclude=/parameter --exclude=/.git "$vcard/" "$pkg/"\n'+anchor))
+          print('JOB=special')
+          PY
+      - name: Build, serve and measure the release candidate
+        run: bash .github/scripts/devlab_perf.sh "$WORK/receipt/experiment.json" "$JOB"
+      - name: Save the measured package and identity
+        if: always() && env.JOB != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          d="$WORK/$JOB"
+          cp -r "$d/out" "$WORK/receipt/"
+          if [ -e "$d/staging/pkg/model.json" ]; then
+            tar -C "$d/staging/pkg" --exclude=parameter --exclude='*.gguf' --exclude='*.safetensors' --exclude='bench' -czf "$WORK/receipt/package-without-weights.tar.gz" .
+          fi
+      - name: Require matched timing records and pinned identities
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import json, os
+          out=Path(os.environ['WORK'])/'receipt/out'
+          programs=[]
+          for name, sdk in (('control','0.2.0'),('controlnd','0.2.0'),('staging','0.3.0'),('stagingnd','0.3.0')):
+              assert json.loads((out/f'sdk_{name}.json').read_text())['hrx_loom'] == sdk
+              programs.append((out/f'programs_sha256_{name}.txt').read_text().strip())
+          assert len(set(programs)) == 1 and programs[0], programs
+          for name in ('control','staging'):
+              rows=[json.loads(line) for line in (out/f'perf_{name}.jsonl').read_text().splitlines()]
+              assert sum(bool(row.get('decode_tps')) for row in rows) >= 2
+              assert sum(bool(row.get('decode_tps_32k')) for row in rows) >= 2
+              assert (out/f'c4_{name}nd.txt').stat().st_size > 0
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sdk030-${{ matrix.device }}-${{ matrix.slug }}
+          path: ${{ env.WORK }}/receipt
+          retention-days: 30
+      - name: Release job disk
+        if: always()
+        shell: bash
+        run: |
+          if [ "${WORK:-}" = "$(dirname "$GITHUB_WORKSPACE")/sdk030-wave-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$SDK_GPU_KEY-$SLUG" ]; then rm -rf -- "$WORK"; fi
+
+
+
