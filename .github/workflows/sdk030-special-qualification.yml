@@ -16,12 +16,6 @@ jobs:
           - slug: jdopensource-JoyAI-LLM-Flash-loom
             device: strix-halo
             labels: '["self-hosted","devlab-dispatch","strix-halo","Linux"]'
-          - slug: unsloth-Inkling-2-Mini-loom
-            device: strix-halo
-            labels: '["self-hosted","devlab-dispatch","strix-halo","Linux"]'
-          - slug: unsloth-Inkling-2-Mini-loom-r9700
-            device: radeon-r9700
-            labels: '["self-hosted","devlab-dispatch","radeon-r9700"]'
     runs-on: ${{ fromJSON(matrix.labels) }}
     timeout-minutes: 240
     env:
@@ -59,11 +53,14 @@ jobs:
               job['steps'].extend(['perf:control:1','perf:control:1:long','c4:controlnd','perf:control:1','perf:staging:1','perf:control:1:long','perf:staging:1:long'])
           if r9700:
               job['require_preset_r9700']=True
-          plan=dict(runner='r9700' if r9700 else 'strix',jobs=[job])
+          plan=dict(runner='strix', memory_bytes=47000000000, jobs=[job])
           out=Path(os.environ['WORK'])/'receipt'
           (out/'experiment.json').write_text(json.dumps(plan,indent=2))
           h=Path('.github/scripts/devlab_perf.sh')
           source=h.read_text()
+          old='    kit_for "$v" "" || exit 1'
+          assert source.count(old)==1
+          source=source.replace(old, '    kit_for "$v" "ec5dbc713a971ba4cf331be127f4c7ec4af3c952" || exit 1')
           anchor='    ln -sfn "$vcard/parameter" "$pkg/parameter"'
           assert source.count(anchor)==1
           h.write_text(source.replace(anchor,'    rsync -a --exclude=/parameter --exclude=/.git "$vcard/" "$pkg/"\n'+anchor))
