@@ -1,4 +1,4 @@
-name: SDK 0.3 frozen-program qualification
+name: SDK 0.3 frozen-program confirmation
 on:
   pull_request:
     types: [labeled]
@@ -12,7 +12,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - slug: unsloth-Qwen3.5-2B-loom
+          - slug: bartowski-Qwen2.5-0.5B-Instruct-loom
             device: radeon-r9700
             labels: '["self-hosted","devlab-dispatch","radeon-r9700"]'
     runs-on: ${{ fromJSON(matrix.labels) }}
@@ -35,7 +35,7 @@ jobs:
           mkdir -p "$WORK/receipt"
           echo "WORK=$WORK" >> "$GITHUB_ENV"
           python3 fleet/regen.py plan --base codex/sdk030-migration --mode sdk-loom --new-sdk 0.3.0 --gates full --device "$SDK_GPU_KEY" --batch 1 --work "$WORK/plan" --state "$WORK/receipt/state.json" "$SLUG"
-          cp "$WORK/plan/batches/0.perf.json" "$WORK/receipt/experiment.json"
+          python3 .github/scripts/ab_jobs.py --device "$SDK_GPU_KEY" --gates full --sdk-ab --old-sdk card --new-sdk 0.3.0 --refs "$WORK/plan/refs_$SDK_GPU_KEY.json" "$SLUG" > "$WORK/receipt/experiment.json"
           python3 - <<'PY' >> "$GITHUB_ENV"
           import json,os
           from pathlib import Path
@@ -46,8 +46,12 @@ jobs:
           repo='loom-fun/'+os.environ['SLUG']
           assert job['card']==repo+'@'+frozen[repo],job['card']
           assert job.get('sdk',plan.get('sdk'))=='0.3.0'
-          for variant in job['variants']:
-              assert variant['sdk']=='0.3.0' and variant['name'] in ('staging', 'stagingnd')
+          variants={v['name']:v for v in job['variants']}
+          assert variants['fun']['sdk']=='card' and variants['fun']['card']==job['card']
+          assert variants['funnd']['sdk']=='card' and variants['funnd']['card']==job['card']
+          for name in ('staging','stagingnd'):
+              variant=variants[name]
+              assert variant['sdk']=='0.3.0'
               variant.pop('build')
               variant.pop('build_args',None)
               variant['card']=job['card']
@@ -78,7 +82,7 @@ jobs:
           rows=[json.loads(line) for line in (out/'perf_staging.jsonl').read_text().splitlines()] if (out/'perf_staging.jsonl').is_file() else []
           if not any(r.get('decode_tps') for r in rows) or not any(r.get('prefill_long') for r in rows):
               failures['performance']='missing short or long metrics'
-          for step in ('c4:stagingnd', 'func:staging', 'ktest:staging', 'gates:staging:full'):
+          for step in ('c4:funnd', 'c4:stagingnd', 'perf:fun:1', 'perf:fun:1:long', 'func:staging', 'ktest:staging', 'gates:staging:full'):
               if step not in results:
                   failures[step]='missing required result'
           if not results or failures:raise SystemExit(str(failures or 'no results'))
