@@ -509,6 +509,8 @@ def cmd_build(a):
             a.status = old.get("status")
         if a.next_steps is None:
             a.next_steps = old.get("next_steps")
+        if a.promotion_hold is None:
+            a.promotion_hold = old.get("promotion_hold")
     for spec in a.perf_from or []:   # GPU=INFO.json: that card's performance on GPU (sessions, baselines and their sources) as published
         gpu, _, path = spec.partition("=")
         if gpu not in GPUS or not path:
@@ -754,6 +756,8 @@ def cmd_build(a):
         info["status"] = a.status
     if a.next_steps:
         info["next_steps"] = a.next_steps
+    if a.promotion_hold:
+        info["promotion_hold"] = a.promotion_hold
     used = {s["source"] for d in devices.values() for s in (d.get("performance") or {}).get("sessions", [])}
     used |= {m["baseline_from"]["source"] for d in devices.values() for s in (d.get("performance") or {}).get("sessions", [])
              for m in s["metrics"].values() if m.get("baseline_from")}
@@ -1464,6 +1468,7 @@ def main(argv=None):
                    "from another card's info.json (the staging flow: the loom-fun card's Strix table, with a remeasure evidence)")
     b.add_argument("--status", choices=["paused", "active"], help="paused: work on this model has stopped (active: clears it)")
     b.add_argument("--next-steps", type=next_steps_file, help="a file of next steps, one per line (empty: none)")
+    b.add_argument("--promotion-hold", type=load_json, help="JSON record of a confirmed same-runner SDK regression that holds production promotion")
     b.add_argument("--upstream", choices=["probe", "none"], default=os.environ.get("LOOM_CARD_UPSTREAM", "probe"),
                    help="probe: ask Hugging Face what the upstream model has (vision: an mmproj or vision_config; audio: audio_* "
                    "config keys; an older package: the GGUF chat template), for the features that are n/a when it has none; "
