@@ -112,14 +112,25 @@ def moe_wscale_case(save, rng, k):
 
 
 def moe_combine_case(save, rng, k):
-    """g_moe_combine: y = sum_k wts[k] * ys[k] (the experts' outputs)."""
+    """Combine routed outputs and, on shared-expert kernels, add the optional gated residual."""
     KU, W = _view(k, "ys")
     T = 3
     ys = rng.standard_normal((T, KU, W)).astype(np.float32)
     wts = rng.random((T, KU)).astype(np.float32)
-    y = (wts[:, :, None].astype(np.float64) * ys).sum(1).astype(np.float32)
+    y = (wts[:, :, None].astype(np.float64) * ys).sum(1)
     c = _Case("moe_combine", save)
-    c.launch("g_moe_combine", ["%t"], [c.lit("t", T), c.inp("ys", ys), c.inp("wts", wts), c.out("y", y, close="1.0e-5")])
+    args = [c.lit("t", T), c.inp("ys", ys), c.inp("wts", wts)]
+    initial = None
+    if "view.load %y_view" in k:
+        initial = rng.standard_normal((T, W)).astype(np.float32)
+        residual = initial.astype(np.float64)
+        if _view(k, "sg") is not None:
+            gates = rng.random(T).astype(np.float32)
+            args.append(c.inp("sg", gates))
+            residual *= gates[:, None]
+        y += residual
+    args.append(c.out("y", y.astype(np.float32), init=initial, close="1.0e-5"))
+    c.launch("g_moe_combine", ["%t"], args)
     return c.text()
 
 

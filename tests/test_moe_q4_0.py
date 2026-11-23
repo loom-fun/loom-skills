@@ -21,6 +21,18 @@ import moe_q4_0
 
 class Q40Experts(unittest.TestCase):
     @unittest.skipIf(np is None, 'numpy not installed (numeric qualification uses the tools environment)')
+    def test_combine_case_uses_the_shared_gate_abi_and_reference(self):
+        from ktest_more import moe_combine_case
+
+        captured = {}
+        kernel = gen_moe.shared_gated(gen_moe.combine(32, 2, acc=True))
+        text = moe_combine_case(lambda name, value: captured.__setitem__(name, value), np.random.default_rng(19), kernel)
+        self.assertIn('@g_moe_combine[%t](%t, %ys, %wts, %sg, %y)', text)
+        routed = np.einsum('tkh,tk->th', captured['moe_combine_ys'].astype(np.float64), captured['moe_combine_wts'])
+        shared = captured['moe_combine_y'].astype(np.float64) * captured['moe_combine_sg'][:, None]
+        np.testing.assert_allclose(captured['moe_combine_y_e'], routed + shared, rtol=1e-6, atol=1e-7)
+
+    @unittest.skipIf(np is None, 'numpy not installed (numeric qualification uses the tools environment)')
     def test_half_multiply_matches_reference_for_every_finite_scale(self):
         # Independent exhaustive numerical check: every finite half scale and all
         # 16 centered codes. The reference widens before multiply, then rounds.
