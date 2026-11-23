@@ -14,7 +14,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - slug: bartowski-Mellum2.1-12B-A2.5B-Thinking-loom
+          - slug: unsloth-Llama-3.2-3B-Instruct-loom
             device: radeon-r9700
             labels: '["self-hosted","devlab-dispatch","radeon-r9700"]'
     runs-on: ${{ fromJSON(matrix.labels) }}
