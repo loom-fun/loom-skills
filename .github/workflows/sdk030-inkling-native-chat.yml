@@ -1,0 +1,122 @@
+name: Inkling R9700 native template control and tool continuation
+on:
+  push:
+    branches: [codex/sdk030-special-qualification]
+    paths: [.github/workflows/sdk030-inkling-native-chat.yml]
+permissions:
+  contents: read
+jobs:
+  verify:
+    name: Inkling R9700 ${{ matrix.preset }}
+    strategy:
+      max-parallel: 2
+      fail-fast: false
+      matrix:
+        include:
+          - preset: chat
+            quant: Q4_K_XL
+            sha: e64276656f072e9b2197a61723667cbdb71da66a716ffd966e572c21088f3cd3
+
+    runs-on: [self-hosted, devlab-dispatch, radeon-r9700]
+    timeout-minutes: 240
+    env:
+      SLUG: unsloth-Inkling-2-Mini-loom-r9700
+      FETCH_PRESET: ${{ matrix.preset }}
+      QUANT: ${{ matrix.quant }}
+      REF_SHA: ${{ matrix.sha }}
+      SDK_GPU_KEY: radeon-r9700
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 4c28b772a8f22f121b3925788dae14b26c58511b
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Plan from the accepted production revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          export WORK="$(dirname "$GITHUB_WORKSPACE")/sdk030-wave-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$SDK_GPU_KEY-$SLUG-$QUANT"
+          mkdir -p "$WORK/receipt"
+          echo "WORK=$WORK" >> "$GITHUB_ENV"
+          python3 - <<'PY' >> "$GITHUB_ENV"
+          import json, os
+          from pathlib import Path
+          slug = os.environ['SLUG']
+          repo = 'loom-fun/' + slug
+          pins = json.loads(Path('skills/loom-migrate/versions/v0.2.0-to-v0.3.0-production.json').read_text())
+          job = dict(name='special', card=repo+'@'+pins[repo], sdk='0.3.0',
+                     llamacpp='b1383',
+                     variants=[dict(name='staging', sdk='0.3.0'),dict(name='stagingnd', sdk='0.3.0', execution=dict(draft_depth=0))],
+                     steps=['nativeprobe:staging'])
+          job['require_preset_r9700']=True
+          plan=dict(runner='r9700',memory_bytes=34000000000,jobs=[job])
+          out=Path(os.environ['WORK'])/'receipt'
+          (out/'experiment.json').write_text(json.dumps(plan,indent=2))
+          h=Path('.github/scripts/devlab_perf.sh')
+          source=h.read_text()
+          source=source.replace('    # LOCAL_HF_CACHE=', '    pf="--preset=$FETCH_PRESET"\n    # LOCAL_HF_CACHE=')
+          source=source.replace('    if n not in dst["presets"]:', '    if n not in dst["presets"] and p["variant"] in dst["variants"] and p["programs"] in dst["programs"]:')
+          original='    c["gguf"] = par(c["gguf"])'
+          assert source.count(original)==2
+          source=source.replace(original, '    c["gguf"] = par("Inkling-2-Mini-UD-"+os.environ["QUANT"]+".gguf")')
+          anchor_hash='fetch_card "$repo_ref"; card=$CARD_DIR; base=$CARD_BASE'
+          assert source.count(anchor_hash)==1
+          source=source.replace(anchor_hash,anchor_hash+'\necho "$REF_SHA  $card/parameter/Inkling-2-Mini-UD-$QUANT.gguf" > "$out/reference-sha256.input"\nsha256sum -c "$out/reference-sha256.input" > "$out/reference-sha256.log" || exit 1')
+          anchor='    ln -sfn "$vcard/parameter" "$pkg/parameter"'
+          assert source.count(anchor)==1
+          probe='''    nativeprobe)
+                serve_alone "$p1" || { res[$s]=ERROR; continue; }
+                "$T" "$WORK/inkling-native.py" loom "$url" "$out/native-loom.json" || { res[$s]=ERROR; continue; }
+                llama_up || { res[$s]=ERROR; continue; }
+                "$T" "$WORK/inkling-native.py" reference "$lurl" "$out/native-reference.json" || { res[$s]=ERROR; continue; }
+                res[$s]=CAPTURED;;
+              func)'''
+          assert source.count('    func)') == 1
+          source=source.replace('    func)',probe)
+          import base64
+          (Path(os.environ['WORK'])/'inkling-native.py').write_bytes(base64.b64decode('IiIiRXhlcmNpc2UgdHdvIHB1YmxpYyBjaGF0IGVuZHBvaW50cyB3aXRoIGlkZW50aWNhbCByZXF1ZXN0cyBhbmQgcHJlc2VydmUgY29tcGxldGUgcmVwbGllcy4iIiIKaW1wb3J0IGpzb24KaW1wb3J0IHN5cwpmcm9tIHBhdGhsaWIgaW1wb3J0IFBhdGgKZnJvbSB1cmxsaWIuZXJyb3IgaW1wb3J0IEhUVFBFcnJvcgpmcm9tIHVybGxpYi5yZXF1ZXN0IGltcG9ydCBSZXF1ZXN0LCB1cmxvcGVuCgptb2RlLCB1cmwsIG91dHB1dCA9IHN5cy5hcmd2WzE6XQpkZWYgcG9zdChwYXRoLCBkYXRhKToKICAgIHJlcXVlc3QgPSBSZXF1ZXN0KHVybC5yc3RyaXAoIi8iKSArIHBhdGgsIGhlYWRlcnM9eyJDb250ZW50LVR5cGUiOiAiYXBwbGljYXRpb24vanNvbiJ9LCBkYXRhPWpzb24uZHVtcHMoZGF0YSkuZW5jb2RlKCkpCiAgICB0cnk6CiAgICAgICAgd2l0aCB1cmxvcGVuKHJlcXVlc3QsIHRpbWVvdXQ9MTUwKSBhcyByOgogICAgICAgICAgICByZXR1cm4ganNvbi5sb2FkKHIpCiAgICBleGNlcHQgSFRUUEVycm9yIGFzIGU6CiAgICAgICAgcmV0dXJuIHsiaHR0cF9lcnJvciI6IGUuY29kZSwgImJvZHkiOiBlLnJlYWQoKS5kZWNvZGUoKX0KCndpdGggdXJsb3Blbih1cmwucnN0cmlwKCIvIikgKyAiL3YxL21vZGVscyIsIHRpbWVvdXQ9MjApIGFzIHI6CiAgICBtb2RlbCA9IGpzb24ubG9hZChyKVsiZGF0YSJdWzBdWyJpZCJdCnJlc3VsdCA9IHsibW9kZSI6IG1vZGUsICJtb2RlbCI6IG1vZGVsLCAiY2FzZXMiOiB7fX0KZm9yIGxhYmVsLCBwcm9tcHQsIGV4cGVjdGVkIGluIFsKICAgICgiY2FwaXRhbCIsICJXaGF0IGlzIHRoZSBjYXBpdGFsIG9mIEZyYW5jZT8gQW5zd2VyIHdpdGggdGhlIGNpdHkgbmFtZSBvbmx5LiIsICJwYXJpcyIpLAogICAgKCJhcml0aG1ldGljIiwgIldoYXQgaXMgdHdvIHBsdXMgdHdvPyBSZXBseSB3aXRoIGp1c3QgdGhlIG51bWVyYWwuIiwgIjQiKSwKXToKICAgIGJvZHkgPSB7Im1vZGVsIjogbW9kZWwsICJtZXNzYWdlcyI6IFt7InJvbGUiOiAidXNlciIsICJjb250ZW50IjogcHJvbXB0fV0sICJ0ZW1wZXJhdHVyZSI6IDAsCiAgICAgICAgICAgICJtYXhfdG9rZW5zIjogOTYsICJyZWFzb25pbmdfZWZmb3J0IjogIm5vbmUifQogICAgcmVzcG9uc2UgPSBwb3N0KCIvdjEvY2hhdC9jb21wbGV0aW9ucyIsIGJvZHkpCiAgICByZXN1bHRbImNhc2VzIl1bbGFiZWxdID0geyJyZXF1ZXN0IjogYm9keSwgInJlcGx5IjogcmVzcG9uc2UsICJleHBlY3RlZCI6IGV4cGVjdGVkfQogICAgaWYgbW9kZSA9PSAicmVmZXJlbmNlIjoKICAgICAgICByZXN1bHRbImNhc2VzIl1bbGFiZWxdWyJuYXRpdmVfcmVuZGVyIl0gPSBwb3N0KCIvYXBwbHktdGVtcGxhdGUiLCBib2R5KQppZiBtb2RlID09ICJsb29tIjoKICAgIHdlYXRoZXIgPSB7InR5cGUiOiAiZnVuY3Rpb24iLCAiZnVuY3Rpb24iOiB7Im5hbWUiOiAiZ2V0X3dlYXRoZXIiLCAiZGVzY3JpcHRpb24iOiAiR2V0IHRoZSBjdXJyZW50IHdlYXRoZXIiLAogICAgICAgICAgICAgICAicGFyYW1ldGVycyI6IHsidHlwZSI6ICJvYmplY3QiLCAicHJvcGVydGllcyI6IHsiY2l0eSI6IHsidHlwZSI6ICJzdHJpbmcifX0sICJyZXF1aXJlZCI6IFsiY2l0eSJdfX19CiAgICByZXF1ZXN0ID0geyJtb2RlbCI6IG1vZGVsLCAibWVzc2FnZXMiOiBbeyJyb2xlIjogInVzZXIiLCAiY29udGVudCI6ICJVc2UgZ2V0X3dlYXRoZXIgdG8gdGVsbCBtZSB0aGUgY3VycmVudCB3ZWF0aGVyIGluIFBhcmlzLiJ9XSwKICAgICAgICAgICAgICAgInRvb2xzIjogW3dlYXRoZXJdLCAidGVtcGVyYXR1cmUiOiAwLCAibWF4X3Rva2VucyI6IDE2MCwgInJlYXNvbmluZ19lZmZvcnQiOiAibm9uZSJ9CiAgICByZXBseSA9IHBvc3QoIi92MS9jaGF0L2NvbXBsZXRpb25zIiwgcmVxdWVzdCkKICAgIHR1cm4gPSByZXBseS5nZXQoImNob2ljZXMiLCBbe31dKVswXS5nZXQoIm1lc3NhZ2UiLCB7fSkKICAgIHJlc3VsdFsidG9vbF90dXJuIl0gPSB7InJlcXVlc3QiOiByZXF1ZXN0LCAicmVwbHkiOiByZXBseX0KICAgIGNhbGxzID0gdHVybi5nZXQoInRvb2xfY2FsbHMiKSBvciBbXQogICAgaWYgY2FsbHM6CiAgICAgICAgY2FsbCA9IGNhbGxzWzBdCiAgICAgICAgdG9vbCA9IHsicm9sZSI6ICJ0b29sIiwgInRvb2xfY2FsbF9pZCI6IGNhbGxbImlkIl0sICJuYW1lIjogY2FsbFsiZnVuY3Rpb24iXVsibmFtZSJdLAogICAgICAgICAgICAgICAgImNvbnRlbnQiOiBqc29uLmR1bXBzKHsiY2l0eSI6ICJQYXJpcyIsICJ0ZW1wZXJhdHVyZV9jIjogMTcsICJjb25kaXRpb24iOiAicmFpbiJ9KX0KICAgICAgICBjb250aW51ZWQgPSBkaWN0KHJlcXVlc3QsIG1lc3NhZ2VzPVsqcmVxdWVzdFsibWVzc2FnZXMiXSwgdHVybiwgdG9vbF0pCiAgICAgICAgcmVzdWx0WyJuYW1lZF90b29sX3Jlc3VsdCJdID0gcG9zdCgiL3YxL2NoYXQvY29tcGxldGlvbnMiLCBjb250aW51ZWQpCiAgICAgICAgY29udGludWVkWyJtZXNzYWdlcyJdWy0xXSA9IHtrOiB2IGZvciBrLCB2IGluIHRvb2wuaXRlbXMoKSBpZiBrICE9ICJuYW1lIn0KICAgICAgICByZXN1bHRbInVubmFtZWRfdG9vbF9yZXN1bHQiXSA9IHBvc3QoIi92MS9jaGF0L2NvbXBsZXRpb25zIiwgY29udGludWVkKQpQYXRoKG91dHB1dCkud3JpdGVfdGV4dChqc29uLmR1bXBzKHJlc3VsdCwgaW5kZW50PTIsIGVuc3VyZV9hc2NpaT1GYWxzZSkgKyAiXG4iKQpmb3IgbGFiZWwsIGNhc2UgaW4gcmVzdWx0WyJjYXNlcyJdLml0ZW1zKCk6CiAgICBjb250ZW50ID0gKGNhc2VbInJlcGx5Il0uZ2V0KCJjaG9pY2VzIikgb3IgW3t9XSlbMF0uZ2V0KCJtZXNzYWdlIiwge30pLmdldCgiY29udGVudCIpCiAgICBwcmludChtb2RlLCBsYWJlbCwgcmVwcihjb250ZW50KSwgY2FzZVsicmVwbHkiXS5nZXQoInVzYWdlIikpCmlmIG1vZGUgPT0gImxvb20iOgogICAgcHJpbnQoInRvb2wiLCBqc29uLmR1bXBzKHtrOnYgZm9yIGssdiBpbiByZXN1bHQuaXRlbXMoKSBpZiBrLmVuZHN3aXRoKCJ0b29sX3Jlc3VsdCIpfSlbOjE1MDBdKQo='))
+          h.write_text(source.replace(anchor,'    rsync -a --exclude=/parameter --exclude=/.git "$vcard/" "$pkg/"\n'+anchor))
+          print('JOB=special')
+          PY
+      - name: Build, serve and measure the release candidate
+        run: bash .github/scripts/devlab_perf.sh "$WORK/receipt/experiment.json" "$JOB"
+      - name: Save the measured package and identity
+        if: always() && env.JOB != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          d="$WORK/$JOB"
+          cp -r "$d/out" "$WORK/receipt/"
+          if [ -e "$d/staging/pkg/model.json" ]; then
+            tar -C "$d/staging/pkg" --exclude=parameter --exclude='*.gguf' --exclude='*.safetensors' --exclude='bench' -czf "$WORK/receipt/package-without-weights.tar.gz" .
+          fi
+      - name: Require complete test and performance records
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import json,os
+          out=Path(os.environ['WORK'])/'receipt/out'
+          results=json.loads((out/'summary.json').read_text())['results']
+          assert results['nativeprobe:staging']=='CAPTURED',results
+          data=json.loads((out/'native-loom.json').read_text())
+          for label,case in data['cases'].items():
+              content=case['reply']['choices'][0]['message']['content']
+              assert case['expected'] in content.lower(), (label,content)
+          named=data['named_tool_result']['choices'][0]['message']['content']
+          assert '17' in named and data['unnamed_tool_result']['http_error']==400, named
+          reference=json.loads((out/'native-reference.json').read_text())
+          assert all('choices' in case['reply'] for case in reference['cases'].values()), reference
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sdk030-inkling-native-chat
+          path: ${{ env.WORK }}/receipt
+          retention-days: 30
+      - name: Release job disk
+        if: always()
+        shell: bash
+        run: |
+          if [ "${WORK:-}" = "$(dirname "$GITHUB_WORKSPACE")/sdk030-wave-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$SDK_GPU_KEY-$SLUG-$QUANT" ]; then rm -rf -- "$WORK"; fi
