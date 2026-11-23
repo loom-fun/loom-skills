@@ -367,18 +367,16 @@
       "dir": "mla_dec",
       "gen": "mla_dec/gen_bench.py",
       "gen_variants": [
-        "cu1",
         "wmma",
-        "cu4",
-        "b1",
-        "b4+cu1"
+        "s64",
+        "s64+b1",
+        "b1"
       ],
       "files": [
-        "bench_cu1.loom",
         "bench_wmma.loom",
-        "bench_cu4.loom",
-        "bench_b1.loom",
-        "bench_b4+cu1.loom"
+        "bench_s64.loom",
+        "bench_s64+b1.loom",
+        "bench_b1.loom"
       ],
       "tests": [
         "test.loom"
