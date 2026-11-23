@@ -1,13 +1,13 @@
 {
- "_comment": "Gufo main 6a205eec (#1315 merged, no fix): the 17 long-context packages with --context 32768 (they fail to load with --sessions 4 at their native context), and Inkling-2-Mini (host logits).",
- "card": "loom-fun/bartowski-Nanbeige4.3-33B-loom",
+ "_comment": "Which Inkling-2-Mini (and Flint) card revision broke host sampling under Gufo main + the inkling2 fix: every revision from the validated pin to head, loom-fetch packages, conformance.py --logits.",
+ "card": "loom-fun/unsloth-Inkling-2-Mini-loom@4e018e88a3aa9826286c71dfe2f6c905a491659b",
  "memory_bytes": 17000000000,
  "kit": null,
  "llamacpp": "b1374",
  "jobs": [
   {
-   "name": "main-ctx-bartowski-nanbeige4.3-33b",
-   "card": "loom-fun/bartowski-Nanbeige4.3-33B-loom",
+   "name": "ink-4e018e88",
+   "card": "loom-fun/unsloth-Inkling-2-Mini-loom@4e018e88a3aa9826286c71dfe2f6c905a491659b",
    "memory_bytes": 17000000000,
    "variants": [
     {
@@ -15,7 +15,159 @@
     }
    ],
    "steps": [
-    "gufosrc:loom-fun/bartowski-Nanbeige4.3-33B-loom"
+    "gufo:card"
+   ],
+   "bundle": {
+    "build": {
+     "extension": "loom-fun/loom-gufo-extension@69887b8e488700ca0728b90c3d92e7dd81dfb60c",
+     "gufo": "jeremyfowers/gufo@f9f893a821ae1fe96cb2e424cc641a1c94a7425f"
+    }
+   }
+  },
+  {
+   "name": "ink-24ceb67c",
+   "card": "loom-fun/unsloth-Inkling-2-Mini-loom@24ceb67c87147935f055c08ccce250c3f7de1f9c",
+   "memory_bytes": 17000000000,
+   "variants": [
+    {
+     "name": "card"
+    }
+   ],
+   "steps": [
+    "gufo:card"
+   ],
+   "bundle": {
+    "build": {
+     "extension": "loom-fun/loom-gufo-extension@69887b8e488700ca0728b90c3d92e7dd81dfb60c",
+     "gufo": "jeremyfowers/gufo@f9f893a821ae1fe96cb2e424cc641a1c94a7425f"
+    }
+   }
+  },
+  {
+   "name": "ink-a8354e77",
+   "card": "loom-fun/unsloth-Inkling-2-Mini-loom@a8354e77a701cd71f749e0a41ce0c41e33799156",
+   "memory_bytes": 17000000000,
+   "variants": [
+    {
+     "name": "card"
+    }
+   ],
+   "steps": [
+    "gufo:card"
+   ],
+   "bundle": {
+    "build": {
+     "extension": "loom-fun/loom-gufo-extension@69887b8e488700ca0728b90c3d92e7dd81dfb60c",
+     "gufo": "jeremyfowers/gufo@f9f893a821ae1fe96cb2e424cc641a1c94a7425f"
+    }
+   }
+  },
+  {
+   "name": "ink-fa6645a0",
+   "card": "loom-fun/unsloth-Inkling-2-Mini-loom@fa6645a0fecf5da5cc7a926461e917b1db364642",
+   "memory_bytes": 17000000000,
+   "variants": [
+    {
+     "name": "card"
+    }
+   ],
+   "steps": [
+    "gufo:card"
+   ],
+   "bundle": {
+    "build": {
+     "extension": "loom-fun/loom-gufo-extension@69887b8e488700ca0728b90c3d92e7dd81dfb60c",
+     "gufo": "jeremyfowers/gufo@f9f893a821ae1fe96cb2e424cc641a1c94a7425f"
+    }
+   }
+  },
+  {
+   "name": "ink-4cf6c1cc",
+   "card": "loom-fun/unsloth-Inkling-2-Mini-loom@4cf6c1cc4695fff2f765caf3b4ed0f4b093a72ea",
+   "memory_bytes": 17000000000,
+   "variants": [
+    {
+     "name": "card"
+    }
+   ],
+   "steps": [
+    "gufo:card"
+   ],
+   "bundle": {
+    "build": {
+     "extension": "loom-fun/loom-gufo-extension@69887b8e488700ca0728b90c3d92e7dd81dfb60c",
+     "gufo": "jeremyfowers/gufo@f9f893a821ae1fe96cb2e424cc641a1c94a7425f"
+    }
+   }
+  },
+  {
+   "name": "ink-a7877981",
+   "card": "loom-fun/unsloth-Inkling-2-Mini-loom@a78779814f545e254cffa9b346e85f236d54ea7c",
+   "memory_bytes": 17000000000,
+   "variants": [
+    {
+     "name": "card"
+    }
+   ],
+   "steps": [
+    "gufo:card"
+   ],
+   "bundle": {
+    "build": {
+     "extension": "loom-fun/loom-gufo-extension@69887b8e488700ca0728b90c3d92e7dd81dfb60c",
+     "gufo": "jeremyfowers/gufo@f9f893a821ae1fe96cb2e424cc641a1c94a7425f"
+    }
+   }
+  },
+  {
+   "name": "ink-b5e33e11",
+   "card": "loom-fun/unsloth-Inkling-2-Mini-loom@b5e33e11ecc753e2df9b066cad2397bc39abe16b",
+   "memory_bytes": 17000000000,
+   "variants": [
+    {
+     "name": "card"
+    }
+   ],
+   "steps": [
+    "gufo:card"
+   ],
+   "bundle": {
+    "build": {
+     "extension": "loom-fun/loom-gufo-extension@69887b8e488700ca0728b90c3d92e7dd81dfb60c",
+     "gufo": "jeremyfowers/gufo@f9f893a821ae1fe96cb2e424cc641a1c94a7425f"
+    }
+   }
+  },
+  {
+   "name": "ink-277f099b",
+   "card": "loom-fun/unsloth-Inkling-2-Mini-loom@277f099b5003b725e099d48caa1a2c0db1f9b650",
+   "memory_bytes": 17000000000,
+   "variants": [
+    {
+     "name": "card"
+    }
+   ],
+   "steps": [
+    "gufo:card"
+   ],
+   "bundle": {
+    "build": {
+     "extension": "loom-fun/loom-gufo-extension@69887b8e488700ca0728b90c3d92e7dd81dfb60c",
+     "gufo": "jeremyfowers/gufo@f9f893a821ae1fe96cb2e424cc641a1c94a7425f"
+    }
+   }
+  },
+  {
+   "name": "flint-pin-d60f073d",
+   "card": "loom-fun/ggml-org-Flint-loom@d60f073d32ca9f4c78fb20e79bb1187f8d60841f",
+   "memory_bytes": 17000000000,
+   "variants": [
+    {
+     "name": "card"
+    }
+   ],
+   "steps": [
+    "gufo:card"
    ],
    "env": {
     "EXTRA_GUFO_ARGS": "--context 32768"
@@ -23,13 +175,13 @@
    "bundle": {
     "build": {
      "extension": "loom-fun/loom-gufo-extension@69887b8e488700ca0728b90c3d92e7dd81dfb60c",
-     "gufo": "gufo-org/gufo@6a205eec28eb78baf408caeff49aefe06ef6004e"
+     "gufo": "jeremyfowers/gufo@f9f893a821ae1fe96cb2e424cc641a1c94a7425f"
     }
    }
   },
   {
-   "name": "main-ctx-bartowski-spark-x2.6-4b",
-   "card": "loom-fun/bartowski-Spark-X2.6-4B-loom",
+   "name": "flint-head-d60f073d",
+   "card": "loom-fun/ggml-org-Flint-loom@d60f073d32ca9f4c78fb20e79bb1187f8d60841f",
    "memory_bytes": 17000000000,
    "variants": [
     {
@@ -37,7 +189,7 @@
     }
    ],
    "steps": [
-    "gufosrc:loom-fun/bartowski-Spark-X2.6-4B-loom"
+    "gufo:card"
    ],
    "env": {
     "EXTRA_GUFO_ARGS": "--context 32768"
@@ -45,312 +197,7 @@
    "bundle": {
     "build": {
      "extension": "loom-fun/loom-gufo-extension@69887b8e488700ca0728b90c3d92e7dd81dfb60c",
-     "gufo": "gufo-org/gufo@6a205eec28eb78baf408caeff49aefe06ef6004e"
-    }
-   }
-  },
-  {
-   "name": "main-ctx-ggml-org-flint",
-   "card": "loom-fun/ggml-org-Flint-loom",
-   "memory_bytes": 17000000000,
-   "variants": [
-    {
-     "name": "card"
-    }
-   ],
-   "steps": [
-    "gufosrc:loom-fun/ggml-org-Flint-loom"
-   ],
-   "env": {
-    "EXTRA_GUFO_ARGS": "--context 32768"
-   },
-   "bundle": {
-    "build": {
-     "extension": "loom-fun/loom-gufo-extension@69887b8e488700ca0728b90c3d92e7dd81dfb60c",
-     "gufo": "gufo-org/gufo@6a205eec28eb78baf408caeff49aefe06ef6004e"
-    }
-   }
-  },
-  {
-   "name": "main-ctx-ggml-org-laguna-xs-2.1",
-   "card": "loom-fun/ggml-org-Laguna-XS-2.1-loom",
-   "memory_bytes": 17000000000,
-   "variants": [
-    {
-     "name": "card"
-    }
-   ],
-   "steps": [
-    "gufosrc:loom-fun/ggml-org-Laguna-XS-2.1-loom"
-   ],
-   "env": {
-    "EXTRA_GUFO_ARGS": "--context 32768"
-   },
-   "bundle": {
-    "build": {
-     "extension": "loom-fun/loom-gufo-extension@69887b8e488700ca0728b90c3d92e7dd81dfb60c",
-     "gufo": "gufo-org/gufo@6a205eec28eb78baf408caeff49aefe06ef6004e"
-    }
-   }
-  },
-  {
-   "name": "main-ctx-ggml-org-qwen3-coder-30b-a3b-instruct",
-   "card": "loom-fun/ggml-org-Qwen3-Coder-30B-A3B-Instruct-loom",
-   "memory_bytes": 17000000000,
-   "variants": [
-    {
-     "name": "card"
-    }
-   ],
-   "steps": [
-    "gufosrc:loom-fun/ggml-org-Qwen3-Coder-30B-A3B-Instruct-loom"
-   ],
-   "env": {
-    "EXTRA_GUFO_ARGS": "--context 32768"
-   },
-   "bundle": {
-    "build": {
-     "extension": "loom-fun/loom-gufo-extension@69887b8e488700ca0728b90c3d92e7dd81dfb60c",
-     "gufo": "gufo-org/gufo@6a205eec28eb78baf408caeff49aefe06ef6004e"
-    }
-   }
-  },
-  {
-   "name": "main-ctx-ggml-org-qwen3.6-27b",
-   "card": "loom-fun/ggml-org-Qwen3.6-27B-loom",
-   "memory_bytes": 17000000000,
-   "variants": [
-    {
-     "name": "card"
-    }
-   ],
-   "steps": [
-    "gufosrc:loom-fun/ggml-org-Qwen3.6-27B-loom"
-   ],
-   "env": {
-    "EXTRA_GUFO_ARGS": "--context 32768"
-   },
-   "bundle": {
-    "build": {
-     "extension": "loom-fun/loom-gufo-extension@69887b8e488700ca0728b90c3d92e7dd81dfb60c",
-     "gufo": "gufo-org/gufo@6a205eec28eb78baf408caeff49aefe06ef6004e"
-    }
-   }
-  },
-  {
-   "name": "main-ctx-lmstudio-community-gemma-4-26b-a4b-it",
-   "card": "loom-fun/lmstudio-community-gemma-4-26B-A4B-it-loom",
-   "memory_bytes": 17000000000,
-   "variants": [
-    {
-     "name": "card"
-    }
-   ],
-   "steps": [
-    "gufosrc:loom-fun/lmstudio-community-gemma-4-26B-A4B-it-loom"
-   ],
-   "env": {
-    "EXTRA_GUFO_ARGS": "--context 32768"
-   },
-   "bundle": {
-    "build": {
-     "extension": "loom-fun/loom-gufo-extension@69887b8e488700ca0728b90c3d92e7dd81dfb60c",
-     "gufo": "gufo-org/gufo@6a205eec28eb78baf408caeff49aefe06ef6004e"
-    }
-   }
-  },
-  {
-   "name": "main-ctx-unsloth-gemma-4-26b-a4b-it-qat",
-   "card": "loom-fun/unsloth-gemma-4-26B-A4B-it-qat-loom",
-   "memory_bytes": 17000000000,
-   "variants": [
-    {
-     "name": "card"
-    }
-   ],
-   "steps": [
-    "gufosrc:loom-fun/unsloth-gemma-4-26B-A4B-it-qat-loom"
-   ],
-   "env": {
-    "EXTRA_GUFO_ARGS": "--context 32768"
-   },
-   "bundle": {
-    "build": {
-     "extension": "loom-fun/loom-gufo-extension@69887b8e488700ca0728b90c3d92e7dd81dfb60c",
-     "gufo": "gufo-org/gufo@6a205eec28eb78baf408caeff49aefe06ef6004e"
-    }
-   }
-  },
-  {
-   "name": "main-ctx-unsloth-gemma-4-31b-it",
-   "card": "loom-fun/unsloth-gemma-4-31B-it-loom",
-   "memory_bytes": 17000000000,
-   "variants": [
-    {
-     "name": "card"
-    }
-   ],
-   "steps": [
-    "gufosrc:loom-fun/unsloth-gemma-4-31B-it-loom"
-   ],
-   "env": {
-    "EXTRA_GUFO_ARGS": "--context 32768"
-   },
-   "bundle": {
-    "build": {
-     "extension": "loom-fun/loom-gufo-extension@69887b8e488700ca0728b90c3d92e7dd81dfb60c",
-     "gufo": "gufo-org/gufo@6a205eec28eb78baf408caeff49aefe06ef6004e"
-    }
-   }
-  },
-  {
-   "name": "main-ctx-unsloth-gemma-4-31b-it-qat",
-   "card": "loom-fun/unsloth-gemma-4-31B-it-qat-loom",
-   "memory_bytes": 17000000000,
-   "variants": [
-    {
-     "name": "card"
-    }
-   ],
-   "steps": [
-    "gufosrc:loom-fun/unsloth-gemma-4-31B-it-qat-loom"
-   ],
-   "env": {
-    "EXTRA_GUFO_ARGS": "--context 32768"
-   },
-   "bundle": {
-    "build": {
-     "extension": "loom-fun/loom-gufo-extension@69887b8e488700ca0728b90c3d92e7dd81dfb60c",
-     "gufo": "gufo-org/gufo@6a205eec28eb78baf408caeff49aefe06ef6004e"
-    }
-   }
-  },
-  {
-   "name": "main-ctx-unsloth-qwen3-30b-a3b-instruct-2507",
-   "card": "loom-fun/unsloth-Qwen3-30B-A3B-Instruct-2507-loom",
-   "memory_bytes": 17000000000,
-   "variants": [
-    {
-     "name": "card"
-    }
-   ],
-   "steps": [
-    "gufosrc:loom-fun/unsloth-Qwen3-30B-A3B-Instruct-2507-loom"
-   ],
-   "env": {
-    "EXTRA_GUFO_ARGS": "--context 32768"
-   },
-   "bundle": {
-    "build": {
-     "extension": "loom-fun/loom-gufo-extension@69887b8e488700ca0728b90c3d92e7dd81dfb60c",
-     "gufo": "gufo-org/gufo@6a205eec28eb78baf408caeff49aefe06ef6004e"
-    }
-   }
-  },
-  {
-   "name": "main-ctx-unsloth-qwen3-4b-instruct-2507",
-   "card": "loom-fun/unsloth-Qwen3-4B-Instruct-2507-loom",
-   "memory_bytes": 17000000000,
-   "variants": [
-    {
-     "name": "card"
-    }
-   ],
-   "steps": [
-    "gufosrc:loom-fun/unsloth-Qwen3-4B-Instruct-2507-loom"
-   ],
-   "env": {
-    "EXTRA_GUFO_ARGS": "--context 32768"
-   },
-   "bundle": {
-    "build": {
-     "extension": "loom-fun/loom-gufo-extension@69887b8e488700ca0728b90c3d92e7dd81dfb60c",
-     "gufo": "gufo-org/gufo@6a205eec28eb78baf408caeff49aefe06ef6004e"
-    }
-   }
-  },
-  {
-   "name": "main-ctx-unsloth-qwen3-vl-4b-instruct",
-   "card": "loom-fun/unsloth-Qwen3-VL-4B-Instruct-loom",
-   "memory_bytes": 17000000000,
-   "variants": [
-    {
-     "name": "card"
-    }
-   ],
-   "steps": [
-    "gufosrc:loom-fun/unsloth-Qwen3-VL-4B-Instruct-loom"
-   ],
-   "env": {
-    "EXTRA_GUFO_ARGS": "--context 32768"
-   },
-   "bundle": {
-    "build": {
-     "extension": "loom-fun/loom-gufo-extension@69887b8e488700ca0728b90c3d92e7dd81dfb60c",
-     "gufo": "gufo-org/gufo@6a205eec28eb78baf408caeff49aefe06ef6004e"
-    }
-   }
-  },
-  {
-   "name": "main-ctx-unsloth-qwen3-vl-8b-instruct",
-   "card": "loom-fun/unsloth-Qwen3-VL-8B-Instruct-loom",
-   "memory_bytes": 17000000000,
-   "variants": [
-    {
-     "name": "card"
-    }
-   ],
-   "steps": [
-    "gufosrc:loom-fun/unsloth-Qwen3-VL-8B-Instruct-loom"
-   ],
-   "env": {
-    "EXTRA_GUFO_ARGS": "--context 32768"
-   },
-   "bundle": {
-    "build": {
-     "extension": "loom-fun/loom-gufo-extension@69887b8e488700ca0728b90c3d92e7dd81dfb60c",
-     "gufo": "gufo-org/gufo@6a205eec28eb78baf408caeff49aefe06ef6004e"
-    }
-   }
-  },
-  {
-   "name": "main-ctx-xhtoken-spark-x2.5-4b",
-   "card": "loom-fun/XHToken-Spark-X2.5-4B-loom",
-   "memory_bytes": 17000000000,
-   "variants": [
-    {
-     "name": "card"
-    }
-   ],
-   "steps": [
-    "gufosrc:loom-fun/XHToken-Spark-X2.5-4B-loom"
-   ],
-   "env": {
-    "EXTRA_GUFO_ARGS": "--context 32768"
-   },
-   "bundle": {
-    "build": {
-     "extension": "loom-fun/loom-gufo-extension@69887b8e488700ca0728b90c3d92e7dd81dfb60c",
-     "gufo": "gufo-org/gufo@6a205eec28eb78baf408caeff49aefe06ef6004e"
-    }
-   }
-  },
-  {
-   "name": "main-inkling-2-mini",
-   "card": "loom-fun/unsloth-Inkling-2-Mini-loom",
-   "memory_bytes": 17000000000,
-   "variants": [
-    {
-     "name": "card"
-    }
-   ],
-   "steps": [
-    "gufosrc:loom-fun/unsloth-Inkling-2-Mini-loom"
-   ],
-   "bundle": {
-    "build": {
-     "extension": "loom-fun/loom-gufo-extension@69887b8e488700ca0728b90c3d92e7dd81dfb60c",
-     "gufo": "gufo-org/gufo@6a205eec28eb78baf408caeff49aefe06ef6004e"
+     "gufo": "jeremyfowers/gufo@f9f893a821ae1fe96cb2e424cc641a1c94a7425f"
     }
    }
   }
