@@ -360,7 +360,7 @@
  USED_MV = set()      # (fmt, K, swiglu, TG) default-row (R=16) decode matrix-vector kernels the model launches
  USED_MV_R = set()    # (fmt, K, swiglu, R, TG) adaptive-row variants
 +USED_MV_DUAL = set()  # (fmt, K, R) of mv_dual (MLA_QA_DUAL); 1- and 4-token kernels
-+MLA_QA_DUAL = os.environ.get("MLA_QA_DUAL", "0") == "1"
++MLA_QA_DUAL = os.environ.get("MLA_QA_DUAL", "1") == "1"
  NVAL = {"%nQH": QH, "%nQKV": (QH + 2 * KVH) * D, "%nH": H, "%nFF": FF, **({} if FF_UNIFORM else {f"%nFF{w}": w for w in set(FFL)}), "%nKV": KVH * D, "%nQ": QH * D, "%nQ2": 2 * QH * D, "%nFS": FS}
  NVAL.update({f"%nQ{h}": h * D for h in NARROW} | {f"%nQH{h}": h for h in NARROW})   # narrower layer_heads layers
  if GDN:
@@ -1142,6 +1142,17 @@
      pick = fallback = None
      for src, layers in cover_sources():
          TT = src["T"]
+--- a/mv_rows.py
++++ b/mv_rows.py
+@@ -11,7 +11,7 @@
+ import os
+ 
+ ADAPT = os.environ.get("MV_ADAPT", "1") not in ("", "0")
+-WG1 = int(os.environ.get("MV_WG1", "4096")); WG4 = int(os.environ.get("MV_WG4", "128"))
++WG1 = int(os.environ.get("MV_WG1", "256"))   # deepseek2 example (JoyAI dec_step: 4096 -> 256 short -1.6 %, c4 -4 %); WG4 = int(os.environ.get("MV_WG4", "128"))
+ WG_LONG = int(os.environ.get("MV_WG_LONG", "640"))
+ SAME_R = "MV_WG4" not in os.environ
+ 
 --- a/templates/control.loom
 +++ b/templates/control.loom
 @@ -460,6 +460,7 @@
