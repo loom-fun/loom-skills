@@ -1,0 +1,45 @@
+name: DevLab pinned image catalog closure
+on:
+  push:
+    branches: [codex/sdk030-image-pr1340-catalog-devlab]
+    paths: [.github/workflows/sdk030-image-pr1340-catalog-devlab.yml, .github/sdk030-image-pr1340-catalog/**]
+permissions:
+  contents: read
+concurrency:
+  group: sdk030-image-pr1340-catalog-devlab
+  cancel-in-progress: false
+jobs:
+  source-closure:
+    runs-on: [radeon-r9700, devlab-dispatch, Linux, self-hosted]
+    timeout-minutes: 20
+    env:
+      PR_HEAD: d48f43191a8d9db165d205223426b831dc382add
+      RELEASE_CATALOG_HEAD: 279afe368b82e0d7acfe38c4f47e8e7e5cfb7bc8
+      FLUX_CATALOG_HEAD: ccd62d6a49576f25efdb7deef7b6f81a7b76fd6c
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Create isolated workspace
+        shell: bash
+        run: |
+          work=$(mktemp -d "$RUNNER_TEMP/sdk030-image-catalog.XXXXXX")
+          mkdir "$work/evidence"
+          echo "WORK=$work" >> "$GITHUB_ENV"
+      - name: Verify pinned source routes, asset closure and parser
+        shell: bash
+        run: bash .github/sdk030-image-pr1340-catalog/qualify.sh
+      - uses: actions/upload-artifact@v4
+        if: always() && env.WORK != ''
+        with:
+          name: sdk030-image-catalog-closure
+          path: ${{ env.WORK }}/evidence
+          if-no-files-found: error
+      - name: Remove isolated workspace
+        if: always() && env.WORK != ''
+        shell: bash
+        run: |
+          case "$WORK" in
+            "$RUNNER_TEMP"/sdk030-image-catalog.*) rm -rf -- "$WORK" ;;
+            *) exit 1 ;;
+          esac
