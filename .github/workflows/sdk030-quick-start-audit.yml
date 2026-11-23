@@ -1,0 +1,55 @@
+name: SDK 0.3 staging Quick start audit
+on:
+  push:
+    branches: [codex/sdk030-quick-start-audit]
+    paths:
+      - .github/workflows/sdk030-quick-start-audit.yml
+      - .github/scripts/sdk030_quick_start_audit.py
+      - .github/devlab/sdk030-quick-start-heads.json
+permissions:
+  contents: read
+jobs:
+  resolve:
+    name: Resolve printed staging recipes without GPU execution
+    runs-on: [self-hosted, devlab-dispatch, Linux, strix-halo]
+    timeout-minutes: 30
+    env:
+      HF_HUB_DISABLE_IMPLICIT_TOKEN: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install the verified release wheel
+        shell: bash
+        run: |
+          set -euo pipefail
+          work="$(mktemp -d "${RUNNER_TEMP}/loom-quick-start-${GITHUB_RUN_ID}-XXXXXX")"
+          echo "AUDIT_WORK=$work" >> "$GITHUB_ENV"
+          mkdir -p "$work/evidence"
+          export LOOM_SKILL_DIR="$GITHUB_WORKSPACE/skills/loom-setup"
+          bash "$LOOM_SKILL_DIR/scripts/install_loom.sh" "$work/sdk" release:0.3.0 | tee "$work/evidence/sdk-install.log"
+          cp "$work/sdk/loom-install.json" "$work/evidence/sdk.json"
+          grep -Fq 6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f "$work/evidence/sdk.json"
+      - name: Audit the exact staging revisions
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp .github/devlab/sdk030-quick-start-heads.json "$AUDIT_WORK/evidence/heads.json"
+          export HF_HUB_CACHE="$AUDIT_WORK/hub-cache"
+          "$AUDIT_WORK/sdk/.venv/bin/python" .github/scripts/sdk030_quick_start_audit.py \
+            "$AUDIT_WORK/evidence/heads.json" --fetch "$AUDIT_WORK/sdk/.venv/bin/loom-fetch" \
+            --report "$AUDIT_WORK/evidence/quick-start.json" | tee "$AUDIT_WORK/evidence/audit.log"
+      - name: Upload audit evidence
+        if: always() && env.AUDIT_WORK != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdk030-quick-start-audit
+          path: ${{ env.AUDIT_WORK }}/evidence
+          retention-days: 30
+      - name: Remove audit scratch
+        if: always() && env.AUDIT_WORK != ''
+        shell: bash
+        run: |
+          case "$AUDIT_WORK" in
+            "$RUNNER_TEMP"/loom-quick-start-"$GITHUB_RUN_ID"-*) rm -rf -- "$AUDIT_WORK" ;;
+          esac
