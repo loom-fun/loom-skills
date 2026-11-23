@@ -1,0 +1,103 @@
+name: Flash Next production 0.2 and ABI 2 elastic 0.3 same-runner comparison
+on:
+  push:
+    branches: [codex/sdk030-flash-next]
+    paths: [.github/workflows/sdk030-flash-release-abba.yml]
+permissions:
+  contents: read
+jobs:
+  compare:
+    runs-on: [strix-halo, devlab-dispatch, Linux, self-hosted]
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 5b4bad185fb90ecc6759f7af09c28ca6e48593a2
+          persist-credentials: false
+      - name: Prepare pinned ABI 2 source and matched workload
+        shell: bash
+        run: |
+          set -euo pipefail
+          export WORK="$(dirname "$GITHUB_WORKSPACE")/sdk030-flash-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          mkdir -p "$WORK"
+          echo "WORK=$WORK" >> "$GITHUB_ENV"
+          git clone -q --depth 1 --branch v0.3.0 https://github.com/ROCm/hrx-loom-library "$WORK/library"
+          test "$(git -C "$WORK/library" rev-parse HEAD)" = 279afe368b82e0d7acfe38c4f47e8e7e5cfb7bc8
+          example=skills/loom-port-llm/reference/qwen4exp-example
+          mv "$example/catalog" "$WORK/previous-catalog"
+          mkdir "$example/catalog"
+          python3 "$example/flatten.py" "$WORK/library" "$example/catalog"
+          cp "$WORK/previous-catalog/catalog.json" "$example/catalog/"
+          python3 - <<'PY'
+          from pathlib import Path
+          import json
+          p = Path('skills/loom-port-llm/reference/qwen4exp-example/catalog/catalog.json')
+          meta = json.loads(p.read_text())
+          # The launcher supplies fixed backing explicitly in the tuned arm.
+          del meta['serve']
+          meta['sdk'] = dict(hrx_loom='0.3.0', source='pypi', hrx_system_sha='e2c41a720363911c04606ce0f4417e2d55630352', wheel_sha256='6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f')
+          p.write_text(json.dumps(meta, indent=1))
+          # Prove each serving process used the designated memory settings and capture its actual launch.
+          h = Path('.github/scripts/devlab_perf.sh')
+          source = h.read_text()
+          anchor = '  # "ready" is the compiled registration;'
+          assert source.count(anchor) == 1
+          check = '''  local argfile="$out/argv_$1.txt"
+            tr '\\0' '\\n' < "/proc/$(cat "$LOOM_SERVE_STATE/perf-$1.pid")/cmdline" > "$argfile" || return 1
+            if [ "$1" = elastic ]; then
+              if grep -Eq '^--(memory_bytes|pool_backing)=' "$argfile"; then echo "Wrong elastic launch"; exit 61; fi
+            elif ! grep -qx -- '--pool_backing=fixed' "$argfile"; then echo "Wrong fixed launch"; exit 61; fi
+          '''
+          h.write_text(source.replace(anchor, check + anchor))
+          job = {'name':'flash', 'card':'loom-fun/unsloth-Qwen3.8-Flash-Next-loom@d847c21bc93c0c6bc45752a9edaf91d80ac74490', 'sdk':'0.3.0', 'kit':'qwen4exp', 'memory_bytes':100000000000, 'llamacpp':'b1371', 'env':{'MIN_MEMAVAIL_GB':110}, 'variants': [
+              {'name':'published', 'sdk':'0.2.0'},
+              {'name':'tuned', 'build':{}, 'config':{'serve':None}, 'sdk':'0.3.0','execution':{'max_tokens':4096}},
+              {'name':'elastic', 'build':{}, 'config':{'serve':None}, 'sdk':'0.3.0','elastic':True,'memory_bytes':'none','execution':{'max_tokens':4096}}],
+              'steps':[]}
+          job['variants'] = [v for v in job['variants'] if v['name'] in ('published','elastic')]
+          for step in ('perf:{}:1','perf:{}:1:long','c4:{}'):
+              job['steps'].extend(step.format(name) for name in ('published','elastic','elastic','published'))
+          Path('flash-exp.json').write_text(json.dumps({'jobs':[job]}, indent=2))
+          PY
+      - name: Qualify selected release catalog on DevLab
+        run: bash .github/scripts/devlab_perf.sh flash-exp.json flash
+      - name: Check backing and benchmark results
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json,os
+          from pathlib import Path
+          root=Path(os.environ['WORK'])/'flash/out'
+          s=json.loads((root/'summary.json').read_text())['results']
+          assert all(v and 'ERROR' not in str(v) and 'FAIL' not in str(v) for v in s.values()),s
+          for name, digest, wheel in [('published','ae75cfd5e65d886ad793b14c8c6f47d436f8667b622b434581b08e2154705f56','5148f9e3a264af400ec4bae38bd7b06bf551d28cc33b7a61d67f7bcefa590438'),('elastic','c0cf0958949af15430bb8791eb167e8108a5a374f3f5aa3828eb55f0d88ac920','6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f')]:
+              assert (root/f'programs_sha256_{name}.txt').read_text().strip()==digest
+              assert json.loads((root/f'sdk_{name}.json').read_text())['wheel_sha256']==wheel
+              assert all(s.get(t.format(name)) for t in ('perf:{}:1','perf:{}:1:long','c4:{}'))
+          PY
+      - name: Collect model settings
+        if: always()
+        shell: bash
+        run: |
+          set -eu
+          mkdir -p "$WORK/flash/out"
+          cp flash-exp.json "$WORK/flash/out/"
+          for v in published tuned elastic; do
+            for f in model.json llm_config.json; do
+              [ ! -f "$WORK/flash/$v/pkg/$f" ] || cp "$WORK/flash/$v/pkg/$f" "$WORK/flash/out/${v}_$f"
+            done
+          done
+          if [ -d "$WORK/flash/elastic/pkg/program" ]; then
+            tar -czf "$WORK/flash/out/catalog-source.tar.gz" -C "$WORK/flash/elastic/pkg" program model.json llm_config.json tokenizer.json
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: flash-release-abba
+          path: ${{ env.WORK }}/flash/out
+          retention-days: 30
+      - name: Release job disk
+        if: always()
+        shell: bash
+        run: |
+          if [ "${WORK:-}" = "$(dirname "$GITHUB_WORKSPACE")/sdk030-flash-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" ]; then rm -rf -- "$WORK"; fi
