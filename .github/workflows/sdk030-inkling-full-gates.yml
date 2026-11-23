@@ -1,0 +1,122 @@
+name: SDK 0.3 Inkling R9700 full gates with published renderer
+on:
+  push:
+    branches: [codex/sdk030-special-qualification]
+    paths: [.github/workflows/sdk030-inkling-full-gates.yml]
+permissions:
+  contents: read
+jobs:
+  verify:
+    name: Inkling R9700 ${{ matrix.preset }}
+    strategy:
+      max-parallel: 2
+      fail-fast: false
+      matrix:
+        include:
+          - preset: chat
+            quant: Q4_K_XL
+            sha: e64276656f072e9b2197a61723667cbdb71da66a716ffd966e572c21088f3cd3
+          - preset: chat-q8
+            quant: Q8_K_XL
+            sha: 2da51788d43a17e1f033bec420fa83ba9cb87ac1f0130dc9135a4d2ed2678b68
+    runs-on: [self-hosted, devlab-dispatch, radeon-r9700]
+    timeout-minutes: 240
+    env:
+      SLUG: unsloth-Inkling-2-Mini-loom-r9700
+      FETCH_PRESET: ${{ matrix.preset }}
+      QUANT: ${{ matrix.quant }}
+      REF_SHA: ${{ matrix.sha }}
+      SDK_GPU_KEY: radeon-r9700
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 4c28b772a8f22f121b3925788dae14b26c58511b
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Plan from the accepted production revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          export WORK="$(dirname "$GITHUB_WORKSPACE")/sdk030-wave-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$SDK_GPU_KEY-$SLUG-$QUANT"
+          mkdir -p "$WORK/receipt"
+          echo "WORK=$WORK" >> "$GITHUB_ENV"
+          python3 - <<'PY' >> "$GITHUB_ENV"
+          import json, os
+          from pathlib import Path
+          slug = os.environ['SLUG']
+          repo = 'loom-fun/' + slug
+          pins = json.loads(Path('skills/loom-migrate/versions/v0.2.0-to-v0.3.0-production.json').read_text())
+          job = dict(name='special', card=repo+'@'+pins[repo], sdk='0.3.0',
+                     llamacpp='b1383',
+                     variants=[dict(name='staging', sdk='0.3.0'),dict(name='stagingnd', sdk='0.3.0', execution=dict(draft_depth=0))],
+                     steps=['gates:staging:full'], reference_cache='none')
+          job['require_preset_r9700']=True
+          plan=dict(runner='r9700',memory_bytes=34000000000,jobs=[job])
+          out=Path(os.environ['WORK'])/'receipt'
+          (out/'experiment.json').write_text(json.dumps(plan,indent=2))
+          kit=Path(os.environ['WORK'])/'inkling-kit'
+          kit.mkdir()
+          agent=Path('skills/loom-benchmark/scripts/agent_golden.py')
+          agent_source=agent.read_text()
+          tool_message='msgs.append({"role": "tool", "tool_call_id": c["id"], "content": run_tool(c)})'
+          assert agent_source.count(tool_message)==1
+          agent.write_text(agent_source.replace(tool_message, tool_message.replace('"tool_call_id"', '"name": c["function"]["name"], "tool_call_id"')))
+          h=Path('.github/scripts/devlab_perf.sh')
+          source=h.read_text()
+          kit_choice='export LOOM_KIT=${KIT[$p1]}'
+          assert source.count(kit_choice)==1
+          source=source.replace(kit_choice, 'export LOOM_KIT="$WORK/inkling-kit"')
+          source=source.replace('    # LOCAL_HF_CACHE=', '    pf="--preset=$FETCH_PRESET"\n    # LOCAL_HF_CACHE=')
+          source=source.replace('    if n not in dst["presets"]:', '    if n not in dst["presets"] and p["variant"] in dst["variants"] and p["programs"] in dst["programs"]:')
+          original='    c["gguf"] = par(c["gguf"])'
+          assert source.count(original)==2
+          source=source.replace(original, '    c["gguf"] = par("Inkling-2-Mini-UD-"+os.environ["QUANT"]+".gguf")')
+          anchor_hash='fetch_card "$repo_ref"; card=$CARD_DIR; base=$CARD_BASE'
+          assert source.count(anchor_hash)==1
+          source=source.replace(anchor_hash,anchor_hash+'\necho "$REF_SHA  $card/parameter/Inkling-2-Mini-UD-$QUANT.gguf" > "$out/reference-sha256.input"\nsha256sum -c "$out/reference-sha256.input" > "$out/reference-sha256.log" || exit 1')
+          anchor='    ln -sfn "$vcard/parameter" "$pkg/parameter"'
+          assert source.count(anchor)==1
+          h.write_text(source.replace(anchor,'    rsync -a --exclude=/parameter --exclude=/.git "$vcard/" "$pkg/"\n'+anchor))
+          print('JOB=special')
+          PY
+      - name: Fetch the published Inkling renderer at the frozen revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 3 'https://huggingface.co/loom-fun/unsloth-Inkling-2-Mini-loom-r9700/resolve/6213fd3ce3a15ea2bab98d4adf09ec783c5ad5dc/dev/kit/chat_probe.py' -o "$WORK/inkling-kit/chat_probe.py"
+          echo "f4bc81c51aa0d79e99612d19736c016d977ab32dab787345ffe59a904fd91e10  $WORK/inkling-kit/chat_probe.py" | sha256sum -c | tee "$WORK/receipt/renderer-sha256.log"
+      - name: Build, serve and measure the release candidate
+        run: bash .github/scripts/devlab_perf.sh "$WORK/receipt/experiment.json" "$JOB"
+      - name: Save the measured package and identity
+        if: always() && env.JOB != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          d="$WORK/$JOB"
+          cp -r "$d/out" "$WORK/receipt/"
+          if [ -e "$d/staging/pkg/model.json" ]; then
+            tar -C "$d/staging/pkg" --exclude=parameter --exclude='*.gguf' --exclude='*.safetensors' --exclude='bench' -czf "$WORK/receipt/package-without-weights.tar.gz" .
+          fi
+      - name: Require every full correctness gate
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import json,os
+          out=Path(os.environ['WORK'])/'receipt/out'
+          result=json.loads((out/'gates_staging/gates.json').read_text())
+          assert result['level']=='full' and result['verdict']=='PASS', result
+          assert {'consistency','compare','agent','golden','sampling'} <= result['gates'].keys(), result
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sdk030-inkling-full-gates-${{ matrix.preset }}
+          path: ${{ env.WORK }}/receipt
+          retention-days: 30
+      - name: Release job disk
+        if: always()
+        shell: bash
+        run: |
+          if [ "${WORK:-}" = "$(dirname "$GITHUB_WORKSPACE")/sdk030-wave-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$SDK_GPU_KEY-$SLUG-$QUANT" ]; then rm -rf -- "$WORK"; fi
