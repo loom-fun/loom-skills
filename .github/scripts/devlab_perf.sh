@@ -497,8 +497,8 @@ serve_alone() { # serve_alone VARIANT
   # (the job's "require_preset_r9700" covers the job's own card; a variant of another card, e.g. the old package of an A/B, has no R9700 preset unless it sets the key itself)
   if [ -z "$rp" ] && [ -n "$RDEV" ] && [ "$(qv "$1" "print(v['require_preset_$RUNNER'] if 'require_preset_$RUNNER' in v else (j.get('require_preset_$RUNNER') or '') if 'card' not in v else '')")" = True ]; then
     echo "FAIL: the card has no <first>$RSUF preset (its fit row has ${RUNNER}_execution): publish the package with it first"; return 1; fi
-  # elsewhere (Strix) a package with several presets serves its first (the default), as the card's Strix Quick start fetches --preset=<first>
-  [ -z "$rp" ] && [ -z "$RDEV" ] && rp=$("$T" -c "import json,sys; p=list(json.load(open(sys.argv[1]))['presets']); print(p[0] if len(p) > 1 else '')" "$D/$1/pkg/model.json")
+  # With no device-specific alternate, select the first preset explicitly on every runner for a multi-preset card.
+  [ -z "$rp" ] && rp=$(pkg_preset "$D/$1/pkg/model.json")
   if [ -n "$rp" ] && [[ "$sa" != *--preset=* ]]; then sa="--preset=$rp $sa"; fi
   vmem=$(qv "$1" "print(v.get('memory_bytes') or '$mem')")   # variant "memory_bytes": "none" with --pool_backing=fixed
   # every GPU is served as its card's Quick start serves it: the registry device's card.serve_args (card_lib.GPUS "serve_args": --pool_backing=fixed on the
