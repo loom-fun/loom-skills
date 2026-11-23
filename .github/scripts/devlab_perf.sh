@@ -746,6 +746,14 @@ while [ "$qi" -lt "${#queue[@]}" ]; do
 import json,statistics as st; r=[json.loads(l) for l in open('$out/perf_$p1.jsonl')]
 k='decode_tps_32k' if '${p3:-}' else 'decode_tps'
 print('$p1', k, [x.get(k) for x in r if x.get(k)], 'median', round(st.median(v), 2) if (v := [x[k] for x in r if x.get(k)]) else 'n/a (no row served: beyond the served context)')");;
+    qwen36decode)
+      serve_alone "$p1" || { res[$s]=ERROR; continue; }
+      step "matched Qwen3.6 decode $p1 session $p2"
+      if "$T" "$here/.github/sdk030-qwen36/matched_decode.py" "$url" "$cardid" "$p2" "$out/matched_$p1-$p2.json"; then
+        res[$s]=PASS
+      else
+        res[$s]=ERROR
+      fi;;
     profile|trace|observe)   # profile:V[:SCENARIOS] (comma list of probe,pf2k,pf8k,dec; default all but probe): V served alone per scenario with --print_device_statistics (the HAL's
                # per-function dispatch statistics, printed at shutdown); one session per scenario, so each table holds only that scenario's requests
       capture_kind=$kind   # trace uses the same requests without device profiling (observer-effect control)
