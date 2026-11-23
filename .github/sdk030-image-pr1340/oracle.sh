@@ -59,3 +59,18 @@ revision=f332072aa78be7aecdf3ee76d5c247082da564a6
 grep -Fx 'skip fox_s0_384x384' "$WORK/evidence/oracle-reuse.log"
 "$runtime" "$scripts/metrics.py" --reports "$WORK/evidence/metrics" parity \
   "$WORK/evidence/benchmark/z-image" "$WORK/evidence/oracle/bf16" --same-noise
+"$runtime" - "$WORK/evidence" <<'PY'
+import json
+from pathlib import Path
+import sys
+root = Path(sys.argv[1])
+meta = json.loads((root / "oracle/bf16/fox_s0_384x384/meta.json").read_text())
+assert meta["vae_device"] == "cpu" and meta["vae_decode_dtype"] == "fp32", meta
+runtime = json.loads((root / "oracle-runtime.json").read_text())
+assert meta["device"] in runtime["device"], meta
+metrics = json.loads((root / "metrics/parity_z-image_vs_bf16.json").read_text())
+assert metrics["n"] == 1
+case = metrics["cases"][0]
+assert case["psnr"] >= 35 and case["ssim"] >= 0.95 and case["lpips"] <= 0.10, case
+print({name: case[name] for name in ("psnr", "ssim", "lpips")})
+PY

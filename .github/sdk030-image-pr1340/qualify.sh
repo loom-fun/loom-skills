@@ -4,7 +4,7 @@ exec > >(tee "$WORK/evidence/qualification.log") 2>&1
 cd "$WORK"
 git init -q port
 git -C port remote add origin https://github.com/loom-fun/loom-skills.git
-git -C port fetch --depth=4 origin "$PR_HEAD"
+git -C port fetch --depth=5 origin "$PR_HEAD"
 git -C port checkout -q --detach FETCH_HEAD
 test "$(git -C port rev-parse HEAD)" = "$PR_HEAD"
 git init -q catalog

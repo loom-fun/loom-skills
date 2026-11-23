@@ -5,7 +5,6 @@ on:
     paths: [.github/workflows/sdk030-image-pr1340-devlab.yml, .github/sdk030-image-pr1340/**]
 permissions:
   contents: read
-  actions: read
 concurrency:
   group: sdk030-image-pr1340-devlab
   cancel-in-progress: false
@@ -14,8 +13,8 @@ jobs:
     runs-on: [strix-halo, devlab-dispatch, Linux, self-hosted]
     timeout-minutes: 130
     env:
-      PR_HEAD: 0cef7984accf91d500bb8375664a6755a2078e79
-      IMAGE_GATE_RUN: '45266207646'
+      PR_HEAD: d48f43191a8d9db165d205223426b831dc382add
+      CATALOG_HEAD: ccd62d6a49576f25efdb7deef7b6f81a7b76fd6c
     steps:
       - uses: actions/checkout@v4
         with:
@@ -26,45 +25,20 @@ jobs:
           work=$(mktemp -d "$RUNNER_TEMP/sdk030-image-pr1340.XXXXXX")
           mkdir "$work/evidence"
           echo "WORK=$work" >> "$GITHUB_ENV"
-      - uses: actions/download-artifact@v4
-        with:
-          name: sdk030-image-pr1340-oracle-evidence
-          path: ${{ env.WORK }}/evidence
-          run-id: ${{ env.IMAGE_GATE_RUN }}
-          github-token: ${{ github.token }}
-      - name: Verify the exact PR head and reuse its successful stage and image gate evidence
+      - name: Verify the exact PR head and the staged SDK image gate
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
         shell: bash
-        run: |
-          git init -q "$WORK/port"
-          git -C "$WORK/port" fetch --depth=1 https://github.com/loom-fun/loom-skills.git "$PR_HEAD"
-          git -C "$WORK/port" checkout -q --detach FETCH_HEAD
-          test "$(git -C "$WORK/port" rev-parse HEAD)" = "$PR_HEAD"
-          grep -Fx "PR_HEAD=$PR_HEAD" "$WORK/evidence/revisions.txt"
-          grep -Fx "CATALOG_HEAD=ccd62d6a49576f25efdb7deef7b6f81a7b76fd6c" "$WORK/evidence/revisions.txt"
-          python3 - "$WORK" <<'PY'
-          import json
-          from pathlib import Path
-          import sys
-          root = Path(sys.argv[1])
-          gate = json.loads((root / "evidence/gate.json").read_text())
-          assert gate["exact"] and gate["deterministic"], gate
-          ref = json.loads((root / "evidence/reference.json").read_text())
-          (root / "prompts.json").write_text(json.dumps(
-              {"prompts": [{"id": "fox", "text": ref["short_prompt"]}], "seeds": [0]}))
-          PY
+        run: bash .github/sdk030-image-pr1340/qualify.sh
       - name: Run the pinned Diffusers ROCm oracle and same-noise parity CLI
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         shell: bash
         run: bash .github/sdk030-image-pr1340/oracle.sh
-      - name: Diagnose stock and manual Z-Image generation
-        shell: bash
-        run: |
-          "$WORK/oracle-runtime/bin/python3" .github/sdk030-image-pr1340/diagnose_zimage.py "$WORK"
       - uses: actions/upload-artifact@v4
         if: always() && env.WORK != ''
         with:
-          name: sdk030-image-pr1340-diagnostic-evidence
+          name: sdk030-image-pr1340-final-evidence
           path: ${{ env.WORK }}/evidence
           if-no-files-found: error
       - name: Remove isolated workspace
