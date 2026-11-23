@@ -22,7 +22,7 @@ QH, D, PB, KL, QB, VD = 32, 576, 1152, 512, 192, 128
 XCAP = 131072
 QW = 4
 VARIANTS = {"x": {}, "xg": {"MLA_XF": "global"},   # x: LDS-staged flash (default); xg: fragments straight from the scratch
-            "xe8": {"MLA_XE_NT": "8"}, "x8": {"MLA_XQ": "8"}, "xg8": {"MLA_XF": "global", "MLA_XQ": "8"},   # 8 query tiles (waves) per workgroup
+            "xe8": {"MLA_XE_NT": "8"}, "xel": {"MLA_XE_LDS": "1"}, "x8": {"MLA_XQ": "8"}, "xg8": {"MLA_XF": "global", "MLA_XQ": "8"},   # 8 query tiles (waves) per workgroup
             "t": {"MLA_XCAP": "4096"}, "tg": {"MLA_XCAP": "4096", "MLA_XF": "global"},
             **{f"e{d}": {"MLA_XCAP": "4096", "MLA_XE_DBG": str(d)} for d in (1, 2, 3, 4, 8, 12, 15)}}   # g_mla_xexp fault bisection   # small-scratch twins for the staged tests
 

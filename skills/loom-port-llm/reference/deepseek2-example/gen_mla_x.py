@@ -472,12 +472,90 @@ kernel.def export("g_mla_xexp") @g_mla_xexp(%count_buffer: buffer) {{
                 a(f"""      %m{pp}{tt} = vector.mma {x}, {y}, %a{pp}{tt} : vector<16xf16>, vector<16xf16>, vector<8xf32>""")
         a(f"""      scf.yield {", ".join(f"%m{pp}{tt}" for pp in range(2) for tt in range(NT))} : {", ".join(["vector<8xf32>"] * (2 * NT))}
     }}""")
+    XL = os.environ.get("MLA_XE_LDS", "0") == "1"   # stage each 32-value latent step of the 64 keys and 256 W rows in workgroup memory
+    assert not XL or NT == 4
     a(f"""  %two = index.constant 2 : offset
   %chalf = index.constant {QDN // 2} : index
   %is_k = index.cmp ult, %qd, %chalf : index
-  %xrow0 = index.add %xpos, %kg32 : index
-  scf.if %is_k {{""")
-    loop(False)
+  %xrow0 = index.add %xpos, %kg32 : index""")
+    if XL:
+        TY8 = ", ".join(["vector<8xf32>"] * 8)
+        a(f"""  %ls_bytes = index.constant {64 * 40 * 2} : offset
+  %ls_tile = buffer.alloca<workgroup> align(16) %ls_bytes : buffer
+  %ls_view = buffer.view %ls_tile[%zero] : buffer -> view<64x40xf16>
+  %ws_bytes = index.constant {256 * 40 * 2} : offset
+  %ws_tile = buffer.alloca<workgroup> align(16) %ws_bytes : buffer
+  %ws_view = buffer.view %ws_tile[%zero] : buffer -> view<256x40xf16>
+  // staging: thread wi < 128 loads latent key wi / 2 (16 values at 16 (wi % 2)), every thread one W row (32 values)
+  %sl_key = index.div %wi, %c2 : index
+  %sl_h = index.rem %wi, %c2 : index
+  %sl_h16 = index.mul %sl_h, %c16 : index
+  %sl_lk = index.rem %sl_key, %c64 : index
+  %sl_pos = index.add %key0, %sl_lk : index
+  %sl_valid0 = index.cmp ult, %sl_pos, %nk : index
+  %sl_lo = index.cmp ult, %wi, %c128 : index
+  %sl_pc = scf.select %sl_valid0, %sl_pos, %c0 : index
+  %sl_o = func.call @{kvo}(%origins, %row, %sl_pc, %blocks, %layer, %pool) : (buffer, index, index, index, index, index) -> (offset)
+  %sl_view = buffer.view %arena[%sl_o] : buffer -> view<1x{D}xf16>
+  %sw_row_v = index.add %hrow, %wi : index
+  %sw_row = index.assume %sw_row_v [range(%sw_row_v, 0, {QH * 256 - 1})] : index
+  %c0i = index.constant 0 : index
+  %lrow0 = index.add %kg32, %lane_col : index
+  %c16i = index.constant 16 : index
+  %lrow1 = index.add %lrow0, %c16i : index
+  %wrow_b = index.add %qd64, %lane_col : index
+  {", ".join(f"%o{pp}{tt}" for pp in range(2) for tt in range(4))} = scf.for %j = [%c0 to %c16 step %c1]({", ".join(f"%a{pp}{tt} = %init : vector<8xf32>" for pp in range(2) for tt in range(4))}) -> ({TY8}) {{
+    %j32_v = index.mul %j, %c32 : index
+    %j32 = index.assume %j32_v [range(%j32_v, 0, 480)] : index
+    scf.if %sl_lo {{
+      %sl_col_v = index.add %j32, %sl_h16 : index
+      %sl_col = index.assume %sl_col_v [range(%sl_col_v, 0, 496)] : index
+      %sl_raw = vector.load %sl_view[%c0i, %sl_col] : view<1x{D}xf16> -> vector<16xf16>
+      %sl_val = scf.select %sl_valid0, %sl_raw, %zero16h : vector<16xf16>
+      vector.store %sl_val, %ls_view[%sl_lk, %sl_h16] : vector<16xf16>, view<64x40xf16>
+    }}
+    %j32b = index.add %j32, %c16i : index
+    %sw0 = vector.load %w_view[%sw_row, %j32] : view<{QH * 256}x512xf16> -> vector<16xf16>
+    %sw1 = vector.load %w_view[%sw_row, %j32b] : view<{QH * 256}x512xf16> -> vector<16xf16>
+    vector.store %sw0, %ws_view[%wi, %c0i] : vector<16xf16>, view<256x40xf16>
+    vector.store %sw1, %ws_view[%wi, %c16i] : vector<16xf16>, view<256x40xf16>
+    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)""")
+        cur = {(pp, tt): f"%a{pp}{tt}" for pp in range(2) for tt in range(4)}
+        for s in range(2):
+            a(f"""    %ss{s} = index.constant {16 * s} : index""")
+            for pp in range(2):
+                a(f"""    %lv{s}{pp} = vector.load %ls_view[%lrow{pp}, %ss{s}] : view<64x40xf16> -> vector<16xf16>""")
+            for tt in range(4):
+                a(f"""    %wo{s}{tt} = index.constant {16 * tt} : index
+    %wrr{s}{tt} = index.add %wrow_b, %wo{s}{tt} : index
+    %wv{s}{tt} = vector.load %ws_view[%wrr{s}{tt}, %ss{s}] : view<256x40xf16> -> vector<16xf16>""")
+            names = [f"%n{s}{pp}{tt}" for pp in range(2) for tt in range(4)]
+            a(f"""    {", ".join(names)} = scf.if %is_k -> ({TY8}) {{""")
+            for pp in range(2):
+                a(f"""      %klf{s}{pp} = vector.fragment<lhs> %lv{s}{pp} shape [%c16, %c16] : vector<16xf16>""")
+            for tt in range(4):
+                a(f"""      %kwf{s}{tt} = vector.fragment<rhs> %wv{s}{tt} shape [%c16, %c16] : vector<16xf16>""")
+            for pp in range(2):
+                for tt in range(4):
+                    a(f"""      %km{s}{pp}{tt} = vector.mma %klf{s}{pp}, %kwf{s}{tt}, {cur[(pp, tt)]} : vector<16xf16>, vector<16xf16>, vector<8xf32>""")
+            a(f"""      scf.yield {", ".join(f"%km{s}{pp}{tt}" for pp in range(2) for tt in range(4))} : {TY8}
+    }} else {{""")
+            for pp in range(2):
+                a(f"""      %vlf{s}{pp} = vector.fragment<rhs> %lv{s}{pp} shape [%c16, %c16] : vector<16xf16>""")
+            for tt in range(4):
+                a(f"""      %vwf{s}{tt} = vector.fragment<lhs> %wv{s}{tt} shape [%c16, %c16] : vector<16xf16>""")
+            for pp in range(2):
+                for tt in range(4):
+                    a(f"""      %vm{s}{pp}{tt} = vector.mma %vwf{s}{tt}, %vlf{s}{pp}, {cur[(pp, tt)]} : vector<16xf16>, vector<16xf16>, vector<8xf32>""")
+            a(f"""      scf.yield {", ".join(f"%vm{s}{pp}{tt}" for pp in range(2) for tt in range(4))} : {TY8}
+    }}""")
+            cur = {(pp, tt): f"%n{s}{pp}{tt}" for pp in range(2) for tt in range(4)}
+        a(f"""    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+    scf.yield {", ".join(cur[(pp, tt)] for pp in range(2) for tt in range(4))} : {TY8}
+  }}""")
+    a("  scf.if %is_k {")
+    if not XL:
+        loop(False)
     a(f"""    %hk_e = index.mul %head, %cxcap : index
     %hk_e2 = index.mul %hk_e, %c128 : index
     %hk_o = index.scale %hk_e2, %two : index, offset -> offset
@@ -492,7 +570,8 @@ kernel.def export("g_mla_xexp") @g_mla_xexp(%count_buffer: buffer) {{
     %sk{pp}{tt}_c = index.assume %sk{pp}{tt}_c1 [range(%sk{pp}{tt}_c1, 0, 112)] : index
     vector.fragment.store<result> %o{pp}{tt}, %xk_view[%sk{pp}{tt}_r, %sk{pp}{tt}_c] shape [%c16, %c16] : vector<8xf32>, view<{XCAP}x128xf16>""")
     a(f"""  }} else {{""")
-    loop(True)
+    if not XL:
+        loop(True)
     a(f"""    %cnb = index.constant {XCAP // 32} : index
     %c4096v = index.constant 4096 : index
     %vblk = index.div %xrow0, %c32 : index
