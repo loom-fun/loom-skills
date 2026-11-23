@@ -1,0 +1,172 @@
+name: Render SDK 0.3.0 Qwen pilot candidate
+on:
+  pull_request:
+    types: [labeled]
+permissions:
+  actions: read
+  contents: read
+jobs:
+  render:
+    if: github.event.pull_request.head.ref == 'codex/sdk030-migration' && github.event.pull_request.head.repo.full_name == github.repository && github.event.label.name == 'sdk030-candidate'
+    runs-on: [strix-halo, devlab-dispatch, Linux, self-hosted]
+    timeout-minutes: 22
+    env:
+      WORK: ${{ github.workspace }}/sdk030-candidate-${{ github.run_id }}-${{ github.run_attempt }}
+      HF_ENDPOINT: https://huggingface.co
+      PACKAGE_SLUG: unsloth-Qwen3-0.6B-loom
+      PRODUCTION_REVISION: 564d578f4e487c6fbabd84915439f873651b5953
+      STAGING_PARENT: aec3ff660cf5c3c6c8b357a0d3116366615de85f
+      PROGRAMS_SHA256: 36be806329b1e49f47cb705f853b61a503c10e49daac939427b3c58a334da243
+      PERFORMANCE_RUN: "45251639763"
+      PERFORMANCE_JOB: "137962619710"
+      PERFORMANCE_ARTIFACT: "14856743877"
+      PERFORMANCE_DIGEST: f32f585b064ac914add717307025d074983522a2bd9350a1c78419e0034ef569
+      WHEEL_SHA256: 6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Validate pinned run and production package
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$WORK/job" "$WORK/out"
+          gh api "repos/loom-fun/loom-skills/actions/artifacts/$PERFORMANCE_ARTIFACT" > "$WORK/artifact.json"
+          gh api "repos/loom-fun/loom-skills/actions/artifacts/$PERFORMANCE_ARTIFACT/zip" > "$WORK/performance.zip"
+          gh api "repos/loom-fun/loom-skills/actions/jobs/$PERFORMANCE_JOB" > "$WORK/job.json"
+          printf '%s  %s\n' "$PERFORMANCE_DIGEST" "$WORK/performance.zip" | sha256sum -c
+          unzip -q "$WORK/performance.zip" -d "$WORK/job"
+          python3 -m venv "$WORK/venv"
+          "$WORK/venv/bin/pip" install -q huggingface_hub requests
+          "$WORK/venv/bin/python" - "$PWD/skills/loom-benchmark/scripts/card" <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import shutil
+          import sys
+          from huggingface_hub import HfApi, snapshot_download
+          sys.path.insert(0, sys.argv[1])
+          from card_lib import programs_sha256
+
+          w = Path(os.environ["WORK"])
+          j = w / "job"
+          prod = f"loom-fun/{os.environ['PACKAGE_SLUG']}"
+          staging = f"loom-fun-staging/{os.environ['PACKAGE_SLUG']}"
+          rev = os.environ["PRODUCTION_REVISION"]
+          h = os.environ["PROGRAMS_SHA256"]
+          job = json.loads((w / "job.json").read_text())
+          artifact = json.loads((w / "artifact.json").read_text())
+          assert job["conclusion"] == "success" and job["run_id"] == int(os.environ["PERFORMANCE_RUN"])
+          assert artifact["name"] == "devlab-perf-sdk030-qwen3-06b-qualify"
+          assert artifact["workflow_run"]["id"] == job["run_id"]
+          assert artifact["digest"] == f"sha256:{os.environ['PERFORMANCE_DIGEST']}"
+          assert (j / "card_revision.txt").read_text().strip() == f"{prod}@{rev}"
+          assert (j / "programs_sha256_staging.txt").read_text().strip() == h
+          result = json.loads((j / "summary.json").read_text())["results"]
+          for step, prefix in {"func:staging": "pass", "ktest:staging": "PASS",
+                               "gates:staging:full": "GATES PASS", "admit:staging": "ADMITTED"}.items():
+              assert result[step].startswith(prefix), (step, result[step])
+          pin = json.loads((j / "sdk_staging.json").read_text())
+          assert (pin["hrx_loom"], pin["source"], pin["wheel_sha256"]) == ("0.3.0", "pypi", os.environ["WHEEL_SHA256"])
+          api = HfApi()
+          target = api.model_info(staging)
+          assert target.sha == os.environ["STAGING_PARENT"]
+          pkg = w / "out/package"
+          snapshot_download(prod, revision=rev, local_dir=pkg,
+                            ignore_patterns=["*.gguf", "*.safetensors", "*.bin", "*.mmproj", "parameter/*"])
+          shutil.rmtree(pkg / ".cache", ignore_errors=True)
+          assert programs_sha256(pkg) == h
+          remote = {f.rfilename for f in target.siblings}
+          files = {f.relative_to(pkg).as_posix() for f in pkg.rglob("*") if f.is_file()}
+          assert not remote - files - {".gitattributes"}, sorted(remote - files)
+          config = pkg / "llm_config.json"
+          data = json.loads(config.read_text())
+          data["sdk"] = {k: v for k, v in pin.items() if v is not None}
+          config.write_text(json.dumps(data, indent=1) + "\n")
+          shutil.copyfile(pkg / "info.json", w / "previous-info.json")
+          (w / "completed.txt").write_text(job["completed_at"])
+          PY
+      - name: Render and check the card using qualified measurements
+        shell: bash
+        run: |
+          card="$PWD/skills/loom-benchmark/scripts/card"
+          py="$WORK/venv/bin/python"
+          j="$WORK/job"
+          pkg="$WORK/out/package"
+          evid=(--source-kind devlab --run "$PERFORMANCE_RUN" --url "https://github.com/loom-fun/loom-skills/actions/runs/$PERFORMANCE_RUN/job/$PERFORMANCE_JOB")
+          "$py" "$card/pull_devlab.py" --identity "$j" --gpu strix-halo \
+            --device-out "$WORK/device.json" --hrx-out "$WORK/hrx.json"
+          "$py" "$card/make_info.py" perf --gpu strix-halo --loom-jsonl "$j/perf_staging.jsonl" --c4-loom "$j/c4_staging.txt" \
+            --baseline-from-info "$WORK/previous-info.json" --package "$pkg" "${evid[@]}" \
+            --device "$WORK/device.json" --hrx-loom "$WORK/hrx.json" --fetched-programs "$PROGRAMS_SHA256" -o "$WORK/perf.json"
+          "$py" "$card/make_info.py" gates --gpu strix-halo --time "$(cut -c1-19 "$WORK/completed.txt")" \
+            "$j/gates_staging/gates.json" "$j/ktest_staging.log" --package "$pkg" "${evid[@]}" \
+            --device "$WORK/device.json" --hrx-loom "$WORK/hrx.json" -o "$WORK/gates.json"
+          roof_device=$("$py" -c 'import sys; sys.path.insert(0,sys.argv[1]); from card_lib import registry; print(registry.device("strix-halo")["roofline"]["default"])' "$card")
+          "$py" "$card/make_info.py" roofline --gpu strix-halo --device "$roof_device" --package "$pkg" \
+            --evidence "$WORK/perf.json" -o "$WORK/roofline.json"
+          "$py" "$card/make_info.py" build "$pkg" --org loom-fun-staging --gpus gfx1201-16gb,radeon-r9700,strix-halo \
+            --from-info "$WORK/previous-info.json" --reset-performance \
+            --perf-from "gfx1201-16gb=$WORK/previous-info.json" --perf-from "radeon-r9700=$WORK/previous-info.json" \
+            --report generated --evidence "$WORK/perf.json" "$WORK/gates.json" "$WORK/roofline.json"
+          "$py" - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          w = Path(os.environ["WORK"])
+          p = w / "out/package/info.json"
+          info = json.loads(p.read_text())
+          old = json.loads((w / "previous-info.json").read_text())
+          new_session = json.loads((w / "perf.json").read_text())["performance"]["session"]
+          old_session = old["devices"]["strix-halo"]["performance"]["sessions"][-1]
+          assert old_session["programs_sha256"] == new_session["programs_sha256"] == os.environ["PROGRAMS_SHA256"]
+          changes = {}
+          for metric, row in old_session["metrics"].items():
+              if row.get("loom") is None:
+                  continue
+              got = new_session["metrics"][metric]["loom"]
+              changes[metric] = {"previous": row["loom"], "current": got, "percent": (got / row["loom"] - 1) * 100}
+          for key in ("decode", "decode_32k", "prefill_8k", "streams4"):
+              assert abs(changes[key]["percent"]) <= 3.0, (key, changes[key])
+          devices = ["gfx1201-16gb", "radeon-r9700"]
+          for gpu in devices:
+              prior = old["devices"][gpu]["performance"]
+              perf = info["devices"][gpu]["performance"]
+              assert perf["sessions"] == prior["sessions"], gpu
+              note = ("Historical Loom sessions from the pinned production card before this SDK 0.3.0 migration. "
+                      "This device has no SDK 0.3.0 measurements in this staged pilot.")
+              perf["baseline"].setdefault("differs", []).append(note)
+          new_perf = info["devices"]["strix-halo"]["performance"]
+          notes = new_perf["baseline"].setdefault("differs", [])
+          notes.append("Strix Halo Loom rows were measured on hrx-loom 0.3.0 on 2026-11-23. The llama.cpp measurements are retained from their published sessions.")
+          for key, entry in changes.items():
+              if abs(entry["percent"]) > 3.0:
+                  notes.append(f"{key}: {entry['percent']:+.2f}% compared with the published Strix Halo Loom session on {old_session['date']}. This cross-run observation has no same-runner confirmation.")
+          p.write_text(json.dumps(info, indent=1, sort_keys=True) + "\n")
+          evidence = {
+              "slug": os.environ["PACKAGE_SLUG"], "production_revision": os.environ["PRODUCTION_REVISION"],
+              "staging_parent": os.environ["STAGING_PARENT"], "programs_sha256": os.environ["PROGRAMS_SHA256"],
+              "qualification_run": int(os.environ["PERFORMANCE_RUN"]), "qualification_artifact": int(os.environ["PERFORMANCE_ARTIFACT"]),
+              "metrics": changes, "verdict": "publish",
+          }
+          (w / "out/evidence.json").write_text(json.dumps(evidence, indent=2) + "\n")
+          print(json.dumps(evidence, indent=2))
+          PY
+          "$py" "$card/render_card.py" "$pkg"
+          "$py" "$card/render_card.py" --check "$pkg" "$pkg/README.md"
+          "$py" "$card/publish_package.py" upload "$pkg" --org loom-fun-staging \
+            --repo "$PACKAGE_SLUG" --parent-commit "$STAGING_PARENT" --dry-run
+      - name: Retain the reviewed card candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdk030-stage-candidate
+          path: ${{ env.WORK }}/out
+          include-hidden-files: true
+          retention-days: 30
+      - name: Remove runner scratch
+        if: always()
+        shell: bash
+        run: rm -rf -- "$WORK"
