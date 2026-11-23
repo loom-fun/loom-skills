@@ -920,12 +920,17 @@ def direct(text, name):
 
 
 def skip_twin(text, name):
-    """`<name>_x` of a g_mla_kbm / g_mla_vbm kernel (gen_mla.bmm): an extra %xskip argument; a workgroup whose 64-token block
-    is all expanded (xskip[block] = 1) does nothing."""
+    """`<name>_x` of a g_mla_kbm / g_mla_vbm kernel (gen_mla.bmm / bmm2, with or without MLA_BMM_LIVE): an extra %xskip
+    argument (after %info when the kernel is the MLA_BMM_LIVE form); a workgroup whose 64-token block is all expanded or
+    padding (xskip[block] = 1) does nothing. Under MLA_BMM_LIVE the kernel's own all-padding test stays nested inside
+    (workgroup-uniform both): a block is skipped when it is all padding OR all expanded/padding."""
     a = text.index(f'kernel.def export("{name}")')
     b = text.index("\n}\n", text.index("kernel.return", a)) + 3
     k = text[a:b].replace(f'export("{name}") @{name}(', f'export("{name}_x") @{name}_x(')
+    n0 = k.count(", %y: buffer) {") + k.count(", %y: buffer, %info: buffer) {")
+    assert n0 == 1, (name, n0)
     k = k.replace(", %y: buffer) {", ", %y: buffer, %xskip: buffer) {", 1)
+    k = k.replace(", %y: buffer, %info: buffer) {", ", %y: buffer, %info: buffer, %xskip: buffer) {", 1)
     anchor = "  %tblk = index.assume %tb_id [lt(%tb_id, %tblocks)] : index\n"
     assert k.count(anchor) == 1 and k.count("  kernel.return\n") == 1
     k = k.replace(anchor, anchor + """  %xs_zero = index.constant 0 : offset
