@@ -396,6 +396,30 @@
       "device": "amdgpu://?completion_spin_ns=4294967295",
       "repeats": 5,
       "case_timing": true
+    },
+    {
+      "suite": "dec_step",
+      "dir": "dec_step",
+      "gen": "dec_step/gen_bench.py",
+      "gen_variants": [
+        "base",
+        "split",
+        "s32+b8+pl1"
+      ],
+      "files": [
+        "bench.loom",
+        "bench_split.loom",
+        "bench_s32+b8+pl1.loom"
+      ],
+      "config": [],
+      "args": [
+        "--measure=dispatch_complete",
+        "--batch-size=8",
+        "--profile-final-batch=true"
+      ],
+      "device": "amdgpu://?completion_spin_ns=4294967295",
+      "repeats": 3,
+      "case_timing": true
     }
   ]
 }
