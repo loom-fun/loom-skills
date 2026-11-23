@@ -14,7 +14,10 @@ echo "6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f  $wheel" 
 python -m pip install -q "./$wheel[hf]"
 export HF_HUB_CACHE="$WORK/hf/hub"
 mkdir -p "$cache/refs"
-timeout 240s loom-fetch "huggingface:$repo:chat@$revision" --materialize=copy --output="$snapshot" --no-input
+materialized="$WORK/materialized-qwen"
+timeout 240s loom-fetch "huggingface:$repo:chat@$revision" --materialize=copy --output="$materialized" --no-input
+rm -rf -- "$snapshot"
+mv "$materialized" "$snapshot"
 printf '%s\n' "$revision" > "$cache/refs/main"
 printf '{"loom":"v0.2.0"}\n' > "$snapshot/.lemonade-loom.json"
 python - "$snapshot" <<'PY'
@@ -77,7 +80,11 @@ lemonade_smoke() {
   local port
   port=$(free_port)
   mkdir -p "$WORK/lemon-cache" "$WORK/lemon-config"
-  "$WORK/lemonade/build/lemond" "$WORK/lemon-cache" "$WORK/lemon-config" --port "$port" --host 127.0.0.1 > "$WORK/out/lemonade-server.log" 2>&1 &
+  (
+    ulimit -S -l 8192
+    echo "Lemonade and its backend memlock limit: $(ulimit -l) KiB"
+    exec "$WORK/lemonade/build/lemond" "$WORK/lemon-cache" "$WORK/lemon-config" --port "$port" --host 127.0.0.1
+  ) > "$WORK/out/lemonade-server.log" 2>&1 &
   pid=$!
   if ! wait_http "http://127.0.0.1:$port/api/v1/health"; then
     tail -40 "$WORK/out/lemonade-server.log"

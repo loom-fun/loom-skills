@@ -82,6 +82,24 @@ update("weaver/commands/doctor.py", '    kfd = Path("/dev/kfd")',
     r.append(("Loom SDK", sdk == runtime.LOOM_SDK_VERSION, sdk or "missing",
               f"reinstall weaver with its pinned hrx-loom {runtime.LOOM_SDK_VERSION}"))
     kfd = Path("/dev/kfd")''')
+update("weaver/commands/doctor.py",
+       '''    r.append(("memlock", True, "unlimited" if ml is None else f"{ml // 2**20} MiB",
+              "" if ml is None else "stock limit: weaver serves with --parameter_mode=preload when the weights "
+              f"(up to {servers.PRELOAD_MAX_BYTES // 10**9} GB) fit in host memory; for larger packages "
+              + servers.MEMLOCK_ADVICE))''',
+       '''    r.append(("memlock", True, "unlimited" if ml is None else f"{ml // 2**20} MiB", ""))''')
+update("weaver/commands/doctor.py", 'if fix and (not ok or name == "memlock"):', 'if fix and not ok:')
+
+server = Path("weaver/servers.py")
+text = server.read_text()
+start = text.index('PRELOAD_FLAG =')
+end = text.index('def memlock_limit', start)
+text = text[:start] + text[end:]
+start = text.index('def _mem_available')
+end = text.index('def start(', start)
+server.write_text(text[:start] + text[end:])
+update(server, 'import sys\n', '')
+update(server, '    extra = [*host_args(weights_bytes(model_jsons)), *(extra or [])]\n', '')
 
 update("packaging/build_bundle.sh",
        'echo "== pi $PI_VERSION"',
@@ -92,6 +110,9 @@ update("README.md", "hrx-loom[hf]BKT 0.2.0;".replace("BKT", chr(96)), "hrx-loom[
 update("README.md",
        "- Verified on hrx-loom 0.1.0 (the evidence above); the 0.2.0 upgrade is checked by the unit tests and a serve/chat smoke test (BKTdocs/release-notes.mdBKT). Model packages built for 0.1.0 (card field BKTpresets.*.execution.pool_capacityBKT) do not load on 0.2.0: serve the current loom-fun package or BKTweaver portBKT the GGUF again.".replace("BKT", chr(96)),
        "- Weaver uses hrx-loom 0.3.0. Published Loom 0.2 packages, including Weaver's pinned Qwen3.8 agent card, continue to work through controller ABI 1. See BKTdocs/release-notes.mdBKT for the upgrade details and earlier measurements.".replace("BKT", chr(96)))
+update("README.md",
+       "- On a stock host (8 MiB memlock limit) weaver starts loom-serve with BKT--parameter_mode=preloadBKT when the weights (up to 40 GB) fit in host memory (ROCm/hrx-system#3332). Larger packages need BKTulimit -l unlimitedBKT (BKTweaver doctorBKT shows the limit).".replace("BKT", chr(96)),
+       "- Loom 0.3 loads weights through its default buffered file mode. BKTweaver doctorBKT reports the host's locked-memory limit.".replace("BKT", chr(96)))
 update("weaver/config.py", "# the loom-fun repo revision of the 0.2.0 card (promoted 2026-11-17)",
                           "# the published 0.2.0 card uses controller ABI 1, also supported by Loom 0.3.0")
 update("weaver/agent_server.py", '''    """A fetched card of this SDK. A package fetched before hrx-loom 0.2.0 declares presets.*.execution.pool_capacity,
@@ -101,13 +122,34 @@ notes = Path("docs/release-notes.md")
 notes.write_text("""## hrx-loom 0.3.0
 
 - Weaver and generated model instructions pin Loom SDK 0.3.0, and the bundle checks the installed wheel version before recording it.
+- The server uses Loom 0.3's default buffered file loading. This replaces Weaver's 0.2 preload workaround.
 - The installed SDK selects the catalog revision on upgrades, including existing pip environments. BKTweaver doctorBKT reports the installed Loom SDK.
 - The pinned Qwen3.8-27B agent card continues to use the published controller ABI 1. Its model revision and earlier performance results remain attributable to the corresponding release.
 
 """.replace("BKT", chr(96)) + notes.read_text())
 
 test = Path("tests/test_core.py")
-test.write_text(test.read_text() + '''
+text = test.read_text()
+start = text.index('def test_host_args_preload_on_stock_memlock(')
+assert not any(line.startswith("def ") for line in text[start:].splitlines()[1:])
+test.write_text(text[:start] + '''def test_serve_leaves_parameter_mode_to_the_sdk(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+    from weaver import servers
+
+    calls = []
+
+    def run(cmd, **_):
+        calls.append(cmd)
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(servers.subprocess, "run", run)
+    runtime = SimpleNamespace(script=lambda name: tmp_path / name, env=lambda: {})
+    card = tmp_path / "model.json"
+    servers.start(runtime, "test", 8080, 123, [card])
+    assert calls[0][-1] == str(card)
+    servers.start(runtime, "test", 8080, 123, [card], extra=["--parameter_mode=direct"])
+    assert calls[1][-2:] == ["--", "--parameter_mode=direct"]
+
 
 def test_ensure_library_updates_a_stale_sdk_catalog(tmp_path, monkeypatch):
     home = tmp_path / "weaver"

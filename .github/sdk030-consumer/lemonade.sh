@@ -95,6 +95,46 @@ update(header,
        '// for another release (an older card loom-serve rejects) is fetched again.',
        '// loom-serve reads, and the backend_versions.json pin. A snapshot recorded\n'
        '// for a supported older release can also be reused offline.')
+update(header,
+       '                                           const std::vector<std::string>& serve_args,\n'
+       '                                           const std::string& custom_args);',
+       '                                           const std::vector<std::string>& serve_args,\n'
+       '                                           const std::string& custom_args,\n'
+       '                                           bool legacy_parameter_modes = false);')
+update(header,
+       '// --parameter_mode=preload: reads the weights into host memory first, which',
+       '// Legacy Loom 0.2 --parameter_mode=preload reads weights into host memory first, which')
+bundle = "src/cpp/server/backends/loom/loom_bundle.cpp"
+update(bundle,
+       '                                           const std::vector<std::string>& serve_args,\n'
+       '                                           const std::string& custom_args) {',
+       '                                           const std::vector<std::string>& serve_args,\n'
+       '                                           const std::string& custom_args,\n'
+       '                                           bool legacy_parameter_modes) {')
+update(bundle,
+       '        argv.insert(argv.end(), parsed.begin(), parsed.end());\n'
+       '    }\n'
+       '    return argv;',
+       '        argv.insert(argv.end(), parsed.begin(), parsed.end());\n'
+       '    }\n'
+       '    if (!legacy_parameter_modes) {\n'
+       '        // Loom 0.3 reads buffered files by default. Old cards and saved arguments\n'
+       '        // may still contain these former parameter modes.\n'
+       '        argv.erase(std::remove_if(argv.begin(), argv.end(), [](const std::string& arg) {\n'
+       '                       return arg == kPreloadFlag || arg == "--parameter_mode=mmap";\n'
+       '                   }), argv.end());\n'
+       '    }\n'
+       '    return argv;')
+update(source,
+       '    constexpr bool kPreload = true;\r\n',
+       '    const std::string sdk_version =\n'
+       '        backend_manager_->get_install_params(loom::descriptor.recipe, kBackend).version;\n'
+       '    const bool legacy_parameter_modes = sdk_version == "v0.2.0" || sdk_version == "0.2.0";\n')
+update(source,
+       'loom::serve_args(target, info, loom::parameter_bytes(plan), kPreload, loom_args);',
+       'loom::serve_args(target, info, loom::parameter_bytes(plan), legacy_parameter_modes, loom_args);')
+update(source, '                                           serve_args, loom_args);',
+               '                                           serve_args, loom_args, legacy_parameter_modes);')
 test = Path("test/cpp/test_loom_contract.cpp")
 text = test.read_text()
 # Insert near the existing per-platform installer assertions.
@@ -115,6 +155,18 @@ new_test = '''
 #endif
 '''
 test.write_text(text[:start] + new_test + text[start:])
+update(test,
+       '    check("Serve flags are passed through in order",\n'
+       '          loom::build_server_argv("/run", 1, "", {"--pool_backing=fixed", loom::kPreloadFlag}, "") ==',
+       '    check("The legacy runtime still receives its parameter mode",\n'
+       '          loom::build_server_argv("/run", 1, "", {"--pool_backing=fixed", loom::kPreloadFlag}, "", true) ==')
+update(test, '    check("A custom device and memory size follow the defaults, so they win",',
+       '    check("The 0.3 launch drops obsolete parameter modes from both input sources",\n'
+       '          loom::build_server_argv("/run", 1, "", {"--pool_backing=fixed", loom::kPreloadFlag},\n'
+       '                                  "--parameter_mode=mmap --parameter_mode=direct") ==\n'
+       '              std::vector<std::string>({"--model=/run/model.json", "--listen=127.0.0.1:1", device,\n'
+       '                                        "--pool_backing=fixed", "--parameter_mode=direct"}));\n'
+       '    check("A custom device and memory size follow the defaults, so they win",')
 update(test, '        check("A snapshot Lemonade fetched for another Loom release is not downloaded",',
        '        check("The v0.1.0 bundle schema still requires a fresh download",')
 update(test,
