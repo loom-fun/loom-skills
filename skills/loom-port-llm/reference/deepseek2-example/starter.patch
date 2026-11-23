@@ -312,7 +312,38 @@
  from mv_rows import pick_r, iq_r  # noqa: E402  (shared with make_kernel_tests.py)
  
  
-@@ -5298,7 +5338,7 @@
+@@ -5160,9 +5200,17 @@
+     import re as _re
+     pat = _re.compile(r"(scf\.if (%\w+) \{\s*kernel\.launch @g_row_scale_f16\[[^\]]*\]\((%\w+), (%\w+), (%\w+), (%\w+), (%\w+)\) : \[index\]\(index, index, buffer, buffer, buffer\)\s*\})")
+     read = set(_re.findall(r"kernel\.launch @(?:g_mv_\w*_q8\w*|g_moe_gu_\w*_q8_k\w*)\[[^\]]*\]\([^,]+, [^,]+, [^,]+, (%\w+),", program))
++    def consumed(m):
++        """a _q8 consumer reads X16q before X16 is produced again (per layer: a layer whose consumer of X is an f32
++        matvec, e.g. an IQ4_XS shared-expert down next to Q5_K ones, needs no int8 copy)"""
++        x16 = m.group(7)
++        nxt = _re.compile(r"kernel\.launch @g_row_scale_f16\[[^\]]*\]\([^)]*, " + _re.escape(x16) + r"\)").search(program, m.end())
++        seg = program[m.end():nxt.start() if nxt else len(program)]
++        return x16 + "q" in set(_re.findall(r"kernel\.launch @(?:g_mv_\w*_q8\w*|g_moe_gu_\w*_q8_k\w*)\[[^\]]*\]\([^,]+, [^,]+, [^,]+, (%\w+),", seg))
++
+     def sub(m):
+         rows, width, x, x16 = m.group(3), m.group(4), m.group(5), m.group(7)
+-        if x16 + "q" not in read:   # only f32 consumers (e.g. a DFlash feature projection wider than 32768)
++        if x16 + "q" not in read or not consumed(m):   # only f32 consumers (e.g. a DFlash feature projection wider than 32768)
+             return m.group(1)
+         return (m.group(1) + f" else {{\n    kernel.launch @g_quant_q8[{rows}, {width}]({rows}, {width}, {x}, {x16}q) : [index, index](index, index, buffer, buffer)\n  }}")
+     program = pat.sub(sub, program)
+@@ -5291,6 +5339,11 @@
+ # g_row_scale_f16, and the gate/up output quantized by a g_quant_q8 launch) and contract with integer dot4 products,
+ # like the dense decode matvecs and llama.cpp's mul_mat_vec_q for experts. MOE_Q8=0: f32 activations.
+ MOE_Q8 = os.environ.get("MOE_Q8", "1") == "1"
++# MOE_SHSLOT=1: decode runs the shared expert as a ninth assignment slot of the routed expert matvecs (gen_moe
++# expert_mv shared=True + g_moe_combine_sh): 3 launches fewer per layer (shared gate/up, quant, down). Needs one shared
++# expert of the routed experts' formats and width, no shared gate, f32 expert activations.
++MOE_SHSLOT = os.environ.get("MOE_SHSLOT", "0") == "1"
++USED_SHSLOT = set()
+ USED_MOEQ = set()   # (fmt, K, N, mode) of the int8 expert matvecs; USED_MOEF: the f32 ones (USED_MOE: the grouped GEMMs)
+ USED_MOEF = set()
+ 
+@@ -5298,7 +5351,7 @@
  def moe_iq(gu, fd, x):
      """Whether this layer's decode expert matvecs take int8 activations (needs the router input as %h: its h16q)."""
      return (ACT_Q8 and MOE_Q8 and x == "%h" and "+" not in gu and gu in IQ_FMTS and fd in IQ_FMTS
@@ -321,7 +352,88 @@
              and H // 32 <= 1024 and MOE["ffn"] // 32 <= 1024 and not MOE.get("expert_bias"))
  
  
-@@ -5977,6 +6017,60 @@
+@@ -5307,6 +5360,13 @@
+     """Shared experts (dense swiglu FFN of width FS, stored into y; with SHGATE scaled per token by
+     sigmoid(h . ffn_gate_inp_shexp) inside the combine), then the routed experts (moe_routed) added into y."""
+     T = []
++    if shslot(i, b, nm):
++        T += [par("w_gsh", "ffn_gate_shexp"), par("w_ush", "ffn_up_shexp"), par("w_dsh", "ffn_down_shexp")]
++        fsg = fmt_of(nm("ffn_gate_shexp"))
++        T.append("  scf.if %gemm {\n  " + lin(fsg, "%h", "%s_h", (f"%w_gsh_{i}", f"%w_ush_{i}"), sz("ffn_gate_shexp"), "%f", "%nH", "%nFS", H, mode="swiglu") + "\n")
++        T.append(f"    kernel.launch @g_row_scale_f16[%t](%t, %nFS, %f, %s_f, %f16) : [index](index, index, buffer, buffer, buffer)\n")
++        T.append("  " + lin(fmt_of(nm("ffn_down_shexp")), "%f", "%s_f", f"%w_dsh_{i}", sz("ffn_down_shexp"), "%y", "%nFS", "%nH", FS) + "\n  }\n")
++        return "".join(T) + moe_routed(i, b, shared=(f"%w_gsh_{i}", f"%w_ush_{i}", f"%w_dsh_{i}", sz("ffn_gate_shexp"), sz("ffn_down_shexp")))
+     if FS:
+         T += [par("w_gsh", "ffn_gate_shexp"), par("w_ush", "ffn_up_shexp"), par("w_dsh", "ffn_down_shexp")]
+         fsg = fmt_of(nm("ffn_gate_shexp"))
+@@ -5321,7 +5381,18 @@
+     return "".join(T) + moe_routed(i, b)
+ 
+ 
+-def moe_routed(i, b, x="%h", rx="%h", out="%y"):
++def shslot(i, b, nm):
++    """MOE_SHSLOT applies to layer i (see MOE_SHSLOT)."""
++    if not (MOE_SHSLOT and FS and not SHGATE and FS == MOE["ffn"] and not MOE.get("gate_up_fused") and not MOE.get("expert_bias")
++            and not MOE.get("down_scale")):
++        return False
++    fg, fu, fd = (fmt_of(b + f"ffn_{p}_exps.weight") for p in ("gate", "up", "down"))
++    if not (fg == fu == fmt_of(nm("ffn_gate_shexp")) == fmt_of(nm("ffn_up_shexp")) and fd == fmt_of(nm("ffn_down_shexp"))):
++        return False
++    return not moe_iq(fg, fd, "%h")
++
++
++def moe_routed(i, b, x="%h", rx="%h", out="%y", shared=None):
+     """Layer i's routed experts on input buffer X (prefill: its f16 copy %h16/%s_h, made here when X is not %h), the
+     router reading RX: router -> per-assignment gate/up (swiglu) and down -> weighted combine into OUT (added to it
+     when the layer has shared experts, scaled by the shared gate with SHGATE). cfg.moe gate_up_fused: one
+@@ -5378,10 +5449,20 @@
+     kernel.launch @g_moe_combine_sorted[%t](%t, %max_rows, %ys_sorted, %pos, %wts, {sgarg}{out}) : [index](index, index, buffer, buffer, buffer, {sgty}buffer)
+   }} else {{
+     kernel.launch @g_moe_route[%t](%t, {rx}, %router_{i}, {bias}, %ids, %wts) : [index](index, buffer, view<{E * H}x{rty}>, {bias_ty}, buffer, buffer)
+-{wsc}{hq}    kernel.launch @g_moe_gu_{gun}{q8}_k{H}_r{R}[%nFE, %ta](%nFE, %ta, %ids, {xa}, %wge_{i}, {wu}{gu_b}, %act) : [index, index](index, index, buffer, buffer, view<{sg}xi8>, view<{su}xi8>{gu_bt}, buffer)
++""" + (f"""{wsc}{hq}    kernel.launch @g_moe_gu_{gun}{q8}_k{H}_r{R}[%nFE, %ta](%nFE, %ta, %ids, {xa}, %wge_{i}, {wu}{gu_b}, %act) : [index, index](index, index, buffer, buffer, view<{sg}xi8>, view<{su}xi8>{gu_bt}, buffer)
+ {quant_act}    kernel.launch @g_moe_dn_{fd}{q8}_k{FE}_r{R}[%nH, %ta](%nH, %ta, %ids, {actd}, %wde_{i}{dn_b}, %ys) : [index, index](index, index, buffer, buffer, view<{sd}xi8>{dn_bt}, buffer)
+     kernel.launch @g_moe_combine[%t](%t, %ys, %wts, {sgarg}{out}) : [index](index, buffer, buffer, {sgty}buffer)
+   }}
++""" if not shared else shslot_launches(i, gun, fd, R, sg, su, sd, wu, out, shared))
++
++
++def shslot_launches(i, gun, fd, R, sg, su, sd, wu, out, shared):
++    gsh, ush, dsh, ssz, dsz = shared
++    USED_SHSLOT.add((gun, H, MOE["ffn"], "gu")); USED_SHSLOT.add((fd, MOE["ffn"], H, "dn"))
++    return f"""    kernel.launch @g_moe_gu_{gun}_k{H}_r{R}_sh[%nFE, %ta](%nFE, %ta, %ids, %h, %wge_{i}, {wu}, {gsh}, {ush}, %act) : [index, index](index, index, buffer, buffer, view<{sg}xi8>, view<{su}xi8>, view<{ssz}xi8>, view<{ssz}xi8>, buffer)
++    kernel.launch @g_moe_dn_{fd}_k{MOE["ffn"]}_r{R}_sh[%nH, %ta](%nH, %ta, %ids, %act, %wde_{i}, {dsh}, %ys) : [index, index](index, index, buffer, buffer, view<{sd}xi8>, view<{dsz}xi8>, buffer)
++    kernel.launch @g_moe_combine_sh[%t](%t, %ys, %wts, {out}) : [index](index, buffer, buffer, buffer)
++  }}
+ """
+ 
+ 
+@@ -5396,11 +5477,11 @@
+   %ids_size = index.scale %t, %ids_bytes : index, offset -> offset
+   %ids = buffer.alloca<global> align(256) %ids_size : buffer
+   %wts = buffer.alloca<global> align(256) %ids_size : buffer
+-  %act_bytes = index.constant {KU * FE * 4} : offset
++  %act_bytes = index.constant {(KU + MOE_SHSLOT) * FE * 4} : offset
+   %act_size = index.scale %t, %act_bytes : index, offset -> offset
+   %act = buffer.alloca<global> align(256) %act_size : buffer
+   %actq = buffer.alloca<global> align(256) %act_size : buffer
+-  %ys_bytes = index.constant {KU * H * 4} : offset
++  %ys_bytes = index.constant {(KU + MOE_SHSLOT) * H * 4} : offset
+   %ys_size = index.scale %t, %ys_bytes : index, offset -> offset
+   %ys = buffer.alloca<global> align(256) %ys_size : buffer
+   %c64m = index.constant 64 : index
+@@ -5447,6 +5528,10 @@
+         mv = GM.expert_mv(fmt, K, N, MOE["experts"], MOE["used"], MOE_R, mode, fused=bool(MOE.get("gate_up_fused")) and mode == "gu", iq=iqf, **xb)
+         # GEGLU experts: the expert matvec's scalar silu, the grouped GEMM's vector silu, as gelu-tanh
+         parts.append(mv.replace("    %silu = scalar.siluf<afn> %t0 : f32\n", gelu_scalar("silu", "t0", "    ") + "\n") if GELU else mv)
++    for fmt, K, N, mode in sorted(USED_SHSLOT):
++        parts.append(GM.expert_mv(fmt, K, N, MOE["experts"], MOE["used"], MOE_R, mode, shared=True))
++    if USED_SHSLOT:
++        parts.append(GM.combine_sh(H, MOE["used"]))
+     comb, comb_s = GM.combine(H, MOE["used"], acc=bool(FS)), GM.combine_sorted(H, MOE["used"], acc=bool(FS))
+     if SHGATE:
+         comb, comb_s = GM.shared_gated(comb), GM.shared_gated(comb_s)
+@@ -5977,6 +6062,60 @@
      return (head + sizes + "  scf.if %outsel {\n" + gather + comp + scatter + "  } else {\n" + tail + "  }\n")
  
  
@@ -382,7 +494,7 @@
  MODEL_PARTS = {}   # model() records its pieces here for the speculative-decoding programs (draft/gen_draft.py)
  
  
-@@ -6094,9 +6188,9 @@
+@@ -6094,9 +6233,9 @@
    %c_never = index.constant 1000000 : index
    %c128 = index.constant 128 : index
    %prefill_shape = index.cmp uge, %t, {"%c_never" if os.environ.get("NO_GEMM") else "%c64"} : index
@@ -394,7 +506,7 @@
    %pml_pre = index.constant {QH * 16 * 2 * 4} : offset
    %pacc_bytes = scf.select %prefill_shape, %pacc_pre, %pacc_dec : offset
    %pml_bytes = scf.select %prefill_shape, %pml_pre, %pml_dec : offset
-@@ -6157,6 +6251,15 @@
+@@ -6157,6 +6296,15 @@
          L_.append(f"  %nC = index.constant {g['C']} : index\n  %nVD = index.constant {g['VD']} : index\n  %nHV = index.constant {g['HV']} : index\n")
      if not QK_NORM:
          L_.append("  %no_norm = buffer.alloca<global> align(256) %row_bytes : buffer\n")
@@ -410,7 +522,7 @@
      if MOE:   # its own part: the MTP drafter programs reuse the prologue (all parts but the last), MoE layer included
          L_.append("\n" + moe_alloc())
      L_.append(f"""{"" if MOE else chr(10)}  kernel.launch @g_token_info[%t](%t, %spans, %metadata, %info) : [index](index, index, buffer, buffer)
-@@ -6195,11 +6298,13 @@
+@@ -6195,11 +6343,13 @@
              T.append(par("sinks", "attn_sinks", f"view<{QH}xf32>"))
          if i in RECUR:
              T.append(gdn_layer(i, b, nm, sz, par))
@@ -425,7 +537,7 @@
              pass
          elif GATE and not FUSED_Q:
              T.append(par("wg", "attn_gate"))
-@@ -6215,7 +6320,7 @@
+@@ -6215,7 +6365,7 @@
          # same format and size: one dual-weight launch at 8/16 tokens (PAIR_PROJ)
          same = lambda a, b: fmt_of(nm(a)) == fmt_of(nm(b)) and sz(a) == sz(b)
          qg = GATE and not FUSED_Q and not HEAD_GATE and not QKV_FUSED and i not in RECUR and same("attn_q", "attn_gate") and PAIR_PROJ in ("1", "qg")
@@ -434,7 +546,7 @@
              pass
          elif QKV_FUSED:
              T.append("  " + lin(fmt_of(nm("attn_qkv")), "%h", "%s_h", f"%wqkv_{i}", sz("attn_qkv"), "%qkv", "%nH", "%nQKV", H) + "\n")
-@@ -6224,7 +6329,7 @@
+@@ -6224,7 +6374,7 @@
              T.append("  " + lin2(fmt_of(nm("attn_q")), "%h", "%s_h", f"%wq_{i}", f"%wg_{i}", sz("attn_q"), "%q", "%gate", "%nH", "%nQ", H) + "\n")
          else:
              T.append("  " + lin(fmt_of(nm("attn_q")), "%h", "%s_h", f"%wq_{i}", sz("attn_q"), "%q", "%nH", nq, H) + "\n")
@@ -443,7 +555,7 @@
            pass
          elif same("attn_k", "attn_v") and PAIR_PROJ in ("1", "kv"):
            T.append("  " + lin2(fmt_of(nm("attn_k")), "%h", "%s_h", f"%wk_{i}", f"%wv_{i}", sz("attn_k"), "%k", "%v", "%nH", "%nKV", H) + "\n")
-@@ -6239,7 +6344,7 @@
+@@ -6239,7 +6389,7 @@
          qn, kn = (f"%q_norm_{i}", f"%k_norm_{i}") if QK_NORM else ("%no_norm", "%no_norm")
          gate, gty = (f"%sinks_{i}", f"view<{QH}xf32>") if SINKS else (gate0, "buffer")
          nty = f"view<{D}xf32>" if QK_NORM else "buffer"
@@ -452,7 +564,7 @@
            rope_k = "g_qk_rope_store_swa" if SWA_ROPE and i in sliding else "g_qk_rope_store"
            T.append(f"""  kernel.launch @{rope_k}[%t](%t, %layer_{i}, %rope_{i}, %context, %pool, %q, %k, %v, {qn}, {kn}, %info, %origins, %arena{", %metadata, %tokens" if MROPE else ""}{bias_args}) : [index](index, index, i32, index, index, buffer, buffer, buffer, {nty}, {nty}, buffer, buffer, buffer{", buffer, buffer" if MROPE else ""}{bias_types})
    scf.if %gemm {{
-@@ -6255,7 +6360,7 @@
+@@ -6255,7 +6405,7 @@
    }}
  """)
  
@@ -461,7 +573,7 @@
            T.append("  " + lin(fmt_of(nm("attn_output")), "%o", "%s_o", f"%wo_{i}", sz("attn_output"), "%y", nq, "%nH", qd) + "\n")
            if OUT_BIAS:   # attention output projection bias (gpt-oss attn_output.bias)
              T.append(f'  %bo_{i} = command.parameter %weights, "{b}attn_output.bias" : view<{H}xf32>\n'
-@@ -6457,7 +6562,7 @@
+@@ -6457,7 +6607,7 @@
          from gen_mxfp4s import mxfp4s_icodes as _mx_icodes
          COMMON += _mx_icodes()
      if USED_MVQ or USED_MOEQ or PH_ONLY:   # ACT_Q8: int8-activation matvecs, their weight-code helpers and g_quant_q8
@@ -470,7 +582,7 @@
              COMMON += IQ4_ICODES
          COMMON += ICODES + "".join(mv(fmt, K, R=R, TG=TG, swiglu=sw == 1, pair=sw == 2, suffix=f"_r{R}" if R != 16 else "", iq=True)
                                     for fmt, K, sw, R, TG in sorted(USED_MVQ))
-@@ -6515,8 +6620,12 @@
+@@ -6515,8 +6665,12 @@
              parts.append(mv(fmt, K, TG=TG, swiglu=sw))
      for fmt, K, sw, R, TG in sorted(USED_MV_R):
          parts.append(mv(fmt, K, R=R, TG=TG, swiglu=sw, suffix=f"_r{R}"))
@@ -484,7 +596,7 @@
      if FUSED_Q:
          parts.append(split_qgate(QH, D))
      if SWA_ROPE:
-@@ -6567,8 +6676,9 @@
+@@ -6567,8 +6721,9 @@
      parts.append(open(os.path.join(here, "tile_uniform.loom")).read())
      if not NO_FLASH:
          flash2 = os.path.join(out_dir, "flash2.loom")
@@ -512,6 +624,195 @@
  GATE_NAME = {1: "softmax(logits)", 2: "sigmoid(logit)", 3: "logit"}   # llama.cpp's expert_gating_func values
  # gating 3 (SOFTMAX_WEIGHT): `bias` is the router's own bias (ffn_gate_inp.bias, added to the logits before the top-k)
  # and the k weights are a softmax over the k picked logits.
+@@ -532,7 +534,7 @@
+     return route_decode(H, E, KU, gating, norm, bias, wty, scale) + route_prefill(H, E, KU, gating, norm, bias, wty, scale)
+ 
+ 
+-def expert_mv(fmt, K, N, E, KU, R, mode, fused=False, bias=False, act=None, iq=None):
++def expert_mv(fmt, K, N, E, KU, R, mode, fused=False, bias=False, act=None, iq=None, shared=False):
+     """mode 'gu': act[a] = silu(Wg[e] x[a/KU]) * Wu[e] x[a/KU]; mode 'dn': ys[a] = Wd[e] x[a].
+     fmt "GATE+UP" ('gu'): gate and up weights in different formats, each with its own strides and dequant.
+     fused ('gu'): one gate_up tensor passed as both weights, expert e's N gate rows then its N up rows.
+@@ -540,8 +542,13 @@
+     act: the gate/up activation (see act_scalar).
+     iq: (iq_decode, iq_dot, iq_load) of gen_llm (ACT_Q8): the activation is read as int8 codes + (scale, code sum) written by
+     g_quant_q8 (layout: rows x groups x 32 int8, then rows x groups x (d, sum)) and contracted with the weight codes by
+-    integer dot4, as llama.cpp's mul_mat_vec_q does for expert matvecs; kernel name g_moe_{mode}_{fmt}_q8_k{K}_r{R}."""
++    integer dot4, as llama.cpp's mul_mat_vec_q does for expert matvecs; kernel name g_moe_{mode}_{fmt}_q8_k{K}_r{R}.
++    shared (MOE_SHSLOT, kernel name ..._sh): the shared expert (same format and shape as one routed expert, its own
++    weight buffers after the routed ones) as one more assignment slot per token: workgroups x = tokens + tokens / KU
++    ('gu': tokens = assignments) or tokens + rows ('dn': launched with its assignment count and token rows); slot
++    a >= tokens is token a - tokens's shared expert ('gu' reads x row a - tokens), written to output row a."""
+     fmt, _, fmt2 = fmt.partition("+")
++    assert not shared or (not iq and not fmt2 and not bias and not fused), "shared slot: one format, f32 activations, no biases"
+     assert iq is None or (not fmt2 and not bias), "int8 expert matvecs: one weight format, no biases"
+     groups = K // 32
+     lanes = (groups + 31) // 32 * 32
+@@ -549,24 +556,40 @@
+     rb = row_bytes(fmt, K)
+     eb = rb * N
+     nw = 2 if mode == "gu" else 1
+-    name = f"g_moe_{mode}_{fmt}{'_' + fmt2 if fmt2 else ''}{'_fused' if fused else ''}{'_q8' if iq else ''}_k{K}_r{R}"
++    name = f"g_moe_{mode}_{fmt}{'_' + fmt2 if fmt2 else ''}{'_fused' if fused else ''}{'_q8' if iq else ''}_k{K}_r{R}{'_sh' if shared else ''}"
+     wargs = "%w: buffer, %w2: buffer" if nw == 2 else "%w: buffer"
++    if shared:
++        wargs += ", %ws: buffer, %ws2: buffer" if nw == 2 else ", %ws: buffer"
+     if bias:
+         wargs += ", %bg: buffer, %bu: buffer" if nw == 2 else ", %bd: buffer"
+-    xrows = "%xrows" if mode == "gu" else "%tokens"
++    xrows = "%xrows" if mode == "gu" else "%atot" if shared else "%tokens"
+     L = [f"""
+ kernel.def export("{name}") @{name}(%n: index, %tokens: index) {{
+   %c1 = index.constant 1 : index
+   %lanes = index.constant {lanes} : index
+   %rows_per = index.constant {R} : index
+-  %row_groups = index.div %n, %rows_per : index
+-  kernel.launch.config workgroups(%tokens, %row_groups, %c1) workgroup_size(%lanes, %c1, %c1) : index
++  %row_groups = index.div %n, %rows_per : index""" + (f"""
++  %cKU_l = index.constant {KU} : index
++  %sh_rows = index.div %tokens, %cKU_l : index
++  %grid_x = index.add %tokens, %sh_rows : index
++  kernel.launch.config workgroups(%grid_x, %row_groups, %c1) workgroup_size(%lanes, %c1, %c1) : index""" if shared else """
++  kernel.launch.config workgroups(%tokens, %row_groups, %c1) workgroup_size(%lanes, %c1, %c1) : index""") + f"""
+ }} launch(%n_arg: index, %tokens_arg: index, %ids: buffer, %x: buffer, {wargs}, %y: buffer) {{
+   %n = index.assume %n_arg [range(%n_arg, {R}, 262144), multiple_of(%n_arg, {R})] : index
+   %tokens = index.assume %tokens_arg [range(%tokens_arg, 1, 65536)] : index
+   %group_id = kernel.workgroup.id<y> : index
+-  %a_id = kernel.workgroup.id<x> : index
+-  %a = index.assume %a_id [lt(%a_id, %tokens)] : index
++  %a_id = kernel.workgroup.id<x> : index""" + (f"""
++  %cKU_s = index.constant {KU} : index
++  %c1_s = index.constant 1 : index
++  %true_s = scalar.constant true : i1
++  %sh_rows = index.div %tokens, %cKU_s : index
++  %atot = index.add %tokens, %sh_rows : index
++  %a = index.assume %a_id [lt(%a_id, %atot)] : index
++  %is_sh = index.cmp uge, %a, %tokens : index
++  %tok_last = index.sub %tokens, %c1_s : index
++  %a_ids_v = index.min %a, %tok_last : index
++  %a_ids = index.assume %a_ids_v [lt(%a_ids_v, %tokens)] : index""" if shared else """
++  %a = index.assume %a_id [lt(%a_id, %tokens)] : index""") + f"""
+   %workitem_id = kernel.workitem.id<x> : index
+   %workitem = index.assume %workitem_id [range(%workitem_id, 0, {lanes - 1})] : index
+   %wave_id = kernel.subgroup.id : index
+@@ -587,16 +610,26 @@
+   %c0_i32 = scalar.constant 0 : i32
+   %cE1_i32 = scalar.constant {E - 1} : i32
+   %ids_view = buffer.view %ids[%zero] : buffer -> view<[%tokens]xi32>
+-  %eid = view.load %ids_view[%a] : view<[%tokens]xi32> -> i32
++  %eid = view.load %ids_view[{"%a_ids" if shared else "%a"}] : view<[%tokens]xi32> -> i32
+   %elo = scalar.maxsi %eid, %c0_i32 : i32
+   %ehi = scalar.minsi %elo, %cE1_i32 : i32
+   %eb32 = scalar.assume %ehi [range(%ehi, 0, {E - 1})] : i32
+   %e = index.cast %eb32 : i32 to index
+-  %e_off = index.scale %e, %expert_bytes : index, offset -> offset"""]
+-    if mode == "gu":
++  %e_off_r = index.scale %e, %expert_bytes : index, offset -> offset""" + ("""
++  %e_off = scf.select %is_sh, %zero, %e_off_r : offset""" if shared else """
++  %e_off = index.add %e_off_r, %zero : offset""")]
++    if mode == "gu" and shared:
++        L.append(f"""  %xrows = index.div %tokens, %cKU : index
++  %xr_r = index.div %a, %cKU : index
++  %xr_s = index.sub %a, %tokens : index
++  %xr_v = scf.select %is_sh, %xr_s, %xr_r : index
++  %xr = index.assume %xr_v [lt(%xr_v, %xrows)] : index""")
++    elif mode == "gu":
+         L.append(f"""  %xrows = index.div %tokens, %cKU : index
+   %xr_v = index.div %a, %cKU : index
+   %xr = index.assume %xr_v [lt(%xr_v, %xrows)] : index""")
++    elif shared:
++        L.append("  %xr = index.assume %a [lt(%a, %atot)] : index")
+     else:
+         L.append("  %xr = index.assume %a [lt(%a, %tokens)] : index")
+     xview = (f"""  %xq_view = buffer.view %x[%zero] : buffer -> view<[{xrows}]x{groups}x8xi32>
+@@ -671,6 +704,24 @@
+     %qm{wi} = scalar.mulf %mn{wi}, %xs : f32
+     %qs{wi} = scalar.mulf %qd{wi}, %sc{wi} : f32
+     %d{wi} = scalar.subf %qs{wi}, %qm{wi} : f32""")
++        elif fold and shared:
++            L.append(f"""    %ok_r{wi} = scalar.xori %is_sh, %true_s : i1
++    %ok_rr{wi} = scalar.andi %ok, %ok_r{wi} : i1
++    %ok_ss{wi} = scalar.andi %ok, %is_sh : i1
++    %wvr{wi} = scf.if %ok_rr{wi} -> (vector<32xf32>) {{
++      %v = func.call @g_{fw}_values(%{w}, {o}, {within}) : (buffer, offset, index) -> (vector<32xf32>)
++      scf.yield %v : vector<32xf32>
++    }} else {{
++      scf.yield %zero32 : vector<32xf32>
++    }}
++    %wvs{wi} = scf.if %ok_ss{wi} -> (vector<32xf32>) {{
++      %v = func.call @g_{fw}_values(%{"ws" if wi == 0 else "ws2"}, {o}, {within}) : (buffer, offset, index) -> (vector<32xf32>)
++      scf.yield %v : vector<32xf32>
++    }} else {{
++      scf.yield %zero32 : vector<32xf32>
++    }}
++    %wv{wi} = vector.addf %wvr{wi}, %wvs{wi} : vector<32xf32>
++    %d{wi} = vector.dotf<reassoc|contract> %wv{wi}, %xg, %zero_f : vector<32xf32>, vector<32xf32>, f32""")
+         elif fold:
+             L.append(f"""    %wv{wi} = scf.if %ok -> (vector<32xf32>) {{
+       %v = func.call @g_{fw}_values(%{w}, {o}, {within}) : (buffer, offset, index) -> (vector<32xf32>)
+@@ -719,12 +770,13 @@
+     else:
+         L.append(f"    %value = scalar.addf {t0}, %zero_f : f32")
+     L.append("""    %out_row = index.add %row_base, %rr : index
+-    func.call @g_store_row(%y, %tokens, %n, %a, %out_row, %value, %c0_i32) : (buffer, index, index, index, index, f32, i32)
++    func.call @g_store_row(%y, TOKS, %n, %a, %out_row, %value, %c0_i32) : (buffer, index, index, index, index, f32, i32)
+   }
+   kernel.return
+ }
+ """)
+-    return "\n".join(L)
++    t = "\n".join(L).replace("TOKS", "%atot" if shared else "%tokens")
++    return t
+ 
+ 
+ def combine(H, KU, acc=False):
+@@ -758,6 +810,46 @@
+     view.store %a{KU - 1}, %y_view[%token, %ch] : f32, view<[%tokens]x{H}xf32>
+   }}
+   kernel.return
++}}
++"""
++
++
++def combine_sh(H, KU):
++    """g_moe_combine_sh: y[t] = sum_k w_k ys[t, k] + ys[T * KU + t] (the shared expert's slot of expert_mv(shared=True))."""
++    return f"""
++kernel.def export("g_moe_combine_sh") @g_moe_combine_sh(%tokens: index) {{
++  %c1 = index.constant 1 : index
++  %c256 = index.constant 256 : index
++  %cb = index.constant {(H + 255) // 256} : index
++  kernel.launch.config workgroups(%tokens, %cb, %c1) workgroup_size(%c256, %c1, %c1) : index
++}} launch(%tokens_arg: index, %ys: buffer, %wts: buffer, %y: buffer) {{
++  %tokens = index.assume %tokens_arg [range(%tokens_arg, 1, 8192)] : index
++  %token_id = kernel.workgroup.id<x> : index
++  %token = index.assume %token_id [lt(%token_id, %tokens)] : index
++  %thread_id = kernel.workitem.id<x> : index
++  %blk_id = kernel.workgroup.id<y> : index
++  %c256 = index.constant 256 : index
++  %boff = index.mul %blk_id, %c256 : index
++  %c_raw = index.add %thread_id, %boff : index
++  %cH = index.constant {H} : index
++  %in = index.cmp ult, %c_raw, %cH : index
++  scf.if %in {{
++    %ch = index.assume %c_raw [range(%c_raw, 0, {H - 1})] : index
++    %zero = index.constant 0 : offset
++    %zero_f = scalar.constant 0.0 : f32
++    %ys_view = buffer.view %ys[%zero] : buffer -> view<[%tokens]x{KU}x{H}xf32>
++    %sh_bytes = index.constant {KU * H * 4} : offset
++    %sh_off = index.scale %tokens, %sh_bytes : index, offset -> offset
++    %sh_view = buffer.view %ys[%sh_off] : buffer -> view<[%tokens]x{H}xf32>
++    %w_view = buffer.view %wts[%zero] : buffer -> view<[%tokens]x{KU}xf32>
++    %y_view = buffer.view %y[%zero] : buffer -> view<[%tokens]x{H}xf32>
++    %y_sh = view.load %sh_view[%token, %ch] : view<[%tokens]x{H}xf32> -> f32
++""" + "\n".join(f"""    %w{k} = view.load %w_view[%token, {k}] : view<[%tokens]x{KU}xf32> -> f32
++    %v{k} = view.load %ys_view[%token, {k}, %ch] : view<[%tokens]x{KU}x{H}xf32> -> f32
++    %a{k} = scalar.fmaf %w{k}, %v{k}, {"%y_sh" if k == 0 else f"%a{k - 1}"} : f32""" for k in range(KU)) + f"""
++    view.store %a{KU - 1}, %y_view[%token, %ch] : f32, view<[%tokens]x{H}xf32>
++  }}
++  kernel.return
+ }}
+ """
+ 
 --- a/inspect_gguf.py
 +++ b/inspect_gguf.py
 @@ -94,7 +94,7 @@

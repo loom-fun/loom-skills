@@ -22,8 +22,8 @@ v_b reads the first 512). Numerics: Q and P rounded to f16 (as the flash prefill
 """
 import os
 
-SMAX = int(os.environ.get("MLA_DEC_S", "64"))      # splits per token at most (grid y)
-BMIN = int(os.environ.get("MLA_DEC_BMIN", "4"))    # 16-key blocks per split at least
+SMAX = int(os.environ.get("MLA_DEC_S", "32"))      # splits per token at most (grid y)
+BMIN = int(os.environ.get("MLA_DEC_BMIN", "2"))    # 16-key blocks per split at least
 VTC = 16 + int(os.environ.get("MLA_DEC_VTPAD", "8"))   # padded V^T row (halves)
 # timing ablations (kbench only, results wrong): empty (no key blocks), noqk (no S MMAs), nostv (no V^T stores),
 # nopv (no PV MMAs), nosx (no S exchange: own partial, no first barrier), nopart (no partial O stores)
@@ -32,7 +32,7 @@ VTC = 16 + int(os.environ.get("MLA_DEC_VTPAD", "8"))   # padded V^T row (halves)
 PF = int(os.environ.get("MLA_DEC_PF", "0"))
 # partial layout: 0 = part_acc[token][split][head][512] (transposed fragment stores: 8 scattered 4 B stores per lane),
 # 1 = part_acc[token][split][512][head] (16 lanes = 16 heads write 64 contiguous bytes per row); g_mla_dcombine follows
-PL = int(os.environ.get("MLA_DEC_PL", "0"))
+PL = int(os.environ.get("MLA_DEC_PL", "1"))
 ABL = set(x for x in os.environ.get("MLA_DEC_ABL", "").split(",") if x)
 
 

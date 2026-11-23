@@ -19,7 +19,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(sys.argv[1]) if len(sys.argv) > 1 else os.path.abspath(os.path.join(HERE, "../../../.."))
 HEAD = "amdgpu.target<gfx11-generic> @w32 {subgroup_size = 32}\n\n"
 VARIANTS = {"split": {"MLA_DEC": "split"}, "pl1": {"MLA_DEC_PL": "1"}, "s32": {"MLA_DEC_S": "32"}, "b8": {"MLA_DEC_BMIN": "8"},
-            "b2": {"MLA_DEC_BMIN": "2"}, "b1": {"MLA_DEC_BMIN": "1"}}
+            "b2": {"MLA_DEC_BMIN": "2"}, "b1": {"MLA_DEC_BMIN": "1"}, "shslot": {"MOE_SHSLOT": "1"}}
 CTXS = [("short", 300), ("2k", 2048), ("8k", 8192)]
 OUT = None
 

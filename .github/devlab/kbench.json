@@ -404,12 +404,12 @@
       "gen_variants": [
         "base",
         "split",
-        "s32+b8+pl1"
+        "shslot"
       ],
       "files": [
         "bench.loom",
         "bench_split.loom",
-        "bench_s32+b8+pl1.loom"
+        "bench_shslot.loom"
       ],
       "config": [],
       "args": [
