@@ -1,47 +1,40 @@
 {
- "_comment": "R9700 per-model measurement (r9700_jobs.py): one job per model on one R9700 runner; loom-fun-staging card, llama.cpp ROCm b1375 + Vulkan b12211 with the matched drafting, reduced-context models served at served_context. Does not fit: none",
- "runner": "r9700",
- "memory_bytes": 34000000000,
- "llama_spec": "matched",
+ "_comment": "decode lane (JoyAI-LLM-Flash): ABBA base (origin/deepseek2-joyai) vs dec (this branch)",
+ "card": "loom-fun/jdopensource-JoyAI-LLM-Flash-loom@cb7861a81dbb586782044145ebb11f8cd48d8c8e",
+ "memory_bytes": 47000000000,
+ "kit": "deepseek2",
+ "llamacpp": "b1386",
+ "env": {
+  "LLAMACPP_EXTRA_ARGS": "--skip-chat-parsing"
+ },
  "jobs": [
   {
-   "name": "unsloth-qwen3-0-6b-loom",
-   "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
-   "kit": null,
-   "llamacpp": "b1375",
-   "llamacpp_vulkan": "b12211",
-   "memory_bytes_r9700": 17000000000,
+   "name": "joyai-decode",
    "variants": [
     {
-     "name": "card",
-     "build": {}
+     "name": "base",
+     "build": {},
+     "ref": "origin/deepseek2-joyai"
     },
     {
-     "name": "nodraft",
-     "build": {},
-     "execution": {
-      "draft_depth": 0
-     }
+     "name": "dec",
+     "build": {}
     }
    ],
    "steps": [
-    "func:card",
-    "ktest:card",
-    "gates:card:dev",
-    "perf:card:3",
-    "perf:card:3:long",
-    "c4:nodraft",
-    "llama@rocm.np1:3",
-    "llama@rocm.np1:3:long",
-    "llamac4@rocm.nodraft",
-    "llama@vulkan.np1:3",
-    "llama@vulkan.np1:3:long",
-    "llamac4@vulkan.perslot.nodraft"
+    "ktest:dec",
+    "perf:base:1",
+    "perf:dec:1",
+    "perf:dec:1",
+    "perf:base:1",
+    "c4:base",
+    "c4:dec",
+    "c4:dec",
+    "c4:base",
+    "perf:base:1:long",
+    "perf:dec:1:long",
+    "profile:dec:dec"
    ]
   }
- ],
- "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
- "kit": null,
- "llamacpp": "b1375",
- "llamacpp_vulkan": "b12211"
+ ]
 }
