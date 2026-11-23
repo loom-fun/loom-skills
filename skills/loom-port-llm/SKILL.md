@@ -28,9 +28,9 @@ in minutes. Other architectures (MLA, other recurrent layers) need new kernels;
 see the loom-kb topic `new-arch`.
 
 Prerequisites:
-- `loom-setup` is done: `~/loom/.venv` has the SDK (`hrx-loom` 0.2.0 from PyPI, which the
-  templates target) and `~/loom/.tools` has gguf, numpy, tokenizers, jinja2 and
-  requests.
+- `loom-setup` is done: `~/loom/.venv` has hrx-loom 0.3.0 and `~/loom/.tools` has gguf, numpy, tokenizers,
+  jinja2 and requests. The starter emits ABI 1 and retains its 0.2.0 package pin. To publish a validated 0.3.0 package,
+  follow the version entry in `loom-migrate` after qualifying it with that SDK.
 - The llama.cpp ROCm reference is available (`loom-benchmark`), for the golden
   comparison.
 

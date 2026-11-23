@@ -1,7 +1,7 @@
 #!/bin/bash
 # Install the Loom SDK (hrx-loom) + the matching model library, from scratch.
 # usage: [VENV_NAME=.venv] [PYTHON=python3] install_loom.sh [ROOT=~/loom] [VERSION|release:VERSION|pypi:VERSION|latest|ci-latest|ci:ARTIFACT_ID]
-#   0.2.0 (default), 0.1.0, pypi:V: hrx-loom from PyPI (0.1.0 is what packages without an SDK pin were built with)
+#   0.3.0 (default), 0.2.0, 0.1.0, pypi:V: hrx-loom from PyPI (0.1.0 is what packages without an SDK pin were built with)
 #   release:V, or a bare pre-release VERSION (0.2.0rc1, 0.3.0a1): hrx-loom from the ROCm/hrx-system GitHub release vV (a
 #                     pre-release, not on PyPI): the wheel asset, its sha256 verified against the release's SHA256SUMS;
 #                     no gh needed
@@ -19,7 +19,8 @@
 # stamps it into each package's llm_config.json; the card scripts record it with each measurement.
 # Needs: python >= 3.12 with venv, git (and gh + unzip for ci-*). Windows: run from Git Bash (venvs use Scripts/).
 set -euo pipefail
-root=${1:-$HOME/loom}; which=${2:-0.2.0}
+here=$(cd "$(dirname "$0")" && pwd)
+root=${1:-$HOME/loom}; which=${2:-0.3.0}
 # Which source a VERSION means: release:V and bare pre-release versions (0.2.0rc1) are GitHub releases; pypi:V and the rest PyPI.
 case "$which" in
   release:*) which=release:${which#release:};;
@@ -75,10 +76,16 @@ case "$which" in
     rm -rf wheel-pypi; $venv/$bin/pip download -q --no-deps -d wheel-pypi "$spec"
     whl=$(ls wheel-pypi/hrx_loom-*.whl | head -1);;
 esac
-$venv/$bin/pip install -q --force-reinstall --no-deps "$whl" && $venv/$bin/pip install -q "$whl[hf]"
 wheel_sha=$($venv/$bin/python -c 'import hashlib,sys;print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest())' "$whl")
+if [ "$source" != ci ]; then
+  verified_sha=$($venv/$bin/python "$here/sdk_pin.py" verify-release-wheel "$(basename "$whl")" "$wheel_sha")
+  if [ -n "$verified_sha" ]; then
+    sha=$verified_sha; branch=v$(basename "$whl" | cut -d- -f2)
+  fi
+fi
+$venv/$bin/pip install -q --force-reinstall --no-deps "$whl" && $venv/$bin/pip install -q "$whl[hf]"
 version=$($venv/$bin/python -c 'import importlib.metadata as m;print(m.version("hrx-loom"))')
-if [ $source = pypi ] && command -v gh >/dev/null; then
+if [ $source = pypi ] && [ -z "$sha" ] && command -v gh >/dev/null; then
   # The PyPI wheel is the hrx-system release asset with the same sha256: record the release tag's commit.
   q=".assets[] | select(.name == \"$(basename "$whl")\") | .digest"
   digest=$(gh api "repos/ROCm/hrx-system/releases/tags/v$version" -q "$q" 2>/dev/null || true)

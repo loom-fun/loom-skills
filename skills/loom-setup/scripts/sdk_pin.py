@@ -6,7 +6,7 @@ A package carries
 in its llm_config.json (written by build/catalog.py from the kit's catalog.json, or by `stamp`). source is "pypi" (0.2.0 and 0.1.0), "release" (a
 ROCm/hrx-system GitHub release, for pre-releases such as 0.2.0rc1; no expiry), or "ci" (a development artifact; expires after ~90 days, "expires").
 A package WITHOUT a pin was built before pins existed and means hrx-loom 0.1.0 (PyPI), explicitly: the published
-v0.1.0 cards keep running on 0.1.0 while the installer default is 0.2.0.
+v0.1.0 cards keep running on 0.1.0 while the installer default is 0.3.0.
 
   sdk_pin.py show FILE          the install_loom.sh version argument: "release:VERSION", "ci:ARTIFACT_ID" or a PyPI version
                                 ("0.1.0" for a file without a pin)
@@ -27,6 +27,27 @@ def load(path):
 
 
 DEFAULT_PIN = {"hrx_loom": "0.1.0", "source": "pypi"}   # a package without a pin
+VERIFIED_RELEASES = {
+    "0.3.0": {
+        "hrx_system_sha": "e2c41a720363911c04606ce0f4417e2d55630352",
+        "wheels": {
+            "manylinux_2_39_x86_64": "6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f",
+            "win_amd64": "06afbc88370fde741037ebd38dba91c2184cb4d2fbd5cee337720cd494a06752",
+        },
+    },
+}
+
+
+def verify_release_wheel(filename, digest):
+    """Return the exact release commit for a known wheel, or an empty string for other versions."""
+    parts = os.path.basename(filename).removesuffix(".whl").split("-")
+    release = VERIFIED_RELEASES.get(parts[1]) if len(parts) > 1 else None
+    if not release:
+        return ""
+    platform = parts[-1]
+    if filename != f"hrx_loom-{parts[1]}-py3-none-{platform}.whl" or release["wheels"].get(platform) != digest:
+        raise ValueError(f"sha256 verification failed for {filename}: downloaded {digest}")
+    return release["hrx_system_sha"]
 
 
 def pin(path):
@@ -44,6 +65,15 @@ def matches(root, sdk):
         have = load(os.path.join(root, "loom-install.json"))
     except (OSError, ValueError):
         return False
+    digest = sdk.get("wheel_sha256")
+    source = sdk.get("source", "pypi")
+    release = VERIFIED_RELEASES.get(sdk["hrx_loom"])
+    if release and digest and source in ("pypi", "release"):
+        wheels = release["wheels"].values()
+        commit = release["hrx_system_sha"]
+        return (digest in wheels and have.get("wheel_sha256") in wheels
+                and have.get("source") in ("pypi", "release") and have.get("hrx_loom") == sdk["hrx_loom"]
+                and sdk.get("hrx_system_sha") in (None, commit) and have.get("hrx_system_sha") in (None, commit))
     if sdk.get("wheel_sha256") and have.get("wheel_sha256"):
         return sdk["wheel_sha256"] == have["wheel_sha256"]
     if sdk.get("source") == "ci":
@@ -76,6 +106,11 @@ def main(argv):
         return 0 if matches(argv[1], sdk) else 1
     elif cmd == "stamp" and len(argv) == 3:
         stamp(argv[1], argv[2])
+    elif cmd == "verify-release-wheel" and len(argv) == 3:
+        try:
+            print(verify_release_wheel(argv[1], argv[2]))
+        except ValueError as exc:
+            sys.exit(str(exc))
     else:
         sys.exit(__doc__)
     return 0

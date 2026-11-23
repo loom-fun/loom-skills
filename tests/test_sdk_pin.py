@@ -77,6 +77,25 @@ class SdkPinTests(unittest.TestCase):
         self.install(hrx_loom="0.2.0.dev0", source="ci", artifact_id=13628412621, wheel_sha256="ab" * 32)
         self.assertEqual(run("matches", str(self.root), str(self.cfg)).returncode, 0)
 
+    def test_verified_sdk_030_pin_accepts_the_matching_release_on_both_platforms(self):
+        sha = "e2c41a720363911c04606ce0f4417e2d55630352"
+        linux = "6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f"
+        windows = "06afbc88370fde741037ebd38dba91c2184cb4d2fbd5cee337720cd494a06752"
+        pin = {"hrx_loom": "0.3.0", "source": "pypi", "wheel_sha256": linux, "hrx_system_sha": sha}
+        self.cfg.write_text(json.dumps({"sdk": pin}))
+        for platform, digest in (("manylinux_2_39_x86_64", linux), ("win_amd64", windows)):
+            with self.subTest(platform=platform):
+                filename = f"hrx_loom-0.3.0-py3-none-{platform}.whl"
+                result = run("verify-release-wheel", filename, digest)
+                self.assertEqual((result.returncode, result.stdout.strip()), (0, sha))
+                self.assertNotEqual(run("verify-release-wheel", filename, "cd" * 32).returncode, 0)
+                self.install(**dict(pin, wheel_sha256=digest))
+                self.assertEqual(run("matches", str(self.root), str(self.cfg)).returncode, 0)
+        for change in ({"wheel_sha256": "cd" * 32}, {"wheel_sha256": None}, {"source": "ci"}, {"hrx_system_sha": "f" * 40}):
+            with self.subTest(change=change):
+                self.install(**(pin | change))
+                self.assertNotEqual(run("matches", str(self.root), str(self.cfg)).returncode, 0)
+
     def test_no_pin_means_0_1_0(self):
         self.cfg.write_text("{}")
         self.install(hrx_loom="0.2.0rc1", source="release", wheel_sha256="ef" * 32)
@@ -137,6 +156,29 @@ class EnsureSdkTests(unittest.TestCase):
             cfg.write_text(json.dumps({"sdk": RELEASE}))
             r = self.ensure(tmp, cfg)
             self.assertEqual((r.returncode, r.stdout.strip()), (0, str(Path(tmp) / "loom")), r.stderr)
+
+    def test_git_bash_reuses_the_equivalent_windows_wheel(self):
+        with tempfile.TemporaryDirectory() as temp:
+            work = Path(temp)
+            root = work / "loom"
+            cfg = work / "llm_config.json"
+            linux = "6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f"
+            windows = "06afbc88370fde741037ebd38dba91c2184cb4d2fbd5cee337720cd494a06752"
+            pin = {"hrx_loom": "0.3.0", "source": "pypi", "wheel_sha256": linux}
+            cfg.write_text(json.dumps({"sdk": pin}))
+            for binary in (".venv/Scripts/loom-serve.exe", ".tools/Scripts/python.exe"):
+                path = root / binary
+                path.parent.mkdir(parents=True)
+                path.touch(mode=0o755)
+            (root / "loom-install.json").write_text(json.dumps(dict(pin, wheel_sha256=windows)))
+            uname = work / "uname"
+            uname.write_text("#!/bin/sh\necho MINGW64_NT\n")
+            uname.chmod(0o755)
+            env = {k: v for k, v in os.environ.items() if k != "LOOM_VERSION"}
+            env["PATH"] = str(work) + os.pathsep + env["PATH"]
+            r = subprocess.run(["bash", str(SCRIPTS / "ensure_sdk.sh"), str(root), str(cfg)],
+                               capture_output=True, text=True, env=env, timeout=5)
+            self.assertEqual((r.returncode, r.stdout.strip()), (0, str(root)), r.stderr)
 
 
 if __name__ == "__main__":

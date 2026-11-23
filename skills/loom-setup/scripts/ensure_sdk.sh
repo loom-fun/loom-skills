@@ -9,6 +9,7 @@
 # Every script that installs Loom for a package calls this (port.sh, port_e2e.sh, nightly_gates.sh, devlab_*.sh).
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd); root=$1; cfg=${2:-}
+case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) bin=Scripts; suffix=.exe;; *) bin=bin; suffix=;; esac
 which=; if [ -n "$cfg" ] && [ -f "$cfg" ]; then which=$(python3 "$here/sdk_pin.py" show "$cfg"); fi
 pinned=0
 if [ -n "${LOOM_VERSION:-}" ]; then
@@ -18,7 +19,7 @@ elif [ -n "$which" ]; then
   pinned=1
   python3 "$here/sdk_pin.py" matches "$root" "$cfg" || root=$root-${which##*:}
 fi
-if [ ! -x "$root/.venv/bin/loom-serve" ] || [ ! -x "$root/.tools/bin/python" ] || { [ $pinned = 1 ] && ! python3 "$here/sdk_pin.py" matches "$root" "$cfg"; }; then
+if [ ! -x "$root/.venv/$bin/loom-serve$suffix" ] || [ ! -x "$root/.tools/$bin/python$suffix" ] || { [ $pinned = 1 ] && ! python3 "$here/sdk_pin.py" matches "$root" "$cfg"; }; then
   echo "installing Loom ${which:-(default)} into $root" >&2
   "$here/install_loom.sh" "$root" ${which:+"$which"} >&2 || {
     if [ $pinned = 1 ]; then

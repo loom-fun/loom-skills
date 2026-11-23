@@ -120,8 +120,8 @@ The skills use these validation gates to assess whether a model program is corre
 
 - Linux or Windows 11 (Git Bash), and an AMD GPU (ROCm-class; developed on gfx1151). The NPU path needs an XDNA device.
 - Python ≥ 3.12 with `venv`, and `git`. The SDK comes from PyPI
-  ([`hrx-loom` 0.2.0](https://pypi.org/project/hrx-loom/0.2.0/), Linux glibc ≥ 2.39 or Windows 11; source release
-  [v0.2.0](https://github.com/ROCm/hrx-system/releases/tag/v0.2.0)).
+  ([`hrx-loom` 0.3.0](https://pypi.org/project/hrx-loom/0.3.0/), Linux glibc ≥ 2.39 or Windows 11; source release
+  [v0.3.0](https://github.com/ROCm/hrx-system/releases/tag/v0.3.0)).
   `gh` is only needed for development wheels from CI (`install_loom.sh ROOT ci-latest`).
 
 ## Repository layout

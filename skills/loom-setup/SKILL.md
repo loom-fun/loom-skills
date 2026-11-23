@@ -1,6 +1,6 @@
 ---
 name: loom-setup
-description: Install AMD Loom (hrx-loom 0.2.0 from PyPI, 0.1.0 for pin-less packages, a GitHub pre-release, or a ROCm/hrx-system CI wheel) and the hrx-loom-library catalog from a cold start, fetch catalog models with loom-fetch, and start/stop/inspect loom-serve on the GPU or NPU. Use for "install loom", "loom-fetch a model", "start loom-serve for X", "is the server ready", NPU serving.
+description: Install AMD Loom (hrx-loom 0.3.0 from PyPI, 0.1.0 for pin-less packages, a GitHub pre-release, or a ROCm/hrx-system CI wheel) and the hrx-loom-library catalog from a cold start, fetch catalog models with loom-fetch, and start/stop/inspect loom-serve on the GPU or NPU. Use for "install loom", "loom-fetch a model", "start loom-serve for X", "is the server ready", NPU serving.
 ---
 
 # Loom setup: install → fetch → serve
@@ -20,15 +20,16 @@ binary approval).
 ## 1. Install (≈30 s with a warm pip cache, a few minutes cold)
 
 ```bash
-bash "${LOOM_SKILL_DIR}/scripts/install_loom.sh" ~/loom            # hrx-loom 0.2.0 from PyPI (wheel sha256 recorded)
+bash "${LOOM_SKILL_DIR}/scripts/install_loom.sh" ~/loom          # verified hrx-loom 0.3.0 wheel and matching catalog
+bash "${LOOM_SKILL_DIR}/scripts/install_loom.sh" ~/loom-0.2.0 0.2.0   # legacy pinned release
 bash "${LOOM_SKILL_DIR}/scripts/install_loom.sh" ~/loom 0.1.0      # hrx-loom 0.1.0 from PyPI (packages without an SDK pin)
 bash "${LOOM_SKILL_DIR}/scripts/install_loom.sh" ~/loom 0.2.0rc1    # a GitHub pre-release (sha256-verified against its SHA256SUMS)
 bash "${LOOM_SKILL_DIR}/scripts/install_loom.sh" ~/loom latest     # newest PyPI release
 bash "${LOOM_SKILL_DIR}/scripts/install_loom.sh" ~/loom ci-latest  # newest main CI wheel (needs gh)
 ```
 The script:
-- creates `~/loom/.venv` with the pinned wheel (`hrx-loom[hf]` 0.2.0 from PyPI; the wheel's sha256 is recorded, and with `gh` the
-  release commit; a pre-release comes from its GitHub release asset, checked against `SHA256SUMS`, no gh or token needed), which provides loom-serve,
+- creates `~/loom/.venv` with the pinned wheel (`hrx-loom[hf]` 0.3.0 from PyPI; the platform wheel's published sha256 is checked
+  before installation and recorded with the release commit; a pre-release comes from its GitHub release asset, checked against `SHA256SUMS`), which provides loom-serve,
   loom-fetch, loom-test, loom-run, loom-compile, loom-benchmark, loom-opt, loom-format, etc.
   (Linux x86-64 glibc ≥ 2.39 and Windows 11 x86-64 wheels; no ROCm SDK needed);
 - clones `ROCm/hrx-loom-library` to `~/loom/library` and checks out the **catalog revision the
@@ -37,10 +38,8 @@ The script:
   uvicorn and httpx for the port, benchmark and UI scripts.
 
 Facts:
-- **Pin the version.** The `loom-port-llm` templates target one text ABI (`text_*_v1`
-  exports). A newer release can change it; then registration fails with a "root symbol … was
-  not found" error and the templates need the diff of the upstream tiny-text fixture between
-  the two tags (see `loom-port-llm`).
+- **Pin the version.** SDK 0.3.0 accepts the ABI 1 exports used by the `loom-port-llm` templates and published 0.2.0 packages.
+  Use the package's own pin to reproduce its published environment.
 - `loom-fetch --list` shows the release's compatible catalog.
 - **Windows:** run the script from Git Bash; venvs use `Scripts/`. See the `loom` skill's
   Windows section.
@@ -55,9 +54,10 @@ Facts:
 
 A package carries `"sdk": {hrx_loom, source (release|pypi|ci), branch, artifact_id, hrx_system_sha,
 wheel_sha256, expires}` in its `llm_config.json`; a package **without** a pin means hrx-loom 0.1.0 (PyPI), explicitly, so
-the published v0.1.0 cards keep running on it while the installer default is 0.2.0. (A catalog package takes it from its `catalog.json`.) Every script that installs
+the published v0.1.0 cards keep running on it while the installer default is 0.3.0. (A catalog package takes it from its `catalog.json`.) Every script that installs
 Loom for a package calls `scripts/ensure_sdk.sh ROOT llm_config.json`, which prints the root to use: ROOT when it already is
 that wheel, else `ROOT-<artifact id | version>` (installed from the pinned wheel), so pinned and default SDKs coexist.
+An SDK 0.3.0 release pin made on Linux also accepts the verified Windows wheel of the same release, and vice versa.
 `LOOM_VERSION` set explicitly overrides the pin. A `pypi` or `release` pin never expires; **CI artifacts expire (~90 days; `sdk.expires`)**, and an expired CI pin makes
 `ensure_sdk.sh` fail. Refresh it before then: `install_loom.sh ROOT-new ci-latest` (or `ci:ID`), rerun the gates on that SDK, then
 `python3 scripts/sdk_pin.py stamp ROOT-new FILE` for the kit's `catalog.json` and the published card's `llm_config.json`
