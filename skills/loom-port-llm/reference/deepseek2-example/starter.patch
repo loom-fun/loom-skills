@@ -1,8 +1,6 @@
-diff --git a/build.py b/build.py
-index c5a221d..9b53598 100644
 --- a/build.py
 +++ b/build.py
-@@ -112,7 +112,9 @@ if DRAFT and DRAFT["kind"] == "dflash":
+@@ -112,7 +112,9 @@
  pos_bytes = 2 * max(cfg["kv_heads"] * (cfg.get("head_dim_swa") or cfg["head_dim"]),
                      (cfg.get("kv_heads_global") or cfg["kv_heads"]) * cfg["head_dim"])
  kv_layers = cfg.get("kv_layers", cfg["layers"])
@@ -13,7 +11,7 @@ index c5a221d..9b53598 100644
  if DRAFT and DRAFT["kind"] == "mtp":   # the MTP block's K/V shares the pool's pages
      kv_per_position += pos_bytes * 2 * len(cfg["mtp"]["layers"])
  if DRAFT and DRAFT["kind"] == "dflash":   # so does the drafter's context K/V
-@@ -453,8 +455,8 @@ def patch_role_suffixes(text):
+@@ -453,8 +455,8 @@
                 "        %role_suffix = scf.select %user, %suffix, %system_suffix : buffer\n"
                 "        %message = func.call @join4(%prefix, %text, %role_suffix, %empty)")
      # complete_text: the generated assistant turn
@@ -24,7 +22,7 @@ index c5a221d..9b53598 100644
  
  
  def patch_history_think_off(text):
-@@ -759,7 +761,7 @@ CALL_FORMATS = {"none": 0, "hermes": 1, "qwen_xml": 2, "glm": 3, "pythonic": 4,
+@@ -759,7 +761,7 @@
  custom_chat = os.path.join(HERE, "chat", chat["call_format"] + ".loom")
  custom_chat = custom_chat if chat["call_format"] not in CALL_FORMATS and os.path.exists(custom_chat) else None
  subs = {
@@ -33,7 +31,7 @@ index c5a221d..9b53598 100644
      "@@RECURRENT_BYTES@@": str(recurrent_bytes or 4),
      "@@LOGIT_REGION@@": "32768", "@@LOGIT_ROW_BYTES@@": str(((cfg["vocab"] + 127) // 128) * 512),   # gen_llm.LOGITS_OFFSET / CHUNKS * 512
      "@@MAX_CONTEXT@@": str(a.context), "@@TERMINAL@@": chat["terminal"], "@@HEX_TERMINAL@@": hx(chat["terminal"]),
-@@ -781,7 +783,7 @@ subs = {
+@@ -781,7 +783,7 @@
      "@@HEX_TOOLS_SYSTEM_SEPARATOR@@": hx(chat["tools_system_separator"]),
      "@@HEX_TOOL_TURN_PREFIX@@": hx(chat["tool_turn_prefix"]), "@@HEX_TOOL_ITEM_PREFIX@@": hx(chat["tool_item_prefix"]),
      "@@HEX_TOOL_ITEM_SUFFIX@@": hx(chat["tool_item_suffix"]), "@@HEX_TOOL_TURN_SUFFIX@@": hx(chat["tool_turn_suffix"]),
@@ -42,11 +40,9 @@ index c5a221d..9b53598 100644
      "@@HEX_CALL_MARKER@@": hx(chat.get("call_marker", "<tool_call>")),
      "@@DEFAULT_TEMPERATURE@@": repr(float(a.temperature)), "@@DEFAULT_TOP_P@@": repr(float(a.top_p)), "@@DEFAULT_TOP_K@@": str(a.top_k),
      "@@CALL_FORMAT@@": str(CALL_FORMATS[chat.get("base_call_format", "hermes") if custom_chat else chat["call_format"]]),
-diff --git a/chat_probe.py b/chat_probe.py
-index 6bc9d15..6c54872 100644
 --- a/chat_probe.py
 +++ b/chat_probe.py
-@@ -739,7 +739,7 @@ def simulate(chat, messages, tools=None, gen=False, enable_thinking=None, reason
+@@ -739,7 +739,7 @@
                  think = chat["think_open"] + chat["think_close"]
              calls = render_calls(chat, m.get("tool_calls") or [])
              text = "" if calls and chat.get("calls_drop_content") else text
@@ -55,11 +51,9 @@ index 6bc9d15..6c54872 100644
              out += chat["assistant_prefix"] + think + text + sep + calls + asst_suffix(chat)
          elif role == "user":
              out += chat["user_prefix"] + text + chat["suffix"]
-diff --git a/gen_flash2s.py b/gen_flash2s.py
-index 912402d..84ec80f 100644
 --- a/gen_flash2s.py
 +++ b/gen_flash2s.py
-@@ -27,6 +27,14 @@ import sys
+@@ -27,6 +27,14 @@
  _c = json.load(open(os.environ["LLM_CONFIG"]))
  P = "g"
  KVH, G, D = _c["kv_heads"], _c["heads"] // _c["kv_heads"], _c["head_dim"]
@@ -74,7 +68,7 @@ index 912402d..84ec80f 100644
  QH = KVH * G
  WINDOW = _c.get("sliding_window") or 262144
  GATE = bool(_c.get("attn_gate", False))
-@@ -55,13 +63,16 @@ KT = 32 if D == 256 and B_MODE != "2" else 16   # keys per tile (head_dim 512: K
+@@ -55,13 +63,16 @@
  if D == 256 and os.environ.get("FLASH2_KT256"):   # 16-key tiles at head_dim 256 (choice prefill.attn.flash2_kt256; gfx11 G = 6: two workgroups per WGP)
      KT = int(os.environ["FLASH2_KT256"])
  KB = KT // 16                     # 16-key blocks per tile
@@ -93,7 +87,7 @@ index 912402d..84ec80f 100644
  if D == 512 and os.environ.get("FLASH2_NG512"):   # experiment: query-head groups per KV head at head_dim 512 (more groups: fewer waves per workgroup, cheaper barriers)
      NG = int(os.environ["FLASH2_NG512"])
      assert G % NG == 0
-@@ -88,11 +99,15 @@ if KT == 16:
+@@ -88,11 +99,15 @@
      SEG_N = 2 * SEG_N
  while KT * SEG_N > LANES and SEG_N > 8 and B_MODE != "2":   # FLASH2_NG256 groups: fewer lanes, wider segments
      SEG_N //= 2
@@ -112,7 +106,7 @@ index 912402d..84ec80f 100644
  
  POSHI = """  // The last live position of the block: keys past it are not written yet (stale memory, possibly NaN), so they are
    // staged as zeros, which the causal mask already gives zero weight.
-@@ -238,7 +253,7 @@ A(f'''kernel.def export("{P}_attention_flash2") @{P}_attention_flash2(%tokens: i
+@@ -238,7 +253,7 @@
    %pos_last = index.add %pos0, %c15 : index
  {POSHI if PARTIAL else ""}  %padded = index.add %context, %c15 : index
    %blocks = index.div %padded, %c16 : index
@@ -121,7 +115,7 @@ index 912402d..84ec80f 100644
    %is_sliding = scalar.cmpi ne, %sliding, %c0_i32 : i32
    %window = index.constant {WINDOW} : index
    %window_less = index.constant {WINDOW - 1} : index
-@@ -276,13 +291,16 @@ A(f'''kernel.def export("{P}_attention_flash2") @{P}_attention_flash2(%tokens: i
+@@ -276,13 +291,16 @@
    %s_view = buffer.view %s_tile[%origin] : buffer -> view<{WAVES * KB * 16}x16xf32>
  
    // This wave's half of Q^T as MMA rhs, held for the whole key loop: lane column = token, 16 dims each.
@@ -144,7 +138,7 @@ index 912402d..84ec80f 100644
    %qh{c} = vector.fptrunc %qraw{c} : vector<16xf32> to vector<16xf16>
    %qf{c} = vector.fragment<rhs> %qh{c} shape [%c16, %c16] : vector<16xf16>''')
  A(f'''  %zero8 = vector.splatf 0.0 : vector<8xf32>
-@@ -316,11 +334,12 @@ A(f'''  %zero8 = vector.splatf 0.0 : vector<8xf32>
+@@ -316,11 +334,12 @@
    %st_seg = index.min %st_seg_value, %cseg_last : index
    %cseg_w = index.constant {SEG_W} : index
    %st_dim_value = index.mul %st_seg, %cseg_w : index
@@ -159,7 +153,7 @@ index 912402d..84ec80f 100644
  if WPH == 2:
      A(f'''  // S exchange slots: mine and my partner's (wave ^ 1).
    %my_s = index.mul %wave, %c{32 if KB == 2 else 16} : index
-@@ -351,10 +370,10 @@ A(f'''  %m_final, %l_final, {", ".join(f"%o{d}" for d in range(NFH))} = scf.for
+@@ -351,10 +370,10 @@
          %kp = index.assume %key_pos [range(%key_pos, 0, 262143)] : index
          %k_offset = func.call @{P}_kv_offset(%origins, %row, %kp, %blocks, %k_plane, %pool) : (buffer, index, index, index, index, index) -> (offset)
          %v_offset = index.add %k_offset, %v_plane_delta : offset
@@ -174,7 +168,7 @@ index 912402d..84ec80f 100644
          scf.yield %kh, %vh : vector<{SEG_W}xf16>, vector<{SEG_W}xf16>
        }} else {{
          scf.yield %kz, %kz : vector<{SEG_W}xf16>, vector<{SEG_W}xf16>
-@@ -363,8 +382,8 @@ A(f'''  %m_final, %l_final, {", ".join(f"%o{d}" for d in range(NFH))} = scf.for
+@@ -363,8 +382,8 @@
        scf.for %j = [%c0 to %cseg_w step %c1] unroll {{
          %vj = vector.extract %vvals[%j] : vector<{SEG_W}xf16> -> f16
          %vt_row_value = index.add %st_dim, %j : index
@@ -185,7 +179,7 @@ index 912402d..84ec80f 100644
        }}
      }}
      kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
-@@ -372,19 +391,19 @@ A(f'''  %m_final, %l_final, {", ".join(f"%o{d}" for d in range(NFH))} = scf.for
+@@ -372,19 +391,19 @@
  SV = f"view<{WAVES * KB * 16}x16xf32>"
  for kb in range(KB):
      accn = "%init"
@@ -209,7 +203,7 @@ index 912402d..84ec80f 100644
      else:          # all of the head's partials, in wave order
          A("\n".join(f"    %sp{kb}_{j} = vector.fragment.load<result> %s_view[%part{j}_s, %c0] shape [%c16, %c16] : {SV} -> vector<8xf32>"
                      for j in range(WPH)))
-@@ -493,10 +512,10 @@ A('''    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+@@ -493,10 +512,10 @@
    %one_f = scalar.constant 1.0 : f32
    %inv_l = scalar.divf %one_f, %l_final : f32
    %inv_v = vector.splat %inv_l : vector<8xf32>
@@ -222,7 +216,7 @@ index 912402d..84ec80f 100644
    %head_col = index.mul %head, %cdim : index
    %head_half = index.add %head_col, %dim_base : index
    %out_first = index.add %out_first_a, %head_half : index
-@@ -529,9 +548,9 @@ if PARTIAL:
+@@ -529,9 +548,9 @@
    %one_f = scalar.constant 1.0 : f32
    %inv_l = scalar.divf %one_f, %l_final : f32
    %inv_v = vector.splat %inv_l : vector<8xf32>
@@ -235,7 +229,7 @@ index 912402d..84ec80f 100644
    %head_col = index.mul %head, %cdim : index
    %head_half = index.add %head_col, %dim_base : index
    %col_base = index.add %head_half, %lane_half : index
-@@ -551,7 +570,7 @@ if PARTIAL:
+@@ -551,7 +570,7 @@
          for i in range(8):
              E.append(f"    %ov{d}_{i} = vector.extract %of{d}[%e{i}] : vector<8xf32> -> f32\n"
                       + ("" if GATE else f"    %dc{d}_{i} = index.constant {d * 16 + 2 * i} : index\n    %dm{d}_{i} = index.add %col_base, %dc{d}_{i} : index\n    %dn{d}_{i} = index.assume %dm{d}_{i} [lt(%dm{d}_{i}, %cqd)] : index\n")
@@ -244,11 +238,89 @@ index 912402d..84ec80f 100644
      E.append("  }\n")
      text = text[:i0] + "\n".join(E) + text[i1:]
      text = text.replace(f'"{P}_attention_flash2") @{P}_attention_flash2(', f'"{P}_attention_flash2_partial") @{P}_attention_flash2_partial(', 1)
-diff --git a/gen_llm.py b/gen_llm.py
-index 1ea6dec..ac05749 100644
+--- a/gen_gemm.py
++++ b/gen_gemm.py
+@@ -545,6 +545,12 @@
+     accs = ["g0", "g1", "u0", "u1"] if two_w else ["a0", "a1"]
+     stages = ["w_stage", "w2_stage"] if two_w else ["w_stage"]
+     k_min = 256 if 256 in (FMT[fmt]["block_values"], FMT[fmt2 or fmt]["block_values"]) else 64
++    # GEMM_T64_G32 (choice prefill.gemm.t64_g32): the 64-row tile stages IQ4 weights a whole 32-group per thread (_g32_iq4: one
++    # scale decode per 32, the unsigned book + 0x64 magic + one f16 fma per pair; the same values as iq4_dequant16 under
++    # iq4_f16lut). swiglu: threads 0-127 stage the gate rows (row t/2, group t%2), 128-255 the up rows (wave-uniform buffer pick);
++    # store: threads 0-127 stage the 64 rows, 128-255 stage only activations. Used by the grouped MoE GEMMs at short prompts.
++    g32t = (_t64_g32_on() and fmt in ("iq4_xs", "iq4_nl") and fmt2 is None and IQ4_NATIVE and _iq4_f16lut_on()
++            and mode in ("swiglu", "store", "acc"))
+     lines = []
+     lines.append(f'''kernel.def export("{name}") @{name}(%rows: index, %n: index) {{
+   %c1 = index.constant 1 : index
+@@ -618,7 +624,7 @@
+   %stage_col = index.mul %stage_quarter, %c16 : index
+   %x_row = index.add %row_origin, %stage_row : index
+   %bounded_x_row = index.assume %x_row [lt(%x_row, %rows)] : index
+-  %w_out_row = index.add %out_origin, %stage_row : index
++  %w_out_row = index.add %out_origin, %{WROW} : index
+   %bounded_w_out_row = index.assume %w_out_row [lt(%w_out_row, %n)] : index
+   %w_row_origin = index.scale %bounded_w_out_row, %row_bytes : index, offset -> offset{MIXED_ORIGIN}
+   %zero8 = vector.splatf 0.0 : vector<8xf32>
+@@ -635,12 +641,21 @@
+     %x_half = vector.load %x_view[%bounded_x_row, %x_col] : view<[%rows]x[%k]xf16> -> vector<16xf16>
+     vector.store %x_half, %x_stage_view[%stage_row, %stage_col] : vector<16xf16>, view<64x72xf16>
+     %w_col = index.add %k_origin, %stage_col : index''')
+-    for i, (st, w) in enumerate(zip(stages, ["w", "w2"])):
++    for i, (st, w) in enumerate(zip(stages, ["w", "w2"]) if not g32t else []):
+         if i and fmt2:   # the up weight in its own format: its block size and row origin
+             lines.append(dequant16(fmt2, w, None, f"deq{i}").replace("%w_row_origin", "%w2_row_origin").replace("%block_bytes", "%block_bytes2"))
+         else:
+             lines.append(dequant16(fmt, w, None, f"deq{i}"))
+         lines.append(f"    vector.store %deq{i}, %{st}_view[%stage_row, %stage_col] : vector<16xf16>, view<64x72xf16>")
++    if g32t:
++        dq = "\n".join(l for l in _g32_iq4(fmt, "w_g32" if two_w else "w", "dg", "%k_origin").strip("\n").split("\n") if l.strip())
++        st2 = lambda st: f"""      vector.store %dg_v0, %{st}_view[%g32_wrow, %g32_col0] : vector<16xf16>, view<64x72xf16>
++      vector.store %dg_v1, %{st}_view[%g32_wrow, %g32_col1] : vector<16xf16>, view<64x72xf16>"""
++        if two_w:   # every thread dequantizes one group; the wave-uniform branch picks the stage
++            lines.append(dq)
++            lines.append(f"    scf.if %g32_up {{\n{st2('w2_stage')}\n    }} else {{\n{st2('w_stage')}\n    }}")
++        else:       # 128 groups per step: the upper half of the workgroup stages activations only
++            lines.append(f"    scf.if %g32_lo {{\n{dq}\n{st2('w_stage')}\n    }}")
+     lines.append("    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)")
+     cur = {a: f"%{a}_acc" for a in accs}
+     for kk in range(4):
+@@ -693,6 +708,21 @@
+   vector.fragment.store<result> %act1, %y_view[%bounded_wave_row, %wave_out1] shape [%c16, %c16] : vector<8xf32>, view<64x64xf32, %y_layout>''')
+     lines.append("  kernel.return\n}\n")
+     text = "\n".join(lines)
++    if g32t:
++        wsel = "  %w_g32 = scf.select %g32_up, %w2, %w : buffer\n" if two_w else ""
++        text = text.replace("{WROW}", "g32_wrow").replace("  %w_out_row = index.add %out_origin, %g32_wrow : index\n", """  %g32_t = index.rem %workitem, %c128 : index
++  %g32_wrow0 = index.div %g32_t, %c2 : index
++  %g32_wrow = index.assume %g32_wrow0 [range(%g32_wrow0, 0, 63)] : index
++  %stage_ks = index.rem %workitem, %c2 : index
++  %g32_col0 = index.mul %stage_ks, %c32 : index
++  %g32_col1 = index.add %g32_col0, %c16 : index
++  %g32_up = index.cmp uge, %workitem, %c128 : index
++  %g32_true = scalar.constant true : i1
++  %g32_lo = scalar.xori %g32_up, %g32_true : i1
++""" + wsel + "  %w_out_row = index.add %out_origin, %g32_wrow : index\n", 1).replace(
++            "  %c256 = index.constant 256 : index\n  %nibble_mask", "  %c256 = index.constant 256 : index\n  %c128 = index.constant 128 : index\n  %nibble_mask", 1)
++    else:
++        text = text.replace("{WROW}", "stage_row")
+     if fmt2:
+         f2 = FMT[fmt2]
+         text = text.replace("{MIXED_ROW}", f"""
+@@ -1119,6 +1149,10 @@
+       %{o}_v1 = vector.fmaf %{o}_hi_f, %{o}_scales, %{o}_offsets : vector<16xf16>'''
+ 
+ 
++def _t64_g32_on():
++    return os.environ.get("GEMM_T64_G32", "0").strip().lower() not in ("", "0", "false", "no", "off")
++
++
+ def _g32_iq4_on():
+     return os.environ.get("GEMM_IQ4_G32", "0").strip().lower() not in ("", "0", "false", "no", "off")
+ 
 --- a/gen_llm.py
 +++ b/gen_llm.py
-@@ -81,12 +81,23 @@ G = QH // KVH                             # query heads per KV head (waves per a
+@@ -81,12 +81,23 @@
  # Prefill flash attention (gen_flash2.py) tiles head_dim over 32*G lanes: it needs a power-of-two group.
  # Otherwise (Qwen3.8: 6) every prefill token takes the listed split-K path (correct, slower prefill).
  NO_FLASH = os.environ.get("NO_FLASH2") == "1"
@@ -274,7 +346,7 @@ index 1ea6dec..ac05749 100644
  import attn_rules  # noqa: E402  decode attention variants (ATTN_* env), shared with make_kernel_tests.py
  from attn_rules import UNROLL, ATTN_MT, ATTN_MT_FROM  # noqa: E402
  POS_BYTES = KVH * D * 2                   # F16 K (or V) bytes per position
-@@ -4097,9 +4108,35 @@ def attention():
+@@ -4097,9 +4108,35 @@
      dec, _, _ = attention_text(64, "g")
      pre, split_l, combine_l = attention_text(16, "g16")
      count16 = pre[pre.index("// Splits for"):pre.index('kernel.def export("g16_attention_split")')]
@@ -310,7 +382,7 @@ index 1ea6dec..ac05749 100644
  FALLBACK = r"""
  // Prefill attention work lists, built once per epoch from the token info. A token's path depends only on its own
  // run (a run of one row's consecutive positions), never on where the epoch packs it or where the scheduler cut the
-@@ -5092,6 +5129,8 @@ NVAL = {"%nQH": QH, "%nQKV": (QH + 2 * KVH) * D, "%nH": H, "%nFF": FF, **({} if
+@@ -5092,6 +5129,8 @@
  NVAL.update({f"%nQ{h}": h * D for h in NARROW} | {f"%nQH{h}": h for h in NARROW})   # narrower layer_heads layers
  if GDN:
      NVAL.update({"%nC": GDN["C"], "%nVD": GDN["VD"], "%nHV": GDN["HV"]})
@@ -319,7 +391,17 @@ index 1ea6dec..ac05749 100644
  from mv_rows import pick_r, iq_r  # noqa: E402  (shared with make_kernel_tests.py)
  
  
-@@ -5298,7 +5337,7 @@ USED_MOEF = set()
+@@ -5291,6 +5330,9 @@
+ # g_row_scale_f16, and the gate/up output quantized by a g_quant_q8 launch) and contract with integer dot4 products,
+ # like the dense decode matvecs and llama.cpp's mul_mat_vec_q for experts. MOE_Q8=0: f32 activations.
+ MOE_Q8 = os.environ.get("MOE_Q8", "1") == "1"
++# MOE_T128=N (choice moe.prefill.t128): prefill epochs of >= N tokens bucket the experts' rows into 128-row tiles and run the m128
++# grouped GEMMs (gen_moe.grouped_gemm128); 0 (default): the 64-row grouped tiles at every size.
++MOE_T128 = int(os.environ.get("MOE_T128", "0") or 0)
+ USED_MOEQ = set()   # (fmt, K, N, mode) of the int8 expert matvecs; USED_MOEF: the f32 ones (USED_MOE: the grouped GEMMs)
+ USED_MOEF = set()
+ 
+@@ -5298,7 +5340,7 @@
  def moe_iq(gu, fd, x):
      """Whether this layer's decode expert matvecs take int8 activations (needs the router input as %h: its h16q)."""
      return (ACT_Q8 and MOE_Q8 and x == "%h" and "+" not in gu and gu in IQ_FMTS and fd in IQ_FMTS
@@ -328,11 +410,110 @@ index 1ea6dec..ac05749 100644
              and H // 32 <= 1024 and MOE["ffn"] // 32 <= 1024 and not MOE.get("expert_bias"))
  
  
-@@ -5977,6 +6016,58 @@ def last_out_select(text):
+@@ -5322,6 +5364,20 @@
+ 
+ 
+ def moe_routed(i, b, x="%h", rx="%h", out="%y"):
++    """_moe_routed; MOE_CW_F16O (with the column-wave gate/up GEMM): gate/up writes f16 activations (scale 1) straight into
++    %act16, so the g_row_scale_f16_tiles pass between the grouped GEMMs goes."""
++    t = _moe_routed(i, b, x, rx, out)
++    cw = os.environ.get("MOE_CW", "0").strip()
++    if os.environ.get("MOE_CW_F16O", "0") not in ("", "0"):
++        assert cw == "1" or {"swiglu", "store"} <= set(cw.split(",")), "MOE_CW_F16O needs both column-wave GEMMs (MOE_CW=1)"
++        import re as _r
++        t, n1 = _r.subn(r"(kernel\.launch @g_moe_ggu_iq4_xs_k\d+\[[^\n]*?)%act_sorted\) :", r"\1%act16) :", t)
++        t, n2 = _r.subn(r"\n *kernel\.launch @g_row_scale_f16_tiles\[[^\n]*", "", t)
++        assert n1 == 1 and n2 == 1, (n1, n2)
++    return t
++
++
++def _moe_routed(i, b, x="%h", rx="%h", out="%y"):
+     """Layer i's routed experts on input buffer X (prefill: its f16 copy %h16/%s_h, made here when X is not %h), the
+     router reading RX: router -> per-assignment gate/up (swiglu) and down -> weighted combine into OUT (added to it
+     when the layer has shared experts, scaled by the shared gate with SHGATE). cfg.moe gate_up_fused: one
+@@ -5371,12 +5427,15 @@
+ """) + f"""  %wde_{i} = command.parameter %weights, "{b}ffn_down_exps.weight" : view<{sd}xi8>
+   scf.if %gemm {{
+     kernel.launch @g_moe_route_tr_live[%t](%t, {rx}, %router_{i}, {bias}, %ids, %wts, %info) : [index](index, buffer, view<{E * H}x{rty}>, {bias_ty}, buffer, buffer, buffer)
+-{wsc}    kernel.launch @g_moe_bucket[%t](%t, %max_tiles, %info, %ids, %tile_info, %rowmap, %pos) : [index](index, index, buffer, buffer, buffer, buffer, buffer)
+-{x16}    kernel.launch @g_moe_ggu_{gun}_k{H}[%max_rows, %nFE](%max_rows, %nH, %nFE, %t, %tile_info, %rowmap, %h16, %s_h, %wge_{i}, {wu}{gu_b}, %act_sorted) : [index, index](index, index, index, index, buffer, buffer, buffer, buffer, view<{sg}xi8>, view<{su}xi8>{gu_bt}, buffer)
+-    kernel.launch @g_row_scale_f16_tiles[%max_rows](%max_rows, %nFE, %act_sorted, %s_rows, %act16, %tile_info) : [index](index, index, buffer, buffer, buffer, buffer)
+-    kernel.launch @g_moe_gdn_{fd}_k{FE}[%max_rows, %nH](%max_rows, %nFE, %nH, %max_rows, %tile_info, %rowmap, %act16, %s_rows, %wde_{i}{dn_b}, %ys_sorted) : [index, index](index, index, index, index, buffer, buffer, buffer, buffer, view<{sd}xi8>{dn_bt}, buffer)
+-    kernel.launch @g_moe_combine_sorted[%t](%t, %max_rows, %ys_sorted, %pos, %wts, {sgarg}{out}) : [index](index, index, buffer, buffer, buffer, {sgty}buffer)
+-  }} else {{
++{wsc}{x16}""" + "".join((f"""    {pre}scf.if %moe128 {{
++""" if t128 else "") + f"""    {pre}kernel.launch @g_moe_bucket{t128}[%t](%t, %max_tiles{t128}, %info, %ids, %tile_info, %rowmap, %pos) : [index](index, index, buffer, buffer, buffer, buffer, buffer)
++    {pre}kernel.launch @g_moe_ggu{t128}_{gun}_k{H}[%max_rows{t128}, %nFE](%max_rows{t128}, %nH, %nFE, %t, %tile_info, %rowmap, %h16, %s_h, %wge_{i}, {wu}{gu_b}, %act_sorted) : [index, index](index, index, index, index, buffer, buffer, buffer, buffer, view<{sg}xi8>, view<{su}xi8>{gu_bt}, buffer)
++    {pre}kernel.launch @g_row_scale_f16_tiles{t128}[%max_rows{t128}](%max_rows{t128}, %nFE, %act_sorted, %s_rows, %act16, %tile_info) : [index](index, index, buffer, buffer, buffer, buffer)
++    {pre}kernel.launch @g_moe_gdn{t128}_{fd}_k{FE}[%max_rows{t128}, %nH](%max_rows{t128}, %nFE, %nH, %max_rows{t128}, %tile_info, %rowmap, %act16, %s_rows, %wde_{i}{dn_b}, %ys_sorted) : [index, index](index, index, index, index, buffer, buffer, buffer, buffer, view<{sd}xi8>{dn_bt}, buffer)
++    {pre}kernel.launch @g_moe_combine_sorted[%t](%t, %max_rows{t128}, %ys_sorted, %pos, %wts, {sgarg}{out}) : [index](index, index, buffer, buffer, buffer, {sgty}buffer)
++""" + (f"""    }} else {{
++""" if t128 else f"""    }}
++""" if pre else "") for t128, pre in ([("128", "  "), ("", "  ")] if MOE_T128 and not eb and not fused and gu == fg else [("", "")])) + f"""  }} else {{
+     kernel.launch @g_moe_route[%t](%t, {rx}, %router_{i}, {bias}, %ids, %wts) : [index](index, buffer, view<{E * H}x{rty}>, {bias_ty}, buffer, buffer)
+ {wsc}{hq}    kernel.launch @g_moe_gu_{gun}{q8}_k{H}_r{R}[%nFE, %ta](%nFE, %ta, %ids, {xa}, %wge_{i}, {wu}{gu_b}, %act) : [index, index](index, index, buffer, buffer, view<{sg}xi8>, view<{su}xi8>{gu_bt}, buffer)
+ {quant_act}    kernel.launch @g_moe_dn_{fd}{q8}_k{FE}_r{R}[%nH, %ta](%nH, %ta, %ids, {actd}, %wde_{i}{dn_b}, %ys) : [index, index](index, index, buffer, buffer, view<{sd}xi8>{dn_bt}, buffer)
+@@ -5408,24 +5467,32 @@
+   %ta_tiles = index.div %ta, %c64m : index
+   %max_tiles = index.add %ta_tiles, %cEm : index
+   %max_rows = index.mul %max_tiles, %c64m : index
+-  %b8 = index.constant 8 : offset
++""" + (f"""  %c128m = index.constant 128 : index
++  %ta_tiles128 = index.div %ta, %c128m : index
++  %max_tiles128 = index.add %ta_tiles128, %cEm : index
++  %max_rows128 = index.mul %max_tiles128, %c128m : index
++  %moe128_min = index.constant {MOE_T128} : index
++  %moe128 = index.cmp uge, %t, %moe128_min : index
++  %max_rows64 = index.mul %max_tiles, %c64m : index
++  %max_rows_alloc = index.max %max_rows64, %max_rows128 : index
++""" if MOE_T128 else "") + f"""  %b8 = index.constant 8 : offset
+   %b4 = index.constant 4 : offset
+   %ti_size = index.scale %max_tiles, %b8 : index, offset -> offset
+   %tile_info = buffer.alloca<global> align(256) %ti_size : buffer
+-  %rm_size = index.scale %max_rows, %b4 : index, offset -> offset
++  %rm_size = index.scale {'%max_rows_alloc' if MOE_T128 else '%max_rows'}, %b4 : index, offset -> offset
+   %rowmap = buffer.alloca<global> align(256) %rm_size : buffer
+   %pos_size = index.scale %ta, %b4 : index, offset -> offset
+   %pos = buffer.alloca<global> align(256) %pos_size : buffer
+   %fe4 = index.constant {FE * 4} : offset
+   %fe2 = index.constant {FE * 2} : offset
+   %h4 = index.constant {H * 4} : offset
+-  %as_size = index.scale %max_rows, %fe4 : index, offset -> offset
++  %as_size = index.scale {'%max_rows_alloc' if MOE_T128 else '%max_rows'}, %fe4 : index, offset -> offset
+   %act_sorted = buffer.alloca<global> align(256) %as_size : buffer
+-  %a16_size = index.scale %max_rows, %fe2 : index, offset -> offset
++  %a16_size = index.scale {'%max_rows_alloc' if MOE_T128 else '%max_rows'}, %fe2 : index, offset -> offset
+   %act16 = buffer.alloca<global> align(256) %a16_size : buffer
+-  %sr_size = index.scale %max_rows, %b8 : index, offset -> offset
++  %sr_size = index.scale {'%max_rows_alloc' if MOE_T128 else '%max_rows'}, %b8 : index, offset -> offset
+   %s_rows = buffer.alloca<global> align(256) %sr_size : buffer
+-  %yss_size = index.scale %max_rows, %h4 : index, offset -> offset
++  %yss_size = index.scale {'%max_rows_alloc' if MOE_T128 else '%max_rows'}, %h4 : index, offset -> offset
+   %ys_sorted = buffer.alloca<global> align(256) %yss_size : buffer
+ """ + ("""  %sg_size = index.scale %t, %b4 : index, offset -> offset
+   %sg = buffer.alloca<global> align(256) %sg_size : buffer
+@@ -5458,6 +5525,10 @@
+         gg = GM.grouped_gemm(fmt, "swiglu" if mode == "gu" else "store", N, K, MOE["experts"], MOE["used"], gemm_fn,
+                              fused=bool(MOE.get("gate_up_fused")) and mode == "gu", **xb)
+         parts.append(gelu_vectors(gg) if GELU else gg)
++    if MOE_T128:
++        parts += [GM.bucket(MOE["experts"], MOE["used"], 128), GM.row_scale_tiles(row_scale, 128)]
++        for fmt, K, N, mode in sorted(USED_MOE):
++            parts.append(GM.grouped_gemm128(fmt, "swiglu" if mode == "gu" else "store", N, K, MOE["experts"], MOE["used"]))
+     return "".join(parts)
+ 
+ 
+@@ -5977,6 +6048,64 @@
      return (head + sizes + "  scf.if %outsel {\n" + gather + comp + scatter + "  } else {\n" + tail + "  }\n")
  
  
 +def mla_layer(i, b, nm, sz, par):
++    t = _mla_layer(i, b, nm, sz, par)
++    live = os.environ.get("MLA_BMM_LIVE", "0") not in ("", "0")
++    return t.replace("{LVA}", ", %info" if live else "").replace("{LVT}", ", buffer" if live else "")
++
++
++def _mla_layer(i, b, nm, sz, par):
 +    """MLA attention of layer i (gen_mla.py), from the normalized input %h to the attention output in %y:
 +    q_a -> rms * q_a_norm -> q_b; kv_a_mqa; the latent cache row + rotary Q halves (g_mla_rope_store); Q's latent part
 +    k_b q_nope (g_mla_kb_*); attention over the one-head cache (split-K decode / listed fallback / flash prefill) into
@@ -354,7 +535,7 @@ index 1ea6dec..ac05749 100644
 +    kb, vb = f("attn_k_b"), f("attn_v_b")
 +    T.append(f"""  kernel.launch @g_mla_rope_store[%t](%t, %layer_{i}, %context, %pool, %qb, %k, %kvan_{i}, %q, %info, %origins, %arena) : [index](index, index, index, index, buffer, buffer, view<{g['KL']}xf32>, buffer, buffer, buffer, buffer)
 +  scf.if %gemm {{
-+    kernel.launch @g_mla_kbm_{kb}[%t](%t, %qb, %wkb_{i}, %q) : [index](index, buffer, view<{sz("attn_k_b")}xi8>, buffer)
++    kernel.launch @g_mla_kbm_{kb}[%t](%t, %qb, %wkb_{i}, %q{{LVA}}) : [index](index, buffer, view<{sz("attn_k_b")}xi8>, buffer{{LVT}})
 +  }} else {{
 +    kernel.launch @g_mla_kb_{kb}[%t](%t, %qb, %wkb_{i}, %q) : [index](index, buffer, view<{sz("attn_k_b")}xi8>, buffer)
 +  }}
@@ -367,7 +548,7 @@ index 1ea6dec..ac05749 100644
 +    kernel.launch @g_attention_combine[%t](%t, %sliding_{i}, %info, %pacc, %pml, %q, %o) : [index](index, i32, buffer, buffer, buffer, buffer, buffer)
 +  }}
 +  scf.if %gemm {{
-+    kernel.launch @g_mla_vbm_{vb}[%t](%t, %o, %wvb_{i}, %vo) : [index](index, buffer, view<{sz("attn_v_b")}xi8>, buffer)
++    kernel.launch @g_mla_vbm_{vb}[%t](%t, %o, %wvb_{i}, %vo{{LVA}}) : [index](index, buffer, view<{sz("attn_v_b")}xi8>, buffer{{LVT}})
 +  }} else {{
 +    kernel.launch @g_mla_vb_{vb}[%t](%t, %o, %wvb_{i}, %vo) : [index](index, buffer, view<{sz("attn_v_b")}xi8>, buffer)
 +  }}
@@ -387,7 +568,7 @@ index 1ea6dec..ac05749 100644
  MODEL_PARTS = {}   # model() records its pieces here for the speculative-decoding programs (draft/gen_draft.py)
  
  
-@@ -6157,6 +6248,15 @@ command.def public @llm_advance() launch(%weights: buffer, %residual: buffer, %m
+@@ -6157,6 +6286,15 @@
          L_.append(f"  %nC = index.constant {g['C']} : index\n  %nVD = index.constant {g['VD']} : index\n  %nHV = index.constant {g['HV']} : index\n")
      if not QK_NORM:
          L_.append("  %no_norm = buffer.alloca<global> align(256) %row_bytes : buffer\n")
@@ -403,7 +584,7 @@ index 1ea6dec..ac05749 100644
      if MOE:   # its own part: the MTP drafter programs reuse the prologue (all parts but the last), MoE layer included
          L_.append("\n" + moe_alloc())
      L_.append(f"""{"" if MOE else chr(10)}  kernel.launch @g_token_info[%t](%t, %spans, %metadata, %info) : [index](index, index, buffer, buffer)
-@@ -6195,11 +6295,13 @@ command.def public @llm_advance() launch(%weights: buffer, %residual: buffer, %m
+@@ -6195,11 +6333,13 @@
              T.append(par("sinks", "attn_sinks", f"view<{QH}xf32>"))
          if i in RECUR:
              T.append(gdn_layer(i, b, nm, sz, par))
@@ -418,7 +599,7 @@ index 1ea6dec..ac05749 100644
              pass
          elif GATE and not FUSED_Q:
              T.append(par("wg", "attn_gate"))
-@@ -6215,7 +6317,7 @@ command.def public @llm_advance() launch(%weights: buffer, %residual: buffer, %m
+@@ -6215,7 +6355,7 @@
          # same format and size: one dual-weight launch at 8/16 tokens (PAIR_PROJ)
          same = lambda a, b: fmt_of(nm(a)) == fmt_of(nm(b)) and sz(a) == sz(b)
          qg = GATE and not FUSED_Q and not HEAD_GATE and not QKV_FUSED and i not in RECUR and same("attn_q", "attn_gate") and PAIR_PROJ in ("1", "qg")
@@ -427,7 +608,7 @@ index 1ea6dec..ac05749 100644
              pass
          elif QKV_FUSED:
              T.append("  " + lin(fmt_of(nm("attn_qkv")), "%h", "%s_h", f"%wqkv_{i}", sz("attn_qkv"), "%qkv", "%nH", "%nQKV", H) + "\n")
-@@ -6224,7 +6326,7 @@ command.def public @llm_advance() launch(%weights: buffer, %residual: buffer, %m
+@@ -6224,7 +6364,7 @@
              T.append("  " + lin2(fmt_of(nm("attn_q")), "%h", "%s_h", f"%wq_{i}", f"%wg_{i}", sz("attn_q"), "%q", "%gate", "%nH", "%nQ", H) + "\n")
          else:
              T.append("  " + lin(fmt_of(nm("attn_q")), "%h", "%s_h", f"%wq_{i}", sz("attn_q"), "%q", "%nH", nq, H) + "\n")
@@ -436,7 +617,7 @@ index 1ea6dec..ac05749 100644
            pass
          elif same("attn_k", "attn_v") and PAIR_PROJ in ("1", "kv"):
            T.append("  " + lin2(fmt_of(nm("attn_k")), "%h", "%s_h", f"%wk_{i}", f"%wv_{i}", sz("attn_k"), "%k", "%v", "%nH", "%nKV", H) + "\n")
-@@ -6239,7 +6341,7 @@ command.def public @llm_advance() launch(%weights: buffer, %residual: buffer, %m
+@@ -6239,7 +6379,7 @@
          qn, kn = (f"%q_norm_{i}", f"%k_norm_{i}") if QK_NORM else ("%no_norm", "%no_norm")
          gate, gty = (f"%sinks_{i}", f"view<{QH}xf32>") if SINKS else (gate0, "buffer")
          nty = f"view<{D}xf32>" if QK_NORM else "buffer"
@@ -445,7 +626,7 @@ index 1ea6dec..ac05749 100644
            rope_k = "g_qk_rope_store_swa" if SWA_ROPE and i in sliding else "g_qk_rope_store"
            T.append(f"""  kernel.launch @{rope_k}[%t](%t, %layer_{i}, %rope_{i}, %context, %pool, %q, %k, %v, {qn}, {kn}, %info, %origins, %arena{", %metadata, %tokens" if MROPE else ""}{bias_args}) : [index](index, index, i32, index, index, buffer, buffer, buffer, {nty}, {nty}, buffer, buffer, buffer{", buffer, buffer" if MROPE else ""}{bias_types})
    scf.if %gemm {{
-@@ -6255,7 +6357,7 @@ command.def public @llm_advance() launch(%weights: buffer, %residual: buffer, %m
+@@ -6255,7 +6395,7 @@
    }}
  """)
  
@@ -454,7 +635,7 @@ index 1ea6dec..ac05749 100644
            T.append("  " + lin(fmt_of(nm("attn_output")), "%o", "%s_o", f"%wo_{i}", sz("attn_output"), "%y", nq, "%nH", qd) + "\n")
            if OUT_BIAS:   # attention output projection bias (gpt-oss attn_output.bias)
              T.append(f'  %bo_{i} = command.parameter %weights, "{b}attn_output.bias" : view<{H}xf32>\n'
-@@ -6457,7 +6559,7 @@ if __name__ == "__main__":
+@@ -6457,7 +6597,7 @@
          from gen_mxfp4s import mxfp4s_icodes as _mx_icodes
          COMMON += _mx_icodes()
      if USED_MVQ or USED_MOEQ or PH_ONLY:   # ACT_Q8: int8-activation matvecs, their weight-code helpers and g_quant_q8
@@ -463,7 +644,7 @@ index 1ea6dec..ac05749 100644
              COMMON += IQ4_ICODES
          COMMON += ICODES + "".join(mv(fmt, K, R=R, TG=TG, swiglu=sw == 1, pair=sw == 2, suffix=f"_r{R}" if R != 16 else "", iq=True)
                                     for fmt, K, sw, R, TG in sorted(USED_MVQ))
-@@ -6515,8 +6617,10 @@ if __name__ == "__main__":
+@@ -6515,8 +6655,10 @@
              parts.append(mv(fmt, K, TG=TG, swiglu=sw))
      for fmt, K, sw, R, TG in sorted(USED_MV_R):
          parts.append(mv(fmt, K, R=R, TG=TG, swiglu=sw, suffix=f"_r{R}"))
@@ -475,7 +656,7 @@ index 1ea6dec..ac05749 100644
      if FUSED_Q:
          parts.append(split_qgate(QH, D))
      if SWA_ROPE:
-@@ -6567,8 +6671,9 @@ if __name__ == "__main__":
+@@ -6567,8 +6709,9 @@
      parts.append(open(os.path.join(here, "tile_uniform.loom")).read())
      if not NO_FLASH:
          flash2 = os.path.join(out_dir, "flash2.loom")
@@ -487,11 +668,9 @@ index 1ea6dec..ac05749 100644
          parts.append(open(flash2).read())
          for h in NARROW:   # narrower layers' flash prefill: the same generator at their head count
              hcfg, hout = (os.path.join(out_dir, f"flash2_h{h}.{x}") for x in ("json", "loom"))
-diff --git a/gen_moe.py b/gen_moe.py
-index 0e507b4..a7395f4 100644
 --- a/gen_moe.py
 +++ b/gen_moe.py
-@@ -14,9 +14,11 @@ g_moe_combine      y[t, H]   = sg[t] * y[t, :] + sum_k wts[t, k] ys[t*KU + k, :]
+@@ -14,9 +14,11 @@
  """
  import os
  import re
@@ -505,11 +684,159 @@ index 0e507b4..a7395f4 100644
  GATE_NAME = {1: "softmax(logits)", 2: "sigmoid(logit)", 3: "logit"}   # llama.cpp's expert_gating_func values
  # gating 3 (SOFTMAX_WEIGHT): `bias` is the router's own bias (ffn_gate_inp.bias, added to the logits before the top-k)
  # and the k weights are a softmax over the k picked logits.
-diff --git a/inspect_gguf.py b/inspect_gguf.py
-index d2c3ee8..9b092f3 100644
+@@ -500,7 +502,7 @@
+     return "\n" + text
+ 
+ 
+-def row_scale_tiles(row_scale):
++def row_scale_tiles(row_scale, tile=None):
+     """g_row_scale_f16_tiles: the starter's g_row_scale_f16 over the bucketed expert rows (max_tiles x 64), skipping
+     the rows of unused tiles (tile_info expert < 0; g_moe_gdn skips those tiles). max_tiles is sized for the worst
+     case (t*KU/64 + E tiles), so most of them are unused."""
+@@ -509,11 +511,12 @@
+         nonlocal text
+         assert text.count(a) == 1, a
+         text = text.replace(a, b)
+-    rep('export("g_row_scale_f16") @g_row_scale_f16(', 'export("g_row_scale_f16_tiles") @g_row_scale_f16_tiles(')
++    sfx = str(tile) if tile else ""
++    rep('export("g_row_scale_f16") @g_row_scale_f16(', f'export("g_row_scale_f16_tiles{sfx}") @g_row_scale_f16_tiles{sfx}(')
+     rep("%scales: buffer, %x16: buffer) {", "%scales: buffer, %x16: buffer, %tile_info: buffer) {")
+     rep("  %row = index.assume %row_id [lt(%row_id, %rows)] : index\n", f"""  %row = index.assume %row_id [lt(%row_id, %rows)] : index
+   %rt_zero = index.constant 0 : offset
+-  %rt_c64 = index.constant {TILE} : index
++  %rt_c64 = index.constant {tile or TILE} : index
+   %rt_tiles = index.div %rows, %rt_c64 : index
+   %rt_tile_v = index.div %row, %rt_c64 : index
+   %rt_tile = index.assume %rt_tile_v [lt(%rt_tile_v, %rt_tiles)] : index
+@@ -826,9 +829,16 @@
+ TILE = 64
+ 
+ 
+-def bucket(E, KU):
+-    """Assignments a = t*KU + k bucketed by expert into 64-row tiles (flint_moe_bucket pattern)."""
++def bucket(E, KU, tile=None):
++    """Assignments a = t*KU + k bucketed by expert into 64-row tiles (flint_moe_bucket pattern); tile=128: g_moe_bucket128,
++    128-row tiles for the m128 grouped GEMMs (MOE_T128)."""
+     assert E <= 256
++    T = tile or TILE
++    return _bucket(E, KU).replace("{TILE_V}", str(T)).replace("{TILE_M1}", str(T - 1)).replace("{TILE_SH}", str(T.bit_length() - 1)).replace(
++        "g_moe_bucket", "g_moe_bucket" + (str(tile) if tile else ""))
++
++
++def _bucket(E, KU):
+     return f"""
+ kernel.def export("g_moe_bucket") @g_moe_bucket(%tokens: index) {{
+   %c1 = index.constant 1 : index
+@@ -843,12 +853,12 @@
+   %c0 = index.constant 0 : index
+   %c1 = index.constant 1 : index
+   %cKU = index.constant {KU} : index
+-  %cT = index.constant {TILE} : index
++  %cT = index.constant {{TILE_V}} : index
+   %c256 = index.constant 256 : index
+   %c0_i32 = scalar.constant 0 : i32
+   %c1_i32 = scalar.constant 1 : i32
+-  %cshift = scalar.constant 6 : i32
+-  %cTm1 = scalar.constant {TILE - 1} : i32
++  %cshift = scalar.constant {{TILE_SH}} : i32
++  %cTm1 = scalar.constant {{TILE_M1}} : i32
+   %minus_one = scalar.constant -1 : i32
+   %cEm1 = scalar.constant {E - 1} : i32
+   %cE = index.constant {E} : index
+@@ -1130,6 +1140,11 @@
+     fused (swiglu): one gate_up tensor as both weights (expert_mv's layout).
+     bias / act: as expert_mv (per-expert output biases, the gate/up activation)."""
+     import gen_gemm
++    cw = os.environ.get("MOE_CW", "0").strip()   # 1: both GEMMs; or a list of modes (swiglu,store)
++    if (cw not in ("", "0") and (cw == "1" or mode in cw.split(",")) and fmt == "iq4_xs" and not (fused or bias or act not in (None, "silu"))
++            and K % 256 == 0 and N % (128 if mode == "swiglu" else 256) == 0):
++        import gen_moe_cw   # choice moe.prefill.cw: column-wave grouped GEMMs (live 16-row fragments only, weights straight to B)
++        return gen_moe_cw.grouped_gemm_cw(fmt, mode, N, K, E, KU)
+     fmt, _, fmt2 = fmt.partition("+")
+     rb = N and (K // SB[fmt] * FMT[fmt])
+     eb = rb * N
+@@ -1228,6 +1243,78 @@
+     return text + "\n" + gen_gemm_rdna4.twin(text) if gen_gemm_rdna4.enabled() else text   # the gfx12 twin K_rdna4 beside K
+ 
+ 
++def grouped_gemm128(fmt, mode, N, K, E, KU):
++    """MOE_T128: the m128 WMMA GEMM (gen_gemm.gemm_big: 128 rows x 64 columns, register-prefetched K loop) over the rows of
++    one expert per 128-row tile (g_moe_bucket128). At a 4k chunk an expert holds ~128 rows (256 experts, top-8), so each
++    dequantized weight value feeds twice the rows of the 64-row grouped tile. Padding rows read token 0 (clamped rowmap) and
++    their outputs are never combined. mode 'swiglu' gathers A rows x16[rowmap / KU], 'store' reads the sorted rows."""
++    import gen_gemm
++    assert fmt not in gen_gemm.HELPER, fmt
++    rb = K // SB[fmt] * FMT[fmt]
++    eb = rb * N
++    text = gen_gemm.gemm_big(fmt, mode)
++    base = f"g_gemm_{fmt}_{mode}_m128"
++    name = f"g_moe_g{'gu' if mode == 'swiglu' else 'dn'}128_{fmt}_k{K}"
++    def rep(a, b, cnt=1):
++        nonlocal text
++        assert text.count(a) == cnt, (name, a, text.count(a))
++        text = text.replace(a, b)
++    rep(f'export("{base}") @{base}(', f'export("{name}") @{name}(')
++    rep("launch(%rows_arg: index, %k_arg: index, %n_arg: index, %x: buffer, %scales: buffer,",
++        "launch(%rows_arg: index, %k_arg: index, %n_arg: index, %xrows_arg: index, %tile_info: buffer, %rowmap: buffer, %x: buffer, %scales: buffer,")
++    max_rows = 8192 * KU + 128 * E
++    rep("[range(%rows_arg, 128, 8192), multiple_of(%rows_arg, 128)]", f"[range(%rows_arg, 128, {max_rows}), multiple_of(%rows_arg, 128)]")
++    tn = 64 if "[range(%n_arg, 64, 262144), multiple_of(%n_arg, 64)]" in text else 128
++    assert N % tn == 0, (N, tn)
++    rep(f"[range(%n_arg, {tn}, 262144), multiple_of(%n_arg, {tn})]", f"[range(%n_arg, {tn}, {N}), multiple_of(%n_arg, {tn})]")
++    rep("  %origin = index.constant 0 : offset\n", "  %origin = index.constant 0 : offset\n  %xrows = index.assume %xrows_arg [range(%xrows_arg, 1, 1048576)] : index\n")
++    rep("  %workitem_id = kernel.workitem.id<x> : index\n", f"""  %ti_view = buffer.view %tile_info[%origin] : buffer -> view<[%row_tile_count]x2xi32>
++  %tile_expert = view.load %ti_view[%row_group, 0] : view<[%row_tile_count]x2xi32> -> i32
++  %c0_i32g = scalar.constant 0 : i32
++  %tile_used = scalar.cmpi sge, %tile_expert, %c0_i32g : i32
++  scf.if %tile_used {{
++  %cEm1g = scalar.constant {E - 1} : i32
++  %e_lo = scalar.minsi %tile_expert, %cEm1g : i32
++  %e_b = scalar.assume %e_lo [range(%e_lo, 0, {E - 1})] : i32
++  %expert = index.cast %e_b : i32 to index
++  %expert_bytes = index.constant {eb} : offset
++  %expert_off = index.scale %expert, %expert_bytes : index, offset -> offset
++  %workitem_id = kernel.workitem.id<x> : index
++""")
++    rep("  %w_row_origin = index.scale %w_out_row, %row_bytes : index, offset -> offset\n",
++        "  %w_row_origin0 = index.scale %w_out_row, %row_bytes : index, offset -> offset\n  %w_row_origin = index.add %w_row_origin0, %expert_off : offset\n")
++    rep("view<[%rows]x[%k]xf16>", "view<[%xrows]x[%k]xf16>", text.count("view<[%rows]x[%k]xf16>"))
++    rep("view<[%rows]x2xf32>", "view<[%xrows]x2xf32>", text.count("view<[%rows]x2xf32>"))
++    def gather(pre, row_expr, out):
++        return f"""  %{pre}_prow_v = {row_expr}
++  %{pre}_rm_rows = index.mul %row_tile_count, %c128 : index
++  %{pre}_prow = index.assume %{pre}_prow_v [lt(%{pre}_prow_v, %{pre}_rm_rows)] : index
++  %{pre}_rm_view = buffer.view %rowmap[%origin] : buffer -> view<[%{pre}_rm_rows]xi32>
++  %{pre}_a32 = view.load %{pre}_rm_view[%{pre}_prow] : view<[%{pre}_rm_rows]xi32> -> i32
++  %{pre}_ac = scalar.maxsi %{pre}_a32, %c0_i32g : i32
++  %{pre}_ab = scalar.assume %{pre}_ac [range(%{pre}_ac, 0, 1048575)] : i32
++  %{pre}_a = index.cast %{pre}_ab : i32 to index
++  %{pre}_cKU = index.constant {KU} : index
++  %{pre}_t = index.div %{pre}_a, %{pre}_cKU : index
++  %{out} = index.assume %{pre}_t [lt(%{pre}_t, %xrows)] : index
++"""
++    if mode == "swiglu":
++        rep("  %x_row_value = index.add %row_origin, %x_stage_row : index\n  %x_row = index.assume %x_row_value [lt(%x_row_value, %rows)] : index\n",
++            gather("gx", "index.add %row_origin, %x_stage_row : index", "x_row"))
++        rep("    %inv_row_value = index.add %row_origin, %bw : index\n    %inv_row = index.assume %inv_row_value [lt(%inv_row_value, %rows)] : index\n",
++            gather("gi", "index.add %row_origin, %bw : index", "inv_row"))
++    else:
++        rep("  %x_row = index.assume %x_row_value [lt(%x_row_value, %rows)] : index", "  %x_row = index.assume %x_row_value [lt(%x_row_value, %xrows)] : index")
++        rep("    %inv_row = index.assume %inv_row_value [lt(%inv_row_value, %rows)] : index", "    %inv_row = index.assume %inv_row_value [lt(%inv_row_value, %xrows)] : index")
++    rep("  kernel.return\n}\n", "  }\n  kernel.return\n}\n")
++    if mode in os.environ.get("MOE_N_FASTEST", "swiglu,store").split(","):
++        rep("workgroups(%row_tiles, %out_tiles, %c1)", "workgroups(%out_tiles, %row_tiles, %c1)")
++        rep("  %row_group_id = kernel.workgroup.id<x> : index\n  %out_group_id = kernel.workgroup.id<y> : index",
++            "  %row_group_id = kernel.workgroup.id<y> : index\n  %out_group_id = kernel.workgroup.id<x> : index")
++    import gen_gemm_rdna4
++    return text + "\n" + gen_gemm_rdna4.twin(text) if gen_gemm_rdna4.enabled() else text
++
++
+ def combine_sorted(H, KU, acc=False):
+     """y[t] (+)= sum_k w[t, k] ys[pos[t, k]], one workgroup per token looping over 256-channel blocks, so a token's
+     KU expert rows are read whole and at once (with a workgroup per (token, block) and tokens fastest, each row was
 --- a/inspect_gguf.py
 +++ b/inspect_gguf.py
-@@ -94,7 +94,7 @@ if layer_heads:
+@@ -94,7 +94,7 @@
      cfg["layer_heads"] = layer_heads[:L]
      print(f"query heads per layer: {sorted(set(layer_heads))}")
  if arch not in ("llama", "mistral", "granite", "qwen2", "qwen3", "qwen35", "qwen3next", "gemma3", "gemma4", "phi3",
@@ -518,7 +845,7 @@ index d2c3ee8..9b092f3 100644
      print(f"WARNING: arch {arch!r} is unknown to the starter: rope_type '{cfg['rope_type']}' is a guess (neox pairs d/d+D/2, "
            "norm pairs 2d/2d+1; llama4-style models are norm). Check llama.cpp's src/models/<arch>.cpp (LLAMA_ROPE_TYPE_*) "
            "before trusting a golden FAIL or PASS")
-@@ -149,6 +149,29 @@ if A("rope.scaling.type") == "yarn" and (A("rope.scaling.factor") or 1.0) > 1.0:
+@@ -149,6 +149,29 @@
      if arch in ("mellum",) and cfg["sliding_layers"]:
          cfg["rope_scaling_swa"] = "none"
      print("rope scaling:", cfg["rope_scaling"], "(global layers only)" if cfg.get("rope_scaling_swa") else "")
@@ -548,7 +875,7 @@ index d2c3ee8..9b092f3 100644
  # The FFN's pre-norm stored as post_attention_norm (gpt-oss: attn_post_norm normalizes ffn_inp; no ffn_norm and no
  # Gemma-style post_ffw_norm): it is the FFN norm, not a post-attention norm.
  if ("blk.0.ffn_norm.weight" not in tensors and "blk.0.post_attention_norm.weight" in tensors
-@@ -286,7 +309,10 @@ cfg["attn_sinks"] = "blk.0.attn_sinks.weight" in tensors
+@@ -286,7 +309,10 @@
  # instead of writing them to the GGUF; MOE_DEFAULTS mirrors src/models/<arch>.cpp (build_moe_ffn's norm_w and gating).
  MOE_DEFAULTS = {"qwen3moe": {"gating": 1, "norm_weights": True}, "qwen35moe": {"gating": 1, "norm_weights": True},
                  "qwen3next": {"gating": 1, "norm_weights": True}, "qwen2moe": {"gating": 1, "norm_weights": False},
@@ -560,7 +887,7 @@ index d2c3ee8..9b092f3 100644
                  # gpt-oss: SOFTMAX_WEIGHT (top-k of the biased logits, softmax over the k), LLM_FFN_SWIGLU_OAI_MOE
                  "gpt-oss": {"gating": 3, "norm_weights": False, "act": "swiglu_oai", "swiglu_alpha": 1.702, "swiglu_limit": 7.0}}
  if A("expert_count"):
-@@ -364,7 +390,7 @@ print(f"{cfg['name']}: arch={arch} L={L} H={H} heads={heads}/{cfg['kv_heads']} d
+@@ -364,7 +390,7 @@
  unsupported = [f for f in fmts if f not in formats.DECODES]   # what gen_llm.py decodes (formats.py)
  if unsupported:
      print("WARNING: no kernels for", unsupported, "- add dequant helpers (see the loom-kb `porting` topic)")
@@ -569,11 +896,9 @@ index d2c3ee8..9b092f3 100644
      print("WARNING: head_dim", head_dim, "is not 64, 128 or 256: the attention kernels support only those")
  if cfg["chat"] is None:
      print("WARNING: no chat block; fill it by hand from tokenizer.chat_template (fields: see chat_probe.py)")
-diff --git a/ktest_more.py b/ktest_more.py
-index 370f722..d7f61a9 100644
 --- a/ktest_more.py
 +++ b/ktest_more.py
-@@ -117,9 +117,14 @@ def moe_combine_case(save, rng, k):
+@@ -117,9 +117,14 @@
      T = 3
      ys = rng.standard_normal((T, KU, W)).astype(np.float32)
      wts = rng.random((T, KU)).astype(np.float32)
@@ -590,11 +915,9 @@ index 370f722..d7f61a9 100644
      return c.text()
  
  
-diff --git a/make_kernel_tests.py b/make_kernel_tests.py
-index c485393..0d148d7 100644
 --- a/make_kernel_tests.py
 +++ b/make_kernel_tests.py
-@@ -26,6 +26,8 @@ _MIXED_FMTS = {"q4_k", "q5_k", "q6_k"} | ({"iq4_xs"} if _IQ4_NATIVE else set())
+@@ -26,6 +26,8 @@
  from gen_gemm_rdna4 import f16o_swiglu as _f16o_on  # noqa: E402  formats with no 256-row (_m256) GEMM
  ACT_Q8 = os.environ.get("ACT_Q8", "1") == "1"   # gen_llm.py's default: int8 activations for these formats
  from formats import ICODES as IQ_FMTS  # noqa: E402  (gen_llm.py takes int8 activations for these)
@@ -603,7 +926,7 @@ index c485393..0d148d7 100644
  import attn_rules  # noqa: E402
  
  
-@@ -218,7 +220,9 @@ if VIS:   # a media epoch: 8-word records, token 1 carries a feature row (copied
+@@ -218,7 +220,9 @@
  seen = set(); todo = []
  VD = cfg["gdn"]["inner"] if cfg.get("gdn") else 0
  for li in KT_LAYERS:
@@ -614,7 +937,7 @@ index c485393..0d148d7 100644
                     ("attn_qkv", H), ("attn_gate", H), ("ssm_alpha", H), ("ssm_out", VD),
                     ("ffn_gate_shexp", H), ("ffn_down_shexp", (cfg.get("moe") or {}).get("shared_ffn", 0)), ("nextn.eh_proj", 2 * H)]:
          name = f"blk.{li}.{nm_}.weight"
-@@ -504,6 +508,12 @@ for _ai, _a, pa, pb in [(i, l, x, y) for i, l in enumerate(_al.values()) for x,
+@@ -504,6 +508,12 @@
    check.return
  }}
  """)
@@ -627,7 +950,7 @@ index c485393..0d148d7 100644
  # 3. qk norm + rope on q (live = 0: no KV store)
  t = 4; pos = np.array([0, 1, 7, 300])
  A0 = next(i for i in range(cfg["layers"]) if i not in set(cfg.get("recurrent_layers", [])))
-@@ -531,7 +541,7 @@ def rope(a, RD=RD, theta=cfg["rope_theta"], factors=cfg.get("rope_freq_factors")
+@@ -531,7 +541,7 @@
      c, s = np.cos(ang)[:, None] * msc, np.sin(ang)[:, None] * msc
      if cfg["rope_type"] == "neox":
          a1, a2 = a[..., :RD // 2], a[..., RD // 2:RD]; return np.concatenate([a1 * c - a2 * s, a2 * c + a1 * s, a[..., RD:]], -1)
@@ -636,7 +959,7 @@ index c485393..0d148d7 100644
  # attention projection biases (cfg "attn_bias", qwen2): g_qk_rope_store adds them to q/k/v before the norm and RoPE
  BIAS = cfg.get("attn_bias") or []
  BW = {"q": QH * D, "k": KVH * D, "v": KVH * D}
-@@ -3144,6 +3154,10 @@ kernel.def export("test_copy_rows") @test_copy_rows(%rows: index) {
+@@ -3144,6 +3154,10 @@
      cases += [invariance_case(s, st) for s in ((0, 1) if WIN else (0,)) for st in (5, 0, 'zero')]
      cases += [order_case(s) for s in ((0, 1) if WIN else (0,))]
  
@@ -647,7 +970,7 @@ index c485393..0d148d7 100644
  # 6. MoE (gen_moe.py) on real tensors, one layer per expert-down format: the decode chain (router -> top-k ->
  # gate/up -> down -> combine, plus the prefill router with padding tokens) and the prefill chain (prefill router ->
  # bucket by expert -> grouped WMMA gate/up GEMM -> tile row scale -> grouped down GEMM -> combine of the sorted rows),
-@@ -3180,7 +3194,9 @@ if cfg.get("moe") and os.environ.get("MOE_TESTS", "1") == "1":
+@@ -3180,7 +3194,9 @@
              wts = wts / np.maximum(wts.sum(-1, keepdims=True), 6.103515625e-05)
          wts = wts * M.get("scale", 1.0)
          ss = np.sort(sel, -1)[:, ::-1]
@@ -658,7 +981,7 @@ index c485393..0d148d7 100644
          return ids, wts, rel
      def clear_tokens(t):
          """t random rows whose k-th and (k+1)-th scores differ by > 0.2 %: f32 kernels pick the same experts as the
-@@ -3220,7 +3236,7 @@ if cfg.get("moe") and os.environ.get("MOE_TESTS", "1") == "1":
+@@ -3220,7 +3236,7 @@
          fu = T[b + UN].tensor_type.name.lower(); gun = (fg if fg == fu else f"{fg}_{fu}") + ("_fused" if FUSED else "")   # gate+up formats (gen_moe)
          if (fd, gun) in done: continue
          done.add((fd, gun))
@@ -667,7 +990,7 @@ index c485393..0d148d7 100644
                and H // 32 <= 1024 and FE // 32 <= 1024 and not EB)   # gen_llm.moe_iq
          # gen_llm.moe_iq also needs the router input as the experts' input (gemma4's experts read %h2): the package says which it built
          MQ = MQ and (_pkg_llm_text() is None or f'"g_moe_gu_{gun}_q8_k{H}_' in _pkg_llm_text())
-@@ -3689,7 +3705,7 @@ def mv_cover_case(kern, m, crng):
+@@ -3689,7 +3705,7 @@
  
      def rule(n):
          return iq_r(n, K, tg, sw) if q8 else pick_r(n, K, tg)
@@ -676,11 +999,9 @@ index c485393..0d148d7 100644
      pick = fallback = None
      for src, layers in cover_sources():
          TT = src["T"]
-diff --git a/templates/control.loom b/templates/control.loom
-index c1e0be5..d39dd8d 100644
 --- a/templates/control.loom
 +++ b/templates/control.loom
-@@ -460,6 +460,7 @@ global.rodata.def @tool_item_suffix = bytes("@@HEX_TOOL_ITEM_SUFFIX@@")
+@@ -460,6 +460,7 @@
  global.rodata.def @tool_turn_suffix = bytes("@@HEX_TOOL_TURN_SUFFIX@@")
  
  global.rodata.def @content_call_separator = bytes("@@HEX_CONTENT_CALL_SEPARATOR@@")
@@ -688,7 +1009,7 @@ index c1e0be5..d39dd8d 100644
  
  global.rodata.def @call_separator = bytes("@@HEX_CALL_SEPARATOR@@")
  
-@@ -873,7 +874,9 @@ func.def public @chat_message(%raw: buffer, %role: buffer, %content: buffer, %pa
+@@ -873,7 +874,9 @@
          %has_calls = index.cmp ne, %calls_length, %c0 : offset
          %separate = scalar.andi %has_text, %has_calls : i1
          %separator_value = global.load @content_call_separator : buffer
@@ -699,7 +1020,7 @@ index c1e0be5..d39dd8d 100644
          %close_value = global.load @calls_close : buffer
          %close = scf.select %has_calls, %close_value, %empty : buffer
          %head = func.call @join4(%prefix, %think, %text, %separator) : (buffer, buffer, buffer, buffer) -> (buffer)
-@@ -2291,11 +2294,13 @@ func.def public @complete_text(%prompt: buffer, %response: buffer, %raw_content:
+@@ -2291,11 +2294,13 @@
    %has_calls = index.cmp ne, %tools_length, %c0 : offset
    %separate = scalar.andi %has_content, %has_calls : i1
    %separator_value = global.load @content_call_separator : buffer

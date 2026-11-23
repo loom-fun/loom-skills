@@ -6,6 +6,7 @@ g_mla_vb_<fmt> (per-head matvecs, 9 tokens: two token groups); and the whole cha
 (history written by g_mla_rope_store, then the span: rope store -> k_b -> decode split-K + combine AND the prefill listed
 split-K + combine (g16_attention_split / combine: the body of the _listed kernels the program dispatches indirectly; loom-test cannot
 launch from a device count) -> v_b), both paths vs numpy, with a dirty KV pool and padding tokens."""
+import os
 import numpy as np
 
 
@@ -137,6 +138,9 @@ check.case public @mla_vb {{
     for n, a in [("mla_kbm_x", xq.reshape(t, -1)), ("mla_kbm_e", ykb.reshape(t, -1).astype(np.float32)),
                  ("mla_vbm_x", xo.reshape(t, -1)), ("mla_vbm_e", yvb.reshape(t, -1).astype(np.float32))]:
         save(n, a)
+    lv = os.environ.get("MLA_BMM_LIVE", "0") not in ("", "0")   # the products take the epoch's %info (all tokens live here)
+    LVI = f"  %info = check.generate.fill value(1) : tensor<{t}x4xi32>\n" if lv else ""
+    LVA, LVT = (", %info", f", tensor<{t}x4xi32>") if lv else ("", "")
     for nm, w, X, Y in (("kb", "attn_k_b", QH * QB, QH * D), ("vb", "attn_v_b", QH * D, QH * VD)):
         WT = KBT if nm == "kb" else VBT
         out_cases.append(f"""check.case public @mla_{nm}m {{
@@ -145,7 +149,7 @@ check.case public @mla_vb {{
   %w = check.file.read.npy path("mla_{nm}_w.npy") : {WT}
   %e = check.file.read.npy path("mla_{nm}m_e.npy") : tensor<{t}x{Y}xf32>
   %y = check.generate.fill value(0.0) : tensor<{t}x{Y}xf32>
-  kernel.launch @g_mla_{nm}m_{fmt(w + ".weight")}[%t](%t, %x, %w, %y) : [index](index, tensor<{t}x{X}xf32>, {WT}, tensor<{t}x{Y}xf32>)
+{LVI}  kernel.launch @g_mla_{nm}m_{fmt(w + ".weight")}[%t](%t, %x, %w, %y{LVA}) : [index](index, tensor<{t}x{X}xf32>, {WT}, tensor<{t}x{Y}xf32>{LVT})
   check.expect.close actual(%y) expected(%e) atol(2.0e-3) rtol(5.0e-3) nan(different) : tensor<{t}x{Y}xf32>
   check.return
 }}
