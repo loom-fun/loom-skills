@@ -3,7 +3,7 @@ set -euo pipefail
 exec > >(tee "$WORK/out/weaver.log") 2>&1
 cd "$WORK"
 revision=7d4525cb34e89d161dc8864a1456d19152ca262a
-skills_revision=18d4cc22afc8e5211813a32f073db90d5c42aced
+skills_revision=ee0438d57fb0663fbacf7cc29e3aa19e8a1388ea
 git init -q weaver
 git -C weaver fetch -q --depth 1 https://github.com/loom-fun/weaver.git "$revision"
 git -C weaver -c advice.detachedHead=false checkout -q FETCH_HEAD
