@@ -31,7 +31,8 @@ from pathlib import Path
 
 def update(path, old, new, count=1):
     file = Path(path)
-    text = file.read_text(newline="")
+    with file.open(newline="") as source_file:
+        text = source_file.read()
     assert text.count(old) == count, (path, old, text.count(old))
     file.write_text(text.replace(old, new), newline="")
 
@@ -130,3 +131,6 @@ git diff --binary > "$WORK/out/lemonade.patch"
 cmake --preset default -DBUILD_WEB_APP=OFF
 cmake --build --preset default --target test_loom_contract
 ctest --test-dir build --output-on-failure --no-tests=error -R '^LoomContractTest$'
+if [ "${SDK030_GPU_SMOKE:-0}" = 1 ]; then
+  cmake --build --preset default --target lemond
+fi
