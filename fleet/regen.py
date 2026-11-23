@@ -1134,6 +1134,10 @@ def package_one(st, slug, canon, sha, dry, env, prefill_changes=None, source_car
     if source_card:
         reference = os.path.join(W, "staging")
         hf_snapshot_small(repo, rev, reference)
+        qualification = os.path.join(reference, card_lib.QUICK_START_QUALIFICATION)
+        if os.path.isfile(qualification):
+            # Keep the receipt. Card generation applies it only to the exact measured settings.
+            shutil.copy2(qualification, os.path.join(out, card_lib.QUICK_START_QUALIFICATION))
     if version == "0.3.0":
         path = os.path.join(out, "llm_config.json")
         config = sdk_package.load(path)

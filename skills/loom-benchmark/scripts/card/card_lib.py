@@ -856,6 +856,7 @@ def card_serve_args(gpu, weight_bytes=None, sdk=None):
 
 
 QUICK_START_DEVICE = "amdgpu://?completion_spin_ns=4294967295"   # the active wait the card's performance rows are measured with
+QUICK_START_QUALIFICATION = "quick-start-qualification.json"
 
 
 def quick_start(info, facts, gpu):
@@ -882,6 +883,60 @@ def recorded_quick_start(info, facts, gpu):
     if recorded:
         return dict(recorded, args=sdk_serve_args(recorded["args"], facts.get("sdk")))
     return quick_start(info, facts, gpu)
+
+
+def quick_start_package_sha256(directory, package, preset):
+    """Identify the measured package settings and assets without including other presets."""
+    model = dict(package["model"])
+    model["presets"] = {preset: model["presets"][preset]}
+    weights = os.path.join(directory, "weights.loom")
+    weights_sha = None
+    if os.path.isfile(weights):
+        with open(weights, "rb") as f:
+            weights_sha = hashlib.sha256(f.read()).hexdigest()
+    identity = {"model": model, "lock": package["lock"], "llm_config": package["cfg"], "weights_loom_sha256": weights_sha}
+    canonical = json.dumps(identity, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def qualified_bare_quick_start(directory, package, repo, gpu, control, programs, evidence):
+    """Use bare AMDGPU only while the same-device ABBA qualification still applies."""
+    if not isinstance(evidence, dict) or (evidence.get("gpu"), evidence.get("preset")) != (gpu, control["preset"]):
+        return None
+    if evidence.get("staging_repo") != "loom-fun-staging/" + repo.rsplit("/", 1)[-1]:
+        return None
+    if not programs or evidence.get("programs_sha256") != programs:
+        return None
+    sdk = package["cfg"].get("sdk") or {}
+    measured_sdk = evidence.get("sdk")
+    if not isinstance(measured_sdk, dict) or any(not sdk.get(k) or measured_sdk.get(k) != sdk[k]
+                                                 for k in ("hrx_loom", "source", "hrx_system_sha", "wheel_sha256")):
+        return None
+    preset = control["preset"]
+    if preset not in package["model"].get("presets", {}) or evidence.get("package_sha256") != quick_start_package_sha256(directory, package, preset):
+        return None
+    if evidence.get("launch") != {"tuned": [f"--device={control['device']}", *control["args"]], "default": ["--device=amdgpu"]}:
+        return None
+    run, job = evidence.get("run"), evidence.get("job_url")
+    if type(run) is not int or run <= 0 or not re.fullmatch(rf"{re.escape(SKILLS_URL)}/actions/runs/{run}/job/[1-9][0-9]*", str(job)):
+        return None
+    artifact = evidence.get("artifact_id")
+    if type(artifact) is not int or artifact <= 0 or not re.fullmatch(r"[a-f0-9]{64}", str(evidence.get("artifact_sha256"))):
+        return None
+    deltas = evidence.get("default_delta_pct")
+    if not isinstance(deltas, dict) or not deltas or any(type(v) not in (int, float) or not -3 <= v <= 3 for v in deltas.values()):
+        return None
+    sessions = evidence.get("sessions")
+    if not isinstance(sessions, list) or len(sessions) != 4:
+        return None
+    context = package["model"]["presets"][preset].get("execution", {}).get("context_capacity")
+    for session, mode in zip(sessions, ("tuned", "default", "default", "tuned")):
+        if not isinstance(session, dict) or session.get("mode") != mode or session.get("answers_pass") is not True:
+            return None
+        admission = session.get("admission")
+        if not isinstance(admission, dict) or admission.get("admitted") is not True or not context or admission.get("context") != context:
+            return None
+    return {"preset": preset, "device": "amdgpu", "args": []}
 
 
 def package_weight_bytes(model, lock):

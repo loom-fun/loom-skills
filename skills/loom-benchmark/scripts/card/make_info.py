@@ -128,7 +128,7 @@ from card_lib import (DEFAULT_GPU, DRAFTED_ROWS, EVIDENCE_ID, GPUS, METRIC_KEYS,
                       programs_sha256, require_valid, fixed_pool_capacity, gpu_preset_execution, gpu_preset_name, with_gpu_preset, served_context, fit_served_context, upstream_facts, with_gate_features, write_json,
                       SERVE_HEADROOM, registry, fit_rows, non_targets, load_device_results, validate_device_results, with_device_preset, DEVICE_RESULTS_ID, card_serve_args, quick_start, serves,
                       historical_xsj_gate, sdk_serve_args, xsj_enabled, xsj_evidence_errors, xsj_measurement_errors, xsj_vulkan_comparison_errors,
-                      CAVEAT_MAX, DEVICE_RESULTS_DIR, text_errors)
+                      CAVEAT_MAX, DEVICE_RESULTS_DIR, QUICK_START_QUALIFICATION, qualified_bare_quick_start, text_errors)
 
 
 # ---------------------------------------------------------------- sources
@@ -745,11 +745,23 @@ def cmd_build(a):
     info = {"schema": SCHEMA_ID, "repo": a.repo, "card": card,
             "versions": {"card_generator": a.generator_commit, **versions},
             "sources": sources.by_id, "devices": devices}
-    served = package_facts(load_package(a.pkg))   # model.json as written above, with the GPU presets added
+    served_package = load_package(a.pkg)   # model.json as written above, with the GPU presets added
+    served = package_facts(served_package)
+    qualification = None
+    path = os.path.join(a.pkg, QUICK_START_QUALIFICATION)
+    if os.path.isfile(path):
+        try:
+            qualification = load_json(path)
+        except (OSError, ValueError) as exc:
+            print(f"{path}: ignoring unreadable Quick start qualification ({exc})", file=sys.stderr)
     for gpu in [g for g in devices if serves(info, g)] or [g for g in devices if g == DEFAULT_GPU]:
         if "serve_args" in devices[gpu]:
             devices[gpu]["serve_args"] = sdk_serve_args(devices[gpu]["serve_args"], served.get("sdk"))
-        devices[gpu]["quick_start"] = quick_start(info, served, gpu)
+        control = quick_start(info, served, gpu)
+        qualified = qualified_bare_quick_start(a.pkg, served_package, info["repo"], gpu, control, measured_programs, qualification)
+        if isinstance(qualification, dict) and qualification.get("gpu") == gpu and qualified is None:
+            print(f"{path}: {gpu} Quick start qualification does not match the current package and launch settings", file=sys.stderr)
+        devices[gpu]["quick_start"] = qualified or control
     if a.report:
         info["report"] = a.report
     if a.status and a.status != "active":

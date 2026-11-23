@@ -162,6 +162,49 @@ class Cards(unittest.TestCase):
         self.assertEqual(rebuilt["devices"]["gfx1150"], original["devices"]["gfx1150"])
         self.assertEqual(rebuilt["sources"], original["sources"])
 
+    def test_bare_quick_start_requires_the_same_qualified_package_and_device(self):
+        gpu = "radeon-r9700"
+        sdk = {"hrx_loom": "0.3.0", "source": "pypi", "hrx_system_sha": "a" * 40, "wheel_sha256": "b" * 64}
+        pkg, before, _ = self.build({}, sdk=sdk)
+        package = card_lib.load_package(pkg)
+        control = before["devices"][gpu]["quick_start"]
+        preset = control["preset"]
+        programs = card_lib.programs_sha256(pkg)
+        context = package["model"]["presets"][preset]["execution"]["context_capacity"]
+        proof = {"gpu": gpu, "preset": preset, "staging_repo": before["repo"], "programs_sha256": programs, "sdk": sdk,
+                 "package_sha256": card_lib.quick_start_package_sha256(pkg, package, preset),
+                 "run": 1000, "job_url": "https://github.com/loom-fun/loom-skills/actions/runs/1000/job/2000",
+                 "artifact_id": 3000, "artifact_sha256": "e" * 64,
+                 "default_delta_pct": {"decode": 1},
+                 "launch": {"tuned": [f"--device={control['device']}", *control["args"]], "default": ["--device=amdgpu"]},
+                 "sessions": [{"mode": mode, "answers_pass": True, "admission": {"admitted": True, "context": context}}
+                              for mode in ("tuned", "default", "default", "tuned")]}
+        proof_path = os.path.join(pkg, card_lib.QUICK_START_QUALIFICATION)
+        card_lib.write_json(proof_path, proof)
+        prior = os.path.join(pkg, "info.json")
+
+        def rebuild():
+            result = make_info("build", pkg, "--from-info", prior, "--device-results", "none", "--upstream", "none")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            return card_lib.load_json(prior)
+
+        after = rebuild()
+        self.assertEqual(after["devices"][gpu]["quick_start"], {"preset": preset, "device": "amdgpu", "args": []})
+        self.assertEqual(after["devices"]["strix-halo"]["quick_start"], before["devices"]["strix-halo"]["quick_start"])
+        subprocess.run([sys.executable, "-I", os.path.join(CARD, "render_card.py"), pkg], check=True, capture_output=True)
+        with open(os.path.join(pkg, "README.md"), encoding="utf-8") as readme:
+            self.assertIn("--device=amdgpu\n", readme.read())
+
+        for change in ({"gpu": "strix-halo"}, {"preset": "other"}, {"programs_sha256": "c" * 64},
+                       {"sdk": dict(sdk, wheel_sha256="d" * 64)}, {"staging_repo": "loom-fun-staging/Other-loom"},
+                       {"default_delta_pct": {"decode": -9}}, {"launch": {"tuned": [], "default": ["--device=amdgpu"]}}):
+            with self.subTest(change=change):
+                self.assertIsNone(card_lib.qualified_bare_quick_start(pkg, package, before["repo"], gpu, control, programs, proof | change))
+        model_path = os.path.join(pkg, "model.json")
+        package["model"]["presets"][preset]["execution"]["context_capacity"] += 1024
+        card_lib.write_json(model_path, package["model"])
+        self.assertEqual(rebuild()["devices"][gpu]["quick_start"], control)
+
     def test_default_preset_reused_without_overrides(self):   # gfx1150 data that needs no other preset: `chat`
         d = fixture("gfx1150")
         d["models"][SLUG].pop("execution")
