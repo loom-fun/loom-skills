@@ -28,7 +28,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: 18d4cc22afc8e5211813a32f073db90d5c42aced
+          ref: ee0438d57fb0663fbacf7cc29e3aa19e8a1388ea
           fetch-depth: 0
           persist-credentials: false
       - name: Plan from the accepted production revision
