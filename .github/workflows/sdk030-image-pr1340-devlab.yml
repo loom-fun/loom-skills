@@ -13,7 +13,7 @@ jobs:
     runs-on: [strix-halo, devlab-dispatch, Linux, self-hosted]
     timeout-minutes: 95
     env:
-      PR_HEAD: 3499b5bbc8bd8e2298d41839bc4a4d2ec59d052a
+      PR_HEAD: c338a18d03d4ca00bc212241b9a03631305cc332
       CATALOG_HEAD: ccd62d6a49576f25efdb7deef7b6f81a7b76fd6c
     steps:
       - uses: actions/checkout@v4

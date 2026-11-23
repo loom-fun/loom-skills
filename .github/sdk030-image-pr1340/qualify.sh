@@ -4,7 +4,7 @@ exec > >(tee "$WORK/evidence/qualification.log") 2>&1
 cd "$WORK"
 git init -q port
 git -C port remote add origin https://github.com/loom-fun/loom-skills.git
-git -C port fetch --depth=2 origin "$PR_HEAD"
+git -C port fetch --depth=3 origin "$PR_HEAD"
 git -C port checkout -q --detach FETCH_HEAD
 test "$(git -C port rev-parse HEAD)" = "$PR_HEAD"
 git init -q catalog
@@ -36,7 +36,7 @@ rc=0
   "$tools/python" -m unittest discover -s tests -p 'test_kb.py' -v || checks=1
   "$tools/python" "$kb" lint || checks=1
   "$tools/python" "$kb" dupes || checks=1
-  "$tools/python" fleet/scope_lint.py --base HEAD^ --head HEAD --local --no-impact --scope-block 'kind: architecture' || checks=1
+  "$tools/python" fleet/scope_lint.py --base HEAD~2 --head HEAD --local --no-impact --scope-block 'kind: architecture' || checks=1
   exit "$checks"
 ) |& tee "$WORK/evidence/checks.log" || rc=1
 
