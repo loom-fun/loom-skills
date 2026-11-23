@@ -1,0 +1,345 @@
+name: SDK 0.3.0 migration implementation proof
+on:
+  pull_request:
+    types: [labeled, synchronize]
+permissions:
+  contents: read
+jobs:
+  implement:
+    if: github.event.pull_request.head.ref == 'codex/sdk030-migration' && github.event.pull_request.head.repo.full_name == github.repository && contains(github.event.pull_request.labels.*.name, 'sdk030-implement')
+    runs-on: [strix-halo, devlab-dispatch, Linux, self-hosted]
+    timeout-minutes: 45
+    env:
+      WORK: ${{ github.workspace }}/sdk030-implement-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Implement the staged migration
+        shell: bash
+        run: |
+          mkdir -p "$WORK/evidence"
+          python3 - <<'PY'
+          from pathlib import Path
+          
+          def edit(name, replacements):
+              path = Path(name)
+              text = path.read_text()
+              for before, after in replacements:
+                  assert before in text, (name, before)
+                  text = text.replace(before, after)
+              path.write_text(text)
+          
+          edit("fleet/regen.py", [
+              ('SDK_OLD, SDK_NEW = "card", "0.2.0"', '''SDK_OLD, SDK_NEW = "card", "0.2.0"
+          SDK_030_PIN = {
+              "hrx_loom": "0.3.0",
+              "source": "pypi",
+              "hrx_system_sha": "e2c41a720363911c04606ce0f4417e2d55630352",
+              "wheel_sha256": "6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f",
+          }
+          
+          
+          def target_sdk(state):
+              return state["opts"].get("new_sdk", SDK_NEW)
+          
+          
+          def measured_sdk_030(job):
+              """Require the verified Linux wheel for both performance variants."""
+              directory = job.get("dir")
+              if not directory:
+                  return False
+              try:
+                  for variant in ("staging", "stagingnd"):
+                      sdk = sdk_package.load(os.path.join(directory, f"sdk_{variant}.json"))
+                      if any(sdk.get(key) != SDK_030_PIN[key] for key in ("hrx_loom", "wheel_sha256")):
+                          return False
+              except (OSError, ValueError, AttributeError):
+                  return False
+              return True'''),
+              ('"--new-sdk", SDK_NEW]', '"--new-sdk", target_sdk(st)]'),
+              ('"--new-sdk", SDK_NEW, "--baselines"]', '"--new-sdk", target_sdk(st), "--baselines"]'),
+              ('def cmd_plan(a):\n    slugs', '''def cmd_plan(a):
+              if a.new_sdk != SDK_NEW and a.mode not in SDK_MODES:
+                  die("--new-sdk selects the target of sdk-ab or sdk-loom")
+              slugs'''),
+              ('        for s in slugs:\n            repo = f"{a.new_org}/{s}"\n            try:\n                head, old = hf_head(repo), old_sdk_revision(repo)',
+               '''        for s in slugs:
+                      repo = f"{a.new_org}/{s}"
+                      if a.new_sdk == "0.3.0":
+                          published = f"loom-fun/{s}"
+                          try:
+                              revision = hf_head(published)
+                          except Exception as error:
+                              die(f"{published}: cannot pin production revision ({error}); rerun plan")
+                          reference = f"{published}@{revision}"
+                          refs[s] = {"old": reference, "new": reference}
+                          continue
+                      try:
+                          head, old = hf_head(repo), old_sdk_revision(repo)'''),
+              ('"opts": {"gates": a.gates, "new_org": a.new_org, "base": a.base, "old_org": old_org, "batch": a.batch, "refs": None,',
+               '''"opts": {"gates": a.gates, "new_org": a.new_org, "base": a.base, "old_org": old_org, "batch": a.batch, "refs": None,
+                             **({"new_sdk": a.new_sdk} if a.new_sdk != SDK_NEW else {}),'''),
+              ('"card": j["card"], "steps": len(j["steps"]),',
+               '''"card": j["card"], "steps": len(j["steps"]),
+                                                   **({"source_card": e["old"]} if a.new_sdk == "0.3.0" else {}),'''),
+              ('def card_message(e, dev, run, loom_only, sdk):', 'def card_message(e, dev, run, loom_only, sdk, version=SDK_NEW):'),
+              ('hrx-loom {SDK_NEW} Loom rows', 'hrx-loom {version} Loom rows'),
+              ('hrx-loom {SDK_NEW} vs the previous card', 'hrx-loom {version} vs the previous card'),
+              ('msg = card_message(e, dev, run, loom_only, sdk)', 'msg = card_message(e, dev, run, loom_only, sdk, target_sdk(st.d))'),
+              ('    why = None\n    if not pkg:', '    why = None\n    version = target_sdk(st.d)\n    if not pkg:'),
+              ('why = "the v0.2 package is not published yet:', 'why = f"the {version} package is not published yet:'),
+              ('    elif built and built != pkg["programs_sha256"]:', '''    elif version == "0.3.0" and (not built or not measured_sdk_030(e)):
+                  why = "the job has no matching programs hash and verified 0.3.0 SDK identities"
+              elif built and built != pkg["programs_sha256"]:'''),
+              ("the published v0.2 package's programs", "the published {version} package's programs"),
+              ('def package_one(st, slug, canon, sha, dry, env, prefill_changes=None):',
+               'def package_one(st, slug, canon, sha, dry, env, prefill_changes=None, source_card=None):'),
+              ('    hf_snapshot_small(repo, rev, snap)\n    alts =',
+               '''    if source_card:
+                  source_repo, _, source_revision = source_card.partition("@")
+                  if source_repo != f"loom-fun/{slug}" or not re.fullmatch(r"[a-f0-9]{40}", source_revision):
+                      raise ValueError(f"invalid pinned production package: {source_card}")
+                  hf_snapshot_small(source_repo, source_revision, snap)
+              else:
+                  hf_snapshot_small(repo, rev, snap)
+              alts ='''),
+              ('    if sdk_package.same_files(snap, out):', '''    version = target_sdk(st.d)
+              reference = snap
+              if source_card:
+                  reference = os.path.join(W, "staging")
+                  hf_snapshot_small(repo, rev, reference)
+              if version == "0.3.0":
+                  path = os.path.join(out, "llm_config.json")
+                  config = sdk_package.load(path)
+                  config["sdk"] = dict(SDK_030_PIN)
+                  with open(path, "w", encoding="utf-8") as f:
+                      json.dump(config, f, indent=1)
+                      f.write("\\n")
+              if sdk_package.same_files(reference, out):'''),
+              ('Loom package rebuilt for hrx-loom {SDK_NEW}', 'Loom package rebuilt for hrx-loom {version}'),
+              ('            for _, e in picked:   # validate measured programs before package_one can upload anything\n                built = job_programs(e) if e["slug"] == slug else None',
+               '''            source = None
+                      if target_sdk(st.d) == "0.3.0":
+                          sources = {e.get("source_card") for _, e in picked if e["slug"] == slug}
+                          if len(sources) != 1 or None in sources:
+                              raise RuntimeError("no single pinned production package in the selected evidence")
+                          source, = sources
+                      for _, e in picked:   # validate measured programs before package_one can upload anything
+                          built = job_programs(e) if e["slug"] == slug else None
+                          if source and e["slug"] == slug and not a.dry_run:
+                              if e.get("decision") != "promote" or not built or not measured_sdk_030(e):
+                                  raise RuntimeError(f"the {e['device']} job has no passing decision, programs hash, or verified 0.3.0 SDK identities")'''),
+              ('res = package_one(st, slug, canon, sha, a.dry_run, env, transitions.get(slug))',
+               'res = package_one(st, slug, canon, sha, a.dry_run, env, transitions.get(slug), source_card=source)'),
+              ('st.log(f"{slug}: v0.2 package at', 'st.log(f"{slug}: {target_sdk(st.d)} package at'),
+              ('                                  **({"old": st.jobs[first[s]]["old"]} if st.jobs[first[s]].get("old") else {})}',
+               '''                                  **({key: st.jobs[first[s]][key] for key in ("old", "source_card")
+                                                if key in st.jobs[first[s]]})}'''),
+              ('perf v0.2 vs v0.1:', 'SDK performance delta:'),
+              ('    p.add_argument("--old", help=', '''    p.add_argument("--new-sdk", choices=(SDK_NEW, "0.3.0"), default=SDK_NEW,
+                             help="explicit SDK target for sdk-ab or sdk-loom (default: %(default)s)")
+              p.add_argument("--old", help='''),
+          ])
+          edit("skills/loom-migrate/scripts/sweep.py", [
+              ('                if p.endswith(".loom") and p not in out:', '''                p = p["path"] if isinstance(p, dict) else p
+                          if p.endswith(".loom") and p not in out:'''),
+              ('                libs = prog.get("libraries", [])', '''                libs = [entry["path"] if isinstance(entry, dict) else entry
+                                  for entry in prog.get("libraries", [])]'''),
+              ('texts = "".join(read(os.path.join(pkg, p)) for p in inputs + libs)',
+               'texts = "\\n".join(read(os.path.join(pkg, p)) for p in inputs + libs if p.endswith(".loom"))'),
+          ])
+          edit("tests/test_regen.py", [
+              ('    def test_sdk_ab_takes_no_old_org(self):', '''    def test_sdk_030_pins_production_and_persists_the_target(self):
+                  st = self.plan("--mode", "sdk-loom", "--new-sdk", "0.3.0")
+                  self.assertEqual(st.d["opts"]["new_sdk"], "0.3.0")
+                  reference = f"loom-fun/{SLUG}@{'f' * 40}"
+                  self.assertEqual(st.jobs[JOB]["source_card"], reference)
+                  with open(os.path.join(st.work, "refs_radeon-r9700.json")) as f:
+                      self.assertEqual(json.load(f)[SLUG], {"old": reference, "new": reference})
+                  for suffix in ("", "-r2"):
+                      cmd = regen.generator_cmd(st.d, "radeon-r9700", [SLUG], suffix)
+                      self.assertEqual(cmd[cmd.index("--new-sdk") + 1], "0.3.0")
+                      self.assertEqual("--loom-only" in cmd, not suffix)
+          
+              def test_sdk_030_requires_both_verified_serving_wheels(self):
+                  job = {"dir": self.tmp}
+                  self.assertFalse(regen.measured_sdk_030(job))
+                  first = os.path.join(self.tmp, "sdk_staging.json")
+                  second = os.path.join(self.tmp, "sdk_stagingnd.json")
+                  for path, pin in ((first, regen.SDK_030_PIN), (second, {"hrx_loom": "0.3.0"})):
+                      with open(path, "w") as f:
+                          json.dump(pin, f)
+                  self.assertFalse(regen.measured_sdk_030(job))
+                  with open(second, "w") as f:
+                      json.dump(regen.SDK_030_PIN, f)
+                  self.assertTrue(regen.measured_sdk_030(job))
+          
+              def test_sdk_ab_takes_no_old_org(self):'''),
+          ])
+          edit("skills/loom-migrate/SKILL.md", [
+              ('(hrx-loom 0.1.0 to 0.2.0). Template for the next:', '''(hrx-loom 0.1.0 to 0.2.0)
+          and [versions/v0.2.0-to-v0.3.0.md](versions/v0.2.0-to-v0.3.0.md) (hrx-loom 0.2.0 to 0.3.0).
+          Template for the next:'''),
+          ])
+          PY
+          cat > skills/loom-migrate/versions/v0.2.0-to-v0.3.0.md <<'DOC'
+          # Migrate hrx-loom 0.2.0 to 0.3.0
+          
+          [SDK release](https://github.com/ROCm/hrx-system/releases/tag/v0.3.0) ·
+          [SDK source comparison](https://github.com/ROCm/hrx-system/compare/v0.2.0...v0.3.0) ·
+          [Matching library](https://github.com/ROCm/hrx-loom-library/tree/v0.3.0)
+          
+          The stable SDK commit is e2c41a720363911c04606ce0f4417e2d55630352. Its matching library is
+          279afe368b82e0d7acfe38c4f47e8e7e5cfb7bc8. The PyPI wheels match the release assets.
+          
+          | Wheel | SHA256 |
+          |---|---|
+          | Linux x86-64 (manylinux 2.39) | 6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f |
+          | Windows x86-64 | 06afbc88370fde741037ebd38dba91c2184cb4d2fbd5cee337720cd494a06752 |
+          
+          ## 1. Summary
+          
+          The SDK supports published service ABI 1 and legacy HAL ownership. Preserve both in this
+          migration. On DevLab, 60 published package revisions had the same aggregate result under
+          both SDKs (one parse failure and one link failure). For 55 programs-only kit builds, both
+          SDKs parsed all 55 and reported one link failure.
+          
+          ## 2. Breaking changes
+          
+          | Surface | Old and new contracts | Migration and check |
+          |---|---|---|
+          | Text and sequence controller ABI | Published service version 1 retains its existing export signatures. Bare unversioned development exports now select ABI 2. | Keep the published service version and ABI. For an unversioned development controller, export each old role with a _v1 suffix and select version 1, or port the entire service to _v2. The ABI 2 publisher adds a proposal_counts buffer after progress and uses exact live token and span counts. Serve and exercise every changed service. |
+          | HAL ownership | Legacy hal.buffer, hal.fence and hal.file signatures remain accepted. The new contract borrows ptr handles and passes ownership with ref values. | Keep the legacy signature for existing packages. A port to explicit ownership must pair each owner's last use with a release and verify the linked service. |
+          | SDK pin | Previous packages pin 0.2.0 or another recorded SDK. The stable 0.3.0 wheel is available on PyPI. | Install in a separate root and verify its wheel hash. A staging package uses the new pin after its runtime sessions pass. |
+          | Speculative telemetry | ABI 1 may report proposed_tokens as null. Epoch capacity fields are replaced by scheduled_tokens. | Check telemetry consumers for nullable proposals and avoid deriving counts from configured draft depth. Verify tools and image endpoints on the runner. |
+          
+          ## 3. Mechanical steps
+          
+          ### 3a. An existing package
+          
+          1. Install 0.3.0 with the installer from loom-setup.
+          2. Keep a copy of the published package revision and its SDK pin. Run the sweep on that
+             package under both SDKs, then serve the same published preset with 0.3.0. Exercise text and
+             tools, vision, or image generation according to its services.
+          3. After runtime validation, use sdk_pin.py stamp with the verified new SDK root on the
+             staging copy's llm_config.json. Preserve the model, origin, program and tokenizer files.
+             Use the explicit ABI migration in section 2 only for packages that use bare development exports.
+          
+          ### 3b. A manifest model
+          
+          On DevLab, plan the Loom-only comparison by naming the migration branch, device and manifest
+          slug explicitly. The plan pins the current production package revision for the old measurements
+          and build inputs. The final assembly reads metadata from that revision and uses the staging
+          head as the compare-and-swap upload parent.
+          
+          ~~~bash
+          python3 fleet/regen.py plan --base codex/sdk030-migration --device strix-halo \
+            --mode sdk-loom --new-sdk 0.3.0 --state sdk030.json MODEL_SLUG
+          ~~~
+          
+          Run and collect the normal repeated sessions and gates. Confirm a row outside the band with
+          the planned same-runner ABBA job. Package publication requires the measured programs hash,
+          the verified 0.3.0 wheel for both performance variants, and a passing verdict. Then build the
+          card from the evidence and publish to staging. Preserve any verified existing baseline rows.
+          
+          For cards outside the manifest, use the published-package procedure. Track image generation
+          and manually maintained packages independently from the decoder performance workflow.
+          
+          ## 4. Scripts
+          
+          Use scripts/sweep.py for both SDK roots, fleet/regen.py for generated decoder cards and
+          loom-setup/scripts/sdk_pin.py to refresh a validated package's pin. Published ABI 1 does not
+          require a source rewrite.
+          
+          ## 5. Verification
+          
+          Compare each package's parse/link diagnostics against the old SDK control. The fleet build
+          and static sweep cover compilation input and linking, while service ABI registration, device
+          loading, generation, and performance require separate DevLab sessions. Keep baseline and
+          new-run evidence tied to the exact production revisions and rendered staging package.
+          
+          ## 6. Behaviour changes to measure
+          
+          Measure decode, prefill, long-context and four-stream rows for applicable decoder presets.
+          Inspect tool, image, speculative decoding and full-context admission behavior with the
+          registered services. Attribute changes to the runtime or package only after the comparison
+          controls for programs, preset, checkpoint and runner.
+          
+          ## 7. Simplifications available
+          
+          ABI 1 compatibility removes the need for a fleet-wide code rewrite. Leave existing runtime
+          flags in place until a controlled measurement supports a change.
+          
+          ## 8. Opportunities
+          
+          ABI 2 live work limits, explicit HAL ownership and checkpoint streaming can be evaluated in
+          separate measured changes.
+          
+          ## 9. Gotchas
+          
+          - Same aggregate diagnostics on both wheels -> compare individual package and file findings before treating them as existing.
+          - A staging card has older provenance than production -> pin production for the comparison and assembly, then use the staging revision for the upload.
+          - A published input lists a data file as an object -> use its path when selecting Loom sources for the sweep.
+          
+          ## 10. Not applicable
+          
+          The source-built libhrx API change and Bazel/C++ provider or loom_test BUILD migrations do not
+          alter the existing Loom source packages emitted by this repo.
+          
+          ## 11. Promotion
+          
+          Keep uploads in loom-fun-staging until the owner approves production promotion. Preserve the
+          outgoing production revisions with their appropriate SDK tags before promotion. See the
+          [release checklist](../reference/release-checklist.md).
+          
+          ## 12. Campaign evidence
+          
+          [Initial DevLab control and target sweep](https://github.com/loom-fun/loom-skills/actions/runs/45250755821) ·
+          [Per-package repeat](https://github.com/loom-fun/loom-skills/actions/runs/45251450721) ·
+          [Draft migration](https://github.com/loom-fun/loom-skills/pull/1366)
+          DOC
+          git add -- fleet/regen.py tests/test_regen.py skills/loom-migrate/SKILL.md \
+            skills/loom-migrate/scripts/sweep.py skills/loom-migrate/versions/v0.2.0-to-v0.3.0.md
+          git diff --cached --check
+          git diff --cached --binary > "$WORK/evidence/changes.patch"
+          git config user.name "Loom SDK migration on DevLab"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Add opt-in SDK 0.3.0 migration from pinned production packages"
+          git rev-parse HEAD > "$WORK/evidence/tested-commit.txt"
+          git bundle create "$WORK/evidence/changes.bundle" HEAD "^HEAD^"
+      - name: Verify migration and fleet output on DevLab
+        shell: bash
+        run: |
+          bash "$PWD/skills/loom-setup/scripts/install_loom.sh" "$WORK/sdk" 0.3.0 \
+            2>&1 | tee "$WORK/evidence/install.log"
+          cp "$WORK/sdk/loom-install.json" "$WORK/evidence/sdk.json"
+          grep -Fq 6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f "$WORK/evidence/sdk.json"
+          py="$WORK/sdk/.tools/bin/python"
+          "$py" -m pip install -q pyyaml huggingface_hub
+          export PATH="$WORK/sdk/.venv/bin:$PATH"
+          "$py" -m unittest discover -s tests -p test_regen.py > "$WORK/evidence/test-regen.log" 2>&1 || { tail -100 "$WORK/evidence/test-regen.log"; exit 1; }
+          "$py" -m unittest discover -s tests -p test_ab_jobs.py > "$WORK/evidence/test-ab-jobs.log" 2>&1 || { tail -100 "$WORK/evidence/test-ab-jobs.log"; exit 1; }
+          "$py" fleet/scope_lint.py --local --head HEAD --base origin/main \
+            --scope-block $'kind: architecture\nscopes: -\nkernels: -' --work "$WORK/scope" \
+            --json "$WORK/evidence/scope.json" 2>&1 | tee "$WORK/evidence/scope.log"
+          "$py" fleet/build_fleet.py --ref "${{ github.event.pull_request.base.sha }}" --out "$WORK/base" --jobs 8 \
+            2>&1 | tee "$WORK/evidence/base-build.log"
+          "$py" fleet/build_fleet.py --tree "$PWD" --out "$WORK/head" --jobs 8 \
+            2>&1 | tee "$WORK/evidence/head-build.log"
+          "$py" fleet/diff_fleet.py "$WORK/base" "$WORK/head" --raw-spelling \
+            --json "$WORK/evidence/program-diff.json" --md "$WORK/evidence/program-diff.md"
+          cat "$WORK/evidence/program-diff.md"
+      - name: Retain migration proof
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdk030-migration-implementation
+          path: ${{ env.WORK }}/evidence
+          retention-days: 30
+      - name: Remove runner scratch
+        if: always()
+        shell: bash
+        run: rm -rf -- "$WORK"
