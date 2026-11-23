@@ -44,21 +44,33 @@ jobs:
           check = '''  local argfile="$out/argv_$1.txt"
             tr '\\0' '\\n' < "/proc/$(cat "$LOOM_SERVE_STATE/perf-$1.pid")/cmdline" > "$argfile" || return 1
             if [ "$1" = elastic ]; then
-              if grep -Eq '^--(memory_bytes|pool_backing)=' "$argfile"; then echo "Wrong elastic launch"; return 1; fi
-            elif ! grep -qx -- '--pool_backing=fixed' "$argfile"; then echo "Wrong fixed launch"; return 1; fi
+              if grep -Eq '^--(memory_bytes|pool_backing)=' "$argfile"; then echo "Wrong elastic launch"; exit 61; fi
+            elif ! grep -qx -- '--pool_backing=fixed' "$argfile"; then echo "Wrong fixed launch"; exit 61; fi
           '''
           h.write_text(source.replace(anchor, check + anchor))
           job = {'name':'flash', 'card':'loom-fun/unsloth-Qwen3.8-Flash-Next-loom@d847c21bc93c0c6bc45752a9edaf91d80ac74490', 'sdk':'0.3.0', 'kit':'qwen4exp', 'memory_bytes':100000000000, 'llamacpp':'b1371', 'env':{'MIN_MEMAVAIL_GB':110}, 'variants': [
               {'name':'published', 'sdk':'0.3.0'},
-              {'name':'tuned', 'build':{}, 'sdk':'0.3.0','execution':{'max_tokens':4096}},
-              {'name':'elastic', 'build':{}, 'sdk':'0.3.0','elastic':True,'memory_bytes':'none','execution':{'max_tokens':4096}}],
+              {'name':'tuned', 'build':{}, 'config':{'serve':None}, 'sdk':'0.3.0','execution':{'max_tokens':4096}},
+              {'name':'elastic', 'build':{}, 'config':{'serve':None}, 'sdk':'0.3.0','elastic':True,'memory_bytes':'none','execution':{'max_tokens':4096}}],
               'steps':[]}
-          for name in ('published','tuned','elastic'):
+          job['variants'] = [v for v in job['variants'] if v['name'] != 'published']
+          for name in ('elastic','tuned'):
               job['steps'].extend(['func:'+name,'perf:'+name+':1','perf:'+name+':1:long','c4:'+name])
           Path('flash-exp.json').write_text(json.dumps({'jobs':[job]}, indent=2))
           PY
       - name: Compare model sources and memory settings
         run: bash .github/scripts/devlab_perf.sh flash-exp.json flash
+      - name: Check backing and benchmark results
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json,os
+          from pathlib import Path
+          root=Path(os.environ['WORK'])/'flash/out'
+          s=json.loads((root/'summary.json').read_text())['results']
+          assert all(v and 'ERROR' not in str(v) and 'FAIL' not in str(v) for v in s.values()),s
+          assert (root/'programs_sha256_elastic.txt').read_text()==(root/'programs_sha256_tuned.txt').read_text()
+          PY
       - name: Collect model settings
         if: always()
         shell: bash
