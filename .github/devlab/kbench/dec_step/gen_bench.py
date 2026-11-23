@@ -143,7 +143,7 @@ def origins(blocks, T=1):
     return np.concatenate(o)
 
 
-def step_case(lib, body, tag, ctx, T=1):
+def step_case(lib, body, tag, ctx, T=1, roles=True):
     """one step of T tokens, one per row (T = 4: 4 streams, each at context ctx)"""
     blocks = (ctx + 15) // 16
     pool = blocks * 16 * T
@@ -232,7 +232,7 @@ def step_case(lib, body, tag, ctx, T=1):
             assert mm, kn
             kdefs.append(mm.group(0).replace(f'export("{kn}") @{kn}(', f'export("{new}") @{new}(', 1))
     case = f"check.case public @c{tag} {{\n" + "\n".join(lines) + "\n  check.return\n}\n" + f"check.benchmark<@c{tag}> @{tag}\n"
-    if tag == ROLE_CTX:   # one case per kernel role: only that role's launches (all layers) and the values they read
+    if tag == ROLE_CTX and roles:   # one case per kernel role: only that role's launches (all layers) and the values they read
         defs = {}
         for ln in lines:
             m = re.match(r"  (%\w+) = ", ln)
@@ -274,7 +274,7 @@ def bench(variant):
     parts, kd = [strip_kernels(lib)], {}
     cases = []
     for tag, ctx, T in CTXS:
-        kdefs, case = step_case(lib, body, tag, ctx, T)
+        kdefs, case = step_case(lib, body, tag, ctx, T, roles=variant == "base")   # role / minus cases: base only
         for k in kdefs:
             kd[re.search(r'export\("(\w+)"\)', k).group(1)] = k
         cases.append(case)
