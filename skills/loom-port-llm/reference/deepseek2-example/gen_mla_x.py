@@ -32,6 +32,7 @@ import os
 
 XCAP = int(os.environ.get("MLA_XCAP", "131072"))         # scratch positions (sum over the epoch's expanded segments, 64-rounded)
 MIN_TILES = int(os.environ.get("MLA_X_MIN_TILES", "16"))  # whole 16-token tiles a segment needs to be expanded
+MIN_KEYS = int(os.environ.get("MLA_X_MIN_KEYS", "2048"))  # and keys (kbench mla_xpf: a 1k prompt is faster absorbed, 4k expanded)
 XB_MAX = XCAP // 64
 QW = int(os.environ.get("MLA_XQ", "4"))   # 16-query tiles per g_mla_xflash workgroup (one wave each; a quad entry of xq)
 
@@ -128,7 +129,10 @@ kernel.def export("g_mla_xlist") @g_mla_xlist(%tokens: index) {{
         %ntl_v = index.sub %i, %s : index
         %ntl = index.assume %ntl_v [range(%ntl_v, 0, 512)] : index
         %fits = index.cmp ule, %end, %cxcap : index
-        %long = index.cmp uge, %ntl, %cmin : index
+        %long_q = index.cmp uge, %ntl, %cmin : index
+        %cmink = index.constant {MIN_KEYS} : index
+        %long_k = index.cmp uge, %nk, %cmink : index
+        %long = scalar.andi %long_q, %long_k : i1
         %expand = scalar.andi %fits, %long : i1
         %r_base, %r_nq, %r_nb, %r_nc = scf.if %expand -> (index, index, index, index) {{
           %cqwl = index.constant {QW - 1} : index

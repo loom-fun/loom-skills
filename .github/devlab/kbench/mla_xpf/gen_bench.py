@@ -57,6 +57,7 @@ def base_text():
 
 def x_text(variant):
     env = {k: v for k, v in os.environ.items() if not k.startswith("MLA_X")}
+    env["MLA_X_MIN_KEYS"] = "0"   # the cases expand every segment of 16+ tiles (the numpy list mirror's rule)
     env.update({k: v for x in variant.split("+") for k, v in VARIANTS[x].items()})
     code = (f"import json,sys; sys.path.insert(0, {kit()!r}); import gen_mla_x; c = json.load(open({os.path.join(ROOT, 'skills/loom-port-llm/reference/deepseek2-example/cfg.json')!r})); "
             "print(gen_mla_x.kernels(c, 39, 'iq4_nl', 'iq4_xs', 72, 272, 18, 136, tests=True))")
