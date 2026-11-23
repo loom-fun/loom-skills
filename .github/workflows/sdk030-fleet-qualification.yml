@@ -1,0 +1,77 @@
+name: SDK 0.3 fleet qualification wave
+on:
+  pull_request:
+    types: [labeled]
+permissions:
+  contents: read
+jobs:
+  verify:
+    if: github.head_ref == 'codex/sdk030-fleet-qualification' && github.event.label.name == 'devlab-experiment'
+    name: ${{ matrix.device }} ${{ matrix.slug }}
+    strategy:
+      max-parallel: 2
+      fail-fast: false
+      matrix:
+        include:
+          - slug: unsloth-Qwen3.5-0.8B-loom
+            device: radeon-r9700
+            labels: '["self-hosted","devlab-dispatch","radeon-r9700","Linux"]'
+          - slug: unsloth-gemma-4-E2B-it-loom
+            device: strix-halo
+            labels: '["self-hosted","devlab-dispatch","strix-halo","Linux"]'
+    runs-on: ${{ fromJSON(matrix.labels) }}
+    timeout-minutes: 240
+    env:
+      SLUG: ${{ matrix.slug }}
+      DEVICE: ${{ matrix.device }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 18d4cc22afc8e5211813a32f073db90d5c42aced
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Plan from the accepted production revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          export WORK="$(dirname "$GITHUB_WORKSPACE")/sdk030-wave-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$DEVICE-$SLUG"
+          mkdir -p "$WORK/receipt"
+          echo "WORK=$WORK" >> "$GITHUB_ENV"
+          python3 fleet/regen.py plan --base codex/sdk030-migration --mode sdk-loom --new-sdk 0.3.0 --gates full --device "$DEVICE" --batch 1 --work "$WORK/plan" --state "$WORK/receipt/state.json" "$SLUG"
+          cp "$WORK/plan/batches/0.perf.json" "$WORK/receipt/experiment.json"
+          python3 - <<'PY' >> "$GITHUB_ENV"
+          import json,os
+          from pathlib import Path
+          work=Path(os.environ['WORK'])
+          plan=json.loads((work/'receipt/experiment.json').read_text())
+          frozen=json.loads(Path('skills/loom-migrate/versions/v0.2.0-to-v0.3.0-production.json').read_text())
+          job,=plan['jobs']
+          repo='loom-fun/'+os.environ['SLUG']
+          assert job['card']==repo+'@'+frozen[repo],job['card']
+          assert job.get('sdk',plan.get('sdk'))=='0.3.0'
+          print('JOB='+job['name'])
+          PY
+      - name: Build, serve and measure the release candidate
+        run: bash .github/scripts/devlab_perf.sh "$WORK/receipt/experiment.json" "$JOB"
+      - name: Save the measured package and identity
+        if: always() && env.JOB != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          d="$WORK/$JOB"
+          cp -r "$d/out" "$WORK/receipt/"
+          if [ -e "$d/staging/pkg/model.json" ]; then
+            tar -C "$d/staging/pkg" --exclude=parameter --exclude='*.gguf' --exclude='*.safetensors' --exclude='bench' -czf "$WORK/receipt/package-without-weights.tar.gz" .
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sdk030-${{ matrix.device }}-${{ matrix.slug }}
+          path: ${{ env.WORK }}/receipt
+          retention-days: 30
+      - name: Release job disk
+        if: always()
+        shell: bash
+        run: |
+          if [ "${WORK:-}" = "$(dirname "$GITHUB_WORKSPACE")/sdk030-wave-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$DEVICE-$SLUG" ]; then rm -rf -- "$WORK"; fi
