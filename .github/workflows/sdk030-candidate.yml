@@ -163,15 +163,14 @@ jobs:
                       assert sources[source_id] == descriptor, source_id
                   else:
                       sources[source_id] = descriptor
-              note = ("Historical Loom sessions from the pinned production card before this SDK 0.3.0 migration. "
-                      "This device has no SDK 0.3.0 measurements in this staged pilot.")
+              note = "These historical Loom rows retain their original SDK and predate the SDK 0.3.0 staging pilot."
               perf["baseline"].setdefault("differs", []).append(note)
           new_perf = info["devices"]["strix-halo"]["performance"]
           notes = new_perf["baseline"].setdefault("differs", [])
-          notes.append("Strix Halo Loom rows were measured on hrx-loom 0.3.0 on 2026-11-23. The llama.cpp measurements are retained from their published sessions.")
+          notes.append("Strix Halo Loom rows use the 2026-11-23 SDK 0.3.0 run alongside llama.cpp rows from their published sessions.")
           for key, entry in changes.items():
               if abs(entry["percent"]) > 3.0:
-                  notes.append(f"{key}: {entry['percent']:+.2f}% compared with the published Strix Halo Loom session on {old_session['date']}. This cross-run observation has no same-runner confirmation.")
+                  notes.append(f"{key} changed {entry['percent']:+.2f}% against the Strix Halo Loom session on {old_session['date']} in a cross-run comparison without same-runner confirmation.")
           p.write_text(json.dumps(info, indent=1, sort_keys=True) + "\n")
           shutil.copyfile(w / "production-model.json", p.parent / "model.json")
           evidence = {
