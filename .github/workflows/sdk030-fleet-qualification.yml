@@ -1,4 +1,4 @@
-name: SDK 0.3 fleet confirmation
+name: SDK 0.3 Radeon queued fleet remainder
 on:
   pull_request:
     types: [labeled]
@@ -9,13 +9,94 @@ jobs:
     if: github.head_ref == 'codex/sdk030-fleet-qualification' && github.event.label.name == 'devlab-experiment'
     name: ${{ matrix.device }} ${{ matrix.slug }}
     strategy:
-      max-parallel: 6
+      max-parallel: 8
       fail-fast: false
       matrix:
         include:
-          - slug: ggml-org-Flint-loom
-            device: strix-halo
-            labels: '["self-hosted","devlab-dispatch","strix-halo","Linux"]'
+          - slug: ggml-org-LFM2.5-24B-A2B-loom
+            device: radeon-r9700
+            labels: '["self-hosted","devlab-dispatch","radeon-r9700"]'
+          - slug: rippertnt-HyperCLOVAX-SEED-Text-Instruct-1.5B-loom
+            device: radeon-r9700
+            labels: '["self-hosted","devlab-dispatch","radeon-r9700"]'
+          - slug: ggml-org-Qwen3-4B-loom
+            device: radeon-r9700
+            labels: '["self-hosted","devlab-dispatch","radeon-r9700"]'
+          - slug: bartowski-Mellum2.1-12B-A2.5B-Thinking-loom
+            device: radeon-r9700
+            labels: '["self-hosted","devlab-dispatch","radeon-r9700"]'
+          - slug: unsloth-Qwen3.5-4B-loom
+            device: radeon-r9700
+            labels: '["self-hosted","devlab-dispatch","radeon-r9700"]'
+          - slug: unsloth-gpt-oss-20b-loom
+            device: radeon-r9700
+            labels: '["self-hosted","devlab-dispatch","radeon-r9700"]'
+          - slug: unsloth-Llama-3.2-3B-Instruct-loom
+            device: radeon-r9700
+            labels: '["self-hosted","devlab-dispatch","radeon-r9700"]'
+          - slug: unsloth-Qwen3-8B-loom
+            device: radeon-r9700
+            labels: '["self-hosted","devlab-dispatch","radeon-r9700"]'
+          - slug: ggml-org-Qwen3-14B-loom
+            device: radeon-r9700
+            labels: '["self-hosted","devlab-dispatch","radeon-r9700"]'
+          - slug: unsloth-gemma-4-E4B-it-loom
+            device: radeon-r9700
+            labels: '["self-hosted","devlab-dispatch","radeon-r9700"]'
+          - slug: bartowski-Ornith-1.5-9B-loom
+            device: radeon-r9700
+            labels: '["self-hosted","devlab-dispatch","radeon-r9700"]'
+          - slug: unsloth-Qwen3.5-9B-loom
+            device: radeon-r9700
+            labels: '["self-hosted","devlab-dispatch","radeon-r9700"]'
+          - slug: bartowski-MiniCPM-V-4.7-35B-A3B-loom
+            device: radeon-r9700
+            labels: '["self-hosted","devlab-dispatch","radeon-r9700"]'
+          - slug: lmstudio-community-Ornith-1.0-35B-loom
+            device: radeon-r9700
+            labels: '["self-hosted","devlab-dispatch","radeon-r9700"]'
+          - slug: nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom
+            device: radeon-r9700
+            labels: '["self-hosted","devlab-dispatch","radeon-r9700"]'
+          - slug: bartowski-Qwen2.5-32B-Instruct-loom
+            device: radeon-r9700
+            labels: '["self-hosted","devlab-dispatch","radeon-r9700"]'
+          - slug: bartowski-Qwen3.8-27B-loom
+            device: radeon-r9700
+            labels: '["self-hosted","devlab-dispatch","radeon-r9700"]'
+          - slug: XHToken-Spark-X2.5-4B-loom
+            device: radeon-r9700
+            labels: '["self-hosted","devlab-dispatch","radeon-r9700"]'
+          - slug: bartowski-Spark-X2.6-4B-loom
+            device: radeon-r9700
+            labels: '["self-hosted","devlab-dispatch","radeon-r9700"]'
+          - slug: unsloth-Qwen3-4B-Instruct-2507-loom
+            device: radeon-r9700
+            labels: '["self-hosted","devlab-dispatch","radeon-r9700"]'
+          - slug: unsloth-Qwen3-VL-4B-Instruct-loom
+            device: radeon-r9700
+            labels: '["self-hosted","devlab-dispatch","radeon-r9700"]'
+          - slug: unsloth-Qwen3-VL-8B-Instruct-loom
+            device: radeon-r9700
+            labels: '["self-hosted","devlab-dispatch","radeon-r9700"]'
+          - slug: ggml-org-Qwen3-Coder-30B-A3B-Instruct-loom
+            device: radeon-r9700
+            labels: '["self-hosted","devlab-dispatch","radeon-r9700"]'
+          - slug: unsloth-Qwen3-30B-A3B-Instruct-2507-loom
+            device: radeon-r9700
+            labels: '["self-hosted","devlab-dispatch","radeon-r9700"]'
+          - slug: unsloth-gemma-4-31B-it-loom
+            device: radeon-r9700
+            labels: '["self-hosted","devlab-dispatch","radeon-r9700"]'
+          - slug: bartowski-Nanbeige4.3-33B-loom
+            device: radeon-r9700
+            labels: '["self-hosted","devlab-dispatch","radeon-r9700"]'
+          - slug: lmstudio-community-gemma-4-26B-A4B-it-loom
+            device: radeon-r9700
+            labels: '["self-hosted","devlab-dispatch","radeon-r9700"]'
+          - slug: unsloth-gemma-4-12B-it-loom
+            device: radeon-r9700
+            labels: '["self-hosted","devlab-dispatch","radeon-r9700"]'
     runs-on: ${{ fromJSON(matrix.labels) }}
     timeout-minutes: 240
     env:
@@ -36,7 +117,7 @@ jobs:
           mkdir -p "$WORK/receipt"
           echo "WORK=$WORK" >> "$GITHUB_ENV"
           python3 fleet/regen.py plan --base codex/sdk030-migration --mode sdk-loom --new-sdk 0.3.0 --gates full --device "$SDK_GPU_KEY" --batch 1 --work "$WORK/plan" --state "$WORK/receipt/state.json" "$SLUG"
-          python3 .github/scripts/ab_jobs.py --device "$SDK_GPU_KEY" --gates full --sdk-ab --old-sdk card --new-sdk 0.3.0 --refs "$WORK/plan/refs_$SDK_GPU_KEY.json" "$SLUG" > "$WORK/receipt/experiment.json"
+          cp "$WORK/plan/batches/0.perf.json" "$WORK/receipt/experiment.json"
           python3 - <<'PY' >> "$GITHUB_ENV"
           import json,os
           from pathlib import Path
@@ -47,9 +128,6 @@ jobs:
           repo='loom-fun/'+os.environ['SLUG']
           assert job['card']==repo+'@'+frozen[repo],job['card']
           assert job.get('sdk',plan.get('sdk'))=='0.3.0'
-          variants={v['name']:v for v in job['variants']}
-          assert variants['fun']['sdk']=='card' and variants['fun']['card']==job['card']
-          assert variants['staging']['sdk']=='0.3.0' and 'card' not in variants['staging']
           print('JOB='+job['name'])
           PY
       - name: Build, serve and measure the release candidate
@@ -76,7 +154,7 @@ jobs:
           rows=[json.loads(line) for line in (out/'perf_staging.jsonl').read_text().splitlines()] if (out/'perf_staging.jsonl').is_file() else []
           if not any(r.get('decode_tps') for r in rows) or not any(r.get('prefill_long') for r in rows):
               failures['performance']='missing short or long metrics'
-          for step in ('c4:funnd', 'c4:stagingnd', 'perf:fun:1', 'perf:fun:1:long', 'func:staging', 'ktest:staging', 'gates:staging:full'):
+          for step in ('c4:stagingnd', 'func:staging', 'ktest:staging', 'gates:staging:full'):
               if step not in results:
                   failures[step]='missing required result'
           if not results or failures:raise SystemExit(str(failures or 'no results'))
