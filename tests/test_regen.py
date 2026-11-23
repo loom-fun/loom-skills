@@ -389,6 +389,31 @@ class SdkAbTest(Base):
         self.assertEqual(cmd[cmd.index("--old-sdk") + 1], "card")
         self.assertEqual(cmd[cmd.index("--new-sdk") + 1], "0.2.0")
 
+    def test_sdk_030_pins_production_and_persists_the_target(self):
+        st = self.plan("--mode", "sdk-loom", "--new-sdk", "0.3.0")
+        self.assertEqual(st.d["opts"]["new_sdk"], "0.3.0")
+        reference = f"loom-fun/{SLUG}@3503abcf7cfff7bc58bd819ea32ccab8c18c075d"
+        self.assertEqual(st.jobs[JOB]["source_card"], reference)
+        with open(os.path.join(st.work, "refs_radeon-r9700.json")) as f:
+            self.assertEqual(json.load(f)[SLUG], {"old": reference, "new": reference})
+        for suffix in ("", "-r2"):
+            cmd = regen.generator_cmd(st.d, "radeon-r9700", [SLUG], suffix)
+            self.assertEqual(cmd[cmd.index("--new-sdk") + 1], "0.3.0")
+            self.assertEqual("--loom-only" in cmd, not suffix)
+
+    def test_sdk_030_requires_both_verified_serving_wheels(self):
+        job = {"dir": self.tmp}
+        self.assertFalse(regen.measured_sdk_030(job))
+        first = os.path.join(self.tmp, "sdk_staging.json")
+        second = os.path.join(self.tmp, "sdk_stagingnd.json")
+        for path, pin in ((first, regen.SDK_030_PIN), (second, {"hrx_loom": "0.3.0"})):
+            with open(path, "w") as f:
+                json.dump(pin, f)
+        self.assertFalse(regen.measured_sdk_030(job))
+        with open(second, "w") as f:
+            json.dump(regen.SDK_030_PIN, f)
+        self.assertTrue(regen.measured_sdk_030(job))
+
     def test_sdk_ab_takes_no_old_org(self):
         with self.assertRaises(SystemExit), mock.patch.object(regen, "sh", self.gen):
             regen.main(["plan", "--base", "sdk020", "--device", "radeon-r9700", "--mode", "sdk-ab", "--old", "loom-fun", "--state", self.state, SLUG])

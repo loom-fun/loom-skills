@@ -70,6 +70,7 @@ def program_files(model):
     for prog in model.get("programs", {}).values():
         for i in prog.get("inputs", []) + prog.get("libraries", []):
             for p in ([i["path"], *i.get("data", [])] if isinstance(i, dict) else [i]):   # data inputs too: weight policies (head_weights.loom) sit at the package root
+                p = p["path"] if isinstance(p, dict) else p
                 if p.endswith(".loom") and p not in out:
                     out.append(p)
     return out
@@ -94,8 +95,9 @@ def link_pkg(link, pkg, model):
             for pname in svc.get("programs", []):
                 prog = model["programs"][pname]
                 inputs = [i["path"] if isinstance(i, dict) else i for i in prog.get("inputs", [])]
-                libs = prog.get("libraries", [])
-                texts = "".join(read(os.path.join(pkg, p)) for p in inputs + libs)
+                libs = [entry["path"] if isinstance(entry, dict) else entry
+                        for entry in prog.get("libraries", [])]
+                texts = "\n".join(read(os.path.join(pkg, p)) for p in inputs + libs if p.endswith(".loom"))
                 roots = sorted(set(ROOTS.findall(texts)))
                 base = [f"--config={k}={str(v).lower() if isinstance(v, bool) else v}" for k, v in cfg.items()]
                 runs = [("card config", base)]

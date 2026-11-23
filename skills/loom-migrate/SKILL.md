@@ -28,7 +28,9 @@ script on their own tree; a campaign uses the whole procedure.
 | The next release is out and there is no entry for the pair | Procedure step 1 (research), write the entry from `versions/TEMPLATE.md`, then continue |
 | A package fails with `unknown op`, `unknown model field`, a publish/prepare signature error on the new SDK | Find the symptom in the entry's "Gotchas" and "Breaking changes" |
 
-Entries: [versions/v0.1.0-to-v0.2.0.md](versions/v0.1.0-to-v0.2.0.md) (hrx-loom 0.1.0 to 0.2.0). Template for the next:
+Entries: [versions/v0.1.0-to-v0.2.0.md](versions/v0.1.0-to-v0.2.0.md) (hrx-loom 0.1.0 to 0.2.0)
+and [versions/v0.2.0-to-v0.3.0.md](versions/v0.2.0-to-v0.3.0.md) (hrx-loom 0.2.0 to 0.3.0).
+Template for the next:
 [versions/TEMPLATE.md](versions/TEMPLATE.md).
 
 ## The procedure (any adjacent pair)
