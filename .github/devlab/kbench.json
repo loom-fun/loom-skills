@@ -368,13 +368,20 @@
       "gen": "mla_xpf/gen_bench.py",
       "gen_variants": [
         "base",
-        "x"
+        "x",
+        "xg"
       ],
       "files": [
         "bench.loom",
-        "bench_x.loom"
+        "bench_x.loom",
+        "bench_xg.loom"
       ],
       "tests": [
+        "test_t1.loom",
+        "test_t2.loom",
+        "test_t3.loom",
+        "test_t4.loom",
+        "test_tg4.loom",
         "test.loom"
       ],
       "config": [],

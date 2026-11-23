@@ -53,7 +53,7 @@ kernel.def export("g_mla_xlist") @g_mla_xlist(%tokens: index) {{
   %c1 = index.constant 1 : index
   %c32 = index.constant 32 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c32, %c1, %c1) : index
-}} launch(%tokens_arg: index, %info: buffer, %tiles: buffer, %xq: buffer, %xb: buffer, %xcnt: buffer) {{
+}} launch(%tokens_arg: index, %info: buffer, %tiles: buffer, %xq: buffer, %xb: buffer, %xcnt: buffer, %xskip: buffer) {{
   %tokens = index.assume %tokens_arg [range(%tokens_arg, 16, 8192), multiple_of(%tokens_arg, 16)] : index
   %lane_id = kernel.workitem.id<x> : index
   %lane = index.assume %lane_id [range(%lane_id, 0, 31)] : index
@@ -194,6 +194,53 @@ kernel.def export("g_mla_xlist") @g_mla_xlist(%tokens: index) {{
     view.store %nc32, %tiles_view[%c0] : i32, view<[%tokens]xi32>
     view.store %nq32, %cnt_view[0] : i32, view<4xi32>
     view.store %nb32, %cnt_view[1] : i32, view<4xi32>
+  }}
+  // xskip[b] = 1 when tokens 64b .. 64b + 63 all lie in expanded tiles (the absorbed k_b / v_b GEMMs skip that block)
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  %m_bytes = index.constant 32768 : offset
+  %m_tile = buffer.alloca<workgroup> align(16) %m_bytes : buffer
+  %m_view = buffer.view %m_tile[%zero] : buffer -> view<8192xi32>
+  %c32x = index.constant 32 : index
+  %c1_i32 = scalar.constant 1 : i32
+  scf.for %z = [%lane to %tokens step %c32x] {{
+    %zb = index.assume %z [range(%z, 0, 8191)] : index
+    view.store %c0_i32, %m_view[%zb] : i32, view<8192xi32>
+  }}
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  %cv = buffer.view %xcnt[%zero] : buffer -> view<4xi32>
+  %nqw = view.load %cv[0] : view<4xi32> -> i32
+  %nqw_b = scalar.assume %nqw [range(%nqw, 0, 512)] : i32
+  %nqi = index.cast %nqw_b : i32 to index
+  %xqv = buffer.view %xq[%zero] : buffer -> view<512x4xi32>
+  scf.for %e = [%lane to %nqi step %c32x] {{
+    %eb = index.assume %e [range(%e, 0, 511)] : index
+    %et32 = view.load %xqv[%eb, 0] : view<512x4xi32> -> i32
+    %en32 = view.load %xqv[%eb, 1] : view<512x4xi32> -> i32
+    %et_b = scalar.assume %et32 [range(%et32, 0, 8191)] : i32
+    %en_b = scalar.assume %en32 [range(%en32, 0, 4)] : i32
+    %et = index.cast %et_b : i32 to index
+    %en = index.cast %en_b : i32 to index
+    %en16 = index.mul %en, %c16 : index
+    %eend = index.add %et, %en16 : index
+    scf.for %k = [%et to %eend step %c1] {{
+      %kb = index.assume %k [range(%k, 0, 8191)] : index
+      view.store %c1_i32, %m_view[%kb] : i32, view<8192xi32>
+    }}
+  }}
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  %nblk64 = index.div %tokens, %c64 : index
+  %skip_view = buffer.view %xskip[%zero] : buffer -> view<128xi32>
+  scf.for %bk = [%lane to %nblk64 step %c32x] {{
+    %bkb = index.assume %bk [range(%bk, 0, 127)] : index
+    %t0 = index.mul %bkb, %c64 : index
+    %t1 = index.add %t0, %c64 : index
+    %all = scf.for %k = [%t0 to %t1 step %c1](%acc = %c1_i32 : i32) -> (i32) {{
+      %kb = index.assume %k [range(%k, 0, 8191)] : index
+      %mv = view.load %m_view[%kb] : view<8192xi32> -> i32
+      %a2 = scalar.andi %acc, %mv : i32
+      scf.yield %a2 : i32
+    }}
+    view.store %all, %skip_view[%bkb] : i32, view<128xi32>
   }}
   kernel.return
 }}
@@ -451,8 +498,13 @@ kernel.def export("g_mla_xexp") @g_mla_xexp(%count_buffer: buffer) {{
     return "\n".join(A)
 
 
-def xflash(QH, scale, QB=192, QD=576, VD=128):
-    """Expanded flash attention: workgroup (quad, head) of 4 waves, wave = one 16-query tile."""
+def xflash(QH, scale, QB=192, QD=576, VD=128, lds=None):
+    """Expanded flash attention: workgroup (quad, head) of 4 waves, wave = one 16-query tile. lds (MLA_XF=lds): the four
+    waves stage each 32-key block's K [32 x 192] and V^T [128 x 32] in workgroup memory once (128 threads, 5 16-value loads
+    each) and read their fragments from there; the loop runs to the quad's last key block, a wave past its own causal
+    range keeps its state."""
+    if lds is None:
+        lds = os.environ.get("MLA_XF", "lds") == "lds"
     NCH = 12   # 16-dim chunks of the 192-dim key: 8 nope (xk) + 4 rope (xpe)
     A = []
     a = A.append
@@ -485,6 +537,7 @@ kernel.def export("g_mla_xflash") @g_mla_xflash(%count_buffer: buffer) {{
   %c31 = index.constant 31 : index
   %c32 = index.constant 32 : index
   %c128 = index.constant 128 : index
+  %c64x = index.constant 64 : index
   %cxcap = index.constant {XCAP} : index
 """ + "".join(f"  %ex{i} = index.constant {i} : index\n" for i in range(8)) + f"""  %xq_view = buffer.view %xq[%zero] : buffer -> view<512x4xi32>
   %tok32 = view.load %xq_view[%quad, 0] : view<512x4xi32> -> i32
@@ -493,11 +546,14 @@ kernel.def export("g_mla_xflash") @g_mla_xflash(%count_buffer: buffer) {{
   %nt_b = scalar.assume %nt32 [range(%nt32, 0, 4)] : i32
   %ntiles = index.cast %nt_b : i32 to index
   %mine = index.cmp ult, %wave, %ntiles : index
-  scf.if %mine {{
+  {"%all_waves = index.cmp ult, %c0, %c1 : index" + chr(10) + "  scf.if %all_waves {" if lds else "scf.if %mine {"}
     %tok_b = scalar.assume %tok32 [range(%tok32, 0, 8191)] : i32
     %tok_f = index.cast %tok_b : i32 to index
+    %nt_last = index.sub %ntiles, %c1 : index
     %w16 = index.mul %wave, %c16 : index
-    %tok0_v = index.add %tok_f, %w16 : index
+    %tok0_w = index.add %tok_f, %w16 : index
+    %tok_hi = index.sub %tokens, %c16 : index
+    %tok0_v = {"index.min %tok0_w, %tok_hi" if lds else "index.add %tok0_w, %c0"} : index
     %tok0 = index.assume %tok0_v [range(%tok0_v, 0, 8176), lt(%tok0_v, %tokens)] : index
     %base_b = scalar.assume %base32 [range(%base32, 0, {XCAP - 64})] : i32
     %base = index.cast %base_b : i32 to index
@@ -546,23 +602,85 @@ kernel.def export("g_mla_xflash") @g_mla_xflash(%count_buffer: buffer) {{
     %nkw = index.add %pos0, %c16 : index
     %nkw31 = index.add %nkw, %c31 : index
     %nblk = index.div %nkw31, %c32 : index""")
+    if lds:
+        a(f"""    %ntl16 = index.mul %nt_last, %c16 : index
+    %tokl_v = index.add %tok_f, %ntl16 : index
+    %tokl = index.assume %tokl_v [range(%tokl_v, 0, 8176), lt(%tokl_v, %tokens)] : index
+    %posl32 = view.load %info_view[%tokl, 1] : view<[%tokens]x4xi32> -> i32
+    %posl_b = scalar.assume %posl32 [range(%posl32, 0, 262128)] : i32
+    %posl = index.cast %posl_b : i32 to index
+    %nkq = index.add %posl, %c16 : index
+    %nkq31 = index.add %nkq, %c31 : index
+    %nblk_q = index.div %nkq31, %c32 : index
+    %ks_bytes = index.constant {32 * 200 * 2} : offset
+    %ks_tile = buffer.alloca<workgroup> align(16) %ks_bytes : buffer
+    %ks_view = buffer.view %ks_tile[%zero] : buffer -> view<32x200xf16>
+    %vs_bytes = index.constant {128 * 40 * 2} : offset
+    %vs_tile = buffer.alloca<workgroup> align(16) %vs_bytes : buffer
+    %vs_view = buffer.view %vs_tile[%zero] : buffer -> view<128x40xf16>
+    %wi_id = kernel.workitem.id<x> : index
+    %wi = index.assume %wi_id [range(%wi_id, 0, 127)] : index
+    %c2 = index.constant 2 : index
+    %c4 = index.constant 4 : index
+    %c8 = index.constant 8 : index
+    %st_kk0 = index.div %wi, %c8 : index
+    %st_kc0_v = index.rem %wi, %c8 : index
+    %st_kc0 = index.mul %st_kc0_v, %c16 : index
+    %st_kk1 = index.add %st_kk0, %c16 : index
+    %st_pk = index.div %wi, %c4 : index
+    %st_pc_v = index.rem %wi, %c4 : index
+    %st_pc = index.mul %st_pc_v, %c16 : index
+    %st_pc_l = index.add %st_pc, %c128 : index
+    %st_vd0 = index.div %wi, %c2 : index
+    %st_vh_v = index.rem %wi, %c2 : index
+    %st_vh = index.mul %st_vh_v, %c16 : index
+    %st_vd1 = index.add %st_vd0, %c64x : index""")
     for d in range(8):
         a(f"""    %vd{d} = index.constant {16 * d} : index
     %vr{d}_v = index.add %vd{d}, %lane_col : index
     %vr{d} = index.assume %vr{d}_v [range(%vr{d}_v, 0, 127)] : index""")
     acc = ", ".join(f"%a{d} = %init : vector<8xf32>" for d in range(8))
-    a(f"""    %m_final, %l_final, {", ".join(f"%o{d}" for d in range(8))} = scf.for %b = [%c0 to %nblk step %c1](%m = %neg_big : f32, %l = %zero_f : f32, {acc}) -> (f32, f32, {", ".join(["vector<8xf32>"] * 8)}) {{
+    TY = ", ".join(["vector<8xf32>"] * 8)
+    a(f"""    %m_final, %l_final, {", ".join(f"%o{d}" for d in range(8))} = scf.for %b = [%c0 to {"%nblk_q" if lds else "%nblk"} step %c1](%m = %neg_big : f32, %l = %zero_f : f32, {acc}) -> (f32, f32, {TY}) {{
       %kf = index.mul %b, %c32 : index""")
+    if lds:
+        a(f"""      %sk_base = index.add %base, %kf : index
+      %sk_r0_v = index.add %sk_base, %st_kk0 : index
+      %sk_r0 = index.assume %sk_r0_v [range(%sk_r0_v, 0, {XCAP - 1})] : index
+      %sk_r1_v = index.add %sk_base, %st_kk1 : index
+      %sk_r1 = index.assume %sk_r1_v [range(%sk_r1_v, 0, {XCAP - 1})] : index
+      %sk_rp_v = index.add %sk_base, %st_pk : index
+      %sk_rp = index.assume %sk_rp_v [range(%sk_rp_v, 0, {XCAP - 1})] : index
+      %sv_c_v = index.add %sk_base, %st_vh : index
+      %sv_c = index.assume %sv_c_v [range(%sv_c_v, 0, {XCAP - 16}), multiple_of(%sv_c_v, 16)] : index
+      %gk0 = vector.load %xk_view[%sk_r0, %st_kc0] : view<{XCAP}x128xf16> -> vector<16xf16>
+      %gk1 = vector.load %xk_view[%sk_r1, %st_kc0] : view<{XCAP}x128xf16> -> vector<16xf16>
+      %gkp = vector.load %pe_view[%sk_rp, %st_pc] : view<{XCAP}x64xf16> -> vector<16xf16>
+      %gv0 = vector.load %vt_view[%st_vd0, %sv_c] : view<128x{XCAP}xf16> -> vector<16xf16>
+      %gv1 = vector.load %vt_view[%st_vd1, %sv_c] : view<128x{XCAP}xf16> -> vector<16xf16>
+      vector.store %gk0, %ks_view[%st_kk0, %st_kc0] : vector<16xf16>, view<32x200xf16>
+      vector.store %gk1, %ks_view[%st_kk1, %st_kc0] : vector<16xf16>, view<32x200xf16>
+      vector.store %gkp, %ks_view[%st_pk, %st_pc_l] : vector<16xf16>, view<32x200xf16>
+      vector.store %gv0, %vs_view[%st_vd0, %st_vh] : vector<16xf16>, view<128x40xf16>
+      vector.store %gv1, %vs_view[%st_vd1, %st_vh] : vector<16xf16>, view<128x40xf16>
+      kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+      %in_range_b = index.cmp ult, %b, %nblk : index
+      %in_range = scalar.andi %in_range_b, %mine : i1
+      %wm_n, %wl_n, {", ".join(f"%wa{d}_n" for d in range(8))} = scf.if %in_range -> (f32, f32, {TY}) {{""")
     for hh in range(2):
         a(f"""      %kh{hh}_o = index.constant {16 * hh} : index
       %kf{hh} = index.add %kf, %kh{hh}_o : index
       %xr{hh}_a = index.add %base, %kf{hh} : index
       %xr{hh}_b = index.add %xr{hh}_a, %lane_col : index
       %xr{hh} = index.assume %xr{hh}_b [range(%xr{hh}_b, 0, {XCAP - 1})] : index
-      %xc{hh} = index.assume %xr{hh}_a [range(%xr{hh}_a, 0, {XCAP - 16}), multiple_of(%xr{hh}_a, 16)] : index""")
+      %xc{hh} = index.assume %xr{hh}_a [range(%xr{hh}_a, 0, {XCAP - 16}), multiple_of(%xr{hh}_a, 16)] : index
+      %lr{hh}_v = index.add %kh{hh}_o, %lane_col : index
+      %lr{hh} = index.assume %lr{hh}_v [range(%lr{hh}_v, 0, 31)] : index""")
         prev = "%init"
         for c in range(NCH):
-            if c < 8:
+            if lds:
+                a(f"""      %kr{hh}_{c} = vector.load %ks_view[%lr{hh}, {16 * c}] : view<32x200xf16> -> vector<16xf16>""")
+            elif c < 8:
                 a(f"""      %kr{hh}_{c} = vector.load %xk_view[%xr{hh}, {16 * c}] : view<{XCAP}x128xf16> -> vector<16xf16>""")
             else:
                 a(f"""      %kr{hh}_{c} = vector.load %pe_view[%xr{hh}, {16 * (c - 8)}] : view<{XCAP}x64xf16> -> vector<16xf16>""")
@@ -607,18 +725,31 @@ kernel.def export("g_mla_xflash") @g_mla_xflash(%count_buffer: buffer) {{
         a(f"""      %os{d} = vector.mulf %a{d}, %alpha_v : vector<8xf32>""")
         cur = f"%os{d}"
         for hh in range(2):
-            a(f"""      %vl{d}_{hh} = vector.load %vt_view[%vr{d}, %xc{hh}] : view<128x{XCAP}xf16> -> vector<16xf16>
+            a(f"""      %vl{d}_{hh} = vector.load %vs_view[%vr{d}, {16 * hh}] : view<128x40xf16> -> vector<16xf16>""" if lds else f"""      %vl{d}_{hh} = vector.load %vt_view[%vr{d}, %xc{hh}] : view<128x{XCAP}xf16> -> vector<16xf16>""")
+            a(f"""
       %vf{d}_{hh} = vector.fragment<lhs> %vl{d}_{hh} shape [%c16, %c16] : vector<16xf16>
       %an{d}_{hh} = vector.mma %vf{d}_{hh}, %pt{hh}, {cur} : vector<16xf16>, vector<16xf16>, vector<8xf32>""")
             cur = f"%an{d}_{hh}"
-    a(f"""      scf.yield %m_new, %l_new, {", ".join(f"%an{d}_1" for d in range(8))} : f32, f32, {", ".join(["vector<8xf32>"] * 8)}
-    }}
+    if lds:
+        a(f"""      scf.yield %m_new, %l_new, {", ".join(f"%an{d}_1" for d in range(8))} : f32, f32, {TY}
+      }} else {{
+      scf.yield %m, %l, {", ".join(f"%a{d}" for d in range(8))} : f32, f32, {TY}
+      }}
+      kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+      scf.yield %wm_n, %wl_n, {", ".join(f"%wa{d}_n" for d in range(8))} : f32, f32, {TY}
+    }}""")
+    else:
+        a(f"""      scf.yield %m_new, %l_new, {", ".join(f"%an{d}_1" for d in range(8))} : f32, f32, {TY}
+    }}""")
+    a(f"""{chr(10) + "    scf.if %mine {" if lds else ""}
     %one = scalar.constant 1.0 : f32
     %inv = scalar.divf %one, %l_final : f32
     %inv_v = vector.splat %inv : vector<8xf32>
     %cvo = index.constant {QH * VD} : index
-    %vo_layout = encoding.layout.strided [%c1, %cvo] : encoding<layout>
-    %vo_e0 = index.mul %tok0, %cvo : index
+    %c1_vo = index.constant 1 : index
+    %vo_layout = encoding.layout.strided [%c1_vo, %cvo] : encoding<layout>
+    %tok0_s = index.assume %tok0_w [range(%tok0_w, 0, 8176), lt(%tok0_w, %tokens)] : index
+    %vo_e0 = index.mul %tok0_s, %cvo : index
     %hvd = index.mul %head, %c128 : index
     %vo_e = index.add %vo_e0, %hvd : index
     %four = index.constant 4 : offset
@@ -627,6 +758,8 @@ kernel.def export("g_mla_xflash") @g_mla_xflash(%count_buffer: buffer) {{
     for d in range(8):
         a(f"""    %on{d} = vector.mulf %o{d}, %inv_v : vector<8xf32>
     vector.fragment.store<result> %on{d}, %vo_view[%vd{d}, %c0] shape [%c16, %c16] : vector<8xf32>, view<128x16xf32, %vo_layout>""")
+    if lds:
+        a("    }")
     a("""  }
   kernel.return
 }
@@ -647,6 +780,26 @@ def direct(text, name):
     rest = body[m.end():]
     hi = re.search(r"\[range\(%word, 0, (\d+)\)\]", body).group(1)
     return head + f"(%count_arg: index) {{\n  %count = index.assume %count_arg [range(%count_arg, 0, {hi})] : index\n" + rest + text[b:text.index("\n}\n", text.index("kernel.return", b)) + 3]
+
+
+def skip_twin(text, name):
+    """`<name>_x` of a g_mla_kbm / g_mla_vbm kernel (gen_mla.bmm): an extra %xskip argument; a workgroup whose 64-token block
+    is all expanded (xskip[block] = 1) does nothing."""
+    a = text.index(f'kernel.def export("{name}")')
+    b = text.index("\n}\n", text.index("kernel.return", a)) + 3
+    k = text[a:b].replace(f'export("{name}") @{name}(', f'export("{name}_x") @{name}_x(')
+    k = k.replace(", %y: buffer) {", ", %y: buffer, %xskip: buffer) {", 1)
+    anchor = "  %tblk = index.assume %tb_id [lt(%tb_id, %tblocks)] : index\n"
+    assert k.count(anchor) == 1 and k.count("  kernel.return\n") == 1
+    k = k.replace(anchor, anchor + """  %xs_zero = index.constant 0 : offset
+  %xs_view = buffer.view %xskip[%xs_zero] : buffer -> view<128xi32>
+  %xs_b = index.assume %tblk [range(%tblk, 0, 127)] : index
+  %xs_word = view.load %xs_view[%xs_b] : view<128xi32> -> i32
+  %xs_zero_i32 = scalar.constant 0 : i32
+  %xs_run = scalar.cmpi eq, %xs_word, %xs_zero_i32 : i32
+  scf.if %xs_run {
+""").replace("  kernel.return\n", "  }\n  kernel.return\n")
+    return k
 
 
 def kernels(cfg, layer_max, kb_fmt, vb_fmt, kb_row, vb_row, kb_block, vb_block, tests=False):

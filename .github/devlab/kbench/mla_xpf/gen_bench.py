@@ -20,7 +20,13 @@ ROOT = os.path.abspath(sys.argv[1]) if len(sys.argv) > 1 else os.path.abspath(os
 HEAD = "amdgpu.target<gfx11-generic> @w32 {subgroup_size = 32}\n\n"
 QH, D, PB, KL, QB, VD = 32, 576, 1152, 512, 192, 128
 XCAP = 131072
-VARIANTS = {"x": {}}
+VARIANTS = {"x": {}, "xg": {"MLA_XF": "global"},   # x: LDS-staged flash (default); xg: fragments straight from the scratch
+            "t": {"MLA_XCAP": "4096"}, "tg": {"MLA_XCAP": "4096", "MLA_XF": "global"}}   # small-scratch twins for the staged tests
+
+
+def set_xcap(variant):
+    global XCAP
+    XCAP = int(next((VARIANTS[x]["MLA_XCAP"] for x in variant.split("+") if x in VARIANTS and "MLA_XCAP" in VARIANTS[x]), 131072))
 CASES = [   # tag, context end (chunk = last t positions), tokens, layers
     ("1k", 1024, 1024, 8), ("4k", 4096, 4096, 4), ("8k", 8192, 4096, 4), ("32k", 32768, 4096, 2), ("131k", 131072, 4096, 1)]
 OUT = None
@@ -246,6 +252,7 @@ def decls(pfx, inp, x=True):
         s.append(f"""  %xq = check.generate.fill value(0) : tensor<512x4xi32>
   %xb = check.generate.fill value(0) : tensor<{XCAP // 64}x4xi32>
   %xcnt = check.generate.fill value(0) : tensor<64xi32>
+  %xskip = check.generate.fill value(0) : tensor<128xi32>
   %xw = check.generate.fill value(0.0) : tensor<{QH * 256 * 512}xf16>
   %xk = check.generate.fill value(0.0) : tensor<{QH * XCAP * 128}xf16>
   %xv = check.generate.fill value(0.0) : tensor<{QH * XCAP * 128}xf16>
@@ -272,7 +279,7 @@ def launches(variant, s, inp, layers, nq, nb, layer0=0):
                                     T(QH * XCAP * 128, "f16"), T(XCAP * 64, "f16"))
     L.append(f"""  %nq = check.literal value({nq}) : index
   %nb = check.literal value({nb}) : index
-  kernel.launch @k_g_mla_xlist_{s}[%t](%t, %info, %tiles, %xq, %xb, %xcnt) : [index](index, {TI}, {TT}, {TXQ}, {TXB}, {TXC})""")
+  kernel.launch @k_g_mla_xlist_{s}[%t](%t, %info, %tiles, %xq, %xb, %xcnt, %xskip) : [index](index, {TI}, {TT}, {TXQ}, {TXB}, {TXC}, tensor<128xi32>)""")
     for l in range(layer0, layer0 + layers):
         L.append(f"""  %l{l} = check.literal value({l}) : index
   kernel.launch @k_g_mla_xdeq_{s}[%c1x](%c1x, %kb, %vb, %xw) : [index](index, {TKB}, {TVB}, {TXW})
@@ -295,6 +302,7 @@ def bench_inputs(rng):
 
 def bench(variant, res):
     out = []
+    set_xcap(variant)
     for tag, ctx, t, layers in CASES:
         inp, nq, nb = res[tag]
         s = f"{tag}{variant.replace('+', '')}"
@@ -314,6 +322,7 @@ def tests(variants, kbd, vbd):
     rng = np.random.default_rng(7)
     out = []
     for name, rows, toks, layers, layer, ctx in TESTS:
+        set_xcap("x")
         inp = make_inputs(name, rng, rows, toks, layers, ctx)
         t = inp["t"]
         tiles = tile_list(t, inp["info"])
@@ -324,6 +333,8 @@ def tests(variants, kbd, vbd):
         for tok, nt, _, _ in xq:
             expanded[tok:tok + 16 * nt] = True
         for v in variants:
+            set_xcap(v)
+            after, xq, xb = xlists(inp["info"], tiles)
             s = f"{name}{v.replace('+', '')}"
             e = ref.copy()
             if v != "base":
@@ -350,6 +361,77 @@ def tests(variants, kbd, vbd):
     return out
 
 
+def staged(v, kbd, vbd, kb_bytes):
+    """Per-stage cases of a small-scratch variant (one file each: a device fault in one stage does not hide the others):
+    1 g_mla_xlist (lists), 2 g_mla_xdeq (W), 3 g_mla_xexp_d (scratch of the used rows), 4 the whole chain (vo)."""
+    set_xcap(v)
+    rng = np.random.default_rng(11)
+    name, rows, toks, layers, layer, ctx = TESTS[0]
+    pfx = f"s{v}"
+    inp = make_inputs(pfx, rng, rows, toks, layers, ctx)
+    t = inp["t"]
+    tiles = tile_list(t, inp["info"]); save(f"{pfx}_tiles", tiles)
+    after, xq, xb = xlists(inp["info"], tiles)
+    xc = np.zeros(64, np.int32); xc[0], xc[1] = len(xq), len(xb)
+    xqe = np.zeros((512, 4), np.int32); xqe[:len(xq)] = xq
+    xbe = np.zeros((XCAP // 64, 4), np.int32); xbe[:len(xb)] = xb
+    save(f"{pfx}_tiles_e", after); save(f"{pfx}_xcnt_e", xc); save(f"{pfx}_xq_e", xqe); save(f"{pfx}_xb_e", xbe)
+    W = np.zeros((QH, 256, KL)); W[:, :128] = kbd.transpose(0, 2, 1); W[:, 128:] = vbd
+    save(f"{pfx}_w_e", W.reshape(-1).astype(np.float16))
+    # expansion of row 0 (the expanded one): rows 0 .. nk64-1 of the scratch, zero past nk
+    c = inp["lat"][0][layer].astype(np.float64)
+    nk = int(xb[0][3]); n64 = len(xb) * 64
+    W16 = W.astype(np.float16).astype(np.float64)
+    xk = np.zeros((QH, XCAP, 128)); xv = np.zeros((QH, 128, XCAP)); xpe = np.zeros((XCAP, 64))
+    xk[:, :nk] = c[:nk, :KL] @ W16[:, :128].transpose(0, 2, 1)
+    xv[:, :, :nk] = (c[:nk, :KL] @ W16[:, 128:].transpose(0, 2, 1)).transpose(0, 2, 1)
+    xpe[:nk] = c[:nk, KL:]
+    save(f"{pfx}_xk_e", xk.reshape(-1).astype(np.float16)); save(f"{pfx}_xv_e", xv.reshape(-1).astype(np.float16)); save(f"{pfx}_xpe_e", xpe.reshape(-1).astype(np.float16))
+    ref = reference(inp, kbd, vbd, layer)
+    expanded = np.zeros(t, bool)
+    for tok, nt, _, _ in xq:
+        expanded[tok:tok + 16 * nt] = True
+    ref[~expanded] = 0.0
+    save(f"{pfx}_vo_e", ref.astype(np.float32))
+    s = f"{pfx}"
+    txt = kernels(v, s)
+    TXB, TXK, TXP, TXW = f"tensor<{XCAP // 64}x4xi32>", T(QH * XCAP * 128, "f16"), T(XCAP * 64, "f16"), T(QH * 256 * 512, "f16")
+    TO, TA = T(inp["olen"], "i32"), T(inp["alen"], "i8")
+    rd = lambda var, f, ty: f'  %{var} = check.file.read.npy path("{pfx}_{f}.npy") : {ty}\n'
+    files = {}
+    files["1"] = (f"check.case public @{s}_list {{\n" + decls(pfx, inp) + f"""  kernel.launch @k_g_mla_xlist_{s}[%t](%t, %info, %tiles, %xq, %xb, %xcnt, %xskip) : [index](index, tensor<{t}x4xi32>, tensor<{t}xi32>, tensor<512x4xi32>, {TXB}, tensor<64xi32>, tensor<128xi32>)
+""" + rd("et", "tiles_e", f"tensor<{t}xi32>") + rd("ec", "xcnt_e", "tensor<64xi32>") + rd("eq", "xq_e", "tensor<512x4xi32>") + rd("eb", "xb_e", TXB)
+                  + f"""  check.expect.equal actual(%tiles) expected(%et) : tensor<{t}xi32>
+  check.expect.equal actual(%xcnt) expected(%ec) : tensor<64xi32>
+  check.expect.equal actual(%xq) expected(%eq) : tensor<512x4xi32>
+  check.expect.equal actual(%xb) expected(%eb) : {TXB}
+  check.return
+}}
+""")
+    files["2"] = (f"check.case public @{s}_deq {{\n" + decls(pfx, inp) + f"""  kernel.launch @k_g_mla_xdeq_{s}[%c1x](%c1x, %kb, %vb, %xw) : [index](index, {T(QH * KL * 72, "i8")}, {T(QH * VD * 272, "i8")}, {TXW})
+""" + rd("ew", "w_e", TXW) + f"""  check.expect.close actual(%xw) expected(%ew) atol(1.0e-3) rtol(2.0e-3) nan(different) : {TXW}
+  check.return
+}}
+""")
+    files["3"] = (f"check.case public @{s}_exp {{\n" + decls(pfx, inp) + rd("xbi", "xb_e", TXB) + f"""  %nb = check.literal value({len(xb)}) : index
+  %lay = check.literal value({layer}) : index
+  kernel.launch @k_g_mla_xdeq_{s}[%c1x](%c1x, %kb, %vb, %xw) : [index](index, {T(QH * KL * 72, "i8")}, {T(QH * VD * 272, "i8")}, {TXW})
+  kernel.launch @k_g_mla_xexp_d_{s}[%nb](%t, %lay, %ctx, %pool, %xbi, %orig, %arena, %xw, %xk, %xv, %xpe) : [index](index, index, index, index, {TXB}, {TO}, {TA}, {TXW}, {TXK}, {TXK}, {TXP})
+""" + rd("ek", "xk_e", TXK) + rd("ev", "xv_e", TXK) + rd("ep", "xpe_e", TXP) + f"""  check.expect.close actual(%xpe) expected(%ep) atol(0.0) rtol(0.0) nan(different) : {TXP}
+  check.expect.close actual(%xk) expected(%ek) atol(2.0e-2) rtol(1.0e-2) nan(different) : {TXK}
+  check.expect.close actual(%xv) expected(%ev) atol(2.0e-2) rtol(1.0e-2) nan(different) : {TXK}
+  check.return
+}}
+""")
+    files["4"] = (f"check.case public @{s}_all {{\n" + decls(pfx, inp) + launches(v, s, inp, 1, len(xq), len(xb), layer0=layer) + rd("e", "vo_e", f"tensor<{t}x{QH * VD}xf32>")
+                  + f"""  check.expect.approximate actual(%vo) expected(%e) atol(5.0e-3) rtol(1.0e-2) nan(different) : tensor<{t}x{QH * VD}xf32>, tensor<{t}x{QH * VD}xf32>
+  check.return
+}}
+""")
+    for k, body in files.items():
+        open(os.path.join(OUT, f"test_{v}{k}.loom"), "w").write(HEAD + txt + "\n" + body)
+
+
 if __name__ == "__main__" and len(sys.argv) > 2:
     OUT = sys.argv[2]
     os.makedirs(OUT, exist_ok=True)
@@ -362,6 +444,8 @@ if __name__ == "__main__" and len(sys.argv) > 2:
     res = bench_inputs(np.random.default_rng(1))
     for v in vs:
         open(os.path.join(OUT, "bench%s.loom" % ("" if v == "base" else "_" + v.replace("+", "_"))), "w").write(HEAD + "\n".join(bench(v, res)))
+    for v in ("t", "tg"):
+        staged(v, kbd, vbd, kb)
     open(os.path.join(OUT, "test.loom"), "w").write(HEAD + "\n".join(tests(vs, kbd, vbd)))
     if _KIT:
         shutil.rmtree(os.path.dirname(_KIT), ignore_errors=True)

@@ -322,7 +322,7 @@
              and H // 32 <= 1024 and MOE["ffn"] // 32 <= 1024 and not MOE.get("expert_bias"))
  
  
-@@ -5977,6 +6018,89 @@
+@@ -5977,6 +6018,94 @@
      return (head + sizes + "  scf.if %outsel {\n" + gather + comp + scatter + "  } else {\n" + tail + "  }\n")
  
  
@@ -374,6 +374,9 @@
 +        xexp = (f"    kernel.launch @g_mla_xdeq[%c1](%c1, %wkb_{i}, %wvb_{i}, %xw) : [index](index, view<{sz('attn_k_b')}xi8>, view<{sz('attn_v_b')}xi8>, buffer)\n"
 +                f"    kernel.launch @g_mla_xexp[%xcnt](%t, %layer_{i}, %context, %pool, %xb, %origins, %arena, %xw, %xk, %xv, %xpe) : [buffer](index, index, index, index, buffer, buffer, buffer, buffer, buffer, buffer, buffer)\n")
 +        xflash = "    kernel.launch @g_mla_xflash[%xcnt](%t, %xq, %info, %qb, %q, %xk, %xv, %xpe, %vo) : [buffer](index, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)\n"
++        for k in (f"g_mla_kbm_{kb}", f"g_mla_vbm_{vb}"):   # their 64-token blocks that are all expanded: skipped
++            T[-1] = T[-1].replace(f"    kernel.launch @{k}[%t](%t, ", f"    kernel.launch @{k}_x[%t](%t, ", 1)
++            T[-1] = re.sub(rf"(    kernel\.launch @{k}_x\[%t\]\(.*?)\) : \[index\]\((.*?)\)\n", r"\1, %xskip) : [index](\2, buffer)\n", T[-1], count=1)
 +    T[-1] = T[-1].replace("{XEXP}", xexp).replace("{XFLASH}", xflash)
 +    if NO_FLASH:
 +        T[-1] = re.sub(r"    kernel\.launch @g_attention_flash2\[.*\n", "    // flash prefill off (MLA_FLASH=0 build): every prefill token takes the listed split-K kernels\n", T[-1], count=1)
@@ -403,8 +406,10 @@
 +  %xv = buffer.alloca<global> align(256) %xv_bytes : buffer
 +  %xpe = buffer.alloca<global> align(256) %xpe_bytes : buffer
 +  %xw = buffer.alloca<global> align(256) %xw_bytes : buffer
++  %xskip_bytes = index.constant 512 : offset
++  %xskip = buffer.alloca<global> align(256) %xskip_bytes : buffer
 +  scf.if %gemm {{
-+    kernel.launch @g_mla_xlist[%t](%t, %info, %flash_tiles, %xq, %xb, %xcnt) : [index](index, buffer, buffer, buffer, buffer, buffer)
++    kernel.launch @g_mla_xlist[%t](%t, %info, %flash_tiles, %xq, %xb, %xcnt, %xskip) : [index](index, buffer, buffer, buffer, buffer, buffer, buffer)
 +  }}
 +"""
 +
@@ -412,7 +417,7 @@
  MODEL_PARTS = {}   # model() records its pieces here for the speculative-decoding programs (draft/gen_draft.py)
  
  
-@@ -6157,6 +6281,15 @@
+@@ -6157,6 +6286,15 @@
          L_.append(f"  %nC = index.constant {g['C']} : index\n  %nVD = index.constant {g['VD']} : index\n  %nHV = index.constant {g['HV']} : index\n")
      if not QK_NORM:
          L_.append("  %no_norm = buffer.alloca<global> align(256) %row_bytes : buffer\n")
@@ -428,7 +433,7 @@
      if MOE:   # its own part: the MTP drafter programs reuse the prologue (all parts but the last), MoE layer included
          L_.append("\n" + moe_alloc())
      L_.append(f"""{"" if MOE else chr(10)}  kernel.launch @g_token_info[%t](%t, %spans, %metadata, %info) : [index](index, index, buffer, buffer)
-@@ -6169,7 +6302,7 @@
+@@ -6169,7 +6307,7 @@
    scf.if %gemm {{
      kernel.launch @g_attention_fallback_list[%t](%t, %info, %flash_tiles, %fallback_list, %fallback_count) : [index](index, buffer, buffer, buffer, buffer)
    }}
@@ -437,7 +442,7 @@
    %first_norm = command.parameter %weights, "blk.0.attn_norm.weight" : view<{H}xf32>
    kernel.launch @g_embed[%t](%t, %tokens{", %metadata, %info" if VISION else ""}, %embedding, %first_norm, %x, %h) : [index](index, buffer{", buffer, buffer" if VISION else ""}, view<{esize}xi8>, view<{H}xf32>, buffer, buffer)
    %output_norm = command.parameter %weights, "output_norm.weight" : view<{H}xf32>
-@@ -6195,11 +6328,13 @@
+@@ -6195,11 +6333,13 @@
              T.append(par("sinks", "attn_sinks", f"view<{QH}xf32>"))
          if i in RECUR:
              T.append(gdn_layer(i, b, nm, sz, par))
@@ -452,7 +457,7 @@
              pass
          elif GATE and not FUSED_Q:
              T.append(par("wg", "attn_gate"))
-@@ -6215,7 +6350,7 @@
+@@ -6215,7 +6355,7 @@
          # same format and size: one dual-weight launch at 8/16 tokens (PAIR_PROJ)
          same = lambda a, b: fmt_of(nm(a)) == fmt_of(nm(b)) and sz(a) == sz(b)
          qg = GATE and not FUSED_Q and not HEAD_GATE and not QKV_FUSED and i not in RECUR and same("attn_q", "attn_gate") and PAIR_PROJ in ("1", "qg")
@@ -461,7 +466,7 @@
              pass
          elif QKV_FUSED:
              T.append("  " + lin(fmt_of(nm("attn_qkv")), "%h", "%s_h", f"%wqkv_{i}", sz("attn_qkv"), "%qkv", "%nH", "%nQKV", H) + "\n")
-@@ -6224,7 +6359,7 @@
+@@ -6224,7 +6364,7 @@
              T.append("  " + lin2(fmt_of(nm("attn_q")), "%h", "%s_h", f"%wq_{i}", f"%wg_{i}", sz("attn_q"), "%q", "%gate", "%nH", "%nQ", H) + "\n")
          else:
              T.append("  " + lin(fmt_of(nm("attn_q")), "%h", "%s_h", f"%wq_{i}", sz("attn_q"), "%q", "%nH", nq, H) + "\n")
@@ -470,7 +475,7 @@
            pass
          elif same("attn_k", "attn_v") and PAIR_PROJ in ("1", "kv"):
            T.append("  " + lin2(fmt_of(nm("attn_k")), "%h", "%s_h", f"%wk_{i}", f"%wv_{i}", sz("attn_k"), "%k", "%v", "%nH", "%nKV", H) + "\n")
-@@ -6239,7 +6374,7 @@
+@@ -6239,7 +6379,7 @@
          qn, kn = (f"%q_norm_{i}", f"%k_norm_{i}") if QK_NORM else ("%no_norm", "%no_norm")
          gate, gty = (f"%sinks_{i}", f"view<{QH}xf32>") if SINKS else (gate0, "buffer")
          nty = f"view<{D}xf32>" if QK_NORM else "buffer"
@@ -479,7 +484,7 @@
            rope_k = "g_qk_rope_store_swa" if SWA_ROPE and i in sliding else "g_qk_rope_store"
            T.append(f"""  kernel.launch @{rope_k}[%t](%t, %layer_{i}, %rope_{i}, %context, %pool, %q, %k, %v, {qn}, {kn}, %info, %origins, %arena{", %metadata, %tokens" if MROPE else ""}{bias_args}) : [index](index, index, i32, index, index, buffer, buffer, buffer, {nty}, {nty}, buffer, buffer, buffer{", buffer, buffer" if MROPE else ""}{bias_types})
    scf.if %gemm {{
-@@ -6255,7 +6390,7 @@
+@@ -6255,7 +6395,7 @@
    }}
  """)
  
@@ -488,7 +493,7 @@
            T.append("  " + lin(fmt_of(nm("attn_output")), "%o", "%s_o", f"%wo_{i}", sz("attn_output"), "%y", nq, "%nH", qd) + "\n")
            if OUT_BIAS:   # attention output projection bias (gpt-oss attn_output.bias)
              T.append(f'  %bo_{i} = command.parameter %weights, "{b}attn_output.bias" : view<{H}xf32>\n'
-@@ -6457,7 +6592,7 @@
+@@ -6457,7 +6597,7 @@
          from gen_mxfp4s import mxfp4s_icodes as _mx_icodes
          COMMON += _mx_icodes()
      if USED_MVQ or USED_MOEQ or PH_ONLY:   # ACT_Q8: int8-activation matvecs, their weight-code helpers and g_quant_q8
@@ -497,7 +502,7 @@
              COMMON += IQ4_ICODES
          COMMON += ICODES + "".join(mv(fmt, K, R=R, TG=TG, swiglu=sw == 1, pair=sw == 2, suffix=f"_r{R}" if R != 16 else "", iq=True)
                                     for fmt, K, sw, R, TG in sorted(USED_MVQ))
-@@ -6515,8 +6650,14 @@
+@@ -6515,8 +6655,15 @@
              parts.append(mv(fmt, K, TG=TG, swiglu=sw))
      for fmt, K, sw, R, TG in sorted(USED_MV_R):
          parts.append(mv(fmt, K, R=R, TG=TG, swiglu=sw, suffix=f"_r{R}"))
@@ -509,11 +514,12 @@
 +        if MLA_X:
 +            assert len(MLA_FMTS) == 1, MLA_FMTS
 +            (_kbf, _vbf), = MLA_FMTS
++            parts.append(gen_mla_x.skip_twin(parts[-1], f"g_mla_kbm_{_kbf}") + gen_mla_x.skip_twin(parts[-1], f"g_mla_vbm_{_vbf}"))
 +            parts.append(gen_mla_x.kernels(CFG, L - 1, _kbf, _vbf, row_bytes(_kbf, MLA_G["NOPE"]), row_bytes(_vbf, MLA_G["KL"]), FMT[_kbf], FMT[_vbf]))
      if FUSED_Q:
          parts.append(split_qgate(QH, D))
      if SWA_ROPE:
-@@ -6567,8 +6708,9 @@
+@@ -6567,8 +6714,9 @@
      parts.append(open(os.path.join(here, "tile_uniform.loom")).read())
      if not NO_FLASH:
          flash2 = os.path.join(out_dir, "flash2.loom")
