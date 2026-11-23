@@ -6,7 +6,7 @@ permissions:
   contents: read
 jobs:
   sdk-offline:
-    if: github.event.pull_request.head.ref == 'codex/sdk030-migration' && github.event.pull_request.head.repo.full_name == github.repository && contains(github.event.pull_request.labels.*.name, 'devlab-debug')
+    if: github.event.pull_request.head.ref == 'codex/sdk030-migration' && github.event.pull_request.head.repo.full_name == github.repository && contains(github.event.pull_request.labels.*.name, 'sdk030-offline')
     runs-on: [strix-halo, devlab-dispatch, Linux, self-hosted]
     timeout-minutes: 85
     env:
