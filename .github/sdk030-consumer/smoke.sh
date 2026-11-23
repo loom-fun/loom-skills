@@ -11,7 +11,7 @@ source "$WORK/gpu-sdk/bin/activate"
 wheel=hrx_loom-0.3.0-py3-none-manylinux_2_39_x86_64.whl
 curl -fsSL --retry 3 "https://github.com/ROCm/hrx-system/releases/download/v0.3.0/$wheel" -o "$wheel"
 echo "6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f  $wheel" | sha256sum -c -
-python -m pip install -q "./$wheel"
+python -m pip install -q "./$wheel[hf]"
 export HF_HUB_CACHE="$WORK/hf/hub"
 mkdir -p "$cache/refs"
 timeout 240s loom-fetch "huggingface:$repo:chat@$revision" --materialize=copy --output="$snapshot" --no-input

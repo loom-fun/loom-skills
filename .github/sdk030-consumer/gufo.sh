@@ -110,6 +110,8 @@ cmake = "gufo/src/models/loom/runtime.cmake"
 edit(cmake, "0.2.0", "0.3.0")
 edit(cmake, previous, revision, 1)
 edit(cmake, "2bdf75bc99d530054dc7457ec68df0269f7fd23675115faa361702981cc51fa9", archive, 1)
+edit(cmake, "pkg_check_modules(GUFO_LOOM_PC QUIET loom-text-embed)",
+     "pkg_check_modules(GUFO_LOOM_PC QUIET loom-text-embed=${GUFO_LOOM_HRX_VERSION})", 1)
 notice = "gufo/THIRD_PARTY_NOTICES.md"
 edit(notice, previous, revision, 2)
 edit(notice, "v0.2.0", "v0.3.0", 1)
@@ -134,6 +136,9 @@ inline bool SdkCompatible(std::string_view built, std::string_view runtime) {
 
 '''
     file.write_text(text.replace(old, "SdkCompatible(built, runtime)").replace(marker, helper + marker))
+edit("gufo/src/models/loom/loom_package.hpp",
+     "  if (built.empty() || runtime.empty() ||\n      SdkCompatible(built, runtime))",
+     "  if (built.empty() || runtime.empty() || SdkCompatible(built, runtime))", 1)
 edit("gufo/src/models/loom/loom_source.hpp",
      "// A package for another SDK series fails inside Loom: refuse it here.",
      "// Check that the installed revision is supported by this runtime.", 1)
