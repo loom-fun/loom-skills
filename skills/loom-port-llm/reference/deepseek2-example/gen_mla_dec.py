@@ -30,6 +30,9 @@ VTC = 16 + int(os.environ.get("MLA_DEC_VTPAD", "8"))   # padded V^T row (halves)
 # prefetch: 0 = g_kv_offset per block (3 dependent loads), 1 = page map hoisted + next page index prefetched (1 load
 # round trip per block), 2 = 1 + the next block's K fragments loaded during this block's softmax / PV
 PF = int(os.environ.get("MLA_DEC_PF", "0"))
+# partial layout: 0 = part_acc[token][split][head][512] (transposed fragment stores: 8 scattered 4 B stores per lane),
+# 1 = part_acc[token][split][512][head] (16 lanes = 16 heads write 64 contiguous bytes per row); g_mla_dcombine follows
+PL = int(os.environ.get("MLA_DEC_PL", "0"))
 ABL = set(x for x in os.environ.get("MLA_DEC_ABL", "").split(",") if x)
 
 
@@ -314,13 +317,17 @@ kernel.def export("g_mla_dsplit") @g_mla_dsplit(%tokens: index) {{
     }}
     // partials: O^T (dim row, head col) through a transposed strided view of part_acc[token][split][head][512]
     %c512 = index.constant {KL} : index
-    %acc_layout = encoding.layout.strided [%c1, %c512] : encoding<layout>
     %cqh = index.constant {QH} : index
-    %ts = index.madd %token, %cS_, %split : index
+    %ts = index.madd %token, %cS_, %split : index""" + ("""
+    %acc_layout = encoding.layout.strided [%c1, %c512] : encoding<layout>
     %tsh = index.madd %ts, %cqh, %head_tile0 : index
     %acc_first_a = index.mul %tsh, %c512 : index
     %acc_first = index.add %acc_first_a, %vbase : index
-    %four = index.constant 4 : offset
+""" if PL == 0 else """
+    %acc_layout = encoding.layout.strided [%c32, %c1] : encoding<layout>
+    %tsd = index.madd %ts, %c512, %vbase : index
+    %acc_first = index.madd %tsd, %c32, %head_tile0 : index
+""") + f"""    %four = index.constant 4 : offset
     %acc_off = index.scale %acc_first, %four : index, offset -> offset
     %acc_view = buffer.view %part_acc[%acc_off] : buffer -> view<128x16xf32, %acc_layout>""")
     for d in range(8 if "nopart" not in ABL else 0):
@@ -338,6 +345,9 @@ kernel.def export("g_mla_dsplit") @g_mla_dsplit(%tokens: index) {{
   kernel.return
 }}
 
+""")
+    if PL == 0:
+        a(f"""
 // o[t, head, 0:512] = sum_s e^(m_s - M) acc_s / sum_s e^(m_s - M) l_s over the token's splits.
 kernel.def export("g_mla_dcombine") @g_mla_dcombine(%tokens: index) {{
   %c1 = index.constant 1 : index
@@ -404,11 +414,97 @@ kernel.def export("g_mla_dcombine") @g_mla_dcombine(%tokens: index) {{
   kernel.return
 }}
 """)
+    else:
+        a(combine_pl1(QH, KL, D))
     t = "\n".join(A)
     # constants used before their natural place
     t = t.replace("    %ts = index.madd %token, %cS_, %split : index\n",
                   f"    %cS_ = index.constant {SMAX} : index\n    %head_tile0 = index.mul %ht, %c16 : index\n    %ts = index.madd %token, %cS_, %split : index\n")
     return t
+
+
+def combine_pl1(QH, KL, D):
+    """g_mla_dcombine for partial layout 1."""
+    return f"""
+// o[t, head, 0:512] = sum_s e^(m_s - M) acc_s / sum_s e^(m_s - M) l_s over the token's splits.
+// partial layout 1: workgroup (token, 16-dim chunk), lane = (dim quad, head): each partial load is 32 heads x 4 B contiguous.
+kernel.def export("g_mla_dcombine") @g_mla_dcombine(%tokens: index) {{
+  %c1 = index.constant 1 : index
+  %cch = index.constant {KL // 16} : index
+  %c128 = index.constant 128 : index
+  kernel.launch.config workgroups(%tokens, %cch, %c1) workgroup_size(%c128, %c1, %c1) : index
+}} launch(%tokens_arg: index, %sliding: i32, %info: buffer, %part_acc: buffer, %part_ml: buffer, %gate: buffer, %out: buffer) {{
+  %tokens = index.assume %tokens_arg [range(%tokens_arg, 1, 8192)] : index
+  %token_id = kernel.workgroup.id<x> : index
+  %token = index.assume %token_id [lt(%token_id, %tokens)] : index
+  %ch_id = kernel.workgroup.id<y> : index
+  %chunk = index.assume %ch_id [range(%ch_id, 0, {KL // 16 - 1})] : index
+  %lane_id = kernel.workitem.id<x> : index
+  %lane = index.assume %lane_id [range(%lane_id, 0, 127)] : index
+  %zero = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c4 = index.constant 4 : index
+  %c16 = index.constant 16 : index
+  %c32 = index.constant 32 : index
+  %c0_i32 = scalar.constant 0 : i32
+  %zero_f = scalar.constant 0.0 : f32
+  %neg_big = scalar.constant -3.0e38 : f32
+  %zero4 = vector.splat %zero_f : vector<4xf32>
+  %head_v = index.rem %lane, %c32 : index
+  %head = index.assume %head_v [range(%head_v, 0, {QH - 1})] : index
+  %dq = index.div %lane, %c32 : index
+  %quad_v = index.madd %chunk, %c4, %dq : index
+  %quad = index.assume %quad_v [range(%quad_v, 0, {KL // 4 - 1})] : index
+  %dim0 = index.mul %quad, %c4 : index
+""" + "".join(f"""  %dm{i}_c = index.constant {i} : index
+  %dm{i}_v = index.add %dim0, %dm{i}_c : index
+  %dm{i} = index.assume %dm{i}_v [range(%dm{i}_v, 0, {KL - 1})] : index
+""" for i in range(4)) + f"""  %info_view = buffer.view %info[%zero] : buffer -> view<[%tokens]x4xi32>
+  %live32 = view.load %info_view[%token, 2] : view<[%tokens]x4xi32> -> i32
+  %live = scalar.cmpi ne, %live32, %c0_i32 : i32
+  %out_view = buffer.view %out[%zero] : buffer -> view<[%tokens]x{QH}x{D // 4}x4xf32>
+  scf.if %live {{
+    %position32 = view.load %info_view[%token, 1] : view<[%tokens]x4xi32> -> i32
+    %position_bound = scalar.assume %position32 [range(%position32, 0, 262143)] : i32
+    %position = index.cast %position_bound : i32 to index
+    %last_blk = index.div %position, %c16 : index
+    %nblk_value = index.add %last_blk, %c1 : index
+    %nblk = index.assume %nblk_value [range(%nblk_value, 1, 16384)] : index
+    %s_eff = func.call @g_mla_dsplits(%nblk) : (index) -> (index)
+    %ml_view = buffer.view %part_ml[%zero] : buffer -> view<[%tokens]x{SMAX}x{QH}x2xf32>
+    %acc_view = buffer.view %part_acc[%zero] : buffer -> view<[%tokens]x{SMAX}x{KL}x{QH}xf32>
+    %maximum = scf.for %s = [%c0 to %s_eff step %c1](%mx = %neg_big : f32) -> (f32) {{
+      %bs = index.assume %s [range(%s, 0, {SMAX - 1})] : index
+      %ms = view.load %ml_view[%token, %bs, %head, 0] : view<[%tokens]x{SMAX}x{QH}x2xf32> -> f32
+      %next = scalar.maxnumf %mx, %ms : f32
+      scf.yield %next : f32
+    }}
+    %den, %total = scf.for %s = [%c0 to %s_eff step %c1](%d = %zero_f : f32, %acc = %zero4 : vector<4xf32>) -> (f32, vector<4xf32>) {{
+      %bs = index.assume %s [range(%s, 0, {SMAX - 1})] : index
+      %ms = view.load %ml_view[%token, %bs, %head, 0] : view<[%tokens]x{SMAX}x{QH}x2xf32> -> f32
+      %ls = view.load %ml_view[%token, %bs, %head, 1] : view<[%tokens]x{SMAX}x{QH}x2xf32> -> f32
+      %shift = scalar.subf %ms, %maximum : f32
+      %w = scalar.expf<afn> %shift : f32
+      %wl = scalar.mulf %w, %ls : f32
+      %d_next = scalar.addf %d, %wl : f32
+""" + "".join(f"""      %pe{i} = view.load %acc_view[%token, %bs, %dm{i}, %head] : view<[%tokens]x{SMAX}x{KL}x{QH}xf32> -> f32
+""" for i in range(4)) + f"""      %part = vector.from_elements %pe0, %pe1, %pe2, %pe3 : vector<4xf32>
+      %w_v = vector.splat %w : vector<4xf32>
+      %acc_next = vector.fmaf %w_v, %part, %acc : vector<4xf32>
+      scf.yield %d_next, %acc_next : f32, vector<4xf32>
+    }}
+    %one = scalar.constant 1.0 : f32
+    %inv = scalar.divf %one, %den : f32
+    %inv_v = vector.splat %inv : vector<4xf32>
+    %result = vector.mulf %total, %inv_v : vector<4xf32>
+    vector.store %result, %out_view[%token, %head, %quad, %c0] : vector<4xf32>, view<[%tokens]x{QH}x{D // 4}x4xf32>
+  }} else {{
+    vector.store %zero4, %out_view[%token, %head, %quad, %c0] : vector<4xf32>, view<[%tokens]x{QH}x{D // 4}x4xf32>
+  }}
+  kernel.return
+}}
+"""
 
 
 if __name__ == "__main__":

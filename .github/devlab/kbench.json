@@ -368,21 +368,21 @@
       "gen": "mla_dec/gen_bench.py",
       "gen_variants": [
         "s32+b8",
-        "s32+b8+pf1",
-        "s32+b8+pf2",
-        "s32+b4+pf1",
-        "s32+b8+xnopart",
-        "s32+b8+xempty",
-        "s32+b8+pf1+xnopart"
+        "s32+b8+pl1",
+        "s32+b4+pl1",
+        "s32+b2+pl1",
+        "s32+b1+pl1",
+        "s32+b8+pl1+pf2",
+        "s32+b2+pl1+pf2"
       ],
       "files": [
         "bench_s32+b8.loom",
-        "bench_s32+b8+pf1.loom",
-        "bench_s32+b8+pf2.loom",
-        "bench_s32+b4+pf1.loom",
-        "bench_s32+b8+xnopart.loom",
-        "bench_s32+b8+xempty.loom",
-        "bench_s32+b8+pf1+xnopart.loom"
+        "bench_s32+b8+pl1.loom",
+        "bench_s32+b4+pl1.loom",
+        "bench_s32+b2+pl1.loom",
+        "bench_s32+b1+pl1.loom",
+        "bench_s32+b8+pl1+pf2.loom",
+        "bench_s32+b2+pl1+pf2.loom"
       ],
       "tests": [
         "test.loom"
