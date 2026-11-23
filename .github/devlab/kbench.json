@@ -369,17 +369,21 @@
       "gen_variants": [
         "base",
         "x",
-        "xg"
+        "xg",
+        "x8",
+        "xg8"
       ],
       "files": [
         "bench.loom",
         "bench_x.loom",
-        "bench_xg.loom"
+        "bench_xg.loom",
+        "bench_x8.loom",
+        "bench_xg8.loom"
       ],
       "tests": [
-        "test_t3.loom",
         "test_t4.loom",
-        "test_tg4.loom",
+        "test_t6.loom",
+        "test_tg6.loom",
         "test.loom"
       ],
       "config": [],

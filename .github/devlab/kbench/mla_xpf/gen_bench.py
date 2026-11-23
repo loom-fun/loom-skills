@@ -20,13 +20,16 @@ ROOT = os.path.abspath(sys.argv[1]) if len(sys.argv) > 1 else os.path.abspath(os
 HEAD = "amdgpu.target<gfx11-generic> @w32 {subgroup_size = 32}\n\n"
 QH, D, PB, KL, QB, VD = 32, 576, 1152, 512, 192, 128
 XCAP = 131072
+QW = 4
 VARIANTS = {"x": {}, "xg": {"MLA_XF": "global"},   # x: LDS-staged flash (default); xg: fragments straight from the scratch
+            "x8": {"MLA_XQ": "8"}, "xg8": {"MLA_XF": "global", "MLA_XQ": "8"},   # 8 query tiles (waves) per workgroup
             "t": {"MLA_XCAP": "4096"}, "tg": {"MLA_XCAP": "4096", "MLA_XF": "global"},
             **{f"e{d}": {"MLA_XCAP": "4096", "MLA_XE_DBG": str(d)} for d in (1, 2, 3, 4, 8, 12, 15)}}   # g_mla_xexp fault bisection   # small-scratch twins for the staged tests
 
 
 def set_xcap(variant):
-    global XCAP
+    global XCAP, QW
+    QW = int(next((VARIANTS[x]["MLA_XQ"] for x in variant.split("+") if x in VARIANTS and "MLA_XQ" in VARIANTS[x]), 4))
     XCAP = int(next((VARIANTS[x]["MLA_XCAP"] for x in variant.split("+") if x in VARIANTS and "MLA_XCAP" in VARIANTS[x]), 131072))
 CASES = [   # tag, context end (chunk = last t positions), tokens, layers
     ("1k", 1024, 1024, 8), ("4k", 4096, 4096, 4), ("8k", 8192, 4096, 4), ("32k", 32768, 4096, 2), ("131k", 131072, 4096, 1)]
@@ -60,10 +63,19 @@ def x_text(variant):
     return subprocess.run([sys.executable, "-c", code], check=True, env=env, capture_output=True, text=True).stdout
 
 
+def skip_twins(variant, b):
+    """g_mla_kbm / vbm `_x` twins (gen_mla_x.skip_twin) of the base kernels."""
+    code = (f"import sys; sys.path.insert(0, {kit()!r}); import gen_mla_x; b = sys.stdin.read(); "
+            "print(gen_mla_x.skip_twin(b, 'g_mla_kbm_iq4_nl') + gen_mla_x.skip_twin(b, 'g_mla_vbm_iq4_xs'))")
+    env = {k: v for k, v in os.environ.items() if not k.startswith("MLA_X")}
+    env.update({k: v for x in variant.split("+") for k, v in VARIANTS[x].items()})
+    return subprocess.run([sys.executable, "-c", code], check=True, env=env, input=b, capture_output=True, text=True).stdout
+
+
 def kernels(variant, tag):
     """Kernel text of VARIANT (helpers included) with every symbol suffixed by TAG (one file holds several cases)."""
     b = base_text()
-    t = b if variant == "base" else b + "\n" + x_text(variant)
+    t = b if variant == "base" else b + "\n" + x_text(variant) + "\n" + skip_twins(variant, b)
     s = tag.replace("_", "")
     for f in set(re.findall(r"func\.def inline @(\w+)\(", t)) | set(re.findall(r"global\.rodata\.def @(\w+) ", t)):
         t = re.sub(rf"@{f}\b", f"@{f}_{s}", t)
@@ -164,8 +176,8 @@ def xlists(info, tiles, xmin=16):
         nk = sg[-1][2] + 16
         nk64 = (nk + 63) // 64 * 64
         if base + nk64 <= XCAP and len(sg) >= xmin:
-            for q in range(0, len(sg), 4):
-                xq.append((sg[q][0], min(4, len(sg) - q), base, sg[0][1]))
+            for q in range(0, len(sg), QW):
+                xq.append((sg[q][0], min(QW, len(sg) - q), base, sg[0][1]))
             for k0 in range(0, nk64, 64):
                 xb.append((sg[0][1], k0, base + k0, nk))
             base += nk64
@@ -306,6 +318,8 @@ def bench(variant, res):
     set_xcap(variant)
     for tag, ctx, t, layers in CASES:
         inp, nq, nb = res[tag]
+        _, xq, _ = xlists(inp["info"], np.load(os.path.join(OUT, f"b{tag}_tiles.npy")))
+        nq = len(xq)
         s = f"{tag}{variant.replace('+', '')}"
         out.append(kernels(variant, s))
         out.append(f"check.case public @c{tag} {{\n" + decls(f"b{tag}", inp, variant != "base") + launches(variant, s, inp, layers, nq, nb)
@@ -314,7 +328,7 @@ def bench(variant, res):
 
 
 TESTS = [   # name, rows (keys per row), tokens (row, position), layers, layer, ctx
-    ("tA", [480, 48], [(0, 160 + i) for i in range(320)] + [(1, i) for i in range(48)], 2, 1, 512),
+    ("tA", [480, 64], [(0, 160 + i) for i in range(320)] + [(1, i) for i in range(64)], 2, 1, 512),
     ("tB", [40000], [(0, 40000 - 256 + i) for i in range(256)], 1, 0, 40960),
 ]
 
@@ -434,6 +448,24 @@ def staged(v, kbd, vbd, kb_bytes, only=None):
                   + rd("xvi", "xv_e", TXK) + rd("xpi", "xpe_e", TXP) + f"""  %nq = check.literal value({len(xq)}) : index
   kernel.launch @k_g_mla_xflash_d_{s}[%nq](%t, %xqi, %info, %qb, %q, %xki, %xvi, %xpi, %vo) : [index](index, tensor<512x4xi32>, {TI}, {TQB}, {TQ}, {TXK}, {TXK}, {TXP}, tensor<{t}x{QH * VD}xf32>)
 """ + rd("e", "vo_e", f"tensor<{t}x{QH * VD}xf32>") + f"""  check.expect.approximate actual(%vo) expected(%e) atol(5.0e-3) rtol(1.0e-2) nan(different) : tensor<{t}x{QH * VD}xf32>, tensor<{t}x{QH * VD}xf32>
+  check.return
+}}
+""")
+    TKB, TVB, TVO = T(QH * KL * 72, "i8"), T(QH * VD * 272, "i8"), f"tensor<{t}x{QH * VD}xf32>"
+    ref_all = reference(inp, kbd, vbd, layer)
+    save(f"{pfx}_vo_all", ref_all.astype(np.float32))
+    files["6"] = (f"check.case public @{s}_mix {{\n" + decls(pfx, inp) + f"""  %o = check.generate.fill value(0.0) : tensor<{t}x{QH * D}xf32>
+  %nq = check.literal value({len(xq)}) : index
+  %nb = check.literal value({len(xb)}) : index
+  %lay = check.literal value({layer}) : index
+  kernel.launch @k_g_mla_xlist_{s}[%t](%t, %info, %tiles, %xq, %xb, %xcnt, %xskip) : [index](index, {TI}, tensor<{t}xi32>, tensor<512x4xi32>, {TXB}, tensor<64xi32>, tensor<128xi32>)
+  kernel.launch @k_g_mla_kbm_iq4_nl_x_{s}[%t](%t, %qb, %kb, %q, %xskip) : [index](index, {TQB}, {TKB}, {TQ}, tensor<128xi32>)
+  kernel.launch @k_g_mla_xdeq_{s}[%c1x](%c1x, %kb, %vb, %xw) : [index](index, {TKB}, {TVB}, {TXW})
+  kernel.launch @k_g_mla_xexp_d_{s}[%nb](%t, %lay, %ctx, %pool, %xb, %orig, %arena, %xw, %xk, %xv, %xpe) : [index](index, index, index, index, {TXB}, {TO}, {TA}, {TXW}, {TXK}, {TXK}, {TXP})
+  kernel.launch @k_g_attention_flash2_{s}[%t](%t, %lay, %sliding, %ctx, %pool, %q, %q, %info, %tiles, %orig, %arena, %o) : [index](index, index, i32, index, index, {TQ}, {TQ}, {TI}, tensor<{t}xi32>, {TO}, {TA}, {TQ})
+  kernel.launch @k_g_mla_vbm_iq4_xs_x_{s}[%t](%t, %o, %vb, %vo, %xskip) : [index](index, {TQ}, {TVB}, {TVO}, tensor<128xi32>)
+  kernel.launch @k_g_mla_xflash_d_{s}[%nq](%t, %xq, %info, %qb, %q, %xk, %xv, %xpe, %vo) : [index](index, tensor<512x4xi32>, {TI}, {TQB}, {TQ}, {TXK}, {TXK}, {TXP}, {TVO})
+""" + rd("e", "vo_all", TVO) + f"""  check.expect.approximate actual(%vo) expected(%e) atol(5.0e-3) rtol(1.0e-2) nan(different) : {TVO}, {TVO}
   check.return
 }}
 """)

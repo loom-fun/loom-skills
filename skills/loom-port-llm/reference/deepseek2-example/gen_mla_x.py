@@ -33,6 +33,7 @@ import os
 XCAP = int(os.environ.get("MLA_XCAP", "131072"))         # scratch positions (sum over the epoch's expanded segments, 64-rounded)
 MIN_TILES = int(os.environ.get("MLA_X_MIN_TILES", "16"))  # whole 16-token tiles a segment needs to be expanded
 XB_MAX = XCAP // 64
+QW = int(os.environ.get("MLA_XQ", "4"))   # 16-query tiles per g_mla_xflash workgroup (one wave each; a quad entry of xq)
 
 
 def on():
@@ -130,19 +131,21 @@ kernel.def export("g_mla_xlist") @g_mla_xlist(%tokens: index) {{
         %long = index.cmp uge, %ntl, %cmin : index
         %expand = scalar.andi %fits, %long : i1
         %r_base, %r_nq, %r_nb, %r_nc = scf.if %expand -> (index, index, index, index) {{
-          %ntl3 = index.add %ntl, %c3 : index
-          %nqa = index.div %ntl3, %c4 : index
+          %cqwl = index.constant {QW - 1} : index
+          %cqw = index.constant {QW} : index
+          %ntl3 = index.add %ntl, %cqwl : index
+          %nqa = index.div %ntl3, %cqw : index
           %row_w = index.cast %row : index to i32
           %base_w = index.cast %base : index to i32
           %nk_w = index.cast %nk : index to i32
           scf.for %qq = [%c0 to %nqa step %c1] {{
-            %q4 = index.mul %qq, %c4 : index
+            %q4 = index.mul %qq, %cqw : index
             %qs = index.add %s, %q4 : index
             %qslot_v = index.add %qs, %c1 : index
             %qslot = index.assume %qslot_v [range(%qslot_v, 1, 512), lt(%qslot_v, %tokens)] : index
             %qtok = view.load %tiles_view[%qslot] : view<[%tokens]xi32> -> i32
             %left = index.sub %ntl, %q4 : index
-            %qn = index.min %left, %c4 : index
+            %qn = index.min %left, %cqw : index
             %qn_w = index.cast %qn : index to i32
             %qe_v = index.add %nq, %qq : index
             %qe = index.assume %qe_v [range(%qe_v, 0, 511)] : index
@@ -217,7 +220,7 @@ kernel.def export("g_mla_xlist") @g_mla_xlist(%tokens: index) {{
     %et32 = view.load %xqv[%eb, 0] : view<512x4xi32> -> i32
     %en32 = view.load %xqv[%eb, 1] : view<512x4xi32> -> i32
     %et_b = scalar.assume %et32 [range(%et32, 0, 8191)] : i32
-    %en_b = scalar.assume %en32 [range(%en32, 0, 4)] : i32
+    %en_b = scalar.assume %en32 [range(%en32, 0, {QW})] : i32
     %et = index.cast %et_b : i32 to index
     %en = index.cast %en_b : i32 to index
     %en16 = index.mul %en, %c16 : index
@@ -535,8 +538,8 @@ kernel.def export("g_mla_xflash") @g_mla_xflash(%count_buffer: buffer) {{
   %count = index.cast %bounded : i32 to index
   %c1 = index.constant 1 : index
   %cqh = index.constant {QH} : index
-  %c128 = index.constant 128 : index
-  kernel.launch.config workgroups(%count, %cqh, %c1) workgroup_size(%c128, %c1, %c1) : index
+  %cwgs = index.constant {32 * QW} : index
+  kernel.launch.config workgroups(%count, %cqh, %c1) workgroup_size(%cwgs, %c1, %c1) : index
 }} launch(%tokens_arg: index, %xq: buffer, %info: buffer, %qb: buffer, %q: buffer, %xk: buffer, %xv: buffer, %xpe: buffer, %vo: buffer) {{
   %tokens = index.assume %tokens_arg [range(%tokens_arg, 16, 8192), multiple_of(%tokens_arg, 16)] : index
   %quad_id = kernel.workgroup.id<x> : index
@@ -544,7 +547,7 @@ kernel.def export("g_mla_xflash") @g_mla_xflash(%count_buffer: buffer) {{
   %head_id = kernel.workgroup.id<y> : index
   %head = index.assume %head_id [range(%head_id, 0, {QH - 1})] : index
   %wave_id = kernel.subgroup.id : index
-  %wave = index.assume %wave_id [range(%wave_id, 0, 3)] : index
+  %wave = index.assume %wave_id [range(%wave_id, 0, {QW - 1})] : index
   %lane_id = kernel.subgroup.lane.id : index
   %lane = index.assume %lane_id [range(%lane_id, 0, 31)] : index
   %zero = index.constant 0 : offset
@@ -560,7 +563,7 @@ kernel.def export("g_mla_xflash") @g_mla_xflash(%count_buffer: buffer) {{
   %tok32 = view.load %xq_view[%quad, 0] : view<512x4xi32> -> i32
   %nt32 = view.load %xq_view[%quad, 1] : view<512x4xi32> -> i32
   %base32 = view.load %xq_view[%quad, 2] : view<512x4xi32> -> i32
-  %nt_b = scalar.assume %nt32 [range(%nt32, 0, 4)] : i32
+  %nt_b = scalar.assume %nt32 [range(%nt32, 0, {QW})] : i32
   %ntiles = index.cast %nt_b : i32 to index
   %mine = index.cmp ult, %wave, %ntiles : index
   {"%all_waves = index.cmp ult, %c0, %c1 : index" + chr(10) + "  scf.if %all_waves {" if lds else "scf.if %mine {"}
@@ -636,7 +639,11 @@ kernel.def export("g_mla_xflash") @g_mla_xflash(%count_buffer: buffer) {{
     %vs_tile = buffer.alloca<workgroup> align(16) %vs_bytes : buffer
     %vs_view = buffer.view %vs_tile[%zero] : buffer -> view<128x40xf16>
     %wi_id = kernel.workitem.id<x> : index
-    %wi = index.assume %wi_id [range(%wi_id, 0, 127)] : index
+    %wi_all = index.assume %wi_id [range(%wi_id, 0, {32 * QW - 1})] : index
+    %c127 = index.constant 127 : index
+    %stager = index.cmp ult, %wi_all, %c128 : index
+    %wi_m = index.min %wi_all, %c127 : index
+    %wi = index.assume %wi_m [range(%wi_m, 0, 127)] : index
     %c2 = index.constant 2 : index
     %c4 = index.constant 4 : index
     %c8 = index.constant 8 : index
@@ -670,6 +677,7 @@ kernel.def export("g_mla_xflash") @g_mla_xflash(%count_buffer: buffer) {{
       %sk_rp = index.assume %sk_rp_v [range(%sk_rp_v, 0, {XCAP - 1})] : index
       %sv_c_v = index.add %sk_base, %st_vh : index
       %sv_c = index.assume %sv_c_v [range(%sv_c_v, 0, {XCAP - 16}), multiple_of(%sv_c_v, 16)] : index
+      scf.if %stager {{
       %gk0 = vector.load %xk_view[%sk_r0, %st_kc0] : view<{XCAP}x128xf16> -> vector<16xf16>
       %gk1 = vector.load %xk_view[%sk_r1, %st_kc0] : view<{XCAP}x128xf16> -> vector<16xf16>
       %gkp = vector.load %pe_view[%sk_rp, %st_pc] : view<{XCAP}x64xf16> -> vector<16xf16>
@@ -680,10 +688,10 @@ kernel.def export("g_mla_xflash") @g_mla_xflash(%count_buffer: buffer) {{
       vector.store %gkp, %ks_view[%st_pk, %st_pc_l] : vector<16xf16>, view<32x200xf16>
       vector.store %gv0, %vs_view[%st_vd0, %st_vh] : vector<16xf16>, view<128x40xf16>
       vector.store %gv1, %vs_view[%st_vd1, %st_vh] : vector<16xf16>, view<128x40xf16>
+      }}
       kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
-      %in_range_b = index.cmp ult, %b, %nblk : index
-      %in_range = scalar.andi %in_range_b, %mine : i1
-      %wm_n, %wl_n, {", ".join(f"%wa{d}_n" for d in range(8))} = scf.if %in_range -> (f32, f32, {TY}) {{""")
+      // a wave past its causal range (or without a tile) runs the block anyway: every key is masked, so its state stays
+      // (alpha = 1, p = 0); no branch keeps the accumulators from being duplicated across it""")
     for hh in range(2):
         a(f"""      %kh{hh}_o = index.constant {16 * hh} : index
       %kf{hh} = index.add %kf, %kh{hh}_o : index
@@ -748,12 +756,8 @@ kernel.def export("g_mla_xflash") @g_mla_xflash(%count_buffer: buffer) {{
       %an{d}_{hh} = vector.mma %vf{d}_{hh}, %pt{hh}, {cur} : vector<16xf16>, vector<16xf16>, vector<8xf32>""")
             cur = f"%an{d}_{hh}"
     if lds:
-        a(f"""      scf.yield %m_new, %l_new, {", ".join(f"%an{d}_1" for d in range(8))} : f32, f32, {TY}
-      }} else {{
-      scf.yield %m, %l, {", ".join(f"%a{d}" for d in range(8))} : f32, f32, {TY}
-      }}
-      kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
-      scf.yield %wm_n, %wl_n, {", ".join(f"%wa{d}_n" for d in range(8))} : f32, f32, {TY}
+        a(f"""      kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+      scf.yield %m_new, %l_new, {", ".join(f"%an{d}_1" for d in range(8))} : f32, f32, {TY}
     }}""")
     else:
         a(f"""      scf.yield %m_new, %l_new, {", ".join(f"%an{d}_1" for d in range(8))} : f32, f32, {TY}
