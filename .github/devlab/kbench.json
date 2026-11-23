@@ -399,19 +399,13 @@
       "gen": "dec_step/gen_bench.py",
       "gen_variants": [
         "base",
-        "iq4q8",
-        "wg1k",
-        "wg256",
-        "moer4",
-        "moer1"
+        "rt1",
+        "shslot"
       ],
       "files": [
         "bench.loom",
-        "bench_iq4q8.loom",
-        "bench_wg1k.loom",
-        "bench_wg256.loom",
-        "bench_moer4.loom",
-        "bench_moer1.loom"
+        "bench_rt1.loom",
+        "bench_shslot.loom"
       ],
       "config": [],
       "args": [
@@ -420,8 +414,11 @@
         "--profile-final-batch=true"
       ],
       "device": "amdgpu://?completion_spin_ns=4294967295",
-      "repeats": 2,
-      "case_timing": true
+      "repeats": 3,
+      "case_timing": true,
+      "tests": [
+        "test.loom"
+      ]
     }
   ]
 }

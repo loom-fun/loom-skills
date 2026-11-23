@@ -242,6 +242,11 @@ def step_case(lib, body, tag, ctx):
                 for v in re.findall(r"%\w+", ln.split(" : ")[0]):
                     if v in defs and defs[v] not in used:
                         used.append(defs[v])
+            if "%info" in defs and defs["%info"] in used:   # alone: a live token at the context end (g_token_info's output)
+                n = int(re.search(r"tensor<(\d+)xi8>", defs["%info"]).group(1))
+                a = np.zeros(n, np.int8); a[:16] = np.array([0, ctx - 1, 1, 0], np.int32).view(np.int8)
+                np.save(os.path.join(OUT, f"info_{tag}.npy"), a)
+                used[used.index(defs["%info"])] = f'  %info = check.file.read.npy path("info_{tag}.npy") : tensor<{n}xi8>'
             r = k[2:]
             case += f"check.case public @r_{r} {{\n" + "\n".join(used + ls) + "\n  check.return\n}\n" + f"check.benchmark<@r_{r}> @role_{r}\n"
     return kdefs, case
