@@ -1,5 +1,5 @@
 {
- "_comment": "JoyAI pfgemm round 1: base (card settings) vs v2 (IQ4_XS inline dequant switches + GEMM_T64_G32) vs v3 (v2 + MOE_CW + MOE_CW_SWAP: column-wave grouped MoE GEMMs, kbench -27 % per MoE layer at 1k) vs v4 (v3 + MLA_BMM2: k_b/v_b with shared f16 activation stage); ABBA, profiles pf2k/pf8k, kernel tests.",
+ "_comment": "JoyAI pfgemm round 1: base vs v2 (IQ4_XS inline dequant + T64_G32) vs v3 (v2 + MOE_CW + SWAP: column-wave MoE GEMMs, kbench -38 % per MoE layer vs base) vs v4 (v3 + MLA_BMM2=vbm, kbench vbm -28 %/-13 %) vs v5 (v4 + MOE_CW_F16O, numerics-moving: no row-scale pass between MoE GEMMs); ABBA, profiles, kernel tests.",
  "card": "loom-fun/jdopensource-JoyAI-LLM-Flash-loom",
  "memory_bytes": 47000000000,
  "kit": "deepseek2",
@@ -50,21 +50,39 @@
       "GEMM_T64_G32": "1",
       "MOE_CW": "1",
       "MOE_CW_SWAP": "1",
-      "MLA_BMM2": "1"
+      "MLA_BMM2": "vbm"
+     }
+    },
+    {
+     "name": "v5",
+     "build": {
+      "GEMM_IQ4_NATIVE": "1",
+      "GEMM_IQ4_F16LUT": "1",
+      "GEMM_IQ4_G32": "1",
+      "GEMM_M256_G32": "1",
+      "GEMM_M256_F16O": "1",
+      "GEMM_PRUNE": "1",
+      "GEMM_T64_G32": "1",
+      "MOE_CW": "1",
+      "MOE_CW_SWAP": "1",
+      "MLA_BMM2": "vbm",
+      "MOE_CW_F16O": "1"
      }
     }
    ],
    "steps": [
-    "ktest:v2",
     "ktest:v3",
     "ktest:v4",
+    "ktest:v5",
     "profile:base:pf2k,pf8k",
-    "profile:v3:pf2k,pf8k",
     "profile:v4:pf2k,pf8k",
+    "profile:v5:pf2k,pf8k",
     "perf:base:1",
     "perf:v2:1",
     "perf:v3:1",
     "perf:v4:1",
+    "perf:v5:1",
+    "perf:v5:1",
     "perf:v4:1",
     "perf:v3:1",
     "perf:v2:1",

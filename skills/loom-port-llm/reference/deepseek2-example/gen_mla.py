@@ -402,12 +402,15 @@ def kernels(cfg, eps, theta, layers, FMT, SB, row_bytes, kb_fmts, vb_fmts):
     return (rms_q(cfg, eps) + rope_store(cfg, eps, theta, layers)
             + "".join(bmv(f"g_mla_kb_{f}", f, NOPE, KL, QH, QB, D, FMT[f], SB[f], row_bytes(f, NOPE)) for f in kb_fmts)
             + "".join(bmv(f"g_mla_vb_{f}", f, KL, VD, QH, D, VD, FMT[f], SB[f], row_bytes(f, KL)) for f in vb_fmts)
-            + "".join(_bmm()(f"g_mla_kbm_{f}", f, NOPE, KL, QH, QB, D, FMT[f], SB[f], row_bytes(f, NOPE)) for f in kb_fmts)
-            + "".join(_bmm()(f"g_mla_vbm_{f}", f, KL, VD, QH, D, VD, FMT[f], SB[f], row_bytes(f, KL)) for f in vb_fmts))
+            + "".join(_bmm("kbm")(f"g_mla_kbm_{f}", f, NOPE, KL, QH, QB, D, FMT[f], SB[f], row_bytes(f, NOPE)) for f in kb_fmts)
+            + "".join(_bmm("vbm")(f"g_mla_vbm_{f}", f, KL, VD, QH, D, VD, FMT[f], SB[f], row_bytes(f, KL)) for f in vb_fmts))
 
 
-def _bmm():
-    return bmm2 if os.environ.get("MLA_BMM2", "0") not in ("", "0") else bmm
+def _bmm(kind=None):
+    """MLA_BMM2: 1 = bmm2 for both products, or a list (kbm,vbm). kbench joyai_mla (run 45234212231): vbm -28 % (1k) / -13 % (4k),
+    kbm +16 % / tie, so the useful setting is MLA_BMM2=vbm."""
+    v = os.environ.get("MLA_BMM2", "0").strip()
+    return bmm2 if v not in ("", "0") and (v == "1" or kind is None or kind in v.split(",")) else bmm
 
 
 def bmm2(name, fmt, K, N, H, XH, YH, FMT, SB, row_bytes, TT=4):
