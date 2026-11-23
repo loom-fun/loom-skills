@@ -60,7 +60,7 @@ jobs:
           source=source.replace('    # LOCAL_HF_CACHE=', '    pf="--preset=$FETCH_PRESET"\n    # LOCAL_HF_CACHE=')
           source=source.replace('    if n not in dst["presets"]:', '    if n not in dst["presets"] and p["variant"] in dst["variants"] and p["programs"] in dst["programs"]:')
           original='    c["gguf"] = par(c["gguf"])'
-          assert source.count(original)==1
+          assert source.count(original)==2
           source=source.replace(original, '    c["gguf"] = par("Inkling-2-Mini-UD-"+os.environ["QUANT"]+".gguf")')
           anchor_hash='fetch_card "$repo_ref"; card=$CARD_DIR; base=$CARD_BASE'
           assert source.count(anchor_hash)==1
