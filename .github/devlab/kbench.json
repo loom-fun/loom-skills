@@ -399,13 +399,13 @@
       "gen": "dec_step/gen_bench.py",
       "gen_variants": [
         "base",
-        "wg256",
-        "wg64"
+        "qadual",
+        "wg256"
       ],
       "files": [
         "bench.loom",
-        "bench_wg256.loom",
-        "bench_wg64.loom"
+        "bench_qadual.loom",
+        "bench_wg256.loom"
       ],
       "config": [],
       "args": [
