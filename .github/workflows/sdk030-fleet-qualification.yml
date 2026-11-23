@@ -14,10 +14,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - slug: unsloth-Qwen3.5-4B-loom
+          - slug: bartowski-Mellum2.1-12B-A2.5B-Thinking-loom
             device: radeon-r9700
             labels: '["self-hosted","devlab-dispatch","radeon-r9700"]'
-            correctness: '{"run":45275710722,"job":138046833433,"artifact":14871771764,"digest":"sha256:85d6e9b03295d10a15cc6f6fe931cc352036c28a314a584db4bfc097f43916c8","production":"loom-fun/unsloth-Qwen3.5-4B-loom@64bf40259117d99f3e6a9f43b7e80fb030300697","generator":"3adfe7b7b6e68f753042e9f89b318e29a6088579"}'
     runs-on: ${{ fromJSON(matrix.labels) }}
     timeout-minutes: 240
     env:
