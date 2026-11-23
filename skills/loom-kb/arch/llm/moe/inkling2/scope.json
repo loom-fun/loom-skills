@@ -1,0 +1,15 @@
+{
+ "scope": "arch/llm/moe/inkling2",
+ "match": {
+  "arch": [
+   "inkling2",
+   "inkling2_loop"
+  ]
+ },
+ "owner": "kb",
+ "facets": [
+  "moe",
+  "sliding-window"
+ ],
+ "choices": []
+}
