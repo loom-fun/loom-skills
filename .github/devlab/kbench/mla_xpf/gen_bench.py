@@ -457,8 +457,6 @@ if __name__ == "__main__" and len(sys.argv) > 2:
         open(os.path.join(OUT, "bench%s.loom" % ("" if v == "base" else "_" + v.replace("+", "_"))), "w").write(HEAD + "\n".join(bench(v, res)))
     for v in ("t", "tg"):
         staged(v, kbd, vbd, kb)
-    for d in (1, 2, 3, 4, 8, 12, 15):
-        staged(f"e{d}", kbd, vbd, kb, only=("3",))
     open(os.path.join(OUT, "test.loom"), "w").write(HEAD + "\n".join(tests(vs, kbd, vbd)))
     if _KIT:
         shutil.rmtree(os.path.dirname(_KIT), ignore_errors=True)

@@ -367,20 +367,20 @@
       "dir": "mla_xpf",
       "gen": "mla_xpf/gen_bench.py",
       "gen_variants": [
-        "base"
+        "base",
+        "x",
+        "xg"
       ],
       "files": [
-        "bench.loom"
+        "bench.loom",
+        "bench_x.loom",
+        "bench_xg.loom"
       ],
       "tests": [
-        "test_e153.loom",
-        "test_e123.loom",
-        "test_e83.loom",
-        "test_e43.loom",
-        "test_e33.loom",
-        "test_e23.loom",
-        "test_e13.loom",
-        "test_t3.loom"
+        "test_t3.loom",
+        "test_t4.loom",
+        "test_tg4.loom",
+        "test.loom"
       ],
       "config": [],
       "args": [
@@ -389,7 +389,7 @@
         "--profile-final-batch=true"
       ],
       "device": "amdgpu://?completion_spin_ns=4294967295",
-      "repeats": 1,
+      "repeats": 3,
       "case_timing": true
     }
   ]

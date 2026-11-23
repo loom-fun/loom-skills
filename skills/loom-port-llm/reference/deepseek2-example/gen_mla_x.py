@@ -485,12 +485,12 @@ kernel.def export("g_mla_xexp") @g_mla_xexp(%count_buffer: buffer) {{
     %pvalid = index.cmp ult, %pkey, %nk : index
     %pkc = scf.select %pvalid, %pkey, %c0 : index
     %po = func.call @{kvo}(%origins, %row, %pkc, %blocks, %layer, %pool) : (buffer, index, index, index, index, index) -> (offset)
-    %pview = buffer.view %arena[%po] : buffer -> view<16x{D}xf16>
-    %pin = index.rem %pkc, %c16 : index
+    %pview = buffer.view %arena[%po] : buffer -> view<1x{D}xf16>
+    %pin = index.constant 0 : index
     %pq16 = index.mul %pq, %c16 : index
     %pcol_v = index.add %pq16, %c512 : index
     %pcol = index.assume %pcol_v [range(%pcol_v, 512, 560)] : index
-    %praw = vector.load %pview[%pin, %pcol] : view<16x{D}xf16> -> vector<16xf16>
+    %praw = vector.load %pview[%pin, %pcol] : view<1x{D}xf16> -> vector<16xf16>
     %pval = scf.select %pvalid, %praw, %zero16h : vector<16xf16>
     %prow_v = index.add %xpos, %pk : index
     %prow = index.assume %prow_v [range(%prow_v, 0, {XCAP - 1})] : index
