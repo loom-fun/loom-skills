@@ -380,6 +380,8 @@
         "test_t1.loom",
         "test_t2.loom",
         "test_t3.loom",
+        "test_t5.loom",
+        "test_tg5.loom",
         "test_t4.loom",
         "test_tg4.loom",
         "test.loom"

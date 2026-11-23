@@ -409,7 +409,7 @@ def staged(v, kbd, vbd, kb_bytes):
 }}
 """)
     files["2"] = (f"check.case public @{s}_deq {{\n" + decls(pfx, inp) + f"""  kernel.launch @k_g_mla_xdeq_{s}[%c1x](%c1x, %kb, %vb, %xw) : [index](index, {T(QH * KL * 72, "i8")}, {T(QH * VD * 272, "i8")}, {TXW})
-""" + rd("ew", "w_e", TXW) + f"""  check.expect.close actual(%xw) expected(%ew) atol(1.0e-3) rtol(2.0e-3) nan(different) : {TXW}
+""" + rd("ew", "w_e", TXW) + f"""  check.expect.approximate actual(%xw) expected(%ew) atol(1.0e-3) rtol(2.0e-3) nan(different) : {TXW}, {TXW}
   check.return
 }}
 """)
@@ -417,14 +417,22 @@ def staged(v, kbd, vbd, kb_bytes):
   %lay = check.literal value({layer}) : index
   kernel.launch @k_g_mla_xdeq_{s}[%c1x](%c1x, %kb, %vb, %xw) : [index](index, {T(QH * KL * 72, "i8")}, {T(QH * VD * 272, "i8")}, {TXW})
   kernel.launch @k_g_mla_xexp_d_{s}[%nb](%t, %lay, %ctx, %pool, %xbi, %orig, %arena, %xw, %xk, %xv, %xpe) : [index](index, index, index, index, {TXB}, {TO}, {TA}, {TXW}, {TXK}, {TXK}, {TXP})
-""" + rd("ek", "xk_e", TXK) + rd("ev", "xv_e", TXK) + rd("ep", "xpe_e", TXP) + f"""  check.expect.close actual(%xpe) expected(%ep) atol(0.0) rtol(0.0) nan(different) : {TXP}
-  check.expect.close actual(%xk) expected(%ek) atol(2.0e-2) rtol(1.0e-2) nan(different) : {TXK}
-  check.expect.close actual(%xv) expected(%ev) atol(2.0e-2) rtol(1.0e-2) nan(different) : {TXK}
+""" + rd("ek", "xk_e", TXK) + rd("ev", "xv_e", TXK) + rd("ep", "xpe_e", TXP) + f"""  check.expect.approximate actual(%xpe) expected(%ep) atol(0.0) rtol(0.0) nan(different) : {TXP}, {TXP}
+  check.expect.approximate actual(%xk) expected(%ek) atol(2.0e-2) rtol(1.0e-2) nan(different) : {TXK}, {TXK}
+  check.expect.approximate actual(%xv) expected(%ev) atol(2.0e-2) rtol(1.0e-2) nan(different) : {TXK}, {TXK}
   check.return
 }}
 """)
     files["4"] = (f"check.case public @{s}_all {{\n" + decls(pfx, inp) + launches(v, s, inp, 1, len(xq), len(xb), layer0=layer) + rd("e", "vo_e", f"tensor<{t}x{QH * VD}xf32>")
                   + f"""  check.expect.approximate actual(%vo) expected(%e) atol(5.0e-3) rtol(1.0e-2) nan(different) : tensor<{t}x{QH * VD}xf32>, tensor<{t}x{QH * VD}xf32>
+  check.return
+}}
+""")
+    TQB, TQ, TI = f"tensor<{t}x{QH * QB}xf32>", f"tensor<{t}x{QH * D}xf32>", f"tensor<{t}x4xi32>"
+    files["5"] = (f"check.case public @{s}_flash {{\n" + decls(pfx, inp) + rd("xqi", "xq_e", "tensor<512x4xi32>") + rd("xki", "xk_e", TXK)
+                  + rd("xvi", "xv_e", TXK) + rd("xpi", "xpe_e", TXP) + f"""  %nq = check.literal value({len(xq)}) : index
+  kernel.launch @k_g_mla_xflash_d_{s}[%nq](%t, %xqi, %info, %qb, %q, %xki, %xvi, %xpi, %vo) : [index](index, tensor<512x4xi32>, {TI}, {TQB}, {TQ}, {TXK}, {TXK}, {TXP}, tensor<{t}x{QH * VD}xf32>)
+""" + rd("e", "vo_e", f"tensor<{t}x{QH * VD}xf32>") + f"""  check.expect.approximate actual(%vo) expected(%e) atol(5.0e-3) rtol(1.0e-2) nan(different) : tensor<{t}x{QH * VD}xf32>, tensor<{t}x{QH * VD}xf32>
   check.return
 }}
 """)
