@@ -311,6 +311,66 @@ def route_test(lib):
     return HEAD + strip_kernels(lib) + "\n".join(ks) + case
 
 
+def iq4xs_rand(rng, nbytes):
+    """random IQ4_XS blocks (136 bytes per 256 values) with a sane f16 scale d = 0.02 (random bytes give inf / NaN)"""
+    b = rng.integers(0, 256, nbytes, dtype=np.uint8).reshape(-1, 136)
+    b[:, 0:2] = np.array([0.02], np.float16).view(np.uint8)
+    return b.reshape(-1).view(np.int8)
+
+
+def shslot_test(lib, rng):
+    """the shared expert as a ninth slot (g_moe_gu/dn_..._sh + g_moe_combine_sh) against the separate launches (shared
+    swiglu matvec + down matvec into y, routed gu / dn, g_moe_combine accumulating): 2 tokens, 16 experts, IQ4_XS."""
+    names = ["g_mv_iq4_xs_k2048_swiglu_r1", "g_mv_iq4_xs_k768_r1", "g_moe_gu_iq4_xs_k2048_r2", "g_moe_dn_iq4_xs_k768_r2",
+             "g_moe_combine", "g_moe_gu_iq4_xs_k2048_r2_sh", "g_moe_dn_iq4_xs_k768_r2_sh", "g_moe_combine_sh"]
+    ks = []
+    for k in names:
+        m = re.search(rf'^kernel\.def export\("{k}"\) @{k}\((?:.|\n)*?^\}}\n', lib, re.M)
+        assert m, k
+        ks.append(m.group(0))
+    T, E, KU, H, F = 2, 16, 8, 2048, 768
+    eb = F * H // 256 * 136
+    np.save(os.path.join(OUT, "sh_h.npy"), rng.standard_normal((T, H)).astype(np.float32))
+    for n, sz in (("wg", E * eb), ("wu", E * eb), ("wd", E * eb), ("sg", eb), ("su", eb), ("sd", eb)):
+        np.save(os.path.join(OUT, f"sh_{n}.npy"), iq4xs_rand(rng, sz))
+    ids = np.stack([rng.choice(E, KU, replace=False) for _ in range(T)]).astype(np.int32)
+    np.save(os.path.join(OUT, "sh_ids.npy"), ids)
+    np.save(os.path.join(OUT, "sh_wts.npy"), rng.uniform(0.05, 0.3, (T, KU)).astype(np.float32))
+    W, S = f"tensor<{E * eb}xi8>", f"tensor<{eb}xi8>"
+    HT, IT, WT = f"tensor<{T}x{H}xf32>", f"tensor<{T}x{KU}xi32>", f"tensor<{T}x{KU}xf32>"
+    AT, YS, AT2, YS2 = (f"tensor<{T * KU * F}xf32>", f"tensor<{T * KU * H}xf32>", f"tensor<{T * (KU + 1) * F}xf32>",
+                        f"tensor<{T * (KU + 1) * H}xf32>")
+    case = f"""check.case public @shslot {{
+  %t = check.literal value({T}) : index
+  %ta = check.literal value({T * KU}) : index
+  %nH = check.literal value({H}) : index
+  %nF = check.literal value({F}) : index
+  %z = check.literal value(0) : i32
+  %h = check.file.read.npy path("sh_h.npy") : {HT}
+  %ids = check.file.read.npy path("sh_ids.npy") : {IT}
+  %wts = check.file.read.npy path("sh_wts.npy") : {WT}
+""" + "".join(f'  %{n} = check.file.read.npy path("sh_{n}.npy") : {W if n[0] == "w" else S}\n' for n in ("wg", "wu", "wd", "sg", "su", "sd")) + f"""  %f = check.generate.fill value(0.0) : tensor<{T}x{F}xf32>
+  %y = check.generate.fill value(0.0) : {HT}
+  %act = check.generate.fill value(0.0) : {AT}
+  %ys = check.generate.fill value(0.0) : {YS}
+  %y2 = check.generate.fill value(0.0) : {HT}
+  %act2 = check.generate.fill value(0.0) : {AT2}
+  %ys2 = check.generate.fill value(0.0) : {YS2}
+  kernel.launch @g_mv_iq4_xs_k2048_swiglu_r1[%nF, %t](%nF, %t, %z, %h, %sg, %su, %f) : [index, index](index, index, i32, {HT}, {S}, {S}, tensor<{T}x{F}xf32>)
+  kernel.launch @g_mv_iq4_xs_k768_r1[%nH, %t](%nH, %t, %z, %f, %sd, %y) : [index, index](index, index, i32, tensor<{T}x{F}xf32>, {S}, {HT})
+  kernel.launch @g_moe_gu_iq4_xs_k2048_r2[%nF, %ta](%nF, %ta, %ids, %h, %wg, %wu, %act) : [index, index](index, index, {IT}, {HT}, {W}, {W}, {AT})
+  kernel.launch @g_moe_dn_iq4_xs_k768_r2[%nH, %ta](%nH, %ta, %ids, %act, %wd, %ys) : [index, index](index, index, {IT}, {AT}, {W}, {YS})
+  kernel.launch @g_moe_combine[%t](%t, %ys, %wts, %y) : [index](index, {YS}, {WT}, {HT})
+  kernel.launch @g_moe_gu_iq4_xs_k2048_r2_sh[%nF, %ta](%nF, %ta, %ids, %h, %wg, %wu, %sg, %su, %act2) : [index, index](index, index, {IT}, {HT}, {W}, {W}, {S}, {S}, {AT2})
+  kernel.launch @g_moe_dn_iq4_xs_k768_r2_sh[%nH, %ta](%nH, %ta, %ids, %act2, %wd, %sd, %ys2) : [index, index](index, index, {IT}, {AT2}, {W}, {S}, {YS2})
+  kernel.launch @g_moe_combine_sh[%t](%t, %ys2, %wts, %y2) : [index](index, {YS2}, {WT}, {HT})
+  check.expect.approximate actual(%y2) expected(%y) atol(1.0e-2) rtol(1.0e-3) nan(different) : {HT}, {HT}
+  check.return
+}}
+"""
+    return "\n".join(ks) + case
+
+
 if __name__ == "__main__" and len(sys.argv) > 2:
     OUT = sys.argv[2]
     os.makedirs(OUT, exist_ok=True)
@@ -327,7 +387,7 @@ if __name__ == "__main__" and len(sys.argv) > 2:
     np.save(os.path.join(OUT, "rt_w.npy"), (rng.standard_normal(256 * 2048) * 0.05).astype(np.float32))
     np.save(os.path.join(OUT, "rt_b.npy"), (rng.standard_normal(256) * 0.01).astype(np.float32))
     lib0, _ = split_program(program("base"))
-    open(os.path.join(OUT, "test.loom"), "w").write(route_test(lib0))
+    open(os.path.join(OUT, "test.loom"), "w").write(route_test(lib0) + shslot_test(lib0, rng))
     for v in sys.argv[3:] or ["base"]:
         if v != "base" and not all(x in VARIANTS for x in v.split("+")):
             raise SystemExit("unknown variant " + v)
