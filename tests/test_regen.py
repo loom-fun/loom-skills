@@ -12,6 +12,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from types import SimpleNamespace
 from unittest import mock
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -254,6 +255,45 @@ class CollectTest(Base):
 
 
 class IngestPublishTest(Base):
+    def test_sdk_030_ingest_records_the_serving_wheel_and_rejects_a_stale_pin(self):
+        st = SimpleNamespace(d={"mode": "sdk-loom", "opts": {"new_org": regen.STAGING_ORG, "new_sdk": "0.3.0"}})
+        job = {"dir": self.tmp, "device": "strix-halo", "slug": SLUG, "source_card": f"loom-fun/{SLUG}@{'a' * 40}",
+               "package": {"programs_sha256": "b" * 64}}
+        with open(os.path.join(self.tmp, "programs_sha256_staging.txt"), "w") as f:
+            f.write("b" * 64)
+        with open(os.path.join(self.tmp, "ktest_staging.log"), "w"):
+            pass
+        pin = regen.SDK_030_PIN
+
+        def snapshot(repo, revision, out):
+            os.makedirs(out, exist_ok=True)
+            with open(os.path.join(out, "llm_config.json"), "w") as f:
+                json.dump({"sdk": pin}, f)
+            with open(os.path.join(out, "info.json"), "w") as f:
+                json.dump({"card": {"memory_bytes": 123}, "devices": {}}, f)
+
+        def tool(args, cwd):
+            if "build" in args:
+                shutil.copy(os.path.join(cwd, "info_prev.json"), os.path.join(cwd, "info_new.json"))
+
+        with mock.patch.object(regen, "hf_snapshot", snapshot), mock.patch.object(regen, "hf_head", return_value="c" * 40), \
+                mock.patch.object(regen.card_lib, "programs_sha256", return_value="b" * 64), \
+                mock.patch.object(regen, "hf_file", return_value="frozen-info.json"), \
+                mock.patch.object(regen, "job_facts", return_value=("1", "https://example.com/run/job", "2026-11-23")), \
+                mock.patch.object(regen, "run_tool", side_effect=tool) as tools:
+            _, parent, _ = regen.ingest_full(st, JOB, job, self.tmp)
+            self.assertEqual(parent, "c" * 40)
+            commands = [call.args[0] for call in tools.call_args_list]
+            self.assertNotIn("--hrx-out", commands[0])
+            for action in ("perf", "gates"):
+                command = next(cmd for cmd in commands if cmd[1] == action)
+                self.assertEqual(command[command.index("--hrx-loom") + 1], os.path.join(self.tmp, "sdk_staging.json"))
+            pin = {"hrx_loom": "0.2.0"}
+            tools.reset_mock()
+            with self.assertRaisesRegex(RuntimeError, "no longer has the verified SDK 0.3.0 pin"):
+                regen.ingest_full(st, JOB, job, self.tmp)
+            tools.assert_not_called()
+
     def ingested(self, prev_devices=None):
         self.collected()
         self.collect()

@@ -60,13 +60,14 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, ".."))
 CARD = os.path.join(ROOT, "skills", "loom-benchmark", "scripts", "card")
 SCRIPTS = os.path.join(ROOT, ".github", "scripts")
-for p in (HERE, CARD, os.path.join(ROOT, "skills", "loom-kb")):
+for p in (HERE, CARD, os.path.join(ROOT, "skills", "loom-kb"), os.path.join(ROOT, "skills", "loom-setup", "scripts")):
     if p not in sys.path:
         sys.path.insert(0, p)
 import card_lib  # noqa: E402
 import promote_check  # noqa: E402
 import sample_lib  # noqa: E402
 import sdk_package  # noqa: E402
+from sdk_pin import VERIFIED_RELEASES  # noqa: E402
 from publish_package import parse_upload_receipt  # noqa: E402
 
 try:
@@ -95,8 +96,8 @@ SDK_OLD, SDK_NEW = "card", "0.2.0"
 SDK_030_PIN = {
     "hrx_loom": "0.3.0",
     "source": "pypi",
-    "hrx_system_sha": "e2c41a720363911c04606ce0f4417e2d55630352",
-    "wheel_sha256": "6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f",
+    "hrx_system_sha": VERIFIED_RELEASES["0.3.0"]["hrx_system_sha"],
+    "wheel_sha256": VERIFIED_RELEASES["0.3.0"]["wheels"]["manylinux_2_39_x86_64"],
 }
 
 
@@ -899,6 +900,7 @@ def ingest_full(st, name, e, W):
     V, ND = VARIANT[st.d["mode"]]
     S = CARD
     sdk = st.d["mode"] in SDK_MODES
+    sdk_030 = sdk and target_sdk(st.d) == "0.3.0"
     loom_only = st.d["mode"] == "sdk-loom"
     # sdk-ab: the job measured a package BUILT from the branch; the card is made on the staging head, which must hold exactly those programs (the
     # v0.2 package published before this card-only step): make_info.py refuses a different programs hash
@@ -910,10 +912,17 @@ def ingest_full(st, name, e, W):
         if got != e["package"]["programs_sha256"]:
             raise RuntimeError(f"the staging head {rev[:10]} holds programs {str(got)[:12]}, not the published v0.2 package's {e['package']['programs_sha256'][:12]}: "
                                f"another publish replaced them; run `regen.py package` again")
+    if sdk_030:
+        try:
+            published_pin = sdk_package.load(os.path.join(out, "llm_config.json")).get("sdk") or {}
+        except (OSError, ValueError, AttributeError) as ex:
+            raise RuntimeError(f"cannot read the SDK pin from staging head {rev[:10]}") from ex
+        if any(published_pin.get(key) != value for key, value in SDK_030_PIN.items()):
+            raise RuntimeError(f"the staging head {rev[:10]} no longer has the verified SDK 0.3.0 pin")
     shutil.copy(os.path.join(out, "info.json"), os.path.join(W, "info_prev.json"))
     prev = json.load(open(os.path.join(W, "info_prev.json")))
     baseline_info = "info_prev.json"
-    if sdk and target_sdk(st.d) == "0.3.0":
+    if sdk_030:
         source, revision = e["source_card"].split("@", 1)
         baseline_info = hf_file(source, "info.json", revision)
     mem = prev["card"]["memory_bytes"]
@@ -921,21 +930,23 @@ def ingest_full(st, name, e, W):
     src = ["--source-kind", "devlab", "--run", run, "--url", url]
     rd = lambda f: read(os.path.join(d, f))
     g = lambda pat: sorted(glob.glob(os.path.join(d, pat)))
-    run_tool([f"{S}/pull_devlab.py", "--identity", d, "--gpu", dev, "--device-out", "dev.json", "--hrx-out", "hrx.json"], W)
+    hrx = os.path.abspath(os.path.join(d, f"sdk_{V}.json")) if sdk_030 else "hrx.json"
+    identity = [f"{S}/pull_devlab.py", "--identity", d, "--gpu", dev, "--device-out", "dev.json"]
+    run_tool(identity + ([] if sdk_030 else ["--hrx-out", hrx]), W)
     llm, vk = g("perf_llamacpp-rocm.np1_n*.jsonl"), g("perf_llamacpp-vulkan.np1_n*.jsonl")
     c4l, c4v = g("c4_llamacpp-rocm.nodraft_n*.txt"), g("c4_llamacpp-vulkan.perslot.nodraft_n*.txt")
     vl, c4vl = g("perf_vllm_n*.jsonl"), g("c4_vllm_n*.txt")   # a safetensors card: vLLM ROCm is the baseline engine (devlab_perf.sh vllm: steps)
     st_card = (json.load(open(os.path.join(ROOT, "fleet", slug, "llm_config.json"))).get("source") or {}).get("kind") == "safetensors"
     if loom_only:   # the job measured Loom alone: the baseline rows (llama.cpp ROCm and Vulkan, or vLLM) are the previous card's, with their own run and date
         run_tool([f"{S}/make_info.py", "perf", "--gpu", dev, "--loom-jsonl", f"{d}/perf_{V}.jsonl", "--c4-loom", f"{d}/c4_{ND}.txt",
-                  "--baseline-from-info", baseline_info, "--package", out, *src, "--device", "dev.json", "--hrx-loom", "hrx.json",
+                  "--baseline-from-info", baseline_info, "--package", out, *src, "--device", "dev.json", "--hrx-loom", hrx,
                   "--fetched-programs", rd("programs_sha256_staging.txt"), "-o", "ev_perf.json"], W)
     else:
         if not st_card and not (llm and c4l):
             raise RuntimeError("the job has no llama.cpp ROCm files (a job without --baselines cannot make this device's table)")
         baseline = card_lib.registry.methodology()["baselines"][dev]
         perf = [f"{S}/make_info.py", "perf", "--gpu", dev, "--loom-jsonl", f"{d}/perf_{V}.jsonl", "--c4-loom", f"{d}/c4_{ND}.txt", "--package", out, *src,
-                "--device", "dev.json", "--hrx-loom", "hrx.json", "--fetched-programs", rd("programs_sha256_staging.txt" if sdk else "programs_sha256.txt"),
+                "--device", "dev.json", "--hrx-loom", hrx, "--fetched-programs", rd("programs_sha256_staging.txt" if sdk else "programs_sha256.txt"),
                 "-o", "ev_perf.json"]
         if st_card:   # no llama.cpp: the baseline column is vLLM ROCm on the same runner when the job measured it, else none (the card says so)
             c4vl = [f for f in c4vl if "agg_tps" in open(f).read()]   # a c4 file without a rate (the engine served too few streams) is not a baseline
@@ -964,7 +975,7 @@ def ingest_full(st, name, e, W):
         ev.append("ev_vulkan.json")
     gfiles = [f for f in (f"{d}/gates_{V}/gates.json", f"{d}/ktest_{V}.log") if os.path.exists(f)]
     if gfiles:
-        run_tool([f"{S}/make_info.py", "gates", "--gpu", dev, "--time", end, *gfiles, "--package", out, *src, "--device", "dev.json", "--hrx-loom", "hrx.json",
+        run_tool([f"{S}/make_info.py", "gates", "--gpu", dev, "--time", end, *gfiles, "--package", out, *src, "--device", "dev.json", "--hrx-loom", hrx,
                   "-o", "ev_gates.json"], W)
         ev.append("ev_gates.json")
     run_tool([f"{S}/make_info.py", "roofline", "--gpu", dev, "--device", card_lib.registry.device(dev)["roofline"]["default"], "--package", out,
