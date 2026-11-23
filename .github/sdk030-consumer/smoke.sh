@@ -15,7 +15,7 @@ curl -fsSL --retry 3 "https://github.com/ROCm/hrx-system/releases/download/v0.3.
 echo "6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f  $wheel" | sha256sum -c -
 python -m pip install -q "./$wheel[hf]"
 export HF_HUB_CACHE="$WORK/hf/hub"
-mkdir -p "$cache/refs"
+mkdir -p "$cache/refs" "$cache/snapshots"
 materialized="$WORK/materialized-qwen"
 timeout 240s loom-fetch "huggingface:$repo:chat@$revision" --materialize=copy --output="$materialized" --no-input
 rm -rf -- "$snapshot"
