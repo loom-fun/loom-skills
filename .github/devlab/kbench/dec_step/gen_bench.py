@@ -22,7 +22,7 @@ HEAD = "amdgpu.target<gfx11-generic> @w32 {subgroup_size = 32}\n\n"
 VARIANTS = {"split": {"MLA_DEC": "split"}, "pl1": {"MLA_DEC_PL": "1"}, "s32": {"MLA_DEC_S": "32"}, "b8": {"MLA_DEC_BMIN": "8"},
             "b2": {"MLA_DEC_BMIN": "2"}, "b1": {"MLA_DEC_BMIN": "1"}, "shslot": {"MOE_SHSLOT": "1"},
             "iq4q8": {"IQ4_Q8": "1"}, "wg1k": {"MV_WG1": "1024"}, "wg256": {"MV_WG1": "256"}, "moer4": {"MOE_R": "4"}, "moer1": {"MOE_R": "1"},
-            "rt1": {"MOE_ROUTE_SPLIT": "0"}, "wg128": {"MV_WG1": "128"}, "wg64": {"MV_WG1": "64"}, "sh0": {"MOE_SHSLOT": "0"}, "qadual": {"MLA_QA_DUAL": "1"}}
+            "rt1": {"MOE_ROUTE_SPLIT": "0"}, "wg128": {"MV_WG1": "128"}, "wg64": {"MV_WG1": "64"}, "sh0": {"MOE_SHSLOT": "0"}, "qadual": {"MLA_QA_DUAL": "1"}, "rmsx": {"MLA_RMSQ_FUSE": "1"}}
 CTXS = [("short", 300, 1), ("2k", 2048, 1), ("8k", 8192, 1), ("c4", 1024, 4)]   # (tag, context, tokens = streams)
 ROLE_CTX = "short"   # role_<kernel> cases (host wall of that role's 39-40 launches alone) at this context
 OUT = None
@@ -311,6 +311,13 @@ def route_test(lib):
     return HEAD + strip_kernels(lib) + "\n".join(ks) + case
 
 
+def kname(lib, pat):
+    """the one exported kernel whose name fully matches PAT (the R suffixes follow the generator's choices)"""
+    ns = sorted(set(re.findall(r'^kernel\.def export\("(' + pat.replace("(_r", "(?:_r") + r')"\)', lib, re.M)))
+    assert len(ns) == 1, (pat, ns)
+    return ns[0]
+
+
 def iq4xs_rand(rng, nbytes):
     """random IQ4_XS blocks (136 bytes per 256 values) with a sane f16 scale d = 0.02 (random bytes give inf / NaN)"""
     b = rng.integers(0, 256, nbytes, dtype=np.uint8).reshape(-1, 136)
@@ -320,7 +327,8 @@ def iq4xs_rand(rng, nbytes):
 
 def qadual_test(lib, rng):
     """mv_dual (MLA_QA_DUAL: q_a + kv_a in one launch) against the two single launches: equal outputs, 1 and 4 tokens."""
-    names = ["g_mv_iq4_xs_k2048_r1", "g_mv_iq4_xs_k2048_r1_dual", "g_mv_iq4_xs_k2048_t4_r1", "g_mv_iq4_xs_k2048_t4_r1_dual"]
+    D1, D4 = kname(lib, r"g_mv_iq4_xs_k2048(_r\d+)?_dual"), kname(lib, r"g_mv_iq4_xs_k2048_t4(_r\d+)?_dual")
+    names = sorted({D1, D4} | set(re.findall(r'^kernel\.def export\("(g_mv_iq4_xs_k2048(?:_t4)?(?:_r\d+)?)"\)', lib, re.M)))
     ks = []
     for k in names:
         m = re.search(rf'^kernel\.def export\("{k}"\) @{k}\((?:.|\n)*?^\}}\n', lib, re.M)
@@ -330,7 +338,11 @@ def qadual_test(lib, rng):
     np.save(os.path.join(OUT, "qd_wa.npy"), iq4xs_rand(rng, NA * H // 256 * 136))
     np.save(os.path.join(OUT, "qd_wb.npy"), iq4xs_rand(rng, NB * H // 256 * 136))
     out = []
-    for T, k1, kd in ((1, "g_mv_iq4_xs_k2048_r1", "g_mv_iq4_xs_k2048_r1_dual"), (4, "g_mv_iq4_xs_k2048_t4_r1", "g_mv_iq4_xs_k2048_t4_r1_dual")):
+    def single(t4):
+        c = [n for n in names if not n.endswith("_dual") and ("_t4" in n) == t4]
+        r = lambda n: int(n.rsplit("_r", 1)[1]) if "_r" in n else 16
+        return [n for n in c if 576 % r(n) == 0][0]
+    for T, k1, kd in ((1, single(False), D1), (4, single(True), D4)):
         np.save(os.path.join(OUT, f"qd_h{T}.npy"), rng.standard_normal((T, H)).astype(np.float32))
         WA, WB, HT, AT, BT = f"tensor<{NA * H // 256 * 136}xi8>", f"tensor<{NB * H // 256 * 136}xi8>", f"tensor<{T}x{H}xf32>", f"tensor<{T}x{NA}xf32>", f"tensor<{T}x{NB}xf32>"
         out.append(f"""check.case public @qadual_t{T} {{
@@ -357,10 +369,47 @@ def qadual_test(lib, rng):
     return "\n".join(ks) + "".join(out)
 
 
+def rmsx_test(lib, rng):
+    """mv_rmsx (MLA_RMSQ_FUSE) against g_mla_rms_q + the q_b matvec, 1 and 4 tokens (approximate: the norm's sum order)."""
+    out, ks = [], []
+    for T, k1 in ((1, "g_mv_iq4_xs_k1536"), (4, "g_mv_iq4_xs_k1536_t4")):
+        for k in (k1, k1 + "_rmsx") + (("g_mla_rms_q",) if T == 1 else ()):
+            m = re.search(rf'^kernel\.def export\("{k}"\) @{k}\((?:.|\n)*?^\}}\n', lib, re.M)
+            assert m, k
+            ks.append(m.group(0).replace(f'export("{k}") @{k}(', f'export("r_{k}") @r_{k}('))
+        K, N = 1536, 6144
+        wb = N * K // 256 * 136
+        np.save(os.path.join(OUT, f"rx_x{T}.npy"), (rng.standard_normal((T, K)) * 3).astype(np.float32))
+        if T == 1:
+            np.save(os.path.join(OUT, "rx_w.npy"), iq4xs_rand(rng, wb))
+            np.save(os.path.join(OUT, "rx_n.npy"), rng.uniform(0.5, 1.5, K).astype(np.float32))
+        XT, YT, WT, NT = f"tensor<{T}x{K}xf32>", f"tensor<{T}x{N}xf32>", f"tensor<{wb}xi8>", f"tensor<{K}xf32>"
+        out.append(f"""check.case public @rmsx_t{T} {{
+  %t = check.literal value({T}) : index
+  %n = check.literal value({N}) : index
+  %z = check.literal value(0) : i32
+  %x = check.file.read.npy path("rx_x{T}.npy") : {XT}
+  %x2 = check.file.read.npy path("rx_x{T}.npy") : {XT}
+  %w = check.file.read.npy path("rx_w.npy") : {WT}
+  %nw = check.file.read.npy path("rx_n.npy") : {NT}
+  %y = check.generate.fill value(0.0) : {YT}
+  %y2 = check.generate.fill value(0.0) : {YT}
+  kernel.launch @r_g_mla_rms_q[%t](%t, %x, %nw) : [index](index, {XT}, {NT})
+  kernel.launch @r_{k1}[%n, %t](%n, %t, %z, %x, %w, %y) : [index, index](index, index, i32, {XT}, {WT}, {YT})
+  kernel.launch @r_{k1}_rmsx[%n, %t](%n, %t, %z, %x2, %w, %y2, %nw) : [index, index](index, index, i32, {XT}, {WT}, {YT}, {NT})
+  check.expect.approximate actual(%y2) expected(%y) atol(1.0e-3) rtol(1.0e-4) nan(different) : {YT}, {YT}
+  check.return
+}}
+""")
+    return "\n".join(ks) + "".join(out)
+
+
 def shslot_test(lib, rng):
     """the shared expert as a ninth slot (g_moe_gu/dn_..._sh + g_moe_combine_sh) against the separate launches (shared
     swiglu matvec + down matvec into y, routed gu / dn, g_moe_combine accumulating): 2 tokens, 16 experts, IQ4_XS."""
-    names = ["g_mv_iq4_xs_k2048_swiglu_r1", "g_mv_iq4_xs_k768_r1", "g_moe_gu_iq4_xs_k2048_r2", "g_moe_dn_iq4_xs_k768_r2",
+    MS = re.search(r"kernel\.launch @(g_mv_iq4_xs_k2048_swiglu(?:_r\d+)?)\[%nFS, %t\]", lib).group(1)
+    MD = re.search(r"kernel\.launch @(g_mv_iq4_xs_k768(?:_r\d+)?)\[%nH, %t\]", lib).group(1)
+    names = [MS, MD, "g_moe_gu_iq4_xs_k2048_r2", "g_moe_dn_iq4_xs_k768_r2",
              "g_moe_combine", "g_moe_gu_iq4_xs_k2048_r2_sh", "g_moe_dn_iq4_xs_k768_r2_sh", "g_moe_combine_sh"]
     ks = []
     for k in names:
@@ -395,8 +444,8 @@ def shslot_test(lib, rng):
   %y2 = check.generate.fill value(0.0) : {HT}
   %act2 = check.generate.fill value(0.0) : {AT2}
   %ys2 = check.generate.fill value(0.0) : {YS2}
-  kernel.launch @g_mv_iq4_xs_k2048_swiglu_r1[%nF, %t](%nF, %t, %z, %h, %sg, %su, %f) : [index, index](index, index, i32, {HT}, {S}, {S}, tensor<{T}x{F}xf32>)
-  kernel.launch @g_mv_iq4_xs_k768_r1[%nH, %t](%nH, %t, %z, %f, %sd, %y) : [index, index](index, index, i32, tensor<{T}x{F}xf32>, {S}, {HT})
+  kernel.launch @{MS}[%nF, %t](%nF, %t, %z, %h, %sg, %su, %f) : [index, index](index, index, i32, {HT}, {S}, {S}, tensor<{T}x{F}xf32>)
+  kernel.launch @{MD}[%nH, %t](%nH, %t, %z, %f, %sd, %y) : [index, index](index, index, i32, tensor<{T}x{F}xf32>, {S}, {HT})
   kernel.launch @g_moe_gu_iq4_xs_k2048_r2[%nF, %ta](%nF, %ta, %ids, %h, %wg, %wu, %act) : [index, index](index, index, {IT}, {HT}, {W}, {W}, {AT})
   kernel.launch @g_moe_dn_iq4_xs_k768_r2[%nH, %ta](%nH, %ta, %ids, %act, %wd, %ys) : [index, index](index, index, {IT}, {AT}, {W}, {YS})
   kernel.launch @g_moe_combine[%t](%t, %ys, %wts, %y) : [index](index, {YS}, {WT}, {HT})
@@ -425,9 +474,11 @@ if __name__ == "__main__" and len(sys.argv) > 2:
     np.save(os.path.join(OUT, "rt_h.npy"), rng.standard_normal((4, 2048)).astype(np.float32))
     np.save(os.path.join(OUT, "rt_w.npy"), (rng.standard_normal(256 * 2048) * 0.05).astype(np.float32))
     np.save(os.path.join(OUT, "rt_b.npy"), (rng.standard_normal(256) * 0.01).astype(np.float32))
-    lib0, _ = split_program(program("base"))
+    prog0 = program("base")
+    lib0, cmd0 = split_program(prog0)
     lib1, _ = split_program(program("qadual"))
-    open(os.path.join(OUT, "test.loom"), "w").write(route_test(lib0) + shslot_test(lib0, rng) + qadual_test(lib1, rng))
+    open(os.path.join(OUT, "test.loom"), "w").write(route_test(lib0) + shslot_test(lib0 + cmd0, rng) + qadual_test(lib1, rng)
+                                                           + rmsx_test(split_program(program("rmsx"))[0], rng))
     for v in sys.argv[3:] or ["base"]:
         if v != "base" and not all(x in VARIANTS for x in v.split("+")):
             raise SystemExit("unknown variant " + v)

@@ -399,13 +399,11 @@
       "gen": "dec_step/gen_bench.py",
       "gen_variants": [
         "base",
-        "qadual",
-        "wg256"
+        "rmsx"
       ],
       "files": [
         "bench.loom",
-        "bench_qadual.loom",
-        "bench_wg256.loom"
+        "bench_rmsx.loom"
       ],
       "config": [],
       "args": [
@@ -414,7 +412,7 @@
         "--profile-final-batch=true"
       ],
       "device": "amdgpu://?completion_spin_ns=4294967295",
-      "repeats": 2,
+      "repeats": 3,
       "case_timing": true,
       "tests": [
         "test.loom"
