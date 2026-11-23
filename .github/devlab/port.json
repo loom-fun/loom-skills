@@ -1,7 +1,6 @@
 {
- "_comment": "End-to-end ports on DevLab (.github/scripts/port_e2e.sh): from scratch (REFERENCE=off: the pipeline without the lookup) and derived from a loom-fun reference (REFERENCE=auto: find_reference.py picks the best category A package).",
+ "_comment": "JoyAI-LLM-Flash (deepseek2 / MLA) IQ4_XS end-to-end on Strix Halo: port.sh with reference/deepseek2-example -> qualify.sh -> finalize.sh, card evidence and the publishable package.",
  "jobs": [
-  {"name": "q35-9b-derived-v", "spec": "unsloth/Qwen3.5-9B-GGUF:Qwen3.5-9B-Q4_K_M.gguf", "reference": "auto"},
-  {"name": "ornith-9b-scratch-v", "spec": "bartowski/Ornith-1.5-9B-GGUF:Ornith-1.5-9B-Q4_K_M.gguf", "reference": "off", "model_id": "ornith-ai/Ornith-1.5-9B"}
+  {"name": "joyai-iq4xs", "spec": "jdopensource/JoyAI-LLM-Flash-GGUF:JoyAI-LLM-Flash-IQ4_XS.gguf", "reference": "auto", "model_id": "jdopensource/JoyAI-LLM-Flash"}
  ]
 }
