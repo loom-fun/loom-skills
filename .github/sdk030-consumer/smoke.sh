@@ -73,7 +73,7 @@ import urllib.request
 
 endpoint, model, out = sys.argv[1:]
 body = {"model": model, "messages": [{"role": "user", "content": "What is two plus two? Reply with the answer only. /no_think"}],
-        "temperature": 0, "max_tokens": 48}
+        "temperature": 0, "max_tokens": 256, "chat_template_kwargs": {"enable_thinking": False}}
 r = urllib.request.Request(endpoint, json.dumps(body).encode(), {"Content-Type": "application/json"})
 with urllib.request.urlopen(r, timeout=120) as response:
     data = json.load(response)
