@@ -25,10 +25,14 @@ def _line(prefix):
     return next(ln for ln in open(SCRIPT) if ln.startswith(prefix)).rstrip("\n")
 
 
-def serve_line(variant, rdev="", rsuf="-", mem="17000000000", weights=None):
+def serve_line(variant, rdev="", rsuf="-", mem="17000000000", weights=None, runtime_sdk=None):
     """The serve.sh arguments serve_alone passes for a variant of a one-preset package on the runner of `rdev` ("" = Strix Halo)."""
     with tempfile.TemporaryDirectory() as w:
         os.makedirs(f"{w}/D/v/pkg"); os.makedirs(f"{w}/state")
+        if runtime_sdk:
+            os.makedirs(f"{w}/sdk")
+            with open(f"{w}/sdk/loom-install.json", "w", encoding="utf-8") as f:
+                json.dump({"hrx_loom": runtime_sdk}, f)
         model = {"presets": {"chat": {}}}
         if weights is not None:   # one parameter file of this many bytes, sized by the package's lock (what the card's Quick start decides on)
             model["variants"] = {"v": {"services": {"s": {"parameters": {"model": {"files": [{"origin": "@m/x.gguf"}]}}}}}}
@@ -44,7 +48,7 @@ export REC
 mkdir -p {w}/SV; cp {w}/sv_serve.sh {w}/SV/serve.sh; printf '#!/bin/bash\\n' > {w}/SV/stop.sh; chmod +x {w}/SV/stop.sh; SV={w}/SV
 exp={w}/exp.json; job=j
 {_line("qv()")}
-sdk_root() {{ SDKR=/sdk; }}
+sdk_root() {{ SDKR={w}/sdk; }}
 step() {{ :; }}
 gufo_down() {{ :; }}; mem_guard() {{ :; }}
 echo '{{}}' > {w}/serve_v.out
@@ -66,6 +70,11 @@ class ServeAlone(unittest.TestCase):
         got = serve_line({"name": "v"}, rdev="radeon-r9700", rsuf="-r9700", mem="34000000000")
         self.assertIn(" none ", got)
         self.assertTrue(got.endswith("-- --pool_backing=fixed --parameter_mode=preload"), got)   # no weight limit on the R9700
+
+    def test_runtime_sdk_030_does_not_preload_r9700(self):
+        got = serve_line({"name": "v"}, rdev="radeon-r9700", rsuf="-r9700", runtime_sdk="0.3.0")
+        self.assertTrue(got.endswith("-- --pool_backing=fixed"), got)
+        self.assertNotIn("preload", got)
 
     def test_strix_preloads_up_to_40_gb_of_weights(self):
         self.assertTrue(serve_line({"name": "v"}, weights=40_000_000_000).endswith("-- --pool_backing=fixed --parameter_mode=preload"))

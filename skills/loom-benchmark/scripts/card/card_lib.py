@@ -801,11 +801,13 @@ def serves(info, gpu):
     return dev is not None and dev.get("state") not in ("unsupported", "not_a_target") and (has_results(dev) or has_runner(gpu) or "serve_args" in dev)
 
 
-def info_serve_args(info, gpu, weight_bytes=None):
+def info_serve_args(info, gpu, weight_bytes=None, sdk=None):
     """The loom-serve flags of a GPU on this card: the ones its devices entry records (a data file's, per model: used as they are), else the
     GPU's own for a package of weight_bytes (card_serve_args)."""
     dev = (info.get("devices") or {}).get(gpu) or {}
-    return list(dev["serve_args"]) if "serve_args" in dev else card_serve_args(gpu, weight_bytes)
+    if "serve_args" in dev:
+        return sdk_serve_args(dev["serve_args"], sdk)
+    return card_serve_args(gpu, weight_bytes, sdk)
 
 
 def gpu_serve_args(gpu):
@@ -814,6 +816,19 @@ def gpu_serve_args(gpu):
 
 
 PRELOAD_FLAG = "--parameter_mode=preload"
+
+
+def sdk_uses_file_parameters(sdk):
+    """SDK 0.3 and later default to buffered file reads and retired the preload flag."""
+    match = re.match(r"(\d+)\.(\d+)\.", (sdk or {}).get("hrx_loom") or "")
+    return bool(match and tuple(map(int, match.groups())) >= (0, 3))
+
+
+def sdk_serve_args(args, sdk):
+    """Keep recorded flags compatible with the SDK that will run them."""
+    if sdk_uses_file_parameters(sdk):
+        return [arg for arg in args if arg != PRELOAD_FLAG]
+    return list(args)
 
 
 def preload_mode(gpu, weight_bytes):
@@ -831,10 +846,13 @@ def preload_mode(gpu, weight_bytes):
     return "preload" if weight_bytes <= limit else "default"
 
 
-def card_serve_args(gpu, weight_bytes=None):
+def card_serve_args(gpu, weight_bytes=None, sdk=None):
     """The loom-serve flags a package of weight_bytes (the parameter files' sizes: package_weight_bytes) is served with on a GPU, as its card's Quick
     start prints them: the GPU's own flags plus --parameter_mode=preload where preload_mode says so."""
-    return gpu_serve_args(gpu) + ([PRELOAD_FLAG] if preload_mode(gpu, weight_bytes) == "preload" else [])
+    args = gpu_serve_args(gpu)
+    if not sdk_uses_file_parameters(sdk) and preload_mode(gpu, weight_bytes) == "preload":
+        args.append(PRELOAD_FLAG)
+    return sdk_serve_args(args, sdk)
 
 
 QUICK_START_DEVICE = "amdgpu://?completion_spin_ns=4294967295"   # the active wait the card's performance rows are measured with
@@ -846,18 +864,22 @@ def quick_start(info, facts, gpu):
     launchers read (a launcher that picks its own device keeps the URI's query)."""
     args = []
     pkg_serve = (facts.get("serve") or {}).get("args")   # llm_config.json "serve": flags the package must be served with
-    gpu_serve = info_serve_args(info, gpu, facts.get("weight_bytes"))
+    gpu_serve = info_serve_args(info, gpu, facts.get("weight_bytes"), facts.get("sdk"))
     memory = gpu_memory(info, facts["memory_bytes"], gpu)
     if gpu_serve or pkg_serve:
         args += gpu_serve + [a for a in (pkg_serve or []) if a not in gpu_serve]   # e.g. --pool_backing=fixed, which takes no --memory_bytes
     elif memory:
         args.append(f"--memory_bytes={memory}")
-    return {"preset": gpu_preset(facts, gpu) or (facts.get("presets") or [None])[0], "device": QUICK_START_DEVICE, "args": args}
+    return {"preset": gpu_preset(facts, gpu) or (facts.get("presets") or [None])[0], "device": QUICK_START_DEVICE,
+            "args": sdk_serve_args(args, facts.get("sdk"))}
 
 
 def recorded_quick_start(info, facts, gpu):
     """The GPU's recorded quick_start, else quick_start (a card built before the field existed)."""
-    return ((info.get("devices") or {}).get(gpu) or {}).get("quick_start") or quick_start(info, facts, gpu)
+    recorded = ((info.get("devices") or {}).get(gpu) or {}).get("quick_start")
+    if recorded:
+        return dict(recorded, args=sdk_serve_args(recorded["args"], facts.get("sdk")))
+    return quick_start(info, facts, gpu)
 
 
 def package_weight_bytes(model, lock):
@@ -878,11 +900,11 @@ def package_weight_bytes(model, lock):
     return total or None
 
 
-def package_serve_args(gpu, pkg_dir):
+def package_serve_args(gpu, pkg_dir, sdk=None):
     """card_serve_args for the package in a directory (model.json + model.json.lock): what its card's Quick start serves it with on the GPU
     (devlab_perf.sh serve_alone serves with the same flags). A package whose lock sizes are unknown has unknown weights: only a GPU with no weight limit preloads."""
     pf = load_package(pkg_dir)
-    return card_serve_args(gpu, package_weight_bytes(pf["model"], pf["lock"]))
+    return card_serve_args(gpu, package_weight_bytes(pf["model"], pf["lock"]), sdk or pf["cfg"].get("sdk"))
 
 
 def has_runner(gpu):

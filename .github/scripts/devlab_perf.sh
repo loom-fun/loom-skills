@@ -505,7 +505,8 @@ serve_alone() { # serve_alone VARIANT
   # R9700 and on Strix Halo, no --memory_bytes; the R9700's elastic trim + compaction stalls the long-prefill rows, hrx-loom 0.2.0's elastic backing
   # costs Strix prefill, notes u1_rootcause), unless the variant brings its own serve_args/memory_bytes or is "elastic": true (--memory_bytes on any GPU)
   # (+ --parameter_mode=preload where the package's weights fit the GPU's host copy limit: card_lib.package_serve_args, from the package's own model.json.lock sizes)
-  gsa=$("$T" -I -c "import sys; sys.path.insert(0, sys.argv[1]); import card_lib; print(' '.join(card_lib.package_serve_args(sys.argv[2], sys.argv[3])))" "$here/skills/loom-benchmark/scripts/card" "${RDEV:-strix-halo}" "$D/$1/pkg") \
+  sdk_root "$1" || { echo "FAIL: SDK of variant $1"; return 1; }; local vroot=$SDKR
+  gsa=$("$T" -I -c "import os, sys; sys.path.insert(0, sys.argv[1]); import card_lib; pin = card_lib.load_json(sys.argv[4]) if os.path.isfile(sys.argv[4]) else None; print(' '.join(card_lib.package_serve_args(sys.argv[2], sys.argv[3], pin)))" "$here/skills/loom-benchmark/scripts/card" "${RDEV:-strix-halo}" "$D/$1/pkg" "$vroot/loom-install.json") \
     || { echo "FAIL: card_lib.package_serve_args(${RDEV:-strix-halo}) (the device's card serve flags)"; return 1; }
   local memneed=""
   if [ -n "$gsa" ] && [[ "$sa" != *--pool_backing=* ]] && [ "$(qv "$1" "print(bool(v.get('elastic') or v.get('memory_bytes')))")" = False ]; then
@@ -514,7 +515,6 @@ serve_alone() { # serve_alone VARIANT
     memneed=$vmem   # the elastic budget bounds what fixed backing commits: serve.sh's memcheck still guards the host (Strix memory is host RAM)
     vmem=none
   fi
-  sdk_root "$1" || { echo "FAIL: SDK of variant $1"; return 1; }; local vroot=$SDKR
   export LOOM_ROOT=$vroot VENV=$vroot/.venv   # the variant's SDK serves it (and runs gates / kernel tests on it)
   [ -n "${PROFILE_SA:-}" ] && sa="$sa $PROFILE_SA"   # the profile step: --print_device_statistics
   # VRAM still held by the process that was just stopped (a vLLM / llama.cpp server, the reference fill, the last loom-serve) makes the load fail

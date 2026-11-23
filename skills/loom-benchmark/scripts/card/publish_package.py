@@ -210,10 +210,11 @@ def check_xsj_configuration(out, info, programs):
 
         meta = device_meta(gpu, doc, entry, facts["features"], facts.get("weight_bytes"))
         device = (doc.get("serve") or {}).get("device", card_lib.QUICK_START_DEVICE)
-        quick = {"preset": name, "device": device, "args": meta["serve_args"]}
+        args = card_lib.sdk_serve_args(meta["serve_args"], facts.get("sdk"))
+        quick = {"preset": name, "device": device, "args": args}
         dev = info["devices"][gpu]
         if (dev.get("quick_start") != quick or card_lib.quick_start(info, facts, gpu) != quick
-                or dev.get("serve_args") != meta["serve_args"] or dev.get("served_context") != meta.get("served_context")):
+                or dev.get("serve_args") != args or dev.get("served_context") != meta.get("served_context")):
             sys.exit(f"{out}/info.json: {gpu} Quick start or serving settings differ from qualified XSJ device results")
 
 

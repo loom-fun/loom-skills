@@ -27,7 +27,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from card_lib import (DEFAULT_GPU, FEATURES, GATE_NAMES, GATES, GPUS, HF, LOOM_URL, METHOD, METRIC_KEYS, METRICS, SCHEMA_ID, SKILLS_URL,  # noqa: E402
                       TIMED, PRELOAD_FLAG, preload_mode, card_gpus, card_metrics, derived_tags, beyond_context, gate_applies, generator_commit, gpu_context, gpu_memory, recorded_quick_start, serves,
                       gpu_view, has_results, has_runner, load_info, load_json, load_package, metric_applies, native_context, over_context,
-                      package_facts, programs_sha256, require_valid, stale_metrics, with_gate_features, historical_xsj_gate, xsj_enabled)
+                      package_facts, programs_sha256, require_valid, stale_metrics, with_gate_features, historical_xsj_gate, sdk_uses_file_parameters, xsj_enabled)
 from matched_spec import TIE_BAND, classification  # noqa: E402
 
 YES, NO, NA, MISSING = "✅", "❌", "—", "—"
@@ -888,7 +888,7 @@ def render(d):
                 + ", ".join(f"`{k}` {v:,}" if isinstance(v, int) and not isinstance(v, bool) else f"`{k}` {v}" for k, v in sorted(diff.items()))
                 + f" for its {GPUS[g]['memory'] or 'memory'}. The programs, weights and tokenizer are the same.")
     def stock_line(g):   # a GPU whose host copy of the weights does not fit beside its memory keeps the default parameter mode (device.json card.preload_max_weight_bytes)
-        if (preload_mode(g, facts.get("weight_bytes")) is None or "serve_args" in (info["devices"].get(g) or {})
+        if (sdk_uses_file_parameters(pin) or preload_mode(g, facts.get("weight_bytes")) is None or "serve_args" in (info["devices"].get(g) or {})
                 or PRELOAD_FLAG in recorded_quick_start(info, facts, g)["args"]):   # the recorded Quick start preloads: no memlock limit to work around
             return None
         return ("On a stock host (8 MiB memlock) start loom-serve as `systemd-run --user --pty --same-dir -p SystemCallFilter=~io_uring_setup "
@@ -1037,6 +1037,19 @@ def render(d):
         if x:
             rev = f" @ `{x['revision'][:7]}`" if x["revision"] else ""
             L.append(f"- {role}: {hf(x['repo'])}{rev}, `{x['file']}`")
+    if sdk_uses_file_parameters(pin):
+        current = pin["hrx_loom"]
+        history = []
+        for gpu in gpus:
+            perf = info["devices"][gpu].get("performance") or {}
+            measured_versions = {(info["sources"][s["source"]].get("hrx_loom") or {}).get("hrx_loom")
+                        for s in perf.get("sessions", [])}
+            previous = sorted(v for v in measured_versions if v and v != current)
+            if previous:
+                sdks = ", ".join(f"`{v}`" for v in previous)
+                history.append(f"- {GPUS[gpu]['name']} has historical Loom measurements on hrx-loom {sdks}.")
+        if history:
+            L += ["", "## SDK evidence", "", f"The Quick start installs hrx-loom `{current}`.", "", *history]
     paused, steps = info.get("status") == "paused", [f"- {x}" for x in info.get("next_steps") or []]
     if paused or steps:   # last: what would be done if work continued
         L += ["", "## Next steps", ""]

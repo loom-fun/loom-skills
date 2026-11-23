@@ -45,12 +45,20 @@ class PreloadRule(unittest.TestCase):
 
 
 class Render(unittest.TestCase):
-    def render(self, weights):
+    def render(self, weights, sdk=None):
         with tempfile.TemporaryDirectory() as w:
             shutil.copytree(os.path.join(FLINT, "pkg"), w, dirs_exist_ok=True)
             info = json.load(open(os.path.join(FLINT, "expected", "info.json")))
             for d in info["devices"].values():
                 d.pop("quick_start", None)   # a card of these weights: make_info.py build would record the Quick start from them
+            if sdk:
+                pin_file = os.path.join(w, "llm_config.json")
+                cfg = card_lib.load_json(pin_file)
+                cfg["sdk"] = {"hrx_loom": sdk, "source": "pypi"}
+                with open(pin_file, "w", encoding="utf-8") as f:
+                    json.dump(cfg, f)
+                for dev in info["devices"].values():
+                    dev["serve_args"] = card_lib.gpu_serve_args("strix-halo") + [PRE]
             json.dump(info, open(os.path.join(w, "info.json"), "w"))
             lock = json.load(open(os.path.join(w, "model.json.lock")))
             lock["files"][0]["size"] = weights
@@ -63,6 +71,19 @@ class Render(unittest.TestCase):
         self.assertIn("--pool_backing=fixed " + PRE, md)
         self.assertIn("performance rows were measured without it unless their job served with it", md)
         self.assertNotIn(STOCK, md)
+
+    def test_sdk_030_uses_default_file_mode_even_with_legacy_device_flags(self):
+        readme = self.render(30_000_000_000, "0.3.0")
+        self.assertIn('--pool_backing=fixed', readme)
+        self.assertNotIn('--parameter_mode=', readme)
+        self.assertNotIn(STOCK, readme)
+        self.assertEqual(card_lib.card_serve_args("radeon-r9700", None, {"hrx_loom": "0.3.0"}),
+                         ["--pool_backing=fixed"])
+        legacy = {"args": ["--pool_backing=fixed", PRE], "device": card_lib.QUICK_START_DEVICE, "preset": "chat"}
+        info = {"devices": {"strix-halo": {"quick_start": legacy}}}
+        self.assertEqual(card_lib.recorded_quick_start(info, {"sdk": {"hrx_loom": "0.3.0"}}, "strix-halo")["args"],
+                         ["--pool_backing=fixed"])
+        self.assertEqual(card_lib.recorded_quick_start(info, {"sdk": {"hrx_loom": "0.2.0"}}, "strix-halo"), legacy)
 
     def test_big_strix_card_keeps_default_and_says_how_to_start(self):
         md = self.render(70_000_000_000)
