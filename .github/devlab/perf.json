@@ -1,28 +1,13 @@
 {
- "_comment": "JoyAI pfgemm round 3: v4 (gates:dev PASS, run 45258800233) vs v6 = v4 + MLA_BMM_LIVE (fixed: uniform live test) vs v7 = v4 + ROUTE_TR=6 (router weight reuse 4 -> 6 tokens per workgroup, bit-identical); ABBA.",
+ "_comment": "JoyAI pfgemm round 4: gates:dev on the lane winner v6 (IQ4_XS inline dequant + T64_G32 + MOE_CW/SWAP + MLA_BMM2=vbm + MLA_BMM_LIVE; r3 run 45261202924: 1k 1642, 2k 1513 tok/s vs base 1294 / 1239) and its pf8k profile.",
  "card": "loom-fun/jdopensource-JoyAI-LLM-Flash-loom@cb7861a81dbb586782044145ebb11f8cd48d8c8e",
  "memory_bytes": 47000000000,
  "kit": "deepseek2",
  "llamacpp": "b1386",
  "jobs": [
   {
-   "name": "pfgemm-r3",
+   "name": "pfgemm-r4",
    "variants": [
-    {
-     "name": "v4",
-     "build": {
-      "GEMM_IQ4_NATIVE": "1",
-      "GEMM_IQ4_F16LUT": "1",
-      "GEMM_IQ4_G32": "1",
-      "GEMM_M256_G32": "1",
-      "GEMM_M256_F16O": "1",
-      "GEMM_PRUNE": "1",
-      "GEMM_T64_G32": "1",
-      "MOE_CW": "1",
-      "MOE_CW_SWAP": "1",
-      "MLA_BMM2": "vbm"
-     }
-    },
     {
      "name": "v6",
      "build": {
@@ -38,34 +23,11 @@
       "MLA_BMM2": "vbm",
       "MLA_BMM_LIVE": "1"
      }
-    },
-    {
-     "name": "v7",
-     "build": {
-      "GEMM_IQ4_NATIVE": "1",
-      "GEMM_IQ4_F16LUT": "1",
-      "GEMM_IQ4_G32": "1",
-      "GEMM_M256_G32": "1",
-      "GEMM_M256_F16O": "1",
-      "GEMM_PRUNE": "1",
-      "GEMM_T64_G32": "1",
-      "MOE_CW": "1",
-      "MOE_CW_SWAP": "1",
-      "MLA_BMM2": "vbm",
-      "ROUTE_TR": "6"
-     }
     }
    ],
    "steps": [
-    "ktest:v6",
-    "ktest:v7",
-    "profile:v6:pf2k",
-    "perf:v4:1",
-    "perf:v6:1",
-    "perf:v7:1",
-    "perf:v7:1",
-    "perf:v6:1",
-    "perf:v4:1"
+    "gates:v6:dev",
+    "profile:v6:pf8k"
    ]
   }
  ],
