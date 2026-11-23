@@ -1,0 +1,154 @@
+name: Publish verified SDK 0.3.0 package to staging
+on:
+  pull_request:
+    types: [labeled]
+permissions:
+  actions: read
+  contents: read
+concurrency:
+  group: sdk030-stage-pilot
+  cancel-in-progress: false
+jobs:
+  stage:
+    if: github.event.pull_request.head.ref == 'codex/sdk030-migration' && github.event.pull_request.head.repo.full_name == github.repository && github.event.label.name == 'sdk030-stage'
+    runs-on: [strix-halo, devlab-dispatch, Linux, self-hosted]
+    timeout-minutes: 20
+    env:
+      WORK: ${{ github.workspace }}/sdk030-stage-${{ github.run_id }}-${{ github.run_attempt }}
+      CANDIDATE_ARTIFACT: "14858436086"
+      CANDIDATE_RUN: "45255350745"
+      CANDIDATE_DIGEST: "sha256:5acc2ee7dbdd83cb95d51f884147ef97bf4e998c85fb83e859d04f279fca1695"
+      PACKAGE_SLUG: "unsloth-Qwen3-0.6B-loom"
+      PRODUCTION_REVISION: "564d578f4e487c6fbabd84915439f873651b5953"
+      STAGING_PARENT: "aec3ff660cf5c3c6c8b357a0d3116366615de85f"
+      PROGRAMS_SHA256: "36be806329b1e49f47cb705f853b61a503c10e49daac939427b3c58a334da243"
+      HF_ENDPOINT: https://huggingface.co
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Validate the reviewed candidate and report
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$WORK"
+          gh api "repos/loom-fun/loom-skills/actions/artifacts/$CANDIDATE_ARTIFACT" > "$WORK/artifact.json"
+          gh api "repos/loom-fun/loom-skills/actions/artifacts/$CANDIDATE_ARTIFACT/zip" > "$WORK/candidate.zip"
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          import re
+          import shutil
+          import stat
+          from pathlib import Path, PurePosixPath
+          import zipfile
+
+          work = Path(os.environ["WORK"])
+          artifact = json.loads((work / "artifact.json").read_text())
+          candidate = work / "candidate.zip"
+          assert artifact["workflow_run"]["id"] == int(os.environ["CANDIDATE_RUN"])
+          assert artifact["id"] == int(os.environ["CANDIDATE_ARTIFACT"])
+          assert artifact["name"] == "sdk030-stage-candidate" and not artifact["expired"]
+          with candidate.open("rb") as stream:
+              assert "sha256:" + hashlib.file_digest(stream, "sha256").hexdigest() == os.environ["CANDIDATE_DIGEST"]
+          assert artifact["digest"] == os.environ["CANDIDATE_DIGEST"]
+          assert re.fullmatch(r"[A-Za-z0-9][-A-Za-z0-9._]{0,126}", os.environ["PACKAGE_SLUG"])
+          assert re.fullmatch(r"[a-f0-9]{40}", os.environ["STAGING_PARENT"])
+          assert re.fullmatch(r"[a-f0-9]{40}", os.environ["PRODUCTION_REVISION"])
+          assert re.fullmatch(r"[a-f0-9]{64}", os.environ["PROGRAMS_SHA256"])
+          with zipfile.ZipFile(candidate) as archive:
+              names = set()
+              assert sum(item.file_size for item in archive.infolist()) < 150 * 1024 * 1024
+              for item in archive.infolist():
+                  name = item.filename
+                  path = PurePosixPath(name)
+                  assert not path.is_absolute() and ".." not in path.parts
+                  assert re.fullmatch(r"[A-Za-z0-9._/-]+", name) and name not in names
+                  assert not stat.S_ISLNK(item.external_attr >> 16)
+                  names.add(name)
+                  if item.is_dir():
+                      continue
+                  assert name == "evidence.json" or name.startswith("package/")
+                  assert path.suffix.lower() not in {".gguf", ".bin", ".safetensors", ".mmproj"}
+                  target = work.joinpath(*path.parts)
+                  target.parent.mkdir(parents=True, exist_ok=True)
+                  with archive.open(item) as src, target.open("wb") as dst:
+                      shutil.copyfileobj(src, dst)
+          evidence = json.loads((work / "evidence.json").read_text())
+          assert evidence["slug"] == os.environ["PACKAGE_SLUG"]
+          assert evidence["production_revision"] == os.environ["PRODUCTION_REVISION"]
+          assert evidence["programs_sha256"] == os.environ["PROGRAMS_SHA256"]
+          assert evidence["staging_parent"] == os.environ["STAGING_PARENT"]
+          assert evidence["qualification_run"] == 45251639763 and evidence["qualification_artifact"] == 14856743877
+          assert evidence["verdict"] == "publish"
+          pin = json.loads((work / "package/llm_config.json").read_text())["sdk"]
+          assert pin["hrx_loom"] == "0.3.0" and pin["source"] == "pypi"
+          assert pin["wheel_sha256"] == "6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f"
+          PY
+          python3 -m venv "$WORK/venv"
+          "$WORK/venv/bin/pip" install -q huggingface_hub requests
+          card="$PWD/skills/loom-benchmark/scripts/card"
+          "$WORK/venv/bin/python" - "$card" <<'PY'
+          import os
+          import sys
+          sys.path.insert(0, sys.argv[1])
+          from card_lib import programs_sha256
+          assert programs_sha256(os.path.join(os.environ["WORK"], "package")) == os.environ["PROGRAMS_SHA256"]
+          PY
+          "$WORK/venv/bin/python" "$card/render_card.py" --check "$WORK/package" "$WORK/package/README.md"
+          "$WORK/venv/bin/python" "$card/publish_package.py" upload "$WORK/package" \
+            --org loom-fun-staging --repo "$PACKAGE_SLUG" --parent-commit "$STAGING_PARENT" --dry-run
+      - name: Publish the reviewed package to loom-fun-staging and verify the returned commit
+        shell: bash
+        env:
+          HF_TOKEN: ${{ secrets.HF_LOOM_FACTORY }}
+        run: |
+          test -n "$HF_TOKEN"
+          card="$PWD/skills/loom-benchmark/scripts/card"
+          "$WORK/venv/bin/python" "$card/publish_package.py" upload "$WORK/package" \
+            --org loom-fun-staging --repo "$PACKAGE_SLUG" --parent-commit "$STAGING_PARENT" \
+            --message "Validated hrx-loom 0.3.0 package and card" | tee "$WORK/receipt.json"
+          "$WORK/venv/bin/python" - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          import time
+          from huggingface_hub import HfApi, hf_hub_download
+
+          work = Path(os.environ["WORK"])
+          repo = f"loom-fun-staging/{os.environ['PACKAGE_SLUG']}"
+          receipt = json.loads((work / "receipt.json").read_text())
+          assert receipt["repo"] == repo and receipt["parent_commit"] == os.environ["STAGING_PARENT"]
+          commit = receipt["commit"]
+          api = HfApi()
+          for attempt in range(6):
+              if api.model_info(repo).sha == commit:
+                  break
+              time.sleep(1)
+          else:
+              raise RuntimeError("Verified commit is not the current staging head")
+          for local in sorted((work / "package").rglob("*")):
+              if not local.is_file():
+                  continue
+              name = local.relative_to(work / "package").as_posix()
+              if name.startswith("."):
+                  continue
+              dest = Path(hf_hub_download(repo, name, revision=commit))
+              assert hashlib.sha256(local.read_bytes()).digest() == hashlib.sha256(dest.read_bytes()).digest(), name
+          print(receipt["url"])
+          PY
+      - name: Retain the staging receipt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdk030-staging-receipt
+          path: ${{ env.WORK }}/receipt.json
+          if-no-files-found: ignore
+      - name: Remove runner scratch
+        if: always()
+        shell: bash
+        run: rm -rf -- "$WORK"
