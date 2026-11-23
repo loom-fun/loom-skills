@@ -1,0 +1,91 @@
+name: Render validated image-service staging packages
+on:
+  push:
+    branches: [codex/sdk030-image-services]
+    paths: [.github/workflows/sdk030-image-stage.yml]
+permissions:
+  contents: read
+  actions: read
+jobs:
+  assemble:
+    runs-on: [strix-halo, devlab-dispatch, Linux, self-hosted]
+    timeout-minutes: 25
+    steps:
+      - name: Verify A/B evidence and prepare the three package snapshots
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$GITHUB_WORKSPACE/staging-candidates"
+          python3 - <<'PY'
+          import hashlib, io, json, os, statistics, urllib.parse, urllib.request, zipfile
+          from pathlib import Path, PurePosixPath
+          def sha(data):return hashlib.sha256(data).hexdigest()
+          def fetch(url,headers=None):
+              with urllib.request.urlopen(urllib.request.Request(url, headers=headers or {}), timeout=120) as response:
+                  return response.read()
+          digest='268cd51b9649b4cd608060f35d5dcb03215e90ed730a7442d4d6303e30cf4fcf'
+          # gh supplies the artifact download endpoint's authenticated redirect.
+          import subprocess
+          blob=subprocess.check_output(['gh','api','repos/loom-fun/loom-skills/actions/artifacts/14858901745/zip'])
+          assert sha(blob)==digest,'unexpected qualification artifact'
+          z=zipfile.ZipFile(io.BytesIO(blob))
+          records=json.loads(z.read('summary.json'))
+          identity=json.loads(z.read('sdk-0.3.0.json'))
+          assert identity['wheel_sha256']=='6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f'
+          expected={'xinntao-Real-ESRGAN-x4plus-loom':'d7126ceb45f03476c8f6608ba77959dd48fe4515','black-forest-labs-FLUX.2-klein-4B-loom':'b21b10a168c368d67303fea32f5dbc5f6398375e','Tongyi-MAI-Z-Image-Turbo-loom':'77e103e314324c35a88b62350286b07e8dc0f05d'}
+          root=Path('staging-candidates')
+          manifest={}
+          for r in records:
+              slug=r['repo'].split('/')[1]
+              rev=r['revision']
+              assert r['repo']=='loom-fun/'+slug and expected[slug]==rev and slug not in manifest
+              assert r['pixels_match'] and r['programs_match'] and r['max_abs_channel_diff']==0
+              before,after=r['runs']['0.2.0'],r['runs']['0.3.0']
+              assert before['deterministic'] and after['deterministic'] and len(after['observations'])==3 and before['request_sha256']==after['request_sha256']
+              d=root/slug
+              d.mkdir()
+              origin='https://huggingface.co/'+r['repo']
+              source=json.loads(fetch('https://huggingface.co/api/models/'+r['repo']+'/revision/'+rev))
+              assert source['sha']==rev
+              for f in source['siblings']:
+                  name=f['rfilename']; path=PurePosixPath(name)
+                  assert not path.is_absolute() and '..' not in path.parts and '.git' not in path.parts
+                  dest=d/path
+                  dest.parent.mkdir(parents=True,exist_ok=True)
+                  dest.write_bytes(fetch(origin+'/resolve/'+rev+'/'+urllib.parse.quote(name)))
+              tested=after['programs']
+              assert {str(path.relative_to(d)):sha(path.read_bytes()) for path in d.rglob('*.loom')}==tested
+              readme=d/'README.md'
+              text=readme.read_text()
+              old='pipx install "hrx-loom[hf]==0.2.0"'
+              assert text.count(old)==1
+              text=text.replace(old,'pipx install "hrx-loom[hf]==0.3.0"')
+              text=text.replace('huggingface:'+r['repo']+':','huggingface:loom-fun-staging/'+slug+':')
+              text=text.replace('Other AMD GPUs supported by hrx-loom 0.2.0 can fetch and serve the same package. They have not been tested with it yet.','The SDK 0.3.0 qualification below used Strix Halo.')
+              obs=after['observations'];w=obs[0]['width'];h=obs[0]['height']
+              test='upscaled a 64 × 16 synthetic RGB image by four with fully opaque output' if r['preset']=='upscale' else 'generated an image from the published example prompt with seed 42'
+              url='https://github.com/loom-fun/loom-skills/actions/runs/45253984158/job/137970780518'
+              section=f'## SDK 0.3.0 qualification\n\nOn AMD Strix Halo, hrx-loom 0.2.0 and 0.3.0 each {test}. All three requests on each SDK returned identical decoded RGB pixels at {w} × {h}. The package uses the same programs and checkpoint revisions as the [production snapshot]({origin}/tree/{rev}). [DevLab evidence]({url})\n\n'
+              section+='| SDK | First request | Median of two warm requests |\n|---|---:|---:|\n'
+              for ver in ('0.2.0','0.3.0'):
+                  times=[v['seconds'] for v in r['runs'][ver]['observations']]
+                  section+=f'| {ver} | {times[0]:.3f} s | {statistics.median(times[1:]):.3f} s |\n'
+              section+='\nThe timings cover this request and output size. The original quality and performance results below retain their original SDK provenance.\n\n'
+              headings=[i for i in range(len(text)) if text.startswith('\n## ',i)]
+              assert headings
+              first=headings[0]+1
+              readme.write_text(text[:first]+section+text[first:])
+              evidence={'source':r['repo']+'@'+rev,'sdk':identity,'devlab_run':45253984158,'devlab_job':137970780518,'artifact':14858901745,'artifact_sha256':digest,'comparison':r}
+              (d/'sdk-qualification.json').write_text(json.dumps(evidence,indent=2)+'\n')
+              manifest[slug]={'production':r['repo'],'production_revision':rev,'target':'loom-fun-staging/'+slug,'files':{str(f.relative_to(d)):sha(f.read_bytes()) for f in d.rglob('*') if f.is_file()}}
+          assert set(manifest)==set(expected)
+          (root/'manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: image-staging-packages
+          path: staging-candidates
+          include-hidden-files: true
+          retention-days: 30
