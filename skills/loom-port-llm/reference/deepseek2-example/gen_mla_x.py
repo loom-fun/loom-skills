@@ -32,7 +32,7 @@ import os
 
 XCAP = int(os.environ.get("MLA_XCAP", "131072"))         # scratch positions (sum over the epoch's expanded segments, 64-rounded)
 MIN_TILES = int(os.environ.get("MLA_X_MIN_TILES", "16"))  # whole 16-token tiles a segment needs to be expanded
-MIN_KEYS = int(os.environ.get("MLA_X_MIN_KEYS", "2048"))  # and keys (kbench mla_xpf: a 1k prompt is faster absorbed, 4k expanded)
+MIN_KEYS = int(os.environ.get("MLA_X_MIN_KEYS", "1024"))  # and keys (kbench mla_xpf: with the LDS expansion a 1k prompt is already faster expanded)
 XB_MAX = XCAP // 64
 QW = int(os.environ.get("MLA_XQ", "4"))   # 16-query tiles per g_mla_xflash workgroup (one wave each; a quad entry of xq)
 
@@ -472,7 +472,7 @@ kernel.def export("g_mla_xexp") @g_mla_xexp(%count_buffer: buffer) {{
                 a(f"""      %m{pp}{tt} = vector.mma {x}, {y}, %a{pp}{tt} : vector<16xf16>, vector<16xf16>, vector<8xf32>""")
         a(f"""      scf.yield {", ".join(f"%m{pp}{tt}" for pp in range(2) for tt in range(NT))} : {", ".join(["vector<8xf32>"] * (2 * NT))}
     }}""")
-    XL = os.environ.get("MLA_XE_LDS", "0") == "1"   # stage each 32-value latent step of the 64 keys and 256 W rows in workgroup memory
+    XL = os.environ.get("MLA_XE_LDS", "1") == "1"   # stage each 32-value latent step of the 64 keys and 256 W rows in workgroup memory
     assert not XL or NT == 4
     a(f"""  %two = index.constant 2 : offset
   %chalf = index.constant {QDN // 2} : index
