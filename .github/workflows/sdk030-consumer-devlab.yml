@@ -25,13 +25,9 @@ jobs:
           work=$(mktemp -d "$RUNNER_TEMP/sdk030-consumers.XXXXXX")
           echo "WORK=$work" >> "$GITHUB_ENV"
           mkdir "$work/out"
-      - name: Prepare Gufo and the extension and build the embed runtime
+      - name: Build and link a Loom-next SDK 0.3.0 package
         shell: bash
-        run: bash .github/sdk030-consumer/gufo.sh
-      - name: Verify the refreshed Lemonade contract
-        if: "!cancelled() && env.WORK != ''"
-        shell: bash
-        run: bash .github/sdk030-consumer/lemonade.sh
+        run: bash .github/sdk030-consumer/loom-next.sh
       - name: Store changes and lab evidence
         if: always() && env.WORK != ''
         uses: actions/upload-artifact@v4
