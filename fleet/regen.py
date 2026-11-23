@@ -331,10 +331,11 @@ def fleet_slugs():
 
 
 def cmd_plan(a):
-    if a.new_sdk != SDK_NEW and a.mode not in SDK_MODES:
+    new_sdk = getattr(a, "new_sdk", SDK_NEW)
+    if new_sdk != SDK_NEW and a.mode not in SDK_MODES:
         die("--new-sdk selects the target of sdk-ab or sdk-loom")
     slugs = fleet_slugs() if a.all else a.slugs
-    if a.new_sdk == "0.3.0":
+    if new_sdk == "0.3.0":
         inventory = os.path.join(ROOT, "skills", "loom-migrate", "versions", "v0.2.0-to-v0.3.0-production.json")
         accepted = sdk_package.load(inventory)
         if a.all:
@@ -368,7 +369,7 @@ def cmd_plan(a):
         refs = {}
         for s in slugs:
             repo = f"{a.new_org}/{s}"
-            if a.new_sdk == "0.3.0":
+            if new_sdk == "0.3.0":
                 published = f"loom-fun/{s}"
                 if published not in accepted:
                     die(f"{published}: absent from the accepted SDK 0.3.0 production inventory")
@@ -395,7 +396,7 @@ def cmd_plan(a):
         a.bundle_build = [pins["extension"].split("@")[1], pins["gufo"].split("@")[1]]
     st = {"schema": "regen/1", "created": now(), "mode": a.mode, "work": work, "state": state_path,
           "opts": {"gates": a.gates, "new_org": a.new_org, "base": a.base, "old_org": old_org, "batch": a.batch, "refs": None,
-                   **({"new_sdk": a.new_sdk} if a.new_sdk != SDK_NEW else {}),
+                   **({"new_sdk": new_sdk} if new_sdk != SDK_NEW else {}),
                    **({"replicas": a.replicas} if a.replicas > 1 else {}), **({"sequential": True} if a.sequential else {}),
                    **({"no_baselines": True} if a.no_baselines else {}), **({"bundle": a.bundle} if a.bundle else {}),
                    **({"bundle": {"build": {"extension": f"loom-fun/loom-gufo-extension@{a.bundle_build[0]}", "gufo": f"loom-fun/gufo@{a.bundle_build[1]}"}}}
@@ -431,7 +432,7 @@ def cmd_plan(a):
                 rep_no = j.get("replica", 1)
                 st["jobs"][j["name"]] = {"slug": slug_of(j), "device": dev, "batch": bid, "round": rep_no, "stage": "planned",
                                          "card": j["card"], "steps": len(j["steps"]),
-                                         **({"source_card": e["old"]} if a.new_sdk == "0.3.0" else {}),
+                                         **({"source_card": e["old"]} if new_sdk == "0.3.0" else {}),
                                          "aa": a.mode not in SDK_MODES and bool(e.get("old") and e.get("old") == e.get("new")),   # old == new: the A/B shows noise only
                                          **({"old": e["old"]} if a.mode == "sdk-loom" and e.get("old") else {})}   # the old card the cross-job deltas are taken against
                 if rep_no == 1:
