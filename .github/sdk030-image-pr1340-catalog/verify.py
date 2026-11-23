@@ -10,6 +10,7 @@ lock = json.loads((package / "model.json.lock").read_text())
 local = {"model.json", "model.json.lock"}
 remote = {}
 lock_files = {entry["origin"]: entry for entry in lock["files"]}
+revision_pinned_files = set()
 
 
 def asset(value):
@@ -22,7 +23,13 @@ def asset(value):
     else:
         name = origin.split("/", 1)[0].removeprefix("@")
         assert name in card["origins"] and name in lock["origins"], origin
-        assert len(lock_files[origin]["sha256"]) == 64 and lock_files[origin]["size"] > 0, origin
+        revision = lock["origins"][name]["resolved"]["revision"]
+        assert len(revision) == 40, (origin, revision)
+        if origin in lock_files:
+            assert len(lock_files[origin]["sha256"]) == 64 and lock_files[origin]["size"] > 0, origin
+        else:
+            assert Path(origin).name in {"LICENSE.md", "LICENSE.pdf"}, origin
+            revision_pinned_files.add(origin)
         remote[path] = origin
     for child in entry.get("data", []):
         asset(child)
@@ -61,8 +68,9 @@ for preset in card["presets"]:
     plan.check_returncode()
     files = json.loads(plan.stdout)["files"]
     planned = {item["path"] for item in files}
-    assert planned <= local | remote.keys(), planned - (local | remote.keys())
-    assert planned & remote.keys(), preset
+    declared = local | set(remote)
+    assert planned <= declared, planned - declared
+    assert planned & set(remote), preset
     plans[preset] = len(planned)
 programs = sorted(path for path in local if path.endswith(".loom"))
 parse_errors = {}
@@ -71,7 +79,8 @@ for path in programs:
     if result.returncode:
         parse_errors[path] = result.stderr
 record = {"model": card["model"]["id"], "source_program_files": len(programs), "local_assets": len(local),
-          "remote_locked_assets": len(remote), "preset_dry_run_files": plans, "parse_errors": parse_errors,
+          "remote_destinations": len(remote), "revision_pinned_license_files": sorted(revision_pinned_files),
+          "preset_dry_run_files": plans, "parse_errors": parse_errors,
           "staged_card_sha256": hashlib.sha256((package / "model.json").read_bytes()).hexdigest()}
 (evidence / "result.json").write_text(json.dumps(record, indent=2) + "\n")
 print(json.dumps(record))
