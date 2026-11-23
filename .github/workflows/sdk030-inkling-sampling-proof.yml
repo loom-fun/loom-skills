@@ -1,0 +1,139 @@
+name: Inkling R9700 Q4 sampling-gate regression
+on:
+  push:
+    branches: [codex/sdk030-inkling-sampling-gate]
+    paths: [.github/workflows/sdk030-inkling-sampling-proof.yml]
+permissions:
+  contents: read
+jobs:
+  verify:
+    name: Inkling R9700 ${{ matrix.preset }}
+    strategy:
+      max-parallel: 2
+      fail-fast: false
+      matrix:
+        include:
+          - preset: chat
+            quant: Q4_K_XL
+            sha: e64276656f072e9b2197a61723667cbdb71da66a716ffd966e572c21088f3cd3
+    runs-on: [self-hosted, devlab-dispatch, radeon-r9700]
+    timeout-minutes: 240
+    env:
+      SLUG: unsloth-Inkling-2-Mini-loom-r9700
+      FETCH_PRESET: ${{ matrix.preset }}
+      QUANT: ${{ matrix.quant }}
+      REF_SHA: ${{ matrix.sha }}
+      SDK_GPU_KEY: radeon-r9700
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Plan from the accepted production revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          export WORK="$(dirname "$GITHUB_WORKSPACE")/sdk030-wave-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$SDK_GPU_KEY-$SLUG-$QUANT"
+          mkdir -p "$WORK/receipt"
+          echo "WORK=$WORK" >> "$GITHUB_ENV"
+          python3 - <<'PY' >> "$GITHUB_ENV"
+          import json, os
+          from pathlib import Path
+          slug = os.environ['SLUG']
+          repo = 'loom-fun/' + slug
+          pins = json.loads(Path('skills/loom-migrate/versions/v0.2.0-to-v0.3.0-production.json').read_text())
+          job = dict(name='special', card=repo+'@'+pins[repo], sdk='0.3.0',
+                     llamacpp='b1383',
+                     variants=[dict(name='staging', sdk='0.3.0'),dict(name='stagingnd', sdk='0.3.0', execution=dict(draft_depth=0))],
+                     steps=['samplingprobe:staging'])
+          job['require_preset_r9700']=True
+          plan=dict(runner='r9700',memory_bytes=34000000000,jobs=[job])
+          out=Path(os.environ['WORK'])/'receipt'
+          (out/'experiment.json').write_text(json.dumps(plan,indent=2))
+          h=Path('.github/scripts/devlab_perf.sh')
+          source=h.read_text()
+          source=source.replace('    # LOCAL_HF_CACHE=', '    pf="--preset=$FETCH_PRESET"\n    # LOCAL_HF_CACHE=')
+          source=source.replace('    if n not in dst["presets"]:', '    if n not in dst["presets"] and p["variant"] in dst["variants"] and p["programs"] in dst["programs"]:')
+          original='    c["gguf"] = par(c["gguf"])'
+          assert source.count(original)==2
+          source=source.replace(original, '    c["gguf"] = par("Inkling-2-Mini-UD-"+os.environ["QUANT"]+".gguf")')
+          anchor_hash='fetch_card "$repo_ref"; card=$CARD_DIR; base=$CARD_BASE'
+          assert source.count(anchor_hash)==1
+          source=source.replace(anchor_hash,anchor_hash+'\necho "$REF_SHA  $card/parameter/Inkling-2-Mini-UD-$QUANT.gguf" > "$out/reference-sha256.input"\nsha256sum -c "$out/reference-sha256.input" > "$out/reference-sha256.log" || exit 1')
+          anchor='    ln -sfn "$vcard/parameter" "$pkg/parameter"'
+          assert source.count(anchor)==1
+          probe='''    samplingprobe)
+                serve_alone "$p1" || { res[$s]=ERROR; continue; }
+                export PYTHONPATH="$B${PYTHONPATH:+:$PYTHONPATH}"
+                reproduced=0
+                for attempt in 1 2 3; do
+                  "$T" "$WORK/sampling-before.py" "$D/$p1/pkg" "$url" --draws 0 > "$out/sampling-before-$attempt.log" 2>&1
+                  if grep -q '^FAIL temperature 0 == greedy' "$out/sampling-before-$attempt.log"; then reproduced=1; break; fi
+                done
+                cat "$out"/sampling-before-*.log
+                if [ "$reproduced" != 1 ]; then res[$s]=ORIGINAL_NOT_REPRODUCED; continue; fi
+                if "$T" "$B/sampling_check.py" "$D/$p1/pkg" "$url" --draws 0 > "$out/sampling-after.log" 2>&1; then
+                  res[$s]=PASS
+                else res[$s]=FAIL; fi
+                cat "$out/sampling-after.log";;
+              func)'''
+          assert source.count('    func)')==1
+          source=source.replace('    func)',probe)
+          h.write_text(source.replace(anchor,'    rsync -a --exclude=/parameter --exclude=/.git "$vcard/" "$pkg/"\n'+anchor))
+          print('JOB=special')
+          PY
+      - name: Check the fixture against the original and corrected gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          script=skills/loom-benchmark/scripts/sampling_check.py
+          cp "$script" "$WORK/sampling-after.py"
+          git show 3adfe7b7b6e68f753042e9f89b318e29a6088579:"$script" > "$WORK/sampling-before.py"
+          python3 -m unittest discover -s tests -p test_sampling_check.py -v 2>&1 | tee "$WORK/receipt/fixture-after.log"
+          cp "$WORK/sampling-before.py" "$script"
+          original_rc=0
+          python3 -m unittest discover -s tests -p test_sampling_check.py -v > "$WORK/receipt/fixture-before.log" 2>&1 || original_rc=$?
+          cp "$WORK/sampling-after.py" "$script"
+          test "$original_rc" = 1
+          grep -q '^FAIL: test_nonzero_default' "$WORK/receipt/fixture-before.log"
+      - name: Build, serve and measure the release candidate
+        run: bash .github/scripts/devlab_perf.sh "$WORK/receipt/experiment.json" "$JOB"
+      - name: Save the measured package and identity
+        if: always() && env.JOB != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          d="$WORK/$JOB"
+          cp -r "$d/out" "$WORK/receipt/"
+          if [ -e "$d/staging/pkg/model.json" ]; then
+            tar -C "$d/staging/pkg" --exclude=parameter --exclude='*.gguf' --exclude='*.safetensors' --exclude='bench' -czf "$WORK/receipt/package-without-weights.tar.gz" .
+          fi
+      - name: Verify the original failure and every corrected sampling check
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          out = Path(os.environ['WORK'])/'receipt/out'
+          results = json.loads((out/'summary.json').read_text())['results']
+          assert results['samplingprobe:staging'] == 'PASS', results
+          lines = (out/'sampling-after.log').read_text().splitlines()
+          required = {
+              'temperature 0 repeats', 'top_k 1 == greedy',
+              'same seed reproduces with service defaults', 'same seed reproduces',
+          }
+          checks = {line.removeprefix('OK   ') for line in lines if line.startswith('OK   ')}
+          assert required <= checks and any(c.startswith('different seeds vary') for c in checks), lines
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sdk030-inkling-sampling-proof
+          path: ${{ env.WORK }}/receipt
+          retention-days: 30
+      - name: Release job disk
+        if: always()
+        shell: bash
+        run: |
+          if [ "${WORK:-}" = "$(dirname "$GITHUB_WORKSPACE")/sdk030-wave-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$SDK_GPU_KEY-$SLUG-$QUANT" ]; then rm -rf -- "$WORK"; fi

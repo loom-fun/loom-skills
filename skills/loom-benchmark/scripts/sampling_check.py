@@ -1,8 +1,8 @@
 """Sampling gate: temperature / top_p / top_k / seed behave as specified.
 
 Checks, on one short prompt with thinking off when the template allows it:
-  1. temperature 0 == a request without sampling fields (greedy), and top_k 1 == greedy;
-  2. the same seed reproduces the same completion; different seeds vary;
+  1. explicit temperature 0 repeats, and top_k 1 matches explicit greedy;
+  2. the same seed reproduces with both default and explicit sampling settings; different seeds vary;
   3. the empirical first-token distribution at temperature 1 (N draws, distinct seeds) matches
      llama.cpp's probabilities for the same prompt ids (total-variation distance), when --llama is given.
 
@@ -43,9 +43,11 @@ def main():
         return (m.get("reasoning_content") or "") + (m.get("content") or "")
 
     fails = 0
-    greedy = ask()
-    checks = [("temperature 0 == greedy", ask(temperature=0) == greedy),
+    greedy = ask(temperature=0)
+    checks = [("temperature 0 repeats", ask(temperature=0) == greedy),
               ("top_k 1 == greedy", ask(temperature=1.0, top_k=1, seed=7) == greedy)]
+    defaults = [ask(seed=1234) for _ in range(2)]
+    checks.append(("same seed reproduces with service defaults", defaults[0] == defaults[1]))
     same = [ask(temperature=1.0, seed=1234) for _ in range(2)]
     checks.append(("same seed reproduces", same[0] == same[1]))
     varied = {ask(temperature=1.5, seed=s) for s in range(12)}
