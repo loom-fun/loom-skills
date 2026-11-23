@@ -20,7 +20,7 @@ jobs:
           work="$(dirname "$GITHUB_WORKSPACE")/sdk030-setup-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
           mkdir -p "$work" proof
           echo "SDK030_PROOF_WORK=$work" >> "$GITHUB_ENV"
-          unset GH_TOKEN GITHUB_TOKEN
+          unset GH_TOKEN GITHUB_TOKEN HF_ENDPOINT
           setup="$GITHUB_WORKSPACE/skills/loom-setup/scripts"
           bash "$setup/install_loom.sh" "$work/loom" | tee proof/install.log
           cp "$work/loom/loom-install.json" proof/sdk.json
@@ -43,6 +43,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          unset HF_ENDPOINT
           root="$SDK030_PROOF_WORK/loom"
           export VENV="$root/.venv" LOOM_SERVE_STATE="$SDK030_PROOF_WORK/state"
           setup="$GITHUB_WORKSPACE/skills/loom-setup/scripts"
