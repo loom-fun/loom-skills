@@ -156,21 +156,18 @@ jobs:
           # The device registry may have since changed and must not overwrite that record.
           for gpu in devices:
               info["devices"][gpu] = old["devices"][gpu]
-              perf = info["devices"][gpu]["performance"]
               sources = info["sources"]
               for source_id, descriptor in old["sources"].items():
                   if source_id in sources:
                       assert sources[source_id] == descriptor, source_id
                   else:
                       sources[source_id] = descriptor
-              note = "These historical Loom rows retain their original SDK and predate the SDK 0.3.0 staging pilot."
-              perf["baseline"].setdefault("differs", []).append(note)
-          new_perf = info["devices"]["strix-halo"]["performance"]
-          notes = new_perf["baseline"].setdefault("differs", [])
-          notes.append("Strix Halo Loom rows use the 2026-11-23 SDK 0.3.0 run alongside llama.cpp rows from their published sessions.")
+          steps = info.setdefault("next_steps", [])
+          steps.append("Measure Radeon AI PRO R9700 and gfx1201 on hrx-loom 0.3.0 to update their historical Loom rows.")
           for key, entry in changes.items():
               if abs(entry["percent"]) > 3.0:
-                  notes.append(f"{key} changed {entry['percent']:+.2f}% against the Strix Halo Loom session on {old_session['date']} in a cross-run comparison without same-runner confirmation.")
+                  label = {"prefill_16k": "16k prefill"}.get(key, key)
+                  steps.append(f"Confirm the {label} change ({entry['percent']:+.2f}% versus the {old_session['date']} Strix Halo session) in a same-runner SDK comparison.")
           p.write_text(json.dumps(info, indent=1, sort_keys=True) + "\n")
           shutil.copyfile(w / "production-model.json", p.parent / "model.json")
           evidence = {
