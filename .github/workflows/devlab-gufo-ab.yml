@@ -50,4 +50,6 @@ jobs:
           retention-days: 14
       - name: clean up
         if: always()
-        run: docker kill gufo-ab-serve gufo-ab-bench 2>/dev/null || true; rm -rf "$WORK/out" "$WORK/src"
+        run: |   # build trees are written by root in the build container; remove them there. The model download (hf/) and the Nix volume stay for the next run.
+          docker kill gufo-ab-serve gufo-ab-bench 2>/dev/null || true
+          docker run --rm -v "$WORK":"$WORK" nixos/nix:latest rm -rf "$WORK/out" "$WORK/src" || true

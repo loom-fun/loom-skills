@@ -24,15 +24,22 @@ nixrun() {   # nixrun GPU(0|1) CMD: CMD in nixos/nix with the store volume and $
   local gpu=()
   [ "$1" = 1 ] && gpu=(--device /dev/kfd --device /dev/dri --ulimit memlock=-1 --security-opt seccomp=unconfined --ipc=host --network host)
   docker run --rm ${NAME:+--name "$NAME"} "${gpu[@]}" -v "$VOL":/nix -v "$W":"$W" -v "$repo_root":"$repo_root":ro -e HOME=/root \
-    nixos/nix:latest sh -c "mkdir -p /root/.config/nix && printf '%s\n' '$NIXCONF' > /root/.config/nix/nix.conf && git config --global --add safe.directory '*' && $2"
+    nixos/nix:latest sh -c "mkdir -p /root/.config/nix && printf '%s\n' '$NIXCONF' > /root/.config/nix/nix.conf && git config --global --add safe.directory '*' && $2; rc=\$?; chown -R $(id -u):$(id -g) $W/src $W/out 2>/dev/null; exit \$rc"
 }
 docker volume create "$VOL" >/dev/null
 
-# ---- model (Hugging Face, revision-pinned)
+# ---- model (Hugging Face, revision-pinned): resumable, HTTP/1.1 (a 17 GB HTTP/2 stream was cancelled mid-file), checked
 m=$(q 'print(e["model"])'); r=${m%/*}; name=${m##*/}; rev=${r#*@}; r=${r%@*}
 model=$W/hf/$r/$rev/$name
-[ -f "$model" ] || { mkdir -p "${model%/*}"; curl -fsSL --retry 3 ${HF_TOKEN:+-H "Authorization: Bearer $HF_TOKEN"} \
-  "https://huggingface.co/$r/resolve/$rev/$name" -o "$model.part" && mv "$model.part" "$model"; }
+if [ ! -f "$model" ]; then
+  mkdir -p "${model%/*}"
+  for attempt in 1 2 3 4 5 6; do
+    curl -fsSL --http1.1 -C - --retry 5 --retry-all-errors ${HF_TOKEN:+-H "Authorization: Bearer $HF_TOKEN"} \
+      "https://huggingface.co/$r/resolve/$rev/$name" -o "$model.part" && { mv "$model.part" "$model"; break; }
+    echo "download attempt $attempt failed; resuming"; sleep 10
+  done
+fi
+[ -f "$model" ] || { echo "model download failed: $m"; exit 1; }
 echo "model $m $(du -h "$model" | cut -f1)" | tee "$O/model.txt"
 
 # ---- builds
