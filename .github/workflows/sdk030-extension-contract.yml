@@ -1,0 +1,55 @@
+name: DevLab Loom Gufo extension package contracts
+on:
+  push:
+    branches: [codex/sdk030-consumer-devlab]
+    paths:
+      - .github/workflows/sdk030-extension-contract.yml
+permissions:
+  contents: read
+jobs:
+  extension-contract:
+    runs-on: [strix-halo, devlab-dispatch, Linux, self-hosted]
+    timeout-minutes: 80
+    steps:
+      - name: Check out both final draft source revisions
+        shell: bash
+        run: |
+          set -euo pipefail
+          work=$(mktemp -d "$RUNNER_TEMP/sdk030-extension-contract.XXXXXX")
+          echo "WORK=$work" >> "$GITHUB_ENV"
+          mkdir "$work/out"
+          hostname > "$work/out/runner.txt"
+          fetch() {
+            git init -q "$work/$1"
+            git -C "$work/$1" fetch -q --depth 1 "https://github.com/$2.git" "$3"
+            git -C "$work/$1" checkout -q --detach FETCH_HEAD
+            test "$(git -C "$work/$1" rev-parse HEAD)" = "$3"
+            printf '%s=%s\n' "$1" "$3" >> "$work/out/revisions.txt"
+          }
+          fetch gufo gufo-org/gufo 8e4a8d565c66778acd5f1e40fdd7bdb8b2c8ddac
+          fetch extension loom-fun/loom-gufo-extension 20b0617fa7f0f8f080319b29bc35e0a9fe8df72a
+      - name: Check the extension package guard and runner contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          GUFO="$WORK/gufo" bash "$WORK/extension/tests/build_test.sh" "$WORK/test" 2>&1 | tee "$WORK/out/contract.log"
+      - name: Build the extension's pinned Nix package when the runner provides Nix
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v nix >/dev/null; then
+            printf 'Nix was unavailable on this DevLab runner\n' | tee "$WORK/out/nix.log"
+            exit 0
+          fi
+          nix --extra-experimental-features 'nix-command flakes' build -L --no-link --print-out-paths \
+            "path:$WORK/extension#default" 2>&1 | tee "$WORK/out/nix.log"
+      - uses: actions/upload-artifact@v4
+        if: always() && env.WORK != ''
+        with:
+          name: sdk030-extension-contract
+          path: ${{ env.WORK }}/out
+      - name: Remove isolated workspace
+        if: always() && env.WORK != ''
+        shell: bash
+        run: |
+          case "$WORK" in "$RUNNER_TEMP"/sdk030-extension-contract.*) rm -rf -- "$WORK";; *) exit 1;; esac
