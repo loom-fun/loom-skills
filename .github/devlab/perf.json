@@ -1,24 +1,41 @@
 {
   "jobs": [
     {
-      "llamacpp": "b1374",
-      "runner": "strix",
-      "name": "sdk030-qwen3-06b",
-      "kit": null,
-      "steps": [
-        "func:release",
-        "gates:release:dev",
-        "perf:release:1"
-      ],
       "sdk": "0.3.0",
-      "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
+      "kit": null,
+      "memory_bytes": 17000000000,
+      "steps": [
+        "func:staging",
+        "ktest:staging",
+        "gates:staging:full",
+        "admit:staging",
+        "perf:staging:1",
+        "perf:staging:1:long",
+        "perf:staging:1",
+        "perf:staging:1:long",
+        "perf:staging:1",
+        "perf:staging:1:long",
+        "perf:staging:1",
+        "perf:staging:1:long",
+        "perf:staging:1",
+        "perf:staging:1:long",
+        "perf:staging:1",
+        "perf:staging:1:long",
+        "c4:staging",
+        "c4:staging",
+        "c4:staging"
+      ],
+      "llamacpp": "b1374",
       "variants": [
         {
-          "name": "release",
+          "name": "staging",
           "sdk": "0.3.0"
         }
       ],
-      "memory_bytes": 17000000000
+      "card": "loom-fun/unsloth-Qwen3-0.6B-loom@564d578f4e487c6fbabd84915439f873651b5953",
+      "name": "sdk030-qwen3-06b-qualify",
+      "runner": "strix",
+      "repeat_rows": 3
     }
   ]
 }
