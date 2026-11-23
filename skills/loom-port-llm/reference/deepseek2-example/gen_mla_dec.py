@@ -33,7 +33,7 @@ PF = int(os.environ.get("MLA_DEC_PF", "0"))
 # partial layout: 0 = part_acc[token][split][head][512] (transposed fragment stores: 8 scattered 4 B stores per lane),
 # 1 = part_acc[token][split][512][head] (16 lanes = 16 heads write 64 contiguous bytes per row); g_mla_dcombine follows
 PL = int(os.environ.get("MLA_DEC_PL", "1"))
-CU = int(os.environ.get("MLA_DEC_CU", "8"))   # g_mla_dcombine (PL 1): splits whose loads are issued together
+CU = int(os.environ.get("MLA_DEC_CU", "4"))   # g_mla_dcombine (PL 1): splits whose loads are issued together
 ABL = set(x for x in os.environ.get("MLA_DEC_ABL", "").split(",") if x)
 
 
