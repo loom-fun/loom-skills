@@ -24,7 +24,9 @@ jobs:
           echo "CARD_PROOF_WORK=$work" >> "$GITHUB_ENV"
           python3 -m venv "$work/venv"
           py="$work/venv/bin/python"
-          "$py" -m pip install -q requests tokenizers pillow huggingface_hub
+          "$py" -m pip install -q requests tokenizers pillow huggingface_hub jinja2
+          unset HF_ENDPOINT LOOM_KIT
+          PYTHONPATH=skills/loom-benchmark/scripts "$py" -c 'import bench_common'
           bash -n skills/loom-benchmark/scripts/gates.sh
           for test in test_vllm_reference.py test_reference_alt.py test_card_chat_request.py test_device_results.py test_regen.py; do
             "$py" -m unittest discover -s tests -p "$test" -v 2>&1 | tee "proof/$test.log"
@@ -35,6 +37,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          unset HF_ENDPOINT
           work="$CARD_PROOF_WORK"
           gh api "/repos/$GITHUB_REPOSITORY/actions/artifacts/14870490950/zip" > "$work/abba.zip"
           echo "3fa4b9d4ff86b986468a6e9890546d4534f70638d0b4bdbd8501ebb73bf32dda  $work/abba.zip" | sha256sum -c
