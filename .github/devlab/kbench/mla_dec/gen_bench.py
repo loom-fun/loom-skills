@@ -18,7 +18,7 @@ HEAD = "amdgpu.target<gfx11-generic> @w32 {subgroup_size = 32}\n\n"
 QH, D, PB = 32, 576, 1152
 VARIANTS = {"wmma": {}, "s32": {"MLA_DEC_S": "32"}, "s128": {"MLA_DEC_S": "128"}, "b2": {"MLA_DEC_BMIN": "2"}, "b8": {"MLA_DEC_BMIN": "8"},
             "vp4": {"MLA_DEC_VTPAD": "4"}, "s16": {"MLA_DEC_S": "16"}, "b1": {"MLA_DEC_BMIN": "1"}, "b4": {"MLA_DEC_BMIN": "4"}, "b16": {"MLA_DEC_BMIN": "16"},
-            "pf1": {"MLA_DEC_PF": "1"}, "pf2": {"MLA_DEC_PF": "2"}, "pl1": {"MLA_DEC_PL": "1"},
+            "pf1": {"MLA_DEC_PF": "1"}, "pf2": {"MLA_DEC_PF": "2"}, "pl1": {"MLA_DEC_PL": "1"}, "pl0": {"MLA_DEC_PL": "0"}, "cu1": {"MLA_DEC_CU": "1"}, "cu4": {"MLA_DEC_CU": "4"},
             **{"x" + a: {"MLA_DEC_ABL": a} for a in ("empty", "noqk", "nostv", "nopv", "nosx", "nopart")}}   # x*: timing ablations (no tests)
 CASES = [("256", 256, 40, 1), ("1k", 1024, 40, 1), ("2k", 2048, 40, 1), ("8k", 8192, 40, 1), ("32k", 32768, 40, 1), ("131k", 131072, 4, 1), ("c4_8k", 8192, 40, 4)]
 OUT = None

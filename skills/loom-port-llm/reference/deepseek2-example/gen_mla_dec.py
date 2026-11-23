@@ -33,6 +33,7 @@ PF = int(os.environ.get("MLA_DEC_PF", "0"))
 # partial layout: 0 = part_acc[token][split][head][512] (transposed fragment stores: 8 scattered 4 B stores per lane),
 # 1 = part_acc[token][split][512][head] (16 lanes = 16 heads write 64 contiguous bytes per row); g_mla_dcombine follows
 PL = int(os.environ.get("MLA_DEC_PL", "1"))
+CU = int(os.environ.get("MLA_DEC_CU", "8"))   # g_mla_dcombine (PL 1): splits whose loads are issued together
 ABL = set(x for x in os.environ.get("MLA_DEC_ABL", "").split(",") if x)
 
 
@@ -423,6 +424,62 @@ kernel.def export("g_mla_dcombine") @g_mla_dcombine(%tokens: index) {{
     return t
 
 
+def combine_loops_unrolled(QH, KL, U):
+    """the two split loops of combine_pl1, U splits per iteration (loads in flight together; slots past s_eff are read
+    in bounds and masked)"""
+    ML = f"view<[%tokens]x{SMAX}x{QH}x2xf32>"
+    AV = f"view<[%tokens]x{SMAX}x{KL}x{QH}xf32>"
+    t = [f"""    %cU = index.constant {U} : index
+    %cUl = index.constant {U - 1} : index
+    %smax_l = index.constant {SMAX - 1} : index
+    %g_pad = index.add %s_eff, %cUl : index
+    %groups = index.div %g_pad, %cU : index
+    %maximum = scf.for %g = [%c0 to %groups step %c1](%mx = %neg_big : f32) -> (f32) {{
+      %s0 = index.mul %g, %cU : index"""]
+    for i in range(U):
+        t.append(f"""      %si{i}_c = index.constant {i} : index
+      %si{i} = index.add %s0, %si{i}_c : index
+      %vi{i} = index.cmp ult, %si{i}, %s_eff : index
+      %bi{i}_m = index.min %si{i}, %smax_l : index
+      %bi{i} = index.assume %bi{i}_m [range(%bi{i}_m, 0, {SMAX - 1})] : index
+      %mr{i} = view.load %ml_view[%token, %bi{i}, %head, 0] : {ML} -> f32
+      %mm{i} = scf.select %vi{i}, %mr{i}, %neg_big : f32""")
+    prev = "%mx"
+    for i in range(U):
+        t.append(f"""      %mx{i} = scalar.maxnumf {prev}, %mm{i} : f32""")
+        prev = f"%mx{i}"
+    t.append(f"""      scf.yield {prev} : f32
+    }}
+    %den, %total = scf.for %g = [%c0 to %groups step %c1](%d = %zero_f : f32, %acc = %zero4 : vector<4xf32>) -> (f32, vector<4xf32>) {{
+      %s0 = index.mul %g, %cU : index""")
+    for i in range(U):
+        t.append(f"""      %si{i}_c = index.constant {i} : index
+      %si{i} = index.add %s0, %si{i}_c : index
+      %vi{i} = index.cmp ult, %si{i}, %s_eff : index
+      %bi{i}_m = index.min %si{i}, %smax_l : index
+      %bi{i} = index.assume %bi{i}_m [range(%bi{i}_m, 0, {SMAX - 1})] : index
+      %ms{i} = view.load %ml_view[%token, %bi{i}, %head, 0] : {ML} -> f32
+      %lr{i} = view.load %ml_view[%token, %bi{i}, %head, 1] : {ML} -> f32""" + "".join(f"""
+      %pr{i}_{k} = view.load %acc_view[%token, %bi{i}, %dm{k}, %head] : {AV} -> f32""" for k in range(4)))
+    d, acc = "%d", "%acc"
+    for i in range(U):
+        t.append(f"""      %sh{i} = scalar.subf %ms{i}, %maximum : f32
+      %we{i} = scalar.expf<afn> %sh{i} : f32
+      %w{i} = scf.select %vi{i}, %we{i}, %zero_f : f32
+      %ls{i} = scf.select %vi{i}, %lr{i}, %zero_f : f32
+      %wl{i} = scalar.mulf %w{i}, %ls{i} : f32
+      %dn{i} = scalar.addf {d}, %wl{i} : f32""" + "".join(f"""
+      %pz{i}_{k} = scf.select %vi{i}, %pr{i}_{k}, %zero_f : f32""" for k in range(4)) + f"""
+      %part{i} = vector.from_elements %pz{i}_0, %pz{i}_1, %pz{i}_2, %pz{i}_3 : vector<4xf32>
+      %wv{i} = vector.splat %w{i} : vector<4xf32>
+      %an{i} = vector.fmaf %wv{i}, %part{i}, {acc} : vector<4xf32>""")
+        d, acc = f"%dn{i}", f"%an{i}"
+    t.append(f"""      scf.yield {d}, {acc} : f32, vector<4xf32>
+    }}
+""")
+    return "\n".join(t)
+
+
 def combine_pl1(QH, KL, D):
     """g_mla_dcombine for partial layout 1."""
     return f"""
@@ -474,7 +531,7 @@ kernel.def export("g_mla_dcombine") @g_mla_dcombine(%tokens: index) {{
     %s_eff = func.call @g_mla_dsplits(%nblk) : (index) -> (index)
     %ml_view = buffer.view %part_ml[%zero] : buffer -> view<[%tokens]x{SMAX}x{QH}x2xf32>
     %acc_view = buffer.view %part_acc[%zero] : buffer -> view<[%tokens]x{SMAX}x{KL}x{QH}xf32>
-    %maximum = scf.for %s = [%c0 to %s_eff step %c1](%mx = %neg_big : f32) -> (f32) {{
+""" + (combine_loops_unrolled(QH, KL, CU) if CU > 1 else f"""    %maximum = scf.for %s = [%c0 to %s_eff step %c1](%mx = %neg_big : f32) -> (f32) {{
       %bs = index.assume %s [range(%s, 0, {SMAX - 1})] : index
       %ms = view.load %ml_view[%token, %bs, %head, 0] : view<[%tokens]x{SMAX}x{QH}x2xf32> -> f32
       %next = scalar.maxnumf %mx, %ms : f32
@@ -494,7 +551,7 @@ kernel.def export("g_mla_dcombine") @g_mla_dcombine(%tokens: index) {{
       %acc_next = vector.fmaf %w_v, %part, %acc : vector<4xf32>
       scf.yield %d_next, %acc_next : f32, vector<4xf32>
     }}
-    %one = scalar.constant 1.0 : f32
+""") + f"""    %one = scalar.constant 1.0 : f32
     %inv = scalar.divf %one, %den : f32
     %inv_v = vector.splat %inv : vector<4xf32>
     %result = vector.mulf %total, %inv_v : vector<4xf32>
