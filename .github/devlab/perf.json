@@ -1,47 +1,57 @@
 {
- "_comment": "R9700 per-model measurement (r9700_jobs.py): one job per model on one R9700 runner; loom-fun-staging card, llama.cpp ROCm b1375 + Vulkan b12211 with the matched drafting, reduced-context models served at served_context. Does not fit: none",
- "runner": "r9700",
- "memory_bytes": 34000000000,
- "llama_spec": "matched",
+ "_comment": "JoyAI combined (experiment only): every lane's kept wins in one build (pfgemm v6 choices via the model scope, pfattn expanded MLA prefill, decode lane defaults) vs the published card; llama.cpp rows with the matched drafting (none: the package does not draft).",
+ "card": "loom-fun/jdopensource-JoyAI-LLM-Flash-loom@58159cc30c1b9a18fb883f75188b35d03bfea4ed",
+ "memory_bytes": 47000000000,
+ "kit": "deepseek2",
+ "llamacpp": "b1386",
+ "env": {
+  "LLAMACPP_EXTRA_ARGS": "--skip-chat-parsing"
+ },
  "jobs": [
   {
-   "name": "unsloth-qwen3-0-6b-loom",
-   "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
-   "kit": null,
-   "llamacpp": "b1375",
-   "llamacpp_vulkan": "b12211",
-   "memory_bytes_r9700": 17000000000,
+   "name": "combined-perf",
+   "llama_spec": "",
    "variants": [
-    {
-     "name": "card",
-     "build": {}
-    },
-    {
-     "name": "nodraft",
-     "build": {},
-     "execution": {
-      "draft_depth": 0
-     }
-    }
+    {"name": "card"},
+    {"name": "combined", "build": {}}
    ],
    "steps": [
-    "func:card",
-    "ktest:card",
-    "gates:card:dev",
-    "perf:card:3",
-    "perf:card:3:long",
-    "c4:nodraft",
-    "llama@rocm.np1:3",
-    "llama@rocm.np1:3:long",
-    "llamac4@rocm.nodraft",
-    "llama@vulkan.np1:3",
-    "llama@vulkan.np1:3:long",
-    "llamac4@vulkan.perslot.nodraft"
+    "ktest:combined",
+    "perf:card:1",
+    "perf:combined:1",
+    "perf:combined:1",
+    "perf:card:1",
+    "perf:card:1:long",
+    "perf:combined:1:long",
+    "perf:combined:1:long",
+    "perf:card:1:long",
+    "c4:combined",
+    "c4:card",
+    "c4:card",
+    "c4:combined",
+    "profile:combined:pf2k,pf8k,dec",
+    "llama:2",
+    "llama:1:long",
+    "llamac4"
+   ]
+  },
+  {
+   "name": "combined-fullctx",
+   "variants": [
+    {"name": "combined", "build": {}}
+   ],
+   "steps": [
+    "fullctx:combined:131072"
+   ]
+  },
+  {
+   "name": "combined-gates",
+   "variants": [
+    {"name": "combined", "build": {}}
+   ],
+   "steps": [
+    "gates:combined:dev"
    ]
   }
- ],
- "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
- "kit": null,
- "llamacpp": "b1375",
- "llamacpp_vulkan": "b12211"
+ ]
 }
