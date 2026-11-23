@@ -1,0 +1,84 @@
+name: SDK 0.3 normal setup and launcher proof
+on:
+  push:
+    branches: [codex/sdk030-migration-setup-proof]
+    paths: [.github/workflows/sdk030-setup-proof.yml]
+permissions:
+  contents: read
+jobs:
+  setup:
+    runs-on: [self-hosted, devlab-dispatch, strix-halo, Linux]
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Verify the default installer and equivalent release identities
+        shell: bash
+        run: |
+          set -euo pipefail
+          work="$(dirname "$GITHUB_WORKSPACE")/sdk030-setup-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          mkdir -p "$work" proof
+          echo "SDK030_PROOF_WORK=$work" >> "$GITHUB_ENV"
+          unset GH_TOKEN GITHUB_TOKEN
+          setup="$GITHUB_WORKSPACE/skills/loom-setup/scripts"
+          bash "$setup/install_loom.sh" "$work/loom" | tee proof/install.log
+          cp "$work/loom/loom-install.json" proof/sdk.json
+          git -C "$work/loom/library" rev-parse HEAD > proof/library.txt
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          sdk = json.loads(Path('proof/sdk.json').read_text())
+          assert (sdk['hrx_loom'], sdk['source'], sdk['hrx_system_sha']) == ('0.3.0', 'pypi', 'e2c41a720363911c04606ce0f4417e2d55630352'), sdk
+          assert sdk['wheel_sha256'] == '6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f', sdk
+          assert Path('proof/library.txt').read_text().strip() == '279afe368b82e0d7acfe38c4f47e8e7e5cfb7bc8'
+          PY
+          "$work/loom/.venv/bin/loom-fetch" --list > proof/catalog.txt
+          export PATH="$work/loom/.tools/bin:$PATH"
+          python -m unittest discover -s tests -p test_sdk_pin.py -v 2>&1 | tee proof/sdk-pin-tests.log
+          for test in test_preload.py test_card_flag_notes.py test_serve_memguard.py test_regen.py test_devlab_perf_serve.py test_sdk020_kit.py; do
+            python -m unittest discover -s tests -p "$test" -v 2>&1 | tee "proof/$test.log"
+          done
+      - name: Fetch and start the pinned card with fixed and default elastic backing
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="$SDK030_PROOF_WORK/loom"
+          export VENV="$root/.venv" LOOM_SERVE_STATE="$SDK030_PROOF_WORK/state"
+          setup="$GITHUB_WORKSPACE/skills/loom-setup/scripts"
+          pkg="$SDK030_PROOF_WORK/qwen"
+          model='huggingface:loom-fun-staging/unsloth-Qwen3-0.6B-loom:chat@f3ffda86d7bd1fa98d615f4972a7d3f82345294c'
+          "$root/.venv/bin/loom-fetch" "$model" --materialize=copy --output="$pkg" --no-input | tee proof/fetch.log
+          curl -fsSL --retry 3 'https://huggingface.co/loom-fun-staging/unsloth-Qwen3-0.6B-loom/resolve/f3ffda86d7bd1fa98d615f4972a7d3f82345294c/llm_config.json' -o "$pkg/llm_config.json"
+          python3 - "$pkg/llm_config.json" "$root/loom-install.json" <<'PY'
+          import json, sys
+          from pathlib import Path
+          cfg = Path(sys.argv[1]); ident = Path(sys.argv[2])
+          config = json.loads(cfg.read_text()); install = json.loads(ident.read_text())
+          assert config['sdk']['hrx_loom'] == install['hrx_loom'], config['sdk']
+          assert config['sdk']['wheel_sha256'] == install['wheel_sha256'], config['sdk']
+          config['serve'] = {'args': ['--parameter_mode=preload']}
+          cfg.write_text(json.dumps(config))
+          PY
+          test "$(bash "$setup/ensure_sdk.sh" "$root" "$pkg/llm_config.json")" = "$root"
+          trap 'bash "$setup/stop.sh" sdk030-proof || true' EXIT
+          for mode in fixed elastic; do
+            args=()
+            if [ "$mode" = fixed ]; then args=(--pool_backing=fixed); fi
+            bash "$setup/serve.sh" sdk030-proof 48193 amdgpu none "$pkg/model.json" -- "${args[@]}" | tee "proof/$mode.ready"
+            grep '^READY' "proof/$mode.ready"
+            "$root/.tools/bin/python" skills/loom-benchmark/scripts/wait_model.py http://127.0.0.1:48193 --wait 120 | tee "proof/$mode.chat"
+            tr '\000' '\n' < "/proc/$(cat "$LOOM_SERVE_STATE/sdk030-proof.pid")/cmdline" > "proof/$mode.argv"
+            if grep -Eq '^--memory_bytes=|^--parameter_mode=preload$' "proof/$mode.argv"; then exit 1; fi
+            if [ "$mode" = fixed ]; then
+              grep -x -- '--pool_backing=fixed' "proof/$mode.argv"
+            elif grep -q '^--pool_backing=' "proof/$mode.argv"; then
+              exit 1
+            fi
+            bash "$setup/stop.sh" sdk030-proof
+          done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sdk030-normal-setup-proof
+          path: proof
