@@ -16,7 +16,7 @@ precise enough to reproduce them. `REPORT.md` carries the detail that does not f
 | file | from |
 |---|---|
 | `model.json`, `model.json.lock` | `scripts/stage_hf.py` from the hrx-loom-library card |
-| `program/*.loom` | the card's programs |
+| `program/…` and local assets | the card's referenced programs and inputs |
 | `library/motif/tensor/*.loom` | the motifs the card links, copied so the package is self-contained |
 | `README.md` | this template |
 | `REPORT.md` | setup, the full prompt text, commands, per-stage times of in-process backends, and every Loom build measured |
@@ -31,7 +31,7 @@ publisher's repository at a revision, and `loom-fetch` downloads them from there
 2. `# <Model> for AMD Loom` and one paragraph: what the package is, which checkpoint, which
    endpoint, which device it was tested on.
 3. `## Quick start`: "Open your GPU and copy its commands." and one `<details>` block per tested
-   GPU with `pipx install`, `loom-fetch huggingface:loom-fun/<repo>:<preset> --materialize=copy --output=<dir>`
+   GPU with the tested SDK pin, `loom-fetch huggingface:loom-fun/<repo>:<preset>@<revision> --materialize=copy --output=<dir>`
    and `loom-serve`. One line for other GPUs the SDK supports: they can run it and have not been tested.
 4. `## Send a request`: one request to `/v1/images/generations` with `seed` and `response_format: b64_json`.
 5. `## Performance vs stable-diffusion.cpp`, `### <GPU> (<gfx>)`. One line with the size, steps

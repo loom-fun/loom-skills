@@ -6,7 +6,9 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
+from types import SimpleNamespace
 
 ROOT = Path(__file__).resolve().parents[1]
 SK = ROOT / "skills/loom-port-image"
@@ -61,39 +63,136 @@ class Wiring(unittest.TestCase):
             w, h = (int(v) for v in size.split("x"))
             self.assertEqual((w % 16, h % 16), (0, 0), size)
 
+    def test_installed_image_route(self):
+        kb = SK / "../loom-kb/kb.py"
+        result = subprocess.run(
+            [sys.executable, str(kb), "route", "--arch", "z-image", "--device", "strix-halo", "--topic",
+             "image-porting,kernels-ir", "--relative"],
+            check=True, capture_output=True, text=True)
+        files = result.stdout.splitlines()
+        for relative in ("device/rdna3/strix-halo/image-porting.md", "arch/image/diffusion/README.md",
+                         "arch/image/diffusion/z-image/README.md", "topic/image-porting.md"):
+            self.assertIn(relative, files)
+        self.assertFalse(any(path.startswith("arch/llm/") for path in files))
+
 
 class StageHf(unittest.TestCase):
     """stage_hf.py turns a library card into a self-contained package (standard library only)."""
 
-    def test_flattens_motifs_and_drops_archive(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            lib = Path(tmp) / "lib"
-            card_dir = lib / "model/pub/m"
-            (card_dir / "program").mkdir(parents=True)
-            (lib / "motif/tensor").mkdir(parents=True)
-            (lib / "motif/tensor/linear.loom").write_text("// motif\n")
-            (card_dir / "program/generate.loom").write_text("// program\n")
-            (card_dir / "model.json.lock").write_text("{}\n")
-            card = {
-                "programs": {
-                    "source": {"libraries": [{"path": "library/motif/tensor/linear.loom", "origin": "../.."},
-                                             "program/generate.loom"]},
-                    "archive": {"path": "bazel-out/generate.vmfb"},
-                },
-                "variants": {"bf16": {"services": {"images": {"programs": ["archive"]}}}},
-            }
-            (card_dir / "model.json").write_text(json.dumps(card))
-            out = Path(tmp) / "out"
-            subprocess.run([sys.executable, str(SCRIPTS / "stage_hf.py"), str(card_dir), str(out)],
-                           check=True, capture_output=True)
-            staged = json.loads((out / "model.json").read_text(encoding="utf-8"))
-            self.assertEqual(list(staged["programs"]), ["source"])
-            self.assertEqual(staged["programs"]["source"]["libraries"],
-                             ["library/motif/tensor/linear.loom", "program/generate.loom"])
-            self.assertEqual(staged["variants"]["bf16"]["services"]["images"]["programs"], ["source"])
-            self.assertTrue((out / "library/motif/tensor/linear.loom").exists())
-            self.assertTrue((out / "program/generate.loom").exists())
-            self.assertTrue((out / "model.json.lock").exists())
+    def setUp(self):
+        tmp = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.lib = tmp / "lib"
+        self.card_dir = self.lib / "model/pub/m"
+        self.out = tmp / "out"
+        (self.card_dir / "program").mkdir(parents=True)
+        (self.card_dir / "assets").mkdir()
+        (self.lib / "motif/tensor").mkdir(parents=True)
+        (self.lib / "motif/tensor/linear.loom").write_text("// motif\n")
+        (self.card_dir / "program/generate.loom").write_text("// program\n")
+        (self.card_dir / "assets/shape.bin").write_bytes(b"shape")
+        (self.card_dir / "assets/tokenizer.json").write_text("{}")
+        (self.card_dir / "model.json.lock").write_text("{}\n")
+        self.motif = {"path": "library/motif/tensor/linear.loom", "origin": "../../../motif/tensor/linear.loom"}
+        self.input = {"path": "program/generate.loom", "data": ["assets/shape.bin"]}
+        self.card = {
+            "programs": {"source": {"libraries": [self.motif], "inputs": [self.input]}, "archive": {}},
+            "variants": {"bf16": {"services": {"images": {"programs": ["source", "archive"],
+                                                         "tokenizers": {"text": {"path": "assets/tokenizer.json"}}}}}},
+            "presets": {"image": {"programs": "archive"}},
+        }
+
+    def run_stage(self):
+        (self.card_dir / "model.json").write_text(json.dumps(self.card))
+        return subprocess.run([sys.executable, str(SCRIPTS / "stage_hf.py"), str(self.card_dir), str(self.out)],
+                              capture_output=True, text=True)
+
+    def test_flattens_motifs_and_copies_local_assets(self):
+        result = self.run_stage()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        staged = json.loads((self.out / "model.json").read_text())
+        self.assertEqual(list(staged["programs"]), ["source"])
+        self.assertEqual(staged["programs"]["source"]["libraries"], ["library/motif/tensor/linear.loom"])
+        self.assertEqual(staged["variants"]["bf16"]["services"]["images"]["programs"], ["source"])
+        self.assertEqual(staged["presets"]["image"]["programs"], "source")
+        for path in ("library/motif/tensor/linear.loom", "program/generate.loom", "assets/shape.bin",
+                     "assets/tokenizer.json", "model.json.lock"):
+            self.assertTrue((self.out / path).is_file(), path)
+
+    def test_path_traversal_and_missing_inputs_never_publish(self):
+        for filename in ("library/motif/../../outside.loom", "/tmp/file", "assets/..\\outside", "assets/missing"):
+            with self.subTest(filename=filename):
+                self.input["data"] = [filename]
+                self.assertNotEqual(self.run_stage().returncode, 0)
+                self.assertFalse(self.out.exists())
+
+    def test_rejects_wrong_catalog_origin(self):
+        self.motif["origin"] = "../../../../outside.loom"
+        self.assertIn("does not match", self.run_stage().stderr)
+        self.assertFalse(self.out.exists())
+
+    def test_existing_output_stays_intact(self):
+        self.out.mkdir()
+        stale = self.out / "previous"
+        stale.write_text("evidence")
+        self.assertIn("output already exists", self.run_stage().stderr)
+        self.assertEqual(list(self.out.iterdir()), [stale])
+
+
+class ImageEvidence(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        sys.path.insert(0, str(SCRIPTS))
+        import bench_images
+        import oracle_diffusers
+        cls.bench = bench_images
+        cls.oracle = oracle_diffusers
+
+    def test_skip_requires_identical_and_complete_oracle_evidence(self):
+        case = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        settings = {"model": "first", "revision": "first-sha", "steps": 2, "capture_stages": True, "guidance_scale": 0}
+        (case / "image.png").write_bytes(b"png")
+        self.assertFalse(self.oracle.complete_case(case, settings))
+        (case / "meta.json").write_text(json.dumps({"settings": settings}))
+        self.assertFalse(self.oracle.complete_case(case, settings))
+        for name in self.oracle.stage_names(settings):
+            (case / name).write_bytes(b"tensor")
+        self.assertTrue(self.oracle.complete_case(case, settings))
+        for key, value in (("model", "other"), ("revision", "other"), ("steps", 4),
+                           ("capture_stages", False), ("guidance_scale", 1)):
+            self.assertFalse(self.oracle.complete_case(case, {**settings, key: value}), key)
+
+    def test_timing_checks_card_and_sends_explicit_lemonade_options(self):
+        card = Path(self.enterContext(tempfile.TemporaryDirectory())) / "model.json"
+        card.write_text(json.dumps({"model": {"id": "image"}, "services": {
+            "image": {"kind": "image", "interface": {"denoising_steps": 8, "guidance_scale": 0.0}}}}))
+        args = SimpleNamespace(steps=8, cfg_scale=0.0, loom_guidance={}, port=8271, lemonade="http://localhost")
+        loom = self.bench.Target(f"loom=loom:{card}", args)
+        lemon = self.bench.Target("lemon=lemonade:model:sd-cpp:rocm", args)
+        direct = self.bench.Target("direct=sdserver:http://localhost", args)
+        self.assertNotIn("steps", loom.body("fox", 0, "384x384"))
+        self.assertEqual((lemon.body("fox", 0, "384x384")["steps"],
+                          lemon.body("fox", 0, "384x384")["cfg_scale"]), (8, 0.0))
+        self.assertIn('"txt_cfg": 0.0', direct.body("fox", 0, "384x384")["prompt"])
+        with patch.object(self.bench, "http", return_value={"data": [{"id": "image", "loom": {"registration": "ready"}}]}):
+            self.assertEqual(loom.info()["registration"]["registration"], "ready")
+        args.steps = 9
+        with self.assertRaisesRegex(ValueError, "differ from requested"):
+            self.bench.Target(f"loom=loom:{card}", args)
+
+    @unittest.skipIf(np is None, "numpy not installed")
+    def test_paired_scoring_checks_case_identity(self):
+        import metrics
+
+        root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        a, b = root / "left", root / "right"
+        for side in (a, b):
+            (side / "fox").mkdir(parents=True)
+            meta = {"prompt": "a red fox", "seed": 0, "width": 384, "height": 384}
+            (side / "fox/meta.json").write_text(json.dumps(meta))
+        self.assertEqual(metrics.matching_metadata([a, b], ["fox"])["fox"]["seed"], 0)
+        (b / "fox/meta.json").write_text(json.dumps({**meta, "prompt": "a brown hare"}))
+        with self.assertRaisesRegex(ValueError, "differs for paired case"):
+            metrics.matching_metadata([a, b], ["fox"])
 
 
 class LoomDeps(unittest.TestCase):

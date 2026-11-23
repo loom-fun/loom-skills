@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Quality metrics for an image port: same-noise parity against the diffusers oracle, and prompt-alignment scores with paired bootstrap intervals.
 
-usage: metrics.py [--device cpu|cuda] [--reports DIR] parity TEST REF
+usage: metrics.py [--device cpu|cuda] [--reports DIR] parity TEST REF --same-noise
        metrics.py [--device cpu|cuda] [--reports DIR] scores SET [SET ...] [--baseline SET_NAME] [--name NAME]
 
 A set is a directory of cases <prompt>_s<seed>_<WxH>/{image.png, meta.json, *.npy}, the layout oracle_diffusers.py
@@ -38,6 +38,25 @@ def common_cases(sets):
     if not common:
         raise SystemExit("no cases common to every set")
     return common
+
+
+def matching_metadata(sets, names):
+    fields = ("prompt", "seed", "width", "height")
+    matched = {}
+    for name in names:
+        first = None
+        for root in sets:
+            path = root / name / "meta.json"
+            try:
+                meta = json.loads(path.read_text(encoding="utf-8"))
+                values = tuple(meta[key] for key in fields)
+            except (KeyError, OSError, ValueError) as error:
+                raise ValueError(f"{path}: missing or invalid case metadata") from error
+            if first is not None and first != values:
+                raise ValueError(f"{path}: prompt, seed, or image size differs for paired case {name}")
+            first = values
+        matched[name] = dict(zip(fields, first))
+    return matched
 
 
 def load_rgb(path):
@@ -120,13 +139,16 @@ class PickScorer:
 
 def parity(test, ref, device):
     from skimage.metrics import peak_signal_noise_ratio, structural_similarity
+    names = common_cases([test, ref])
+    metadata = matching_metadata([test, ref], names)
     lp = Lpips(device)
     rows = []
-    for name in common_cases([test, ref]):
+    for name in names:
         a, b = load_rgb(test / name / "image.png"), load_rgb(ref / name / "image.png")
         row = {"case": name, "stages": {}}
-        if a.shape != b.shape:
-            row["error"] = f"shape {a.shape} vs {b.shape}"
+        expected = (metadata[name]["height"], metadata[name]["width"], 3)
+        if a.shape != expected or b.shape != expected:
+            row["error"] = f"expected {expected}; got {a.shape} vs {b.shape}"
             rows.append(row)
             continue
         row["psnr"] = float(peak_signal_noise_ratio(b, a, data_range=255))
@@ -135,7 +157,10 @@ def parity(test, ref, device):
         for fa in sorted((test / name).glob("*.npy")):
             fb = ref / name / fa.name
             if fb.exists():
-                row["stages"][fa.stem] = tensor_stats(np.load(fa), np.load(fb))
+                left, right = np.load(fa), np.load(fb)
+                if left.shape != right.shape:
+                    raise ValueError(f"{name}/{fa.name}: stage shapes differ: {left.shape} vs {right.shape}")
+                row["stages"][fa.stem] = tensor_stats(left, right)
         rows.append(row)
         print(f"{name}: psnr {row['psnr']:.2f} ssim {row['ssim']:.4f} lpips {row['lpips']:.4f}")
     ok = [r for r in rows if "error" not in r]
@@ -145,16 +170,25 @@ def parity(test, ref, device):
 
 
 def scores(sets, baseline, device):
+    set_names = {s.name for s in sets}
+    if len(set_names) != len(sets):
+        raise ValueError("score set directory names must be unique")
+    if baseline and baseline not in set_names:
+        raise ValueError(f"--baseline {baseline} is not one of the sets")
     common = common_cases(sets)
+    metadata = matching_metadata(sets, common)
     scorers = {"clip": ClipScorer(device), "pick": PickScorer(device)}
     out = {"kind": "scores", "models": {k: s.name for k, s in scorers.items()}, "cases": common, "sets": {}}
     for s in sets:
         per = {k: {} for k in scorers}
         for name in common:
-            prompt = json.loads((s / name / "meta.json").read_text(encoding="utf-8"))["prompt"]
-            image = Image.open(s / name / "image.png").convert("RGB")
+            case = metadata[name]
+            with Image.open(s / name / "image.png") as source:
+                if source.size != (case["width"], case["height"]):
+                    raise ValueError(f"{s / name}: image size differs from case metadata")
+                image = source.convert("RGB")
             for k, scorer in scorers.items():
-                per[k][name] = scorer(image, prompt)
+                per[k][name] = scorer(image, case["prompt"])
         entry = {"path": str(s)}
         for k in scorers:
             vals = np.array([per[k][c] for c in common])
@@ -162,8 +196,6 @@ def scores(sets, baseline, device):
         out["sets"][s.name] = entry
         print(f"{s.name}: CLIPScore {entry['clip']['mean']:.2f} PickScore {entry['pick']['mean']:.3f} over {len(common)} cases")
     if baseline:
-        if baseline not in out["sets"]:
-            raise SystemExit(f"--baseline {baseline} is not one of the sets")
         out["baseline"] = baseline
         for name, entry in out["sets"].items():
             if name == baseline:
@@ -222,15 +254,20 @@ def main():
     pp = sub.add_parser("parity")
     pp.add_argument("test", type=Path)
     pp.add_argument("ref", type=Path)
+    pp.add_argument("--same-noise", required=True, action="store_true",
+                    help="confirm both image sets used the same initial latent")
     ps = sub.add_parser("scores")
     ps.add_argument("sets", type=Path, nargs="+")
     ps.add_argument("--baseline", help="set directory name the paired differences are taken against")
     ps.add_argument("--name", default="scores")
     args = ap.parse_args()
-    if args.cmd == "parity":
-        write(parity(args.test, args.ref, args.device), args.reports, f"parity_{args.test.name}_vs_{args.ref.name}")
-    else:
-        write(scores(args.sets, args.baseline, args.device), args.reports, args.name)
+    try:
+        if args.cmd == "parity":
+            write(parity(args.test, args.ref, args.device), args.reports, f"parity_{args.test.name}_vs_{args.ref.name}")
+        else:
+            write(scores(args.sets, args.baseline, args.device), args.reports, args.name)
+    except ValueError as error:
+        ap.error(str(error))
 
 
 if __name__ == "__main__":

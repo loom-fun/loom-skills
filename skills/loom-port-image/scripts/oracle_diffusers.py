@@ -25,26 +25,19 @@ at 1024x1024, while the native PyTorch convolution path is fast.
 A new architecture needs a latent layout in philox_noise.py and possibly its VAE de-normalization below.
 """
 import argparse
+import hashlib
+import importlib.metadata
 import inspect
 import json
 import platform
-import sys
+import re
+import tempfile
 import time
 from pathlib import Path
 
-import numpy as np
-import torch
-import diffusers
-import transformers
-from diffusers import DiffusionPipeline
-
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from philox_noise import LAYOUTS  # noqa: E402
-
-DTYPES = {"fp32": torch.float32, "bf16": torch.bfloat16}
-
-
 def save(path, t):
+    import numpy as np
+
     np.save(path, t.detach().float().cpu().numpy())
 
 
@@ -64,14 +57,79 @@ def encode(pipe, prompt):
     return pipe.encode_prompt(**kwargs)[0]
 
 
+def provenance(args):
+    local = Path(args.model).resolve()
+    if local.is_dir():
+        files = []
+        for path in sorted(local.rglob("*")):
+            if path.is_file():
+                stat = path.stat()
+                files.append((path.relative_to(local).as_posix(), stat.st_size, stat.st_mtime_ns))
+        model = str(local)
+        snapshot = hashlib.sha256(json.dumps(files).encode()).hexdigest()
+    else:
+        if not re.fullmatch(r"[0-9a-f]{40}", args.revision or ""):
+            raise ValueError("a Hugging Face model requires --revision with the full commit SHA")
+        model, snapshot = args.model, args.revision
+    source = Path(__file__)
+    return {
+        "model": model, "revision": args.revision, "snapshot": snapshot, "layout": args.layout,
+        "steps": args.steps, "guidance_scale": args.guidance, "dtype": args.dtype,
+        "offload_text_encoder": args.offload_text_encoder, "capture_stages": not args.no_stages,
+        "oracle_sha256": hashlib.sha256(source.read_bytes() + source.with_name("philox_noise.py").read_bytes()).hexdigest(),
+        "versions": {name: importlib.metadata.version(name) for name in ("torch", "diffusers", "transformers", "numpy")},
+    }
+
+
+def stage_names(settings):
+    if not settings["capture_stages"]:
+        return []
+    return ["noise.npy", "embeds.npy", "vae_in.npy", *(f"step_{i}.npy" for i in range(settings["steps"]))]
+
+
+def complete_case(case, settings):
+    try:
+        previous = json.loads((case / "meta.json").read_text(encoding="utf-8"))
+        return previous.get("settings") == settings and all(
+            (case / name).is_file() and (case / name).stat().st_size
+            for name in ("image.png", *stage_names(settings))
+        )
+    except (OSError, ValueError, AttributeError):
+        return False
+
+
+def publish_case(case, settings, meta, image, noise, emb, steps, vae_in):
+    import numpy as np
+
+    case.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix=".oracle-", dir=case) as tmp:
+        pending = Path(tmp)
+        image.save(pending / "image.png")
+        if settings["capture_stages"]:
+            if len(steps) != settings["steps"]:
+                raise ValueError(f"expected {settings['steps']} step tensors, got {len(steps)}")
+            np.save(pending / "noise.npy", noise.numpy())
+            save(pending / "embeds.npy", emb[0] if isinstance(emb, (list, tuple)) else emb)
+            for i, state in enumerate(steps):
+                np.save(pending / f"step_{i}.npy", state[0].numpy())
+            save(pending / "vae_in.npy", vae_in)
+        (pending / "meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
+        (case / "meta.json").unlink(missing_ok=True)
+        for path in case.glob("*.npy"):
+            if path.name in {"noise.npy", "embeds.npy", "vae_in.npy"} or re.fullmatch(r"step_\d+\.npy", path.name):
+                path.unlink()
+        for name in ("image.png", *stage_names(settings), "meta.json"):
+            (pending / name).replace(case / name)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--model", required=True)
     ap.add_argument("--revision")
-    ap.add_argument("--layout", choices=LAYOUTS, required=True)
+    ap.add_argument("--layout", choices=("flux2", "zimage"), required=True)
     ap.add_argument("--steps", type=int, required=True)
     ap.add_argument("--guidance", type=float, required=True)
-    ap.add_argument("--dtype", choices=DTYPES, default="bf16")
+    ap.add_argument("--dtype", choices=("fp32", "bf16"), default="bf16")
     ap.add_argument("--prompt-file", default=str(Path(__file__).resolve().parent.parent / "reference/prompts.json"))
     ap.add_argument("--prompts", help="comma-separated prompt ids (default: all)")
     ap.add_argument("--seeds", help="comma-separated seeds (default: the prompt file's)")
@@ -80,6 +138,12 @@ def main():
     ap.add_argument("--offload-text-encoder", action="store_true")
     ap.add_argument("--no-stages", action="store_true", help="only write image.png and meta.json")
     args = ap.parse_args()
+    if args.steps <= 0:
+        ap.error("--steps must be positive")
+    try:
+        shared = provenance(args)
+    except (ValueError, importlib.metadata.PackageNotFoundError) as error:
+        ap.error(str(error))
 
     cfg = json.loads(Path(args.prompt_file).read_text(encoding="utf-8"))
     prompts = cfg["prompts"]
@@ -94,16 +158,23 @@ def main():
             width, height = (int(v) for v in size.lower().split("x"))
             for seed in seeds:
                 case = Path(args.out) / args.dtype / f"{q['id']}_s{seed}_{width}x{height}"
-                if (case / "image.png").exists():
+                settings = {**shared, "prompt_id": q["id"], "prompt": q["text"],
+                            "seed": seed, "width": width, "height": height}
+                if complete_case(case, settings):
                     print(f"skip {case.name}")
                 else:
-                    pending.append((q, width, height, seed, case))
+                    pending.append((q, width, height, seed, case, settings))
     if not pending:
         return
 
+    import torch
+    from diffusers import DiffusionPipeline
+    from philox_noise import LAYOUTS
+
     torch.backends.cudnn.enabled = False
     t0 = time.perf_counter()
-    pipe = DiffusionPipeline.from_pretrained(args.model, revision=args.revision, torch_dtype=DTYPES[args.dtype])
+    dtype = torch.float32 if args.dtype == "fp32" else torch.bfloat16
+    pipe = DiffusionPipeline.from_pretrained(shared["model"], revision=args.revision, torch_dtype=dtype)
     pipe.set_progress_bar_config(disable=True)
     pipe.text_encoder.to("cuda")
     if not args.offload_text_encoder:
@@ -126,8 +197,7 @@ def main():
     device = torch.cuda.get_device_name(0)
     print(f"loaded {args.model} {args.dtype} in {load_s:.1f}s on {device}")
 
-    for q, width, height, seed, case in pending:
-        case.mkdir(parents=True, exist_ok=True)
+    for q, width, height, seed, case, settings in pending:
         noise = torch.from_numpy(LAYOUTS[args.layout](seed, height, width))
         emb, t_enc = embeds[q["id"]]
         steps = []
@@ -141,7 +211,7 @@ def main():
         with torch.inference_mode():
             latent = pipe(prompt_embeds=emb, height=height, width=width, num_inference_steps=args.steps,
                           guidance_scale=args.guidance, latents=noise, output_type="latent",
-                          callback_on_step_end=on_step).images
+                          callback_on_step_end=None if args.no_stages else on_step).images
             torch.cuda.synchronize()
             t_dit = time.perf_counter() - t1
             vae_in = vae_input(pipe, args.layout, latent)
@@ -150,26 +220,17 @@ def main():
             torch.cuda.synchronize()
         t_dec = time.perf_counter() - t1 - t_dit
 
-        image.save(case / "image.png")
-        if not args.no_stages:
-            np.save(case / "noise.npy", noise.numpy())
-            save(case / "embeds.npy", emb[0] if isinstance(emb, (list, tuple)) else emb)
-            for i, s in enumerate(steps):
-                np.save(case / f"step_{i}.npy", s[0].numpy())
-            save(case / "vae_in.npy", vae_in)
-        (case / "meta.json").write_text(json.dumps({
-            "model": args.model, "revision": args.revision,
-            "prompt_id": q["id"], "prompt": q["text"], "seed": seed, "width": width, "height": height,
-            "steps": args.steps, "guidance_scale": args.guidance, "dtype": args.dtype,
+        meta = {
+            **settings, "settings": settings,
             "noise": f"loom philox4x32-10, layout {args.layout}, bf16",
             "sigmas": [float(s) for s in pipe.scheduler.sigmas.cpu()],
             "timesteps": [float(t) for t in pipe.scheduler.timesteps.cpu()],
             "seconds": {"encode": t_enc, "denoise": t_dit, "decode": t_dec, "total": t_enc + t_dit + t_dec,
                         "pipeline_load": load_s},
             "device": device, "conv_backend": "native (torch.backends.cudnn.enabled=False)",
-            "versions": {"torch": torch.__version__, "diffusers": diffusers.__version__,
-                         "transformers": transformers.__version__, "python": platform.python_version()},
-        }, indent=2), encoding="utf-8")
+            "versions": {**settings["versions"], "python": platform.python_version()},
+        }
+        publish_case(case, settings, meta, image, noise, emb, steps, vae_in)
         print(f"{case.name}: enc {t_enc:.2f}s dit {t_dit:.2f}s dec {t_dec:.2f}s")
 
 

@@ -33,7 +33,8 @@ hand-written card in [ROCm/hrx-loom-library](https://github.com/ROCm/hrx-loom-li
 program composition; reuse their motifs (`motif/tensor/*.loom`) before writing new kernels.
 
 Prerequisites:
-- `loom-setup` is done: `~/loom/.venv` has the SDK (`hrx-loom` 0.2.0).
+- Install the pinned `hrx-loom` 0.3.0 SDK with `loom-setup`. Keep `loom-fetch` and
+  `loom-serve` on the same release and record the installed version.
 - A reference Python with PyTorch ROCm, `diffusers`, `transformers`, `open_clip_torch` and `lpips`
   for the oracle and the quality metrics. Keep it separate from the SDK venv.
 - Optional, for the comparison: [Lemonade](https://github.com/lemonade-sdk/lemonade) with its
@@ -66,7 +67,8 @@ Prerequisites:
    and the bounded preset. Pinned digests are only meaningful after step 6 passes on the same build.
 6. **Quality against the oracle.** `scripts/metrics.py` scores a directory of cases
    (`<prompt>_s<seed>_<WxH>/image.png`): PSNR and LPIPS against diffusers fp32 and bf16 on the same
-   noise, CLIPScore (open_clip ViT-L-14/openai) and PickScore (yuvalkirstain/PickScore_v1), and a
+   noise (pass `parity TEST REF --same-noise` after checking the initial latent), CLIPScore
+   (open_clip ViT-L-14/openai) and PickScore (yuvalkirstain/PickScore_v1), and a
    bootstrap (10,000 resamples) of the mean paired per-case PickScore difference against diffusers
    bf16. A confidence interval that spans 0 is "no measurable difference".
 7. **Time it locally.** `scripts/bench_images.py` times request in, PNG out over HTTP for Loom, Lemonade
@@ -78,7 +80,18 @@ Prerequisites:
 9. **Card.** `scripts/stage_hf.py` turns the hrx-loom-library card into a self-contained
    package (motifs copied under `library/motif/`, Bazel archive program set dropped, checkpoint
    origins kept). Write `README.md` and `REPORT.md` from `reference/card-template.md`
-   (performance and accuracy, best value per column in bold), then fetch the staged package with `loom-fetch` into a clean directory and run `image_check` on it before upload.
+   (performance and accuracy, best value per column in bold). Stage and qualify in new directories:
+
+   ```bash
+   python3 "${LOOM_SKILL_DIR}/scripts/stage_hf.py" "$CATALOG_CARD" "$STAGED"
+   loom-fetch "$STAGED/model.json" --preset=image --materialize=share --output="$MATERIALIZED" --no-input
+   loom-serve --device=amdgpu --model="$MATERIALIZED/model.json" --listen=127.0.0.1:8211
+   ```
+
+   Wait for the model's registration to become ready at `/v1/status`. Run the source card's
+   `image_check.py` on the materialized document, including the lifecycle and bounded-workspace
+   presets when present. After uploading to staging, repeat fetch and qualification against
+   the immutable staged revision.
 
 ## Timing fairly
 
@@ -89,9 +102,12 @@ the card's Methodology list reports.
   second resident model spills into shared memory and both slow down. Time backends in
   **block-alternating sessions**: start one backend, run 8 prompts × 3 seeds, stop it, start the
   next, and rotate the block order over 3 repeats so thermal drift lands on every backend.
-- **Same request everywhere.** Size, step count and guidance must match. Send `steps` and cfg
-  explicitly to Lemonade under `sd_cpp_extra_args.sample_params`; its registry default can differ
-  from the checkpoint's (Z-Image-Turbo: 9 versus 8).
+- **Same request everywhere.** Size, step count and guidance must match. Send top-level `steps`
+  and `cfg_scale` to Lemonade. Its stable-diffusion.cpp wrapper translates them to
+  `sd_cpp_extra_args.sample_params` for the actual backend. Direct sd-server requires the nested tag.
+  For Loom, verify `denoising_steps` in the served card and supply
+  `--loom-guidance LABEL=G` from the pinned program when guidance is absent from its interface.
+  Supply `--loom-card LABEL=PATH` when timing an existing Loom process.
 - **Caches.** thenoise answers a repeat of its previous request from a stage cache, so consecutive
   requests to one backend must not share a prompt: order cases seed-major, prompt-minor.
 - **Own-RNG backends.** stable-diffusion.cpp and thenoise draw their own noise, so their images are a
@@ -103,17 +119,17 @@ the card's Methodology list reports.
 
 ## Domain knowledge
 
-`python3 "${LOOM_SKILL_DIR}/../loom-kb/kb.py" route --device strix-halo --topic kernels-ir,porting`
-prints the Loom IR idioms, compile-error and kernel-test facts shared with LLM ports.
+`python3 "${LOOM_SKILL_DIR}/../loom-kb/kb.py" route --arch z-image --device strix-halo --topic image-porting,kernels-ir`
+prints the diffusion architecture and device facts alongside the shared kernel guidance.
+Use `--arch flux2` or `--arch krea2` for those pipelines.
 
 ## Limits
 
-- `loom-serve` 0.2.0 has no image-input service. Super-resolution (Real-ESRGAN) is served through
+- The published Real-ESRGAN card uses the image-generation service. It is served through
   `/v1/images/generations` with the input as base64 raw RGB in `prompt` and the output size in `size`:
   check the prompt length and alphabet on the host in `@image_prepare_request_v1` and decode on the
   device, ship a tokenizer whose vocabulary is the base64 alphabet (the image service requires one),
-  and expect an RGBA reply. Image-to-image and editing, which need both a text prompt and an image,
-  are not served.
+  and expect an RGBA reply.
 - Guidance-distilled checkpoints only have been ported; classifier-free guidance doubles the
   transformer batch and needs its own request option.
 
