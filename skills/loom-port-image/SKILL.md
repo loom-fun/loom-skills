@@ -25,20 +25,43 @@ OpenAI-style `/v1/images/generations` endpoint:
 - a quality comparison against diffusers, and local timings against stable-diffusion.cpp,
   thenoise and diffusers on the same machine to steer optimization (they stay with your logs).
 
-There is no starter kit or one-command path for image models yet. Start from the closest
-hand-written card in [ROCm/hrx-loom-library](https://github.com/ROCm/hrx-loom-library/tree/main/model):
-`krea/Krea-2-Turbo` (eight-step DiT, Qwen3 text encoder, VAE, INT8 variant),
-`black-forest-labs/FLUX.2-klein-4B` (four-step distilled, joint and single DiT blocks) or
-`Tongyi-MAI/Z-Image-Turbo` (single-stream DiT, caption-row gating). Their `README.md` describes the
-program composition; reuse their motifs (`motif/tensor/*.loom`) before writing new kernels.
+Start from a pinned hand-written card in ROCm/hrx-loom-library. Each card's README describes
+its program composition. Reuse catalog motifs from the same revision.
 
-Prerequisites:
-- Install the pinned `hrx-loom` 0.3.0 SDK with `loom-setup`. Keep `loom-fetch` and
-  `loom-serve` on the same release and record the installed version.
+- [Krea 2 Turbo in the v0.3.0 catalog](https://github.com/ROCm/hrx-loom-library/tree/279afe368b82e0d7acfe38c4f47e8e7e5cfb7bc8/model/krea/Krea-2-Turbo)
+  uses an eight-step DiT, Qwen3 text encoder and VAE, with an INT8 variant.
+- [FLUX.2 Klein 4B](https://github.com/ROCm/hrx-loom-library/tree/ccd62d6a49576f25efdb7deef7b6f81a7b76fd6c/model/black-forest-labs/FLUX.2-klein-4B)
+  and [Z-Image-Turbo](https://github.com/ROCm/hrx-loom-library/tree/ccd62d6a49576f25efdb7deef7b6f81a7b76fd6c/model/Tongyi-MAI/Z-Image-Turbo)
+  come from the pinned revision of [upstream PR #126](https://github.com/ROCm/hrx-loom-library/pull/126).
+
+To check out the same Z-Image catalog source used in DevLab, create a new catalog directory and
+fetch the immutable revision. For Krea 2, use revision `279afe368b82e0d7acfe38c4f47e8e7e5cfb7bc8`
+and path `model/krea/Krea-2-Turbo`.
+
+```bash
+CATALOG="$PWD/hrx-image-catalog"
+git init -q "$CATALOG"
+git -C "$CATALOG" fetch --depth=1 https://github.com/ROCm/hrx-loom-library.git ccd62d6a49576f25efdb7deef7b6f81a7b76fd6c
+git -C "$CATALOG" checkout --detach FETCH_HEAD
+CATALOG_CARD="$CATALOG/model/Tongyi-MAI/Z-Image-Turbo"
+```
+
+## Prerequisites
+
+- Install the pinned `hrx-loom` 0.3.0 wheel with `loom-setup`. Keep the installer record
+  `loom-install.json` with the test evidence. On Linux x86-64 (glibc ≥ 2.39) the release wheel
+  SHA-256 is `6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f`.
 - A reference Python with PyTorch ROCm, `diffusers`, `transformers`, `open_clip_torch` and `lpips`
   for the oracle and the quality metrics. Keep it separate from the SDK venv.
 - Optional, for the comparison: [Lemonade](https://github.com/lemonade-sdk/lemonade) with its
   stable-diffusion.cpp (ROCm and Vulkan) and [thenoise](https://github.com/lemonade-sdk/thenoise) backends.
+
+```bash
+LOOM_IMAGE_SDK="$PWD/loom-image-sdk-0.3.0"
+bash "${LOOM_SKILL_DIR}/../loom-setup/scripts/install_loom.sh" "$LOOM_IMAGE_SDK" 0.3.0
+source "$LOOM_IMAGE_SDK/.venv/bin/activate"
+loom-serve --version
+```
 
 ## Workflow
 
@@ -83,12 +106,25 @@ Prerequisites:
    (performance and accuracy, best value per column in bold). Stage and qualify in new directories:
 
    ```bash
+   STAGED="$PWD/staged-z-image"
+   MATERIALIZED="$PWD/materialized-z-image"
    python3 "${LOOM_SKILL_DIR}/scripts/stage_hf.py" "$CATALOG_CARD" "$STAGED"
    loom-fetch "$STAGED/model.json" --preset=image --materialize=share --output="$MATERIALIZED" --no-input
    loom-serve --device=amdgpu --model="$MATERIALIZED/model.json" --listen=127.0.0.1:8211
    ```
 
-   Wait for the model's registration to become ready at `/v1/status`. Run the source card's
+   From a second terminal, wait for the model's registration to become ready at `/v1/status`
+   before sending the seed-0 Z-Image request.
+
+   ```bash
+   curl -fsS http://127.0.0.1:8211/v1/status
+   curl -fsS http://127.0.0.1:8211/v1/images/generations \
+     -H 'Content-Type: application/json' \
+     -d '{"model":"Tongyi-MAI/Z-Image-Turbo","prompt":"a red fox in the snow","seed":0,"size":"384x384","response_format":"b64_json"}' \
+     -o z-image-response.json
+   ```
+
+   Run the source card's
    `image_check.py` on the materialized document, including the lifecycle and bounded-workspace
    presets when present. After uploading to staging, repeat fetch and qualification against
    the immutable staged revision.
