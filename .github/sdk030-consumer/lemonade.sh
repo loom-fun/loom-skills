@@ -31,9 +31,9 @@ from pathlib import Path
 
 def update(path, old, new, count=1):
     file = Path(path)
-    text = file.read_text()
+    text = file.read_text(newline="")
     assert text.count(old) == count, (path, old, text.count(old))
-    file.write_text(text.replace(old, new))
+    file.write_text(text.replace(old, new), newline="")
 
 resource = Path("src/cpp/resources/backend_versions.json")
 text = resource.read_text()
@@ -59,10 +59,14 @@ source = "src/cpp/server/backends/loom/loom_server.cpp"
 update(source,
        '// A snapshot Lemonade fetched records its Loom release; one fetched for another\n'
        '// release holds a card this loom-serve rejects (0.2.0 refuses 0.1.0\'s\n'
-       '// ', 
+       '// `pool_capacity`). A snapshot without that record (loom-fetch, `hf download`)\n'
+       '// is ready once every file its card reads is here or, for an origin file, in\n'
+       '// its own repository\'s cache.',
        '// A snapshot Lemonade fetched records its Loom release. The v0.3.0 runtime\n'
-       '// also accepts the published v0.2.0 controller ABI. The v0.1.0 card schema\n'
-       '// still contains the unsupported ')
+       '// also accepts the published v0.2.0 controller ABI. The v0.1.0 schema still\n'
+       '// contains the unsupported pool_capacity field. A snapshot without a marker\n'
+       '// is ready once its files are present alongside the card or in the\n'
+       '// originating repository\'s cache.')
 update(source,
        'return read_json_file(dir / loom::kCompleteMarker).value("loom", "") ==\n'
        '                   loom::kBundleRevision;',

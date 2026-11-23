@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 exec > >(tee "$WORK/out/gufo.log") 2>&1
+recipes=$(cd "$(dirname "$0")" && pwd)
 cd "$WORK"
 cmake --version
 ninja --version
@@ -32,7 +33,6 @@ from pathlib import Path
 import re
 import stat
 import struct
-import subprocess
 import sys
 
 revision, previous = sys.argv[1:]
@@ -104,10 +104,7 @@ for path in (gufo_runtime, ext_runtime):
     edit(path, "0.2.0", "0.3.0")
     edit(path, previous, revision, 1)
     edit(path, old_nar, new_nar, 1)
-subprocess.run([sys.executable, "gufo/.devops/nix/hrx/hrx-deps.py", "fetch",
-                revision, "prefetched"], check=True)
-dep_nar = nar_hash(Path("prefetched"))
-print(f"v0.3.0 Gufo dependency directory NAR {dep_nar}", flush=True)
+dep_nar = "sha256-eeC2UsCLc/YnFjla0q2FXIM0uXOLPkjBdrbkxG5HU1Q="
 edit(gufo_runtime, "sha256-kUc4b7acjbrnrG6KHIpJPTRkRvZHJKeRX7WnyAUR7ug=", dep_nar, 1)
 cmake = "gufo/src/models/loom/runtime.cmake"
 edit(cmake, "0.2.0", "0.3.0")
@@ -155,6 +152,7 @@ edit("extension/DESIGN.md", "v0.2.0 (the release loom-fun targets)", "v0.3.0", 1
 PY
 
 python3 extension/nix/hrx-deps.py generate "$revision" extension/nix/hrx-deps.nix
+python3 "$recipes/embed-v030.py"
 for repo in gufo extension; do
   git -C "$repo" rev-parse HEAD > "$WORK/out/$repo.base"
   git -C "$repo" diff --check
@@ -174,3 +172,9 @@ cmake -S "$revision" -B hrx-build -G Ninja \
   "${extra[@]}"
 cmake --build hrx-build --target loom_text_embed
 ldd hrx-build/libloom_text_embed.so | tee "$WORK/out/gufo-embed-ldd.txt"
+mv hrx-build/libloom_text_embed.so "$WORK/libloom_text_embed-gufo.so"
+
+cmake -S "$revision" -B hrx-build \
+  -DIREE_CMAKE_TRY_FILE="$WORK/extension/loom-embed/loom_text_embed.cmake"
+cmake --build hrx-build --target loom_text_embed
+ldd hrx-build/libloom_text_embed.so | tee "$WORK/out/extension-embed-ldd.txt"

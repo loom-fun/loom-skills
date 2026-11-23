@@ -28,6 +28,10 @@ jobs:
       - name: Prepare Gufo and the extension and build the embed runtime
         shell: bash
         run: bash .github/sdk030-consumer/gufo.sh
+      - name: Verify the refreshed Lemonade contract
+        if: "!cancelled() && env.WORK != ''"
+        shell: bash
+        run: bash .github/sdk030-consumer/lemonade.sh
       - name: Store changes and lab evidence
         if: always() && env.WORK != ''
         uses: actions/upload-artifact@v4
