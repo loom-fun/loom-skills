@@ -340,10 +340,33 @@ kernel.def export("g_mla_xdeq") @g_mla_xdeq(%unused: index) {{
 """
 
 
+PE_BODY = '''    %pk = index.div %wi, %c4 : index
+    %pq = index.rem %wi, %c4 : index
+    %pkey = index.add %key0, %pk : index
+    %pvalid = index.cmp ult, %pkey, %nk : index
+    %pkc = scf.select %pvalid, %pkey, %c0 : index
+    %po = func.call @{kvo}(%origins, %row, %pkc, %blocks, %layer, %pool) : (buffer, index, index, index, index, index) -> (offset)
+    %pview = buffer.view %arena[%po] : buffer -> view<1x{D}xf16>
+    %pin = index.constant 0 : index
+    %pq16 = index.mul %pq, %c16 : index
+    %pcol_v = index.add %pq16, %c512 : index
+    %pcol = index.assume %pcol_v [range(%pcol_v, 512, 560)] : index
+    %praw = vector.load %pview[%pin, %pcol] : view<1x{D}xf16> -> vector<16xf16>
+    %pval = scf.select %pvalid, %praw, %zero16h : vector<16xf16>
+    %prow_v = index.add %xpos, %pk : index
+    %prow = index.assume %prow_v [range(%prow_v, 0, {XCAP - 1})] : index
+    %pqc = index.assume %pq16 [range(%pq16, 0, 48)] : index
+    vector.store %pval, %xpe_view[%prow, %pqc] : vector<16xf16>, view<{XCAP}x64xf16>
+'''   # g_mla_xexp's k_pe copy step (template: {kvo}, {D}, {XCAP})
+
+
 def xexp(QH, layer_max, kvo="g_kv_offset"):
     """[k_nope | v] of 64 keys x one head per workgroup: 8 waves = (32-key half kg, 64-column quarter qd of the head's 256
     W rows); per 16-value latent step a wave loads 2 key fragments (one 16-position page each) and 4 W fragments: 8 MMAs."""
     D = 576
+    NT = int(os.environ.get("MLA_XE_NT", "4"))   # 16-column W tiles per wave (4: 8 waves of 32 keys x 64 cols; 8: 4 waves of 32 x 128)
+    QDN = 256 // (16 * NT)                       # column groups of the head's 256 W rows (K: the first half)
+    WT = 2 * QDN * 32                            # threads
     A = []
     a = A.append
     a(f"""
@@ -356,8 +379,8 @@ kernel.def export("g_mla_xexp") @g_mla_xexp(%count_buffer: buffer) {{
   %count = index.cast %bounded : i32 to index
   %c1 = index.constant 1 : index
   %cqh = index.constant {QH} : index
-  %c256 = index.constant 256 : index
-  kernel.launch.config workgroups(%count, %cqh, %c1) workgroup_size(%c256, %c1, %c1) : index
+  %cwt = index.constant {WT} : index
+  kernel.launch.config workgroups(%count, %cqh, %c1) workgroup_size(%cwt, %c1, %c1) : index
 }} launch(%tokens_arg: index, %layer_arg: index, %context_arg: index, %pool_arg: index, %xb: buffer, %origins: buffer, %arena: buffer, %w: buffer, %xk: buffer, %xv: buffer, %xpe: buffer) {{
   %layer = index.assume %layer_arg [range(%layer_arg, 0, {layer_max})] : index
   %context = index.assume %context_arg [range(%context_arg, 16, 262144)] : index
@@ -367,9 +390,9 @@ kernel.def export("g_mla_xexp") @g_mla_xexp(%count_buffer: buffer) {{
   %head_id = kernel.workgroup.id<y> : index
   %head = index.assume %head_id [range(%head_id, 0, {QH - 1})] : index
   %wi_id = kernel.workitem.id<x> : index
-  %wi = index.assume %wi_id [range(%wi_id, 0, 255)] : index
+  %wi = index.assume %wi_id [range(%wi_id, 0, {WT - 1})] : index
   %wave_id = kernel.subgroup.id : index
-  %wave = index.assume %wave_id [range(%wave_id, 0, 7)] : index
+  %wave = index.assume %wave_id [range(%wave_id, 0, {WT // 32 - 1})] : index
   %lane_id = kernel.subgroup.lane.id : index
   %lane = index.assume %lane_id [range(%lane_id, 0, 31)] : index
   %zero = index.constant 0 : offset
@@ -400,13 +423,15 @@ kernel.def export("g_mla_xexp") @g_mla_xexp(%count_buffer: buffer) {{
   %nk = index.cast %nk_b : i32 to index
   %padded = index.add %context, %c15 : index
   %blocks = index.div %padded, %c16 : index
-  %kg = index.div %wave, %c4 : index
-  %qd = index.rem %wave, %c4 : index
+  %cqdn = index.constant {QDN} : index
+  %ccols = index.constant {16 * NT} : index
+  %kg = index.div %wave, %cqdn : index
+  %qd = index.rem %wave, %cqdn : index
   %lane_col = index.rem %lane, %c16 : index
   %kg32 = index.mul %kg, %c32 : index
   %wkey0 = index.add %key0, %kg32 : index
   %hrow = index.mul %head, %c256 : index
-  %qd64 = index.mul %qd, %c64 : index
+  %qd64 = index.mul %qd, %ccols : index
   %nrow0 = index.add %hrow, %qd64 : index
   %w_view = buffer.view %w[%zero] : buffer -> view<{QH * 256}x512xf16>
   %zero16h = vector.splatf 0.0 : vector<16xf16>
@@ -421,34 +446,35 @@ kernel.def export("g_mla_xexp") @g_mla_xexp(%count_buffer: buffer) {{
   %kv{pp} = buffer.view %arena[%ko{pp}] : buffer -> view<16x{D}xf16>
   %kk{pp} = index.add %pf{pp}, %lane_col : index
   %kval{pp} = index.cmp ult, %kk{pp}, %nk : index""")
-    for t in range(4):
+    for t in range(NT):
         a(f"""  %nr{t}_o = index.constant {16 * t} : index
   %nr{t}_a = index.add %nrow0, %nr{t}_o : index
   %nr{t}_b = index.add %nr{t}_a, %lane_col : index
   %nr{t} = index.assume %nr{t}_b [range(%nr{t}_b, 0, {QH * 256 - 1})] : index""")
-    accs = [f"a{pp}{t}" for pp in range(2) for t in range(4)]
+    accs = [f"a{pp}{t}" for pp in range(2) for t in range(NT)]
 
     def loop(vt):
         """the 32-step latent loop: K waves S = c W^T (lhs latent, rhs W); V waves (vt) V^T = W c^T (lhs W, rhs latent),
         so V^T lands in its natural row-major layout xv[h][dim][pos]."""
-        a(f"""    {", ".join("%o" + x[1:] for x in accs)} = scf.for %j = [%c0 to %c32 step %c1]({", ".join(f"%{x} = %init : vector<8xf32>" for x in accs)}) -> ({", ".join(["vector<8xf32>"] * 8)}) {{
+        a(f"""    {", ".join("%o" + x[1:] for x in accs)} = scf.for %j = [%c0 to %c32 step %c1]({", ".join(f"%{x} = %init : vector<8xf32>" for x in accs)}) -> ({", ".join(["vector<8xf32>"] * (2 * NT))}) {{
       %jc_v = index.mul %j, %c16 : index
       %jc = index.assume %jc_v [range(%jc_v, 0, 496)] : index""")
         for pp in range(2):
             a(f"""      %lr{pp} = vector.load %kv{pp}[%lane_col, %jc] : view<16x{D}xf16> -> vector<16xf16>
       %lh{pp} = scf.select %kval{pp}, %lr{pp}, %zero16h : vector<16xf16>
       %lf{pp} = vector.fragment<{"rhs" if vt else "lhs"}> %lh{pp} shape [%c16, %c16] : vector<16xf16>""")
-        for tt in range(4):
+        for tt in range(NT):
             a(f"""      %wr{tt} = vector.load %w_view[%nr{tt}, %jc] : view<{QH * 256}x512xf16> -> vector<16xf16>
       %wf{tt} = vector.fragment<{"lhs" if vt else "rhs"}> %wr{tt} shape [%c16, %c16] : vector<16xf16>""")
         for pp in range(2):
-            for tt in range(4):
+            for tt in range(NT):
                 x, y = (f"%wf{tt}", f"%lf{pp}") if vt else (f"%lf{pp}", f"%wf{tt}")
                 a(f"""      %m{pp}{tt} = vector.mma {x}, {y}, %a{pp}{tt} : vector<16xf16>, vector<16xf16>, vector<8xf32>""")
-        a(f"""      scf.yield {", ".join(f"%m{pp}{tt}" for pp in range(2) for tt in range(4))} : {", ".join(["vector<8xf32>"] * 8)}
+        a(f"""      scf.yield {", ".join(f"%m{pp}{tt}" for pp in range(2) for tt in range(NT))} : {", ".join(["vector<8xf32>"] * (2 * NT))}
     }}""")
     a(f"""  %two = index.constant 2 : offset
-  %is_k = index.cmp ult, %qd, %c2 : index
+  %chalf = index.constant {QDN // 2} : index
+  %is_k = index.cmp ult, %qd, %chalf : index
   %xrow0 = index.add %xpos, %kg32 : index
   scf.if %is_k {{""")
     loop(False)
@@ -457,7 +483,7 @@ kernel.def export("g_mla_xexp") @g_mla_xexp(%count_buffer: buffer) {{
     %hk_o = index.scale %hk_e2, %two : index, offset -> offset
     %xk_view = buffer.view %xk[%hk_o] : buffer -> view<{XCAP}x128xf16>""")
     for pp in range(2):
-        for tt in range(4):
+        for tt in range(NT):
             a(f"""    %sk{pp}{tt}_r0 = index.constant {16 * pp} : index
     %sk{pp}{tt}_r1 = index.add %xrow0, %sk{pp}{tt}_r0 : index
     %sk{pp}{tt}_r = index.assume %sk{pp}{tt}_r1 [range(%sk{pp}{tt}_r1, 0, {XCAP - 16})] : index
@@ -474,10 +500,10 @@ kernel.def export("g_mla_xexp") @g_mla_xexp(%count_buffer: buffer) {{
     %hv_e2 = index.mul %hv_e, %c4096v : index
     %hv_o = index.scale %hv_e2, %two : index, offset -> offset
     %xv_view = buffer.view %xv[%hv_o] : buffer -> view<128x32xf16>
-    %qdv = index.sub %qd, %c2 : index
-    %qdv64 = index.mul %qdv, %c64 : index""")
+    %qdv = index.sub %qd, %chalf : index
+    %qdv64 = index.mul %qdv, %ccols : index""")
     for pp in range(2):
-        for tt in range(4):
+        for tt in range(NT):
             a(f"""    %sv{pp}{tt}_r0 = index.constant {16 * pp} : index
     %sv{pp}{tt}_r1 = index.add %xrow0, %sv{pp}{tt}_r0 : index
     %sv{pp}{tt}_r = index.assume %sv{pp}{tt}_r1 [range(%sv{pp}{tt}_r1, 0, {XCAP - 16})] : index
@@ -486,28 +512,19 @@ kernel.def export("g_mla_xexp") @g_mla_xexp(%count_buffer: buffer) {{
     %sv{pp}{tt}_c = index.assume %sv{pp}{tt}_c1 [range(%sv{pp}{tt}_c1, 0, 112)] : index
     vector.fragment.store<result> %o{pp}{tt}, %xv_view[%sv{pp}{tt}_c, %sv{pp}{tt}_r0] shape [%c16, %c16] : vector<8xf32>, view<128x32xf16>""")
     a(f"""  }}
-  // k_pe (shared by the heads): head 0's workgroups copy it, thread = (key, 16-dim quarter)
+  // k_pe (shared by the heads): head 0's workgroups copy it, (key, 16-dim quarter) per thread and step
   %h0 = index.cmp eq, %head, %c0 : index
   scf.if %h0 {{
-    %pk = index.div %wi, %c4 : index
-    %pq = index.rem %wi, %c4 : index
-    %pkey = index.add %key0, %pk : index
-    %pvalid = index.cmp ult, %pkey, %nk : index
-    %pkc = scf.select %pvalid, %pkey, %c0 : index
-    %po = func.call @{kvo}(%origins, %row, %pkc, %blocks, %layer, %pool) : (buffer, index, index, index, index, index) -> (offset)
-    %pview = buffer.view %arena[%po] : buffer -> view<1x{D}xf16>
-    %pin = index.constant 0 : index
-    %pq16 = index.mul %pq, %c16 : index
-    %pcol_v = index.add %pq16, %c512 : index
-    %pcol = index.assume %pcol_v [range(%pcol_v, 512, 560)] : index
-    %praw = vector.load %pview[%pin, %pcol] : view<1x{D}xf16> -> vector<16xf16>
-    %pval = scf.select %pvalid, %praw, %zero16h : vector<16xf16>
-    %prow_v = index.add %xpos, %pk : index
-    %prow = index.assume %prow_v [range(%prow_v, 0, {XCAP - 1})] : index
-    %pqc = index.assume %pq16 [range(%pq16, 0, 48)] : index
     %xpe_view = buffer.view %xpe[%zero] : buffer -> view<{XCAP}x64xf16>
-    vector.store %pval, %xpe_view[%prow, %pqc] : vector<16xf16>, view<{XCAP}x64xf16>
-  }}
+""")
+    import re as _re
+    for r in range(256 // WT):
+        b = PE_BODY.replace("%wi, %c4", f"%pv_{r}, %c4")
+        b = _re.sub(r"%(pk|pq|pkey|pvalid|pkc|po|pview|pin|pq16|pcol_v|pcol|praw|pval|prow_v|prow|pqc)\b", lambda m: f"%{m.group(1)}_{r}", b)
+        a(f"""    %pvo_{r} = index.constant {WT * r} : index
+    %pv_{r} = index.add %wi, %pvo_{r} : index
+""" + b.rstrip("\n").replace("{kvo}", kvo).replace("{D}", str(D)).replace("{XCAP - 1}", str(XCAP - 1)).replace("{XCAP}", str(XCAP)))
+    a(f"""  }}
   kernel.return
 }}
 """)
