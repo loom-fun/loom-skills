@@ -12,36 +12,28 @@
    "name": "joyai-decode",
    "variants": [
     {
-     "name": "base",
-     "build": {},
-     "ref": "origin/deepseek2-joyai"
-    },
-    {
      "name": "dec",
      "build": {}
     },
     {
-     "name": "w4k",
+     "name": "dnu2",
      "build": {
-      "MV_WG1": "4096"
+      "MOE_DN_U": "2"
      }
     },
     {
-     "name": "w4kn",
+     "name": "dnu4",
      "build": {
-      "MV_WG1": "4096",
-      "MLA_RMSQ_FUSE": "0"
+      "MOE_DN_U": "4"
      }
     }
    ],
    "steps": [
     "ab:8",
-    "perf:dec:1",
-    "perf:w4k:1",
-    "perf:w4kn:1",
-    "perf:w4kn:1",
-    "perf:w4k:1",
-    "perf:dec:1"
+    "c4:dec",
+    "c4:dnu4",
+    "c4:dnu4",
+    "c4:dec"
    ]
   }
  ]
