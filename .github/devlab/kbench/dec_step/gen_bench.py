@@ -22,7 +22,7 @@ HEAD = "amdgpu.target<gfx11-generic> @w32 {subgroup_size = 32}\n\n"
 VARIANTS = {"split": {"MLA_DEC": "split"}, "pl1": {"MLA_DEC_PL": "1"}, "s32": {"MLA_DEC_S": "32"}, "b8": {"MLA_DEC_BMIN": "8"},
             "b2": {"MLA_DEC_BMIN": "2"}, "b1": {"MLA_DEC_BMIN": "1"}, "shslot": {"MOE_SHSLOT": "1"},
             "iq4q8": {"IQ4_Q8": "1"}, "wg1k": {"MV_WG1": "1024"}, "wg256": {"MV_WG1": "256"}, "moer4": {"MOE_R": "4"}, "moer1": {"MOE_R": "1"},
-            "rt1": {"MOE_ROUTE_SPLIT": "0"}, "wg128": {"MV_WG1": "128"}, "wg64": {"MV_WG1": "64"}, "sh0": {"MOE_SHSLOT": "0"}}
+            "rt1": {"MOE_ROUTE_SPLIT": "0"}, "wg128": {"MV_WG1": "128"}, "wg64": {"MV_WG1": "64"}, "sh0": {"MOE_SHSLOT": "0"}, "qadual": {"MLA_QA_DUAL": "1"}}
 CTXS = [("short", 300, 1), ("2k", 2048, 1), ("8k", 8192, 1), ("c4", 1024, 4)]   # (tag, context, tokens = streams)
 ROLE_CTX = "short"   # role_<kernel> cases (host wall of that role's 39-40 launches alone) at this context
 OUT = None
@@ -318,6 +318,45 @@ def iq4xs_rand(rng, nbytes):
     return b.reshape(-1).view(np.int8)
 
 
+def qadual_test(lib, rng):
+    """mv_dual (MLA_QA_DUAL: q_a + kv_a in one launch) against the two single launches: equal outputs, 1 and 4 tokens."""
+    names = ["g_mv_iq4_xs_k2048_r1", "g_mv_iq4_xs_k2048_r1_dual", "g_mv_iq4_xs_k2048_t4_r1", "g_mv_iq4_xs_k2048_t4_r1_dual"]
+    ks = []
+    for k in names:
+        m = re.search(rf'^kernel\.def export\("{k}"\) @{k}\((?:.|\n)*?^\}}\n', lib, re.M)
+        assert m, k
+        ks.append(m.group(0).replace(f'export("{k}") @{k}(', f'export("q_{k}") @q_{k}('))
+    H, NA, NB = 2048, 1536, 576
+    np.save(os.path.join(OUT, "qd_wa.npy"), iq4xs_rand(rng, NA * H // 256 * 136))
+    np.save(os.path.join(OUT, "qd_wb.npy"), iq4xs_rand(rng, NB * H // 256 * 136))
+    out = []
+    for T, k1, kd in ((1, "g_mv_iq4_xs_k2048_r1", "g_mv_iq4_xs_k2048_r1_dual"), (4, "g_mv_iq4_xs_k2048_t4_r1", "g_mv_iq4_xs_k2048_t4_r1_dual")):
+        np.save(os.path.join(OUT, f"qd_h{T}.npy"), rng.standard_normal((T, H)).astype(np.float32))
+        WA, WB, HT, AT, BT = f"tensor<{NA * H // 256 * 136}xi8>", f"tensor<{NB * H // 256 * 136}xi8>", f"tensor<{T}x{H}xf32>", f"tensor<{T}x{NA}xf32>", f"tensor<{T}x{NB}xf32>"
+        out.append(f"""check.case public @qadual_t{T} {{
+  %t = check.literal value({T}) : index
+  %na = check.literal value({NA}) : index
+  %nb = check.literal value({NB}) : index
+  %nab = check.literal value({NA + NB}) : index
+  %z = check.literal value(0) : i32
+  %h = check.file.read.npy path("qd_h{T}.npy") : {HT}
+  %wa = check.file.read.npy path("qd_wa.npy") : {WA}
+  %wb = check.file.read.npy path("qd_wb.npy") : {WB}
+  %ya = check.generate.fill value(0.0) : {AT}
+  %yb = check.generate.fill value(0.0) : {BT}
+  %ya2 = check.generate.fill value(0.0) : {AT}
+  %yb2 = check.generate.fill value(0.0) : {BT}
+  kernel.launch @q_{k1}[%na, %t](%na, %t, %z, %h, %wa, %ya) : [index, index](index, index, i32, {HT}, {WA}, {AT})
+  kernel.launch @q_{k1}[%nb, %t](%nb, %t, %z, %h, %wb, %yb) : [index, index](index, index, i32, {HT}, {WB}, {BT})
+  kernel.launch @q_{kd}[%nab, %t](%nab, %t, %z, %h, %wa, %wb, %ya2, %yb2, %na) : [index, index](index, index, i32, {HT}, {WA}, {WB}, {AT}, {BT}, index)
+  check.expect.equal actual(%ya2) expected(%ya) : {AT}
+  check.expect.equal actual(%yb2) expected(%yb) : {BT}
+  check.return
+}}
+""")
+    return "\n".join(ks) + "".join(out)
+
+
 def shslot_test(lib, rng):
     """the shared expert as a ninth slot (g_moe_gu/dn_..._sh + g_moe_combine_sh) against the separate launches (shared
     swiglu matvec + down matvec into y, routed gu / dn, g_moe_combine accumulating): 2 tokens, 16 experts, IQ4_XS."""
@@ -387,7 +426,8 @@ if __name__ == "__main__" and len(sys.argv) > 2:
     np.save(os.path.join(OUT, "rt_w.npy"), (rng.standard_normal(256 * 2048) * 0.05).astype(np.float32))
     np.save(os.path.join(OUT, "rt_b.npy"), (rng.standard_normal(256) * 0.01).astype(np.float32))
     lib0, _ = split_program(program("base"))
-    open(os.path.join(OUT, "test.loom"), "w").write(route_test(lib0) + shslot_test(lib0, rng))
+    lib1, _ = split_program(program("qadual"))
+    open(os.path.join(OUT, "test.loom"), "w").write(route_test(lib0) + shslot_test(lib0, rng) + qadual_test(lib1, rng))
     for v in sys.argv[3:] or ["base"]:
         if v != "base" and not all(x in VARIANTS for x in v.split("+")):
             raise SystemExit("unknown variant " + v)
