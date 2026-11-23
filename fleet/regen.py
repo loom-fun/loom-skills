@@ -911,6 +911,10 @@ def ingest_full(st, name, e, W):
                                f"another publish replaced them; run `regen.py package` again")
     shutil.copy(os.path.join(out, "info.json"), os.path.join(W, "info_prev.json"))
     prev = json.load(open(os.path.join(W, "info_prev.json")))
+    baseline_info = "info_prev.json"
+    if sdk and target_sdk(st.d) == "0.3.0":
+        source, revision = e["source_card"].split("@", 1)
+        baseline_info = hf_file(source, "info.json", revision)
     mem = prev["card"]["memory_bytes"]
     run, url, end = job_facts(st, e)
     src = ["--source-kind", "devlab", "--run", run, "--url", url]
@@ -923,7 +927,7 @@ def ingest_full(st, name, e, W):
     st_card = (json.load(open(os.path.join(ROOT, "fleet", slug, "llm_config.json"))).get("source") or {}).get("kind") == "safetensors"
     if loom_only:   # the job measured Loom alone: the baseline rows (llama.cpp ROCm and Vulkan, or vLLM) are the previous card's, with their own run and date
         run_tool([f"{S}/make_info.py", "perf", "--gpu", dev, "--loom-jsonl", f"{d}/perf_{V}.jsonl", "--c4-loom", f"{d}/c4_{ND}.txt",
-                  "--baseline-from-info", "info_prev.json", "--package", out, *src, "--device", "dev.json", "--hrx-loom", "hrx.json",
+                  "--baseline-from-info", baseline_info, "--package", out, *src, "--device", "dev.json", "--hrx-loom", "hrx.json",
                   "--fetched-programs", rd("programs_sha256_staging.txt"), "-o", "ev_perf.json"], W)
     else:
         if not st_card and not (llm and c4l):
@@ -981,7 +985,8 @@ def ingest_full(st, name, e, W):
                       "-o", "info_new.json"], W)
     shutil.copy(os.path.join(W, "info_new.json"), os.path.join(out, "info.json"))
     msg = card_message(e, dev, run, loom_only, sdk, target_sdk(st.d))
-    return out, hf_head(f"{st.d['opts']['new_org']}/{slug}"), msg
+    parent = rev if target_sdk(st.d) == "0.3.0" else hf_head(f"{st.d['opts']['new_org']}/{slug}")
+    return out, parent, msg
 
 
 def ingest_strix(st, name, e, W):
