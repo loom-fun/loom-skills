@@ -106,8 +106,26 @@ jobs:
             "$j/gates_staging/gates.json" "$j/ktest_staging.log" --package "$pkg" "${evid[@]}" \
             --device "$WORK/device.json" --hrx-loom "$WORK/hrx.json" -o "$WORK/gates.json"
           roof_device=$("$py" -c 'import sys; sys.path.insert(0,sys.argv[1]); from card_lib import registry; print(registry.device("strix-halo")["roofline"]["default"])' "$card")
+          gguf=$("$py" - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          from huggingface_hub import hf_hub_download
+
+          work = Path(os.environ["WORK"])
+          lock = json.loads((work / "out/package/model.json.lock").read_text())
+          checkpoint = lock["origins"]["checkpoint"]
+          entry = next(f for f in lock["files"] if f["origin"].startswith("@checkpoint/") and f["origin"].endswith(".gguf"))
+          path = Path(hf_hub_download(checkpoint["requested"]["repository"], entry["origin"].split("/", 1)[1],
+                                      revision=checkpoint["resolved"]["revision"], cache_dir=work / "weights"))
+          with path.open("rb") as stream:
+              assert hashlib.file_digest(stream, "sha256").hexdigest() == entry["sha256"]
+          print(path)
+          PY
+          )
           "$py" "$card/make_info.py" roofline --gpu strix-halo --device "$roof_device" --package "$pkg" \
-            --evidence "$WORK/perf.json" -o "$WORK/roofline.json"
+            --gguf "$gguf" --evidence "$WORK/perf.json" -o "$WORK/roofline.json"
           "$py" "$card/make_info.py" build "$pkg" --org loom-fun-staging --gpus gfx1201-16gb,radeon-r9700,strix-halo \
             --from-info "$WORK/previous-info.json" --reset-performance \
             --perf-from "gfx1201-16gb=$WORK/previous-info.json" --perf-from "radeon-r9700=$WORK/previous-info.json" \
