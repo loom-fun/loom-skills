@@ -3977,10 +3977,6 @@ if True:   # coverage: a case for every kernel the package launches
   check.return
 }}
 """)
-    cases += ktest_variants.listed_cases(cases, _lib, pkg_launched() - cases_launched(), save, KS)
-    cases += ktest_variants.clones(cases, _lib + _helpers, pkg_launched() - cases_launched(), save, KS, lambda f: np.load(os.path.join(out, f)))
-    for _k in sorted(pkg_launched() - cases_launched()):
-        print(f"coverage: no case launches {_k}")
 if flash2_deep_from(cfg):   # gen_llm.py launches the deep pairs' kernel after every one-tile prefill flash launch
     cases = [re.sub(r"^( *)kernel\.launch @g_attention_flash2\[(.*)$", r"\g<0>\n\1kernel.launch @g_attention_flash2_deep[\2", c,
                     flags=re.M) for c in cases] + DEEP_CASES   # these launch the two kernels as they test them
@@ -3998,8 +3994,17 @@ for h in sorted(set(cfg.get("layer_heads") or []) - {QH}):
     import subprocess
     subprocess.run([sys.executable, os.path.abspath(__file__), hc, out], check=True,
                    env=dict(os.environ, KTEST_HEADS_SFX=f"_h{h}", GEMM_TESTS="0", DRAFTER_TESTS="0", MOE_TESTS="0"))
-    cases.append(open(os.path.join(out, f"cases_h{h}.loom-test")).read())
+    child_cases = open(os.path.join(out, f"cases_h{h}.loom-test")).read()
+    cases.extend(re.split(r"(?m)^(?=check\.case public @)", child_cases.strip()))
     os.remove(hc); os.remove(os.path.join(out, f"cases_h{h}.loom-test"))
+if not KS:
+    # The narrow chains now launch their own kernels and name their own fixture files.
+    # Derive variants from those names so the clones use the same head geometry.
+    cases += ktest_variants.listed_cases(cases, _lib, pkg_launched() - cases_launched(), save)
+    cases += ktest_variants.clones(cases, _lib + _helpers, pkg_launched() - cases_launched(), save,
+                                    load=lambda f: np.load(os.path.join(out, f)))
+    for _k in sorted(pkg_launched() - cases_launched()):
+        print(f"coverage: no case launches {_k}")
 # hrx-loom 0.1.0: float comparison is check.expect.approximate with the actual and expected types.
 text = re.sub(r"check\.expect\.close (actual\(.*\)) : (.*)$", r"check.expect.approximate \1 : \2, \2", "\n".join(cases), flags=re.M)
 open(os.path.join(out, f"cases{KS}.loom-test"), "w", newline="\n").write(text)

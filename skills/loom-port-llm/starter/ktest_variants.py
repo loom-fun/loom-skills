@@ -139,11 +139,15 @@ def width_copy(lib, name, n):
 def listed_cases(cases, lib, untested, save, ks=""):
     """kt_ copies of the untested X_listed kernels, and for each a case that launches them where a case launching their direct
     analogues did (every direct kernel of that case with a listed twin), over the list of every token: the same outputs."""
-    listed = sorted(k for k in untested if k.endswith("_listed"))
-    if not listed:
+    pairs = {}
+    for name in sorted(untested):
+        match = re.fullmatch(r"(\w+?)_listed(_h\d+)?", name)
+        if match:
+            base, heads = match.groups()
+            pairs[re.sub(r"^g16", "g", base) + (heads or "")] = name
+    if not pairs:
         return []
-    pairs = {re.sub(r"^g16", "g", k[:-len("_listed")]): k for k in listed}   # g16[d256]_X_listed <- g[d256]_X
-    helpers = {k: listed_copy(lib, k) for k in listed}
+    helpers = {name: listed_copy(lib, name) for name in pairs.values()}
     out, covered = [h for h in helpers.values() if h], set()
     for c in cases:
         used = set(re.findall(r"kernel\.launch @([\w.]+)\[", c)) & set(pairs)
