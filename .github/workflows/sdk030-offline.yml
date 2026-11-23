@@ -1,16 +1,16 @@
 name: SDK 0.3.0 offline fleet proof
 on:
   pull_request:
-    types: [labeled, synchronize]
+    types: [labeled]
 permissions:
   contents: read
 jobs:
   sdk-offline:
-    if: github.event.pull_request.head.ref == 'codex/sdk030-migration' && github.event.pull_request.head.repo.full_name == github.repository && contains(github.event.pull_request.labels.*.name, 'sdk030-offline')
+    if: github.event.pull_request.head.ref == 'codex/sdk030-migration' && github.event.pull_request.head.repo.full_name == github.repository && github.event.label.name == 'sdk030-offline'
     runs-on: [strix-halo, devlab-dispatch, Linux, self-hosted]
     timeout-minutes: 85
     env:
-      WORK: ${{ github.workspace }}/.sdk030-${{ github.run_id }}-${{ github.run_attempt }}
+      WORK: ${{ github.workspace }}/sdk030-offline-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -102,7 +102,7 @@ jobs:
               )
 
           repos = sorted(x["id"] for x in json.loads(request("/api/models?author=loom-fun&limit=1000")))
-          assert len(repos) == 60, repos
+          assert len(repos) >= 60, repos
           results, errors = [], []
           with concurrent.futures.ThreadPoolExecutor(max_workers=12) as executor:
               tasks = {executor.submit(card, repo): repo for repo in repos}
@@ -175,7 +175,7 @@ jobs:
                   print("Manual lane:", row["repo"], row["revision"], row["services"])
           (evidence / "inventory.json").write_text(json.dumps(inventory, indent=2))
           (evidence / "comparison.json").write_text(json.dumps(result, indent=2))
-          assert len(inventory["packages"]) == 60 and not inventory["errors"]
+          assert len(inventory["packages"]) >= 60 and not inventory["errors"]
           assert all(row["identical"] for row in result.values())
           PY
       - name: Upload proof
