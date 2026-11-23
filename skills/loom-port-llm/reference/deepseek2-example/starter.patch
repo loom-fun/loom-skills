@@ -972,7 +972,7 @@
          elif fold:
              L.append(f"""    %wv{wi} = scf.if %ok -> (vector<32xf32>) {{
        %v = func.call @g_{fw}_values(%{w}, {o}, {within}) : (buffer, offset, index) -> (vector<32xf32>)
-@@ -719,12 +839,13 @@
+@@ -719,12 +839,35 @@
      else:
          L.append(f"    %value = scalar.addf {t0}, %zero_f : f32")
      L.append("""    %out_row = index.add %row_base, %rr : index
@@ -984,11 +984,33 @@
  """)
 -    return "\n".join(L)
 +    t = "\n".join(L).replace("TOKS", "%atot" if shared else "%tokens")
-+    return t
++    U = int(_os.environ.get("MOE_DN_U", "1")) if mode == "dn" and shared else 1
++    return unroll_rows(t, U, R) if U > 1 else t
++
++
++def unroll_rows(t, U, R):
++    """MOE_DN_U: the expert matvec's row loop unrolled U times (U rows' weight loads issued together); each row's
++    arithmetic unchanged. Values defined in the loop body get a per-copy suffix."""
++    import re as _re
++    assert R % U == 0, (R, U)
++    head = "  scf.for %r = [%c0 to %rows_per step %c1] {\n"
++    i = t.index(head) + len(head)
++    j = t.index("\n  }\n  kernel.barrier<workgroup>", i)
++    body = t[i:j]
++    defs = sorted(set(_re.findall(r"(%\w+)(?:, %\w+)* = ", body)) | set(_re.findall(r", (%\w+)(?=(?:, %\w+)* = )", body)), key=len, reverse=True)
++    copies = []
++    for u in range(U):
++        b = body
++        for d in defs:
++            b = _re.sub(_re.escape(d) + r"\b", f"{d}_u{u}", b)
++        b = _re.sub(r"%r\b", f"%r_u{u}", b)
++        copies.append(f"    %ru_c{u} = index.constant {u} : index\n    %r_u{u} = index.add %r, %ru_c{u} : index\n" + b)
++    new_head = f"  %cU_rows = index.constant {U} : index\n  scf.for %r = [%c0 to %rows_per step %cU_rows] {{\n"
++    return t[:t.index(head)] + new_head + "\n".join(copies) + t[j:]
  
  
  def combine(H, KU, acc=False):
-@@ -758,6 +879,46 @@
+@@ -758,6 +901,46 @@
      view.store %a{KU - 1}, %y_view[%token, %ch] : f32, view<[%tokens]x{H}xf32>
    }}
    kernel.return
