@@ -78,9 +78,10 @@ if [ "$(q 'print(int(bool(e.get("exact"))))')" = 1 ]; then
   for line in "${vars[@]}"; do
     read -r v _ _ <<<"$line"; src=$W/src/$v
     NAME=gufo-ab-serve nixrun 1 "cd $src && nix develop path:$src --command ./build/gufo serve llm --model $model --served-model-name gufo-ab --context 65536 --speculative off --sessions 1 --host 127.0.0.1 --port 18731" > "$O/serve_$v.log" 2>&1 &
+    spid=$!
     for _ in $(seq 1 600); do curl -sf localhost:18731/v1/models >/dev/null && break; sleep 2; done
     python3 "$here/gufo_exact.py" http://127.0.0.1:18731 "$O/exact_$v.json" "$text" > "$O/exact_$v.log" 2>&1 || echo "exact $v failed: $(tail -2 "$O/exact_$v.log")"
-    docker kill gufo-ab-serve >/dev/null 2>&1 || true; wait || true; sleep 5
+    docker kill gufo-ab-serve >/dev/null 2>&1 || true; wait "$spid" || true; sleep 5   # not a bare wait: the power logger never exits
   done
 fi
 

@@ -1,11 +1,11 @@
 {
-  "comment": "Gufo A/B on one DevLab Strix Halo runner (devlab-gufo-ab.yml): Qwen3.8-27B UD-Q4_K_XL FP16 prefill GEMMs without gfx11 true16 (jeremyfowers/gufo perf/qwen-prefill-gemm-no-true16) vs gufo-org/gufo main.",
+  "comment": "Exactness rerun (bench numbers: run 45237336933). Gufo A/B on one DevLab Strix Halo runner (devlab-gufo-ab.yml): Qwen3.8-27B UD-Q4_K_XL FP16 prefill GEMMs without gfx11 true16 (jeremyfowers/gufo perf/qwen-prefill-gemm-no-true16) vs gufo-org/gufo main.",
   "model": "unsloth/Qwen3.8-27B-GGUF@4af51b3542f775b0a8e4b310bfb3f17e01c306c9/Qwen3.8-27B-UD-Q4_K_XL.gguf",
   "variants": [
     {"name": "base", "repo": "gufo-org/gufo", "rev": "6a205eec28eb78baf408caeff49aefe06ef6004e"},
     {"name": "cand", "repo": "jeremyfowers/gufo", "rev": "288c79d11407ee74bb414d057b58a3eb8dfd8920"}
   ],
-  "order": ["base", "cand", "cand", "base", "base", "cand"],
+  "order": [],
   "bench_args": "-p 2048,8192,32768 -n 64 -r 2",
   "exact": true
 }
