@@ -1,12 +1,12 @@
 {
- "_comment": "JoyAI pfgemm round 2: v4 (round-1 winner: IQ4_XS inline dequant + T64_G32 + MOE_CW/SWAP + MLA_BMM2=vbm; r1 run 45251424551 prefill 1k 1580 vs base 1294) gates:dev; v6 = v4 + MLA_BMM_LIVE (k_b/v_b skip padding token blocks); ABBA.",
+ "_comment": "JoyAI pfgemm round 3: v4 (gates:dev PASS, run 45258800233) vs v6 = v4 + MLA_BMM_LIVE (fixed: uniform live test); ABBA.",
  "card": "loom-fun/jdopensource-JoyAI-LLM-Flash-loom@cb7861a81dbb586782044145ebb11f8cd48d8c8e",
  "memory_bytes": 47000000000,
  "kit": "deepseek2",
  "llamacpp": "b1386",
  "jobs": [
   {
-   "name": "pfgemm-r2",
+   "name": "pfgemm-r3",
    "variants": [
     {
      "name": "v4",
@@ -42,7 +42,6 @@
    ],
    "steps": [
     "ktest:v6",
-    "gates:v4:dev",
     "profile:v6:pf2k",
     "perf:v4:1",
     "perf:v6:1",
