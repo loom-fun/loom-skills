@@ -3,6 +3,7 @@ on:
   pull_request:
     types: [labeled]
 permissions:
+  actions: read
   contents: read
 jobs:
   verify:
@@ -13,15 +14,18 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - slug: ggml-org-Qwen3.6-27B-loom
+          - slug: unsloth-Qwen3.5-4B-loom
             device: radeon-r9700
             labels: '["self-hosted","devlab-dispatch","radeon-r9700"]'
+            correctness: '{"run":45275710722,"job":138046833433,"artifact":14871771764,"digest":"sha256:85d6e9b03295d10a15cc6f6fe931cc352036c28a314a584db4bfc097f43916c8","production":"loom-fun/unsloth-Qwen3.5-4B-loom@64bf40259117d99f3e6a9f43b7e80fb030300697","generator":"3adfe7b7b6e68f753042e9f89b318e29a6088579"}'
     runs-on: ${{ fromJSON(matrix.labels) }}
     timeout-minutes: 240
     env:
       SLUG: ${{ matrix.slug }}
       SDK_GPU_KEY: ${{ matrix.device }}
       GH_TOKEN: ${{ github.token }}
+      INITIAL_CORRECTNESS: ${{ matrix.correctness }}
+      DISPATCH_HEAD: ${{ github.event.pull_request.head.sha }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -52,8 +56,34 @@ jobs:
           assert variants['staging']['sdk']=='0.3.0' and 'card' not in variants['staging']
           print('JOB='+job['name'])
           PY
+      - name: Verify eligibility for reusing original correctness
+        if: env.INITIAL_CORRECTNESS != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! git show "$DISPATCH_HEAD:.github/scripts/sdk030_confirm_reuse.py" > "$WORK/sdk030_confirm_reuse.py"; then
+            echo 'The launch-proof helper was unavailable; running full qualification.' > "$WORK/receipt/correctness-fallback.log"
+            exit 0
+          fi
+          python3 "$WORK/sdk030_confirm_reuse.py" prepare "$WORK" "$INITIAL_CORRECTNESS" "$GITHUB_WORKSPACE"
       - name: Build, serve and measure the release candidate
-        run: bash .github/scripts/devlab_perf.sh "$WORK/receipt/experiment.json" "$JOB"
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -f "$WORK/reuse-plan.json" ]; then
+            start=$SECONDS
+            if SDK030_LAUNCH_PROOF="$WORK/sdk030_confirm_reuse.py" bash .github/scripts/sdk030_record_perf.sh "$WORK/receipt/experiment.json" "$JOB" \
+                && python3 "$WORK/sdk030_confirm_reuse.py" validate "$WORK" "$WORK/$JOB" "$((SECONDS - start))" > "$WORK/reuse-validation.log" 2>&1; then
+              exit 0
+            fi
+            if [ -e "$WORK/reuse-validation.log" ]; then
+              cp "$WORK/reuse-validation.log" "$WORK/receipt/correctness-fallback.log"
+            else
+              echo 'The shortened DevLab run failed; repeating full qualification.' > "$WORK/receipt/correctness-fallback.log"
+            fi
+            cp "$WORK/full-experiment.json" "$WORK/receipt/experiment.json"
+          fi
+          bash .github/scripts/devlab_perf.sh "$WORK/receipt/experiment.json" "$JOB"
       - name: Save the measured package and identity
         if: always() && env.JOB != ''
         shell: bash
@@ -70,13 +100,16 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
           import json,os
-          out=Path(os.environ['WORK'])/'receipt/out'
+          receipt=Path(os.environ['WORK'])/'receipt'
+          out=receipt/'out'
           results=json.loads((out/'summary.json').read_text())['results']
           failures={k:v for k,v in results.items() if not v or 'FAIL' in str(v) or 'ERROR' in str(v)}
           rows=[json.loads(line) for line in (out/'perf_staging.jsonl').read_text().splitlines()] if (out/'perf_staging.jsonl').is_file() else []
           if not any(r.get('decode_tps') for r in rows) or not any(r.get('prefill_long') for r in rows):
               failures['performance']='missing short or long metrics'
-          for step in ('c4:funnd', 'c4:stagingnd', 'perf:fun:1', 'perf:fun:1:long', 'func:staging', 'ktest:staging', 'gates:staging:full'):
+          common=('c4:funnd', 'c4:stagingnd', 'perf:fun:1', 'perf:fun:1:long', 'textmatch:fun', 'textmatch:staging')
+          correctness=('smoke:fun', 'smoke:staging') if (receipt/'correctness-reused.json').is_file() else ('func:staging', 'ktest:staging', 'gates:staging:full')
+          for step in common + correctness:
               if step not in results:
                   failures[step]='missing required result'
           if not results or failures:raise SystemExit(str(failures or 'no results'))
@@ -91,4 +124,5 @@ jobs:
         if: always()
         shell: bash
         run: |
+          if [ -f "$WORK/reuse-plan.json" ]; then rm -f .github/scripts/sdk030_record_perf.sh; fi
           if [ "${WORK:-}" = "$(dirname "$GITHUB_WORKSPACE")/sdk030-wave-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$SDK_GPU_KEY-$SLUG" ]; then rm -rf -- "$WORK"; fi
