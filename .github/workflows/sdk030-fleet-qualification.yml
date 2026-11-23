@@ -15,7 +15,7 @@ jobs:
         include:
           - slug: unsloth-Qwen3.5-0.8B-loom
             device: radeon-r9700
-            labels: '["self-hosted","devlab-dispatch","radeon-r9700","Linux"]'
+            labels: '["self-hosted","devlab-dispatch","radeon-r9700"]'
           - slug: unsloth-gemma-4-E2B-it-loom
             device: strix-halo
             labels: '["self-hosted","devlab-dispatch","strix-halo","Linux"]'
