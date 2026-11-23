@@ -19,7 +19,10 @@ VARIANTS = {   # name -> environment of the kit generators
     "v1": IQ4,
     "v2": dict(IQ4, GEMM_T64_G32="1"),
     "cw": dict(IQ4, GEMM_T64_G32="1", MOE_CW="1"),   # gen_moe_cw: column waves, live 16-row fragments only
+    "cws": dict(IQ4, GEMM_T64_G32="1", MOE_CW="1", MOE_CW_SWAP="1"),   # cw, half-waves dequantize half a group each + xor-16 swap
+    "t128": dict(IQ4, GEMM_T64_G32="1"),              # gen_moe.grouped_gemm128 (MOE_T128): m128 tiles, 128-row expert buckets
 }
+TILE_OF = {"t128": 128}   # variants on another expert bucket (timing only: their rows are laid out differently)
 VARIANTS.update(json.loads(os.environ.get("JOY_MOE_VARIANTS", "{}")))
 BLOCK = 136   # IQ4_XS bytes per 256 values
 
@@ -43,6 +46,10 @@ def routing(rng, T):
     """ids [T, KU] (distinct experts per token, skewed popularity) -> tile_info [max_tiles, 2], rowmap [max_rows] as g_moe_bucket."""
     p = np.exp(rng.normal(0, 0.6, E)); p /= p.sum()
     ids = np.stack([rng.choice(E, KU, replace=False, p=p) for _ in range(T)])
+    return bucket(ids, T, TILE) + (ids,)
+
+
+def bucket(ids, T, TILE):
     max_tiles = (T * KU + TILE - 1) // TILE + E
     ti = np.zeros((max_tiles, 2), np.int32); ti[:, 0] = -1
     rm = np.full(max_tiles * TILE, -1, np.int32)
@@ -63,8 +70,12 @@ def emit(kit, variant, out):
     code = f"""
 import sys; sys.path.insert(0, {kit!r})
 import gen_gemm, gen_moe
-gu = gen_moe.grouped_gemm("iq4_xs", "swiglu", {F}, {H}, {E}, {KU}, gen_gemm.gemm)
-dn = gen_moe.grouped_gemm("iq4_xs", "store", {H}, {F}, {E}, {KU}, gen_gemm.gemm)
+if {TILE_OF.get(variant, 64)} == 128:
+    gu = gen_moe.grouped_gemm128("iq4_xs", "swiglu", {F}, {H}, {E}, {KU}).replace("g_moe_ggu128_", "g_moe_ggu_")
+    dn = gen_moe.grouped_gemm128("iq4_xs", "store", {H}, {F}, {E}, {KU}).replace("g_moe_gdn128_", "g_moe_gdn_")
+else:
+    gu = gen_moe.grouped_gemm("iq4_xs", "swiglu", {F}, {H}, {E}, {KU}, gen_gemm.gemm)
+    dn = gen_moe.grouped_gemm("iq4_xs", "store", {H}, {F}, {E}, {KU}, gen_gemm.gemm)
 open({out!r}, "w").write(gu + "\\n" + dn)
 """
     subprocess.run([sys.executable, "-c", code], env=env, check=True)
@@ -77,7 +88,7 @@ def helpers(kit):
 
 def main():
     root, out = os.path.abspath(sys.argv[1]), os.path.abspath(sys.argv[2])
-    variants = sys.argv[3:] or ["base", "v1", "v2", "cw"]
+    variants = sys.argv[3:] or ["base", "v1", "v2", "cw", "cws", "t128"]
     os.makedirs(out, exist_ok=True)
     kit = os.path.join(out, "kit")
     if not os.path.isdir(kit):
@@ -92,7 +103,17 @@ def main():
     nbytes = {n: r * (k // 256) * BLOCK for n, (r, k) in wb.items()}
     shapes = {}
     for T in TS:
-        ti, rm, mt = routing(rng, T)
+        ti, rm, mt, ids = routing(rng, T)
+        r2 = np.random.default_rng(1362 + T)
+        for tl in sorted(set(TILE_OF.values())):
+            ti2, rm2, mt2 = bucket(ids, T, tl)
+            np.save(os.path.join(out, "w", f"ti{T}_{tl}.npy"), ti2)
+            np.save(os.path.join(out, "w", f"rm{T}_{tl}.npy"), rm2)
+            a2 = r2.uniform(-1, 1, (mt2 * tl, F)).astype(np.float16)
+            a2[rm2 < 0] = 0
+            np.save(os.path.join(out, "w", f"a{T}_{tl}.npy"), a2)
+            np.save(os.path.join(out, "w", f"sa{T}_{tl}.npy"), np.tile(r2.uniform(0.5, 2, (mt2 * tl, 1)), (1, 2)).astype(np.float32))
+            shapes[(T, tl)] = (mt2, mt2 * tl)
         mr = mt * TILE
         np.save(os.path.join(out, "w", f"ti{T}.npy"), ti)
         np.save(os.path.join(out, "w", f"rm{T}.npy"), rm)
@@ -105,14 +126,15 @@ def main():
         shapes[T] = (mt, mr)
         print(f"T={T}: max_tiles {mt}, used tiles {(ti[:, 0] >= 0).sum()}, rows/expert mean {T * KU / E:.1f}")
 
-    def case(T, kn_gu, kn_dn, ret=("y",), extra=""):
-        mt, mr = shapes[T]
-        return f"""  %ti = check.file.read.npy path("w/ti{T}.npy") : tensor<{mt}x2xi32>
-  %rm = check.file.read.npy path("w/rm{T}.npy") : tensor<{mr}xi32>
+    def case(T, kn_gu, kn_dn, ret=("y",), extra="", tl=64):
+        mt, mr = shapes[T if tl == 64 else (T, tl)]
+        sf = "" if tl == 64 else f"_{tl}"
+        return f"""  %ti = check.file.read.npy path("w/ti{T}{sf}.npy") : tensor<{mt}x2xi32>
+  %rm = check.file.read.npy path("w/rm{T}{sf}.npy") : tensor<{mr}xi32>
   %x = check.file.read.npy path("w/x{T}.npy") : tensor<{T}x{H}xf16>
   %s = check.file.read.npy path("w/s{T}.npy") : tensor<{T}x2xf32>
-  %a = check.file.read.npy path("w/a{T}.npy") : tensor<{mr}x{F}xf16>
-  %sa = check.file.read.npy path("w/sa{T}.npy") : tensor<{mr}x2xf32>
+  %a = check.file.read.npy path("w/a{T}{sf}.npy") : tensor<{mr}x{F}xf16>
+  %sa = check.file.read.npy path("w/sa{T}{sf}.npy") : tensor<{mr}x2xf32>
   %wg = check.file.read.npy path("w/gate.npy") : tensor<{nbytes['gate']}xi8>
   %wu = check.file.read.npy path("w/up.npy") : tensor<{nbytes['up']}xi8>
   %wd = check.file.read.npy path("w/down.npy") : tensor<{nbytes['down']}xi8>
@@ -122,8 +144,8 @@ def main():
   %nf = check.literal value({F}) : index
 """
 
-    def launches(T, gu, dn, yg, yd):
-        mt, mr = shapes[T]
+    def launches(T, gu, dn, yg, yd, tl=64):
+        mt, mr = shapes[T if tl == 64 else (T, tl)]
         s = ""
         if gu:
             s += (f"  kernel.launch @{gu}[%rows, %nf](%rows, %kh, %nf, %xrows, %ti, %rm, %x, %s, %wg, %wu, {yg}) : [index, index](index, index, index, index, "
@@ -141,23 +163,24 @@ def main():
         assert f"@k_ggu_{v}(" in t and f"@k_gdn_{v}(" in t, v
         texts[v] = t
         parts = [helpers(kit)]
+        tl = TILE_OF.get(v, 64)
         for T in TS:   # one copy per shape so each timing row has its own kernel name
-            mt, mr = shapes[T]
+            mt, mr = shapes[T if tl == 64 else (T, tl)]
             parts.append(t.replace(f"k_ggu_{v}", f"k_ggu_{T}").replace(f"k_gdn_{v}", f"k_gdn_{T}"))
             for kind in ("ggu", "gdn"):
-                parts.append(f"check.case public @b_{kind}_{T}_case {{\n" + case(T, None, None) +
+                parts.append(f"check.case public @b_{kind}_{T}_case {{\n" + case(T, None, None, tl=tl) +
                              f"  %yg = check.generate.fill value(0.0) : tensor<{mr}x{F}xf32>\n  %yd = check.generate.fill value(0.0) : tensor<{mr}x{H}xf32>\n" +
-                             launches(T, f"k_ggu_{T}" if kind == "ggu" else None, f"k_gdn_{T}" if kind == "gdn" else None, "%yg", "%yd") +
+                             launches(T, f"k_ggu_{T}" if kind == "ggu" else None, f"k_gdn_{T}" if kind == "gdn" else None, "%yg", "%yd", tl=tl) +
                              f"  check.return\n}}\ncheck.benchmark<@b_{kind}_{T}_case> @b_{kind}_{T}_bm\n")
         fn = "bench.loom" if v == "base" else f"bench_{v}.loom"
         open(os.path.join(out, fn), "w").write("\n".join(parts))
     # correctness: every non-base variant vs v1 (exact for v1-derived), base vs v1 within f16 rounding of the dequant
     ref = "v1" if "v1" in texts else variants[0]
-    tparts = [helpers(kit)] + [texts[v] for v in variants]
+    tparts = [helpers(kit)] + [texts[v] for v in variants if v not in TILE_OF]
     T = TS[0]
     mt, mr = shapes[T]
     for v in variants:
-        if v in (ref, "base"):   # base (the value helper) rounds differently; it is covered by the model's kernel tests
+        if v in (ref, "base") or v in TILE_OF:   # base (the value helper) rounds differently; it is covered by the model's kernel tests
             continue
         tol = "atol(0.0) rtol(0.0)" if not v.startswith("x") else "atol(1.0e-3) rtol(1.0e-3)"   # x*: variants that reorder sums
         tparts.append(f"check.case public @t_{v} {{\n" + case(T, None, None) +

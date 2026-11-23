@@ -11,13 +11,17 @@
     "base",
     "v1",
     "v2",
-    "cw"
+    "cw",
+    "cws",
+    "t128"
    ],
    "files": [
     "bench.loom",
     "bench_v1.loom",
     "bench_v2.loom",
-    "bench_cw.loom"
+    "bench_cw.loom",
+    "bench_cws.loom",
+    "bench_t128.loom"
    ],
    "tests": [
     "test.loom"

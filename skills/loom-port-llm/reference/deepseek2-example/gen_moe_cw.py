@@ -15,9 +15,17 @@ Values: the dequant is _g32_iq4's (iq4_f16lut values), the MMAs accumulate K in 
 
 KV = (-127, -104, -83, -65, -49, -35, -22, -10, 1, 13, 25, 38, 53, 69, 89, 113)
 KC = 128   # K per staged chunk
+import os
+# MOE_CW_SWAP=1: lanes 0-15 dequantize a group's low nibbles (K 0-15), lanes 16-31 the high nibbles (K 16-31) of the same
+# column, and an xor-16 shuffle swaps the halves (WMMA B wants both half-waves to hold the same 16 values): half the dequant.
+SWAP = os.environ.get("MOE_CW_SWAP", "0") not in ("", "0")
 
 
-def _dequant(o, hdr, packed, grp):
+PLAIN_TAIL = '      %{o}_lo_i = vector.andi {packed}, %{o}_m15 : vector<16xi8>\n      %{o}_hn_s = vector.shrui {packed}, %{o}_f4 : vector<16xi8>\n      %{o}_hi_i = vector.andi %{o}_hn_s, %{o}_m15 : vector<16xi8>\n      %{o}_lo_u = vector.table.lookup %{o}_book[%{o}_lo_i] : vector<16xi8>, vector<16xi8> -> vector<16xi8>\n      %{o}_hi_u = vector.table.lookup %{o}_book[%{o}_hi_i] : vector<16xi8>, vector<16xi8> -> vector<16xi8>\n      %{o}_lo_f = vector.uitofp %{o}_lo_u : vector<16xi8> to vector<16xf16>\n      %{o}_hi_f = vector.uitofp %{o}_hi_u : vector<16xi8> to vector<16xf16>\n      %{o}_m128 = scalar.constant -128.0 : f32\n      %{o}_off32 = scalar.mulf %{o}_dlh32, %{o}_m128 : f32\n      %{o}_off_h = scalar.fptrunc %{o}_off32 : f32 to f16\n      %{o}_scales = vector.splat %{o}_dlh : vector<16xf16>\n      %{o}_offsets = vector.splat %{o}_off_h : vector<16xf16>\n      %{o}_v0 = vector.fmaf %{o}_lo_f, %{o}_scales, %{o}_offsets : vector<16xf16>\n      %{o}_v1 = vector.fmaf %{o}_hi_f, %{o}_scales, %{o}_offsets : vector<16xf16>\n'
+SWAP_TAIL = '      %{o}_shc = vector.shrui {packed}, %{o}_f4 : vector<16xi8>\n      %{o}_sh = scf.select %cw_hi, %{o}_shc, {packed} : vector<16xi8>\n      %{o}_ni = vector.andi %{o}_sh, %{o}_m15 : vector<16xi8>\n      %{o}_nu = vector.table.lookup %{o}_book[%{o}_ni] : vector<16xi8>, vector<16xi8> -> vector<16xi8>\n      %{o}_nf = vector.uitofp %{o}_nu : vector<16xi8> to vector<16xf16>\n      %{o}_m128 = scalar.constant -128.0 : f32\n      %{o}_off32 = scalar.mulf %{o}_dlh32, %{o}_m128 : f32\n      %{o}_off_h = scalar.fptrunc %{o}_off32 : f32 to f16\n      %{o}_scales = vector.splat %{o}_dlh : vector<16xf16>\n      %{o}_offsets = vector.splat %{o}_off_h : vector<16xf16>\n      %{o}_own = vector.fmaf %{o}_nf, %{o}_scales, %{o}_offsets : vector<16xf16>\n      %{o}_own32 = vector.bitcast %{o}_own : vector<16xf16> to vector<8xf32>\n      %{o}_e0 = vector.extract %{o}_own32[0] : vector<8xf32> -> f32\n      %{o}_x0, %{o}_xu0 = kernel.subgroup.shuffle<xor> %{o}_e0, %cw_x16, %cw_w32 : f32, i32, i32\n      %{o}_e1 = vector.extract %{o}_own32[1] : vector<8xf32> -> f32\n      %{o}_x1, %{o}_xu1 = kernel.subgroup.shuffle<xor> %{o}_e1, %cw_x16, %cw_w32 : f32, i32, i32\n      %{o}_e2 = vector.extract %{o}_own32[2] : vector<8xf32> -> f32\n      %{o}_x2, %{o}_xu2 = kernel.subgroup.shuffle<xor> %{o}_e2, %cw_x16, %cw_w32 : f32, i32, i32\n      %{o}_e3 = vector.extract %{o}_own32[3] : vector<8xf32> -> f32\n      %{o}_x3, %{o}_xu3 = kernel.subgroup.shuffle<xor> %{o}_e3, %cw_x16, %cw_w32 : f32, i32, i32\n      %{o}_e4 = vector.extract %{o}_own32[4] : vector<8xf32> -> f32\n      %{o}_x4, %{o}_xu4 = kernel.subgroup.shuffle<xor> %{o}_e4, %cw_x16, %cw_w32 : f32, i32, i32\n      %{o}_e5 = vector.extract %{o}_own32[5] : vector<8xf32> -> f32\n      %{o}_x5, %{o}_xu5 = kernel.subgroup.shuffle<xor> %{o}_e5, %cw_x16, %cw_w32 : f32, i32, i32\n      %{o}_e6 = vector.extract %{o}_own32[6] : vector<8xf32> -> f32\n      %{o}_x6, %{o}_xu6 = kernel.subgroup.shuffle<xor> %{o}_e6, %cw_x16, %cw_w32 : f32, i32, i32\n      %{o}_e7 = vector.extract %{o}_own32[7] : vector<8xf32> -> f32\n      %{o}_x7, %{o}_xu7 = kernel.subgroup.shuffle<xor> %{o}_e7, %cw_x16, %cw_w32 : f32, i32, i32\n      %{o}_oth32 = vector.from_elements %{o}_x0, %{o}_x1, %{o}_x2, %{o}_x3, %{o}_x4, %{o}_x5, %{o}_x6, %{o}_x7 : vector<8xf32>\n      %{o}_oth = vector.bitcast %{o}_oth32 : vector<8xf32> to vector<16xf16>\n      %{o}_v0 = scf.select %cw_hi, %{o}_oth, %{o}_own : vector<16xf16>\n      %{o}_v1 = scf.select %cw_hi, %{o}_own, %{o}_oth : vector<16xf16>\n'
+
+
+def _dequant(o, hdr, packed, grp, swap=False):
     """%{o}_v0 / %{o}_v1: weights 0-15 / 16-31 of 32-group `grp` (an index SSA name, 0..7 in the superblock) as f16."""
     book = "\n".join(f"      %{o}_k{i} = scalar.constant {v + 128 - (256 if v + 128 > 127 else 0)} : i8" for i, v in enumerate(KV))
     return f"""      %{o}_halves = vector.bitcast {hdr} : vector<2xi32> to vector<4xf16>
@@ -50,21 +58,7 @@ def _dequant(o, hdr, packed, grp):
       %{o}_book = vector.from_elements {", ".join(f"%{o}_k{i}" for i in range(16))} : vector<16xi8>
       %{o}_m15 = vector.splati 15 : vector<16xi8>
       %{o}_f4 = vector.splati 4 : vector<16xi8>
-      %{o}_lo_i = vector.andi {packed}, %{o}_m15 : vector<16xi8>
-      %{o}_hn_s = vector.shrui {packed}, %{o}_f4 : vector<16xi8>
-      %{o}_hi_i = vector.andi %{o}_hn_s, %{o}_m15 : vector<16xi8>
-      %{o}_lo_u = vector.table.lookup %{o}_book[%{o}_lo_i] : vector<16xi8>, vector<16xi8> -> vector<16xi8>
-      %{o}_hi_u = vector.table.lookup %{o}_book[%{o}_hi_i] : vector<16xi8>, vector<16xi8> -> vector<16xi8>
-      %{o}_lo_f = vector.uitofp %{o}_lo_u : vector<16xi8> to vector<16xf16>
-      %{o}_hi_f = vector.uitofp %{o}_hi_u : vector<16xi8> to vector<16xf16>
-      %{o}_m128 = scalar.constant -128.0 : f32
-      %{o}_off32 = scalar.mulf %{o}_dlh32, %{o}_m128 : f32
-      %{o}_off_h = scalar.fptrunc %{o}_off32 : f32 to f16
-      %{o}_scales = vector.splat %{o}_dlh : vector<16xf16>
-      %{o}_offsets = vector.splat %{o}_off_h : vector<16xf16>
-      %{o}_v0 = vector.fmaf %{o}_lo_f, %{o}_scales, %{o}_offsets : vector<16xf16>
-      %{o}_v1 = vector.fmaf %{o}_hi_f, %{o}_scales, %{o}_offsets : vector<16xf16>
-"""
+{(SWAP_TAIL if swap else PLAIN_TAIL).format(o=o, packed=packed)}"""
 
 
 def _suffix(text, sfx):
@@ -142,6 +136,12 @@ def grouped_gemm_cw(fmt, mode, N, K, E, KU, tile=64):
   %wave = index.assume %subgroup [range(%subgroup, 0, 7)] : index
   %lane = kernel.subgroup.lane.id : index
   %lane16 = index.rem %lane, %c16 : index
+  %cw_hi = index.cmp uge, %lane, %c16 : index
+  %cw_s0 = vector.splati 0 : vector<16xi8>
+  %cw_s4 = vector.splati 4 : vector<16xi8>
+  %cw_hshift = scf.select %cw_hi, %cw_s4, %cw_s0 : vector<16xi8>
+  %cw_x16 = scalar.constant 16 : i32
+  %cw_w32 = scalar.constant 32 : i32
   %row_origin = index.mul %row_group, %c64 : index
   %out_origin = index.mul %out_group, %cTN : index
   %wcols = index.constant {WCOLS} : index
@@ -283,7 +283,7 @@ def grouped_gemm_cw(fmt, mode, N, K, E, KU, tile=64):
                      else f"    %cg{g} = index.constant {g} : index\n    %grp{g}_v = index.add %gbase, %cg{g} : index")
             s.append(f"    %grp{g} = index.assume %grp{g}_v [range(%grp{g}_v, 0, 7)] : index")
             for i in range(len(WF)):
-                s.append(_dequant(f"d{i}{g}", cr[f"%h{i}p"], cr[f"%q{i}{g}p"], f"%grp{g}"))
+                s.append(_dequant(f"d{i}{g}", cr[f"%h{i}p"], cr[f"%q{i}{g}p"], f"%grp{g}", swap=SWAP))
             for kk in range(2):
                 col = g * 32 + kk * 16
                 s.append(f"    %fc{g}{kk} = index.constant {col} : index")
