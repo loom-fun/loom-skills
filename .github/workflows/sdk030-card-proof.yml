@@ -1,0 +1,119 @@
+name: SDK 0.3 card and evidence proof
+on:
+  push:
+    branches: [codex/sdk030-migration-card-proof]
+    paths: [.github/workflows/sdk030-card-proof.yml]
+permissions:
+  contents: read
+  actions: read
+jobs:
+  cards:
+    runs-on: [self-hosted, devlab-dispatch, Linux]
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Check reference attribution, thinking and measured Quick starts
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p proof
+          work="$(dirname "$GITHUB_WORKSPACE")/sdk030-card-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          mkdir -p "$work"
+          echo "CARD_PROOF_WORK=$work" >> "$GITHUB_ENV"
+          python3 -m venv "$work/venv"
+          py="$work/venv/bin/python"
+          "$py" -m pip install -q requests tokenizers pillow huggingface_hub
+          bash -n skills/loom-benchmark/scripts/gates.sh
+          for test in test_vllm_reference.py test_reference_alt.py test_card_chat_request.py test_device_results.py test_regen.py; do
+            "$py" -m unittest discover -s tests -p "$test" -v 2>&1 | tee "proof/$test.log"
+          done
+      - name: Verify the measured Gemma R9700 package and regenerate its card
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          work="$CARD_PROOF_WORK"
+          gh api "/repos/$GITHUB_REPOSITORY/actions/artifacts/14870490950/zip" > "$work/abba.zip"
+          echo "3fa4b9d4ff86b986468a6e9890546d4534f70638d0b4bdbd8501ebb73bf32dda  $work/abba.zip" | sha256sum -c
+          "$work/venv/bin/python" - "$work" <<'PY'
+          import json
+          from pathlib import Path
+          import shutil
+          import subprocess
+          import sys
+          import zipfile
+          from huggingface_hub import snapshot_download
+
+          work = Path(sys.argv[1]); output = Path('proof').resolve()
+          tools = Path('skills/loom-benchmark/scripts/card').resolve()
+          sys.path.insert(0, str(tools))
+          import card_lib
+
+          repo = 'loom-fun-staging/unsloth-gemma-4-E2B-it-loom'
+          measured = '783ee344b761da90de8e50d668e84f912234df96'
+          staged = 'ddbc6bf9497b980dd47250c474d668c1278000c9'
+          gpu, preset = 'radeon-r9700', 'chat-r9700'
+          package_files = ('model.json', 'model.json.lock', 'llm_config.json', 'weights.loom')
+          for revision, path in ((measured, work / 'measured'), (staged, work / 'candidate')):
+              snapshot_download(repo, revision=revision, local_dir=path, token=False,
+                                allow_patterns=[*package_files, 'program/**', 'info.json', card_lib.QUICK_START_QUALIFICATION])
+          package = work / 'candidate'
+          assert all((work / 'measured' / f).read_bytes() == (package / f).read_bytes() for f in package_files)
+          digests = [card_lib.programs_sha256(path) for path in (work / 'measured', package)]
+          assert digests[0] == digests[1]
+          proof_path = package / card_lib.QUICK_START_QUALIFICATION
+          proof = card_lib.load_json(proof_path)
+          assert (proof['gpu'], proof['preset'], proof['staging_parent']) == (gpu, preset, measured)
+          assert proof['programs_sha256'] == digests[0]
+          with zipfile.ZipFile(work / 'abba.zip') as archive:
+              def load(name):
+                  return json.loads(archive.read(name))
+
+              assert archive.read('card-url.txt').decode().strip().endswith('/' + measured)
+              assert archive.read('programs_sha256.txt').decode().strip() == digests[0]
+              assert load('model.json')['presets'][preset] == card_lib.load_json(package / 'model.json')['presets'][preset]
+              wheel = load('sdk.json')
+              assert all(wheel[k] == proof['sdk'][k] for k in ('hrx_loom', 'wheel_sha256', 'source'))
+              raw = load('comparison.json')
+              assert (raw['gpu'], raw['preset']) == (gpu, preset)
+              for raw_session, recorded in zip(raw['sessions'], proof['sessions'], strict=True):
+                  folder = f"{recorded['session']}-{recorded['mode']}"
+                  assert load(f'{folder}/argv.json')[3:] == proof['launch'][recorded['mode']]
+                  short = json.loads(archive.read(f'{folder}/short.jsonl').decode().splitlines()[-1])
+                  rows = dict(raw_session['metrics'], decode=short['decode_tps'], decode_2k=short['decode_tps_2k'],
+                              prefill_1k=short['prefill'][0]['prefill_tps'], prefill_2k=short['prefill'][1]['prefill_tps'])
+                  assert recorded == dict(raw_session, metrics=rows), folder
+          measured_files = card_lib.load_package(work / 'measured')
+          proof['package_sha256'] = card_lib.quick_start_package_sha256(work / 'measured', measured_files, preset)
+          assert proof['package_sha256'] == 'ea5545b7b5732e7e59ad6944fd538abebd516077e3eab1eb59fee0100815c596'
+          card_lib.write_json(proof_path, proof)
+          card_lib.write_json(output / proof_path.name, proof)
+          prior = work / 'previous-info.json'
+          shutil.copyfile(package / 'info.json', prior)
+          build = [sys.executable, '-I', str(tools / 'make_info.py'), 'build', str(package), '--from-info', str(prior),
+                   '--device-results', 'none', '--upstream', 'none']
+          subprocess.run(build, check=True)
+          regenerated = card_lib.load_json(package / 'info.json')
+          assert regenerated['devices'][gpu]['quick_start'] == {'preset': preset, 'device': 'amdgpu', 'args': []}
+          assert regenerated['devices']['strix-halo']['quick_start'] == card_lib.load_json(prior)['devices']['strix-halo']['quick_start']
+          subprocess.run([sys.executable, '-I', str(tools / 'render_card.py'), str(package)], check=True)
+          readme = (package / 'README.md').read_text()
+          assert any(line.startswith('loom-serve ') and line.endswith('--device=amdgpu') for line in readme.splitlines())
+          shutil.copyfile(package / 'README.md', output / 'gemma-e2b-README.md')
+          shutil.copyfile(package / 'info.json', output / 'gemma-e2b-info.json')
+          proof['sdk']['wheel_sha256'] = '0' * 64
+          card_lib.write_json(proof_path, proof)
+          fallback = output / 'gemma-e2b-stale-proof-info.json'
+          subprocess.run([*build, '-o', str(fallback)], check=True)
+          assert card_lib.load_json(fallback)['devices'][gpu]['quick_start'] == {
+              'preset': preset, 'device': card_lib.QUICK_START_DEVICE, 'args': ['--pool_backing=fixed']}
+          print('Gemma R9700 regeneration accepted authentic ABBA evidence and rejected a changed SDK wheel')
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sdk030-card-proof
+          path: proof
