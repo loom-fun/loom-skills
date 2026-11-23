@@ -9,10 +9,11 @@ jobs:
     if: github.head_ref == 'codex/sdk030-fleet-qualification' && github.event.label.name == 'devlab-experiment'
     name: ${{ matrix.device }} ${{ matrix.slug }}
     strategy:
+      max-parallel: 4
       fail-fast: false
       matrix:
         include:
-          - slug: bartowski-Qwen2.5-0.5B-Instruct-loom
+          - slug: ggml-org-LFM3-Omni-2B-loom
             device: radeon-r9700
             labels: '["self-hosted","devlab-dispatch","radeon-r9700"]'
     runs-on: ${{ fromJSON(matrix.labels) }}
