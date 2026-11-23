@@ -23,7 +23,7 @@ VARIANTS = {"split": {"MLA_DEC": "split"}, "pl1": {"MLA_DEC_PL": "1"}, "s32": {"
             "b2": {"MLA_DEC_BMIN": "2"}, "b1": {"MLA_DEC_BMIN": "1"}, "shslot": {"MOE_SHSLOT": "1"},
             "iq4q8": {"IQ4_Q8": "1"}, "wg1k": {"MV_WG1": "1024"}, "wg256": {"MV_WG1": "256"}, "moer4": {"MOE_R": "4"}, "moer1": {"MOE_R": "1"},
             "rt1": {"MOE_ROUTE_SPLIT": "0"}}
-CTXS = [("short", 300), ("2k", 2048), ("8k", 8192)]
+CTXS = [("short", 300, 1), ("2k", 2048, 1), ("8k", 8192, 1), ("c4", 1024, 4)]   # (tag, context, tokens = streams)
 ROLE_CTX = "short"   # role_<kernel> cases (host wall of that role's 39-40 launches alone) at this context
 OUT = None
 
@@ -53,10 +53,10 @@ def split_program(text):
     return lib, text[i:j]
 
 
-def specialize(body, ctx, pool):
+def specialize(body, ctx, pool, T=1):
     """[(kind, data)] in program order for the 1-token epoch: ("launch", line) / ("param", (ssa, name, type));
     vals: the static value of every index / offset / i32 / i1 SSA the body computes (tokens = spans = 1)."""
-    vals = {"%t": 1, "%spans": 1, "%context": ctx, "%pool": pool, "%logits_on": 0, "%logit_slots": 0}
+    vals = {"%t": T, "%spans": T, "%context": ctx, "%pool": pool, "%logits_on": 0, "%logit_slots": 0}
     allocs, out = {}, []
     stack = []   # [parent active, condition, in else]
 
@@ -134,30 +134,39 @@ def specialize(body, ctx, pool):
     return out, vals, allocs
 
 
-def origins(blocks):
-    o = np.zeros(10, np.int32)
-    o[8] = 40
-    return np.concatenate([o, np.arange(blocks, dtype=np.int32)])
+def origins(blocks, T=1):
+    """T rows: records (10 i32 each, the page map's byte offset at +32), then each row's page map (its own pages)"""
+    o = [np.zeros(10 * T, np.int32)]
+    for r in range(T):
+        o[0][10 * r + 8] = 40 * T + 4 * blocks * r
+    o += [np.arange(blocks, dtype=np.int32) + r * blocks for r in range(T)]
+    return np.concatenate(o)
 
 
-def step_case(lib, body, tag, ctx):
-    pool = (ctx + 15) // 16 * 16
-    seq, vals, allocs = specialize(body, ctx, pool)
+def step_case(lib, body, tag, ctx, T=1):
+    """one step of T tokens, one per row (T = 4: 4 streams, each at context ctx)"""
+    blocks = (ctx + 15) // 16
+    pool = blocks * 16 * T
+    seq, vals, allocs = specialize(body, blocks * 16, pool, T)
     L = 40
-    blocks = pool // 16
-    np.save(os.path.join(OUT, f"meta_{tag}.npy"), np.array([1, 0, 0, 0, 1, ctx - 1, 0, 0, 0, 0, 0, 0, 0], np.int32))
-    np.save(os.path.join(OUT, f"orig_{tag}.npy"), origins(blocks))
-    types = {"%metadata": "tensor<13xi32>", "%origins": f"tensor<{10 + blocks}xi32>", "%arena": f"tensor<{L * pool * 1152}xi8>",
+    meta = np.zeros(4 + 9 * T, np.int32)
+    meta[0] = T
+    for r in range(T):
+        meta[4 + 9 * r:4 + 9 * r + 5] = (1, ctx - 1, 0, r, r)
+    np.save(os.path.join(OUT, f"meta_{tag}.npy"), meta)
+    org = origins(blocks, T)
+    np.save(os.path.join(OUT, f"orig_{tag}.npy"), org)
+    types = {"%metadata": f"tensor<{len(meta)}xi32>", "%origins": f"tensor<{len(org)}xi32>", "%arena": f"tensor<{L * pool * 1152}xi8>",
              "%outputs": "tensor<4096xi8>", "%residual": "tensor<4096xi8>", "%tokens": "tensor<64xi8>"}
-    lines = [f'  %metadata = check.file.read.npy path("meta_{tag}.npy") : tensor<13xi32>',
-             f'  %origins = check.file.read.npy path("orig_{tag}.npy") : tensor<{10 + blocks}xi32>',
+    lines = [f'  %metadata = check.file.read.npy path("meta_{tag}.npy") : tensor<{len(meta)}xi32>',
+             f'  %origins = check.file.read.npy path("orig_{tag}.npy") : tensor<{len(org)}xi32>',
              f"  %arena = check.generate.fill value(0) : tensor<{L * pool * 1152}xi8>",
              "  %outputs = check.generate.fill value(0) : tensor<4096xi8>"]
     for b, n in allocs.items():
         n = max(int(n), 256)
         if b in ("%x", "%h"):
-            types[b] = "tensor<2048xf32>"
-            lines.append(f'  {b} = check.file.read.npy path("{b[1:]}0.npy") : tensor<2048xf32>')
+            types[b] = f"tensor<{T}x2048xf32>"
+            lines.append(f'  {b} = check.file.read.npy path("{b[1:]}{T - 1}.npy") : tensor<{T}x2048xf32>')
         else:
             types[b] = f"tensor<{n}xi8>"
             lines.append(f"  {b} = check.generate.fill value(0) : tensor<{n}xi8>")
@@ -261,8 +270,8 @@ def bench(variant):
     lib, body = split_program(program(variant))
     parts, kd = [strip_kernels(lib)], {}
     cases = []
-    for tag, ctx in CTXS:
-        kdefs, case = step_case(lib, body, tag, ctx)
+    for tag, ctx, T in CTXS:
+        kdefs, case = step_case(lib, body, tag, ctx, T)
         for k in kdefs:
             kd[re.search(r'export\("(\w+)"\)', k).group(1)] = k
         cases.append(case)
@@ -305,8 +314,9 @@ if __name__ == "__main__" and len(sys.argv) > 2:
     rng = np.random.default_rng(3)
     for i in range(40):
         np.save(os.path.join(OUT, f"router_{i}.npy"), rng.standard_normal(256 * 2048).astype(np.float32) * 0.05)
-    np.save(os.path.join(OUT, "x0.npy"), rng.standard_normal(2048).astype(np.float32))
-    np.save(os.path.join(OUT, "h0.npy"), rng.standard_normal(2048).astype(np.float32))
+    for T in (1, 4):
+        np.save(os.path.join(OUT, f"x{T - 1}.npy"), rng.standard_normal((T, 2048)).astype(np.float32))
+        np.save(os.path.join(OUT, f"h{T - 1}.npy"), rng.standard_normal((T, 2048)).astype(np.float32))
     for n in range(40):   # role cases: each layer's 8 distinct experts (int32, as the program's ids buffer, 256 bytes)
         e = np.zeros(64, np.int32); e[:8] = rng.choice(256, 8, replace=False)
         np.save(os.path.join(OUT, f"ids_{n}.npy"), e.view(np.int8))
