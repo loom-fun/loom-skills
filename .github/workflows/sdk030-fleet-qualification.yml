@@ -9,17 +9,11 @@ jobs:
     if: github.head_ref == 'codex/sdk030-fleet-qualification' && github.event.label.name == 'devlab-experiment'
     name: ${{ matrix.device }} ${{ matrix.slug }}
     strategy:
-      max-parallel: 3
+      max-parallel: 4
       fail-fast: false
       matrix:
         include:
-          - slug: InternScience-Sage-A1.5-loom
-            device: strix-halo
-            labels: '["self-hosted","devlab-dispatch","strix-halo","Linux"]'
-          - slug: ggml-org-Qwen3.6-35B-A3B-loom
-            device: strix-halo
-            labels: '["self-hosted","devlab-dispatch","strix-halo","Linux"]'
-          - slug: bartowski-Ornith-1.5-35B-A3B-loom
+          - slug: unsloth-Qwen3.5-35B-A3B-loom
             device: strix-halo
             labels: '["self-hosted","devlab-dispatch","strix-halo","Linux"]'
     runs-on: ${{ fromJSON(matrix.labels) }}
