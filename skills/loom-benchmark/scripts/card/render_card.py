@@ -1027,7 +1027,10 @@ def render(d):
             ev.append(key)
         res = (f"{YES} pass" if gt["status"] == "pass" else f"{NO} fail")
         return res + (f" ({gt['detail']})" if gt["detail"] else "") + f" {mark(ev.index(key) + 1)}"
+    vision_details = [(gpu_view(info, g)["gates"].get("vision", {}).get("detail") or "") for g in cols]
     for name, desc in GATES:
+        if name == "vision" and (c["file"].endswith(".safetensors") or any(d.startswith("vLLM ") for d in vision_details)):
+            desc = "Image input against the external reference model: identical prompt tokens, replies equal up to near-ties"
         L.append(f"| `{name}` | {desc} | " + " | ".join(gate_cell(g, name, desc) for g in cols) + " |")
     L.append("")
     for i, (sid, level, date) in enumerate(ev, 1):

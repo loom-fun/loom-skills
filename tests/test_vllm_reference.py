@@ -1,6 +1,8 @@
 """vLLM as the gates' reference engine for safetensors packages (vllm_shim.py): request/response mapping, a mock server
 answering bench_common's llama_greedy, and the cache identity. No GPU, no vLLM."""
 import base64
+import contextlib
+import io
 import json
 import os
 import sys
@@ -8,6 +10,7 @@ import tempfile
 import threading
 import unittest
 from pathlib import Path
+from unittest import mock
 
 SCRIPTS = Path(__file__).resolve().parents[1] / "skills/loom-benchmark/scripts"
 sys.path.insert(0, str(SCRIPTS))
@@ -121,6 +124,57 @@ class Identity(unittest.TestCase):
         finally:
             srv.shutdown()
             os.environ.pop("LLAMA_CACHE_BUILD")
+
+
+@need_bc
+class VisionReference(unittest.TestCase):
+    def measure(self, cfg, has_independent_alt=False, passes_on=None):
+        import vision_golden as vision
+
+        def read_reference(*args, salt="", server=None):
+            return {"tokens_evaluated": 10, "content": server or salt}
+
+        def judge(pkg, ref, got, views, engine):
+            views([])
+            status = "PASS" if ref["content"] == passes_on else "FAIL"
+            return status, f"{engine} and Loom diverged"
+
+        with tempfile.TemporaryDirectory() as temp, contextlib.chdir(temp), contextlib.redirect_stdout(io.StringIO()) as stdout, \
+                mock.patch.dict(os.environ, {"REFERENCE_ALT": "", "REFERENCE_CHECKPOINT": ""}), \
+                mock.patch.object(sys, "argv", ["vision_golden.py", "pkg"]), \
+                mock.patch.object(bc, "Package", return_value=Pkg(cfg)), \
+                mock.patch.object(bc, "cached", return_value=has_independent_alt) as cached, \
+                mock.patch.object(vision, "cases", return_value={"chart": ("data:,fake", "question", (1, 1))}), \
+                mock.patch.object(vision, "reference_body", return_value={}), \
+                mock.patch.object(vision, "reference", side_effect=read_reference) as references, \
+                mock.patch.object(vision, "prefill_view", return_value=None) as prefill, \
+                mock.patch.object(vision, "judge", side_effect=judge), \
+                mock.patch.object(vision, "request", return_value={}), \
+                mock.patch.object(vision.requests, "get") as models:
+            models.return_value.json.return_value = {"data": [{"id": "loom"}]}
+            with self.assertRaises(SystemExit) as exit_status:
+                vision.main()
+            row = json.loads(Path("vision_golden.json").read_text())[0]
+        summary = json.loads(stdout.getvalue().split("VISION_RESULT ")[-1])
+        return exit_status.exception.code, summary, row, references.call_args_list, prefill.call_args_list, cached.call_args.args[-1]
+
+    def test_vllm_failure_stays_visible_and_never_reuses_an_encoder_alias(self):
+        rc, summary, row, references, prefill, salt = self.measure(ST)
+        self.assertEqual((rc, summary["verdict"], summary["reference_engine"]), (1, "FAIL", "vLLM"))
+        self.assertIn("vLLM", row["detail"])
+        self.assertEqual(len(references), 1)
+        self.assertEqual([call.args[-1] for call in prefill], [None])
+        self.assertEqual(salt, "vllm-independent")
+
+    def test_independent_vllm_and_llamacpp_encoder_alternates_are_distinct(self):
+        rc, summary, row, refs, prefill, _ = self.measure(ST, has_independent_alt=True, passes_on="vllm-independent")
+        self.assertEqual((rc, summary["alt_decided"], refs[-1].kwargs), (0, ["chart"], {"salt": "vllm-independent"}))
+        self.assertTrue(all(call.args[-1] is None for call in prefill))
+        self.assertIn("vLLM's re-recording", row["detail"])
+        rc, summary, row, refs, prefill, _ = self.measure({"gguf": "model.gguf"}, passes_on="cpu-encoder")
+        self.assertEqual((rc, summary["reference_engine"], refs[-1].kwargs), (0, "llama.cpp", {"server": "cpu-encoder"}))
+        self.assertIn("cpu-encoder", [call.args[-1] for call in prefill])
+        self.assertIn("image encoder on the CPU", row["detail"])
 
 
 if __name__ == "__main__":

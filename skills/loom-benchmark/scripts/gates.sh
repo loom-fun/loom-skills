@@ -79,6 +79,8 @@ else
   export LLAMA_STOP="'$S/llamacpp_server.sh' --stop $lport"   # llama_fill.py restarts it for a request that needs other arguments
   defer=1   # one model at a time: references missing from the cache are filled with Loom stopped
 fi
+reference_engine=llama.cpp
+[ -n "$safetensors" ] && reference_engine=vLLM
 declare -A result secs done
 order=()
 # A gate that already PASSED on this exact build (same model.json + program/*.loom) is not re-run:
@@ -88,12 +90,16 @@ pkg_hash=$(cat "$pkg/model.json" "$pkg"/program/*.loom 2>/dev/null | sha256sum |
 passed_before() {  # passed_before NAME
   [ "${FORCE:-0}" = 1 ] && return 1
   [ -f gates_runs.jsonl ] || return 1
-  "$T" - "$pkg_hash" "$1" "$level" <<'PY'
+  "$T" - "$pkg_hash" "$1" "$level" "$reference_engine" <<'PY'
 import json, sys
-h, name, level = sys.argv[1], sys.argv[2], sys.argv[3]
-ok = any(r.get("pkg_hash") == h and r.get("gates", {}).get(name, {}).get("pass") and (level == "dev" or r.get("level") != "dev")
-         for r in map(json.loads, open("gates_runs.jsonl")))
-sys.exit(0 if ok else 1)
+h, name, level, engine = sys.argv[1:]
+for run in map(json.loads, open("gates_runs.jsonl")):
+    gate = run.get("gates", {}).get(name, {})
+    if name == "vision" and gate.get("reference_engine") != engine:
+        continue
+    if run.get("pkg_hash") == h and gate.get("pass") and (level == "dev" or run.get("level") != "dev"):
+        sys.exit(0)
+sys.exit(1)
 PY
 }
 pending=()
@@ -110,7 +116,7 @@ run() {  # run NAME CMD...: a gate whose llama.cpp references were all cached ge
   local rc=$?
   secs[$name]=$(( ${secs[$name]:-0} + $(date +%s) - t0 ))
   if [ -s "pending_$name.jsonl" ]; then
-    echo "   $(wc -l < "pending_$name.jsonl") llama.cpp references pending"; pending+=("$name"); return
+    echo "   $(wc -l < "pending_$name.jsonl") $reference_engine references pending"; pending+=("$name"); return
   fi
   tail -4 "gates_$name.log"; result[$name]=$rc; order+=("$name"); done[$name]=1
 }
@@ -214,14 +220,14 @@ for round in 1 2 3 4 5; do
   all_gates
   [ ${#pending[@]} = 0 ] && break
   # Re-recordings only become known once the first references exist, so this converges in a few rounds.
-  echo "== round $round: filling llama.cpp references for ${pending[*]} with Loom stopped ($(date +%T))"
+  echo "== round $round: filling $reference_engine references for ${pending[*]} with Loom stopped ($(date +%T))"
   loom_down
   files=(); for p in "${pending[@]}"; do files+=("pending_$p.jsonl"); done
   "$T" "$S/llama_fill.py" "$L" "${files[@]}" > llama_fill.log 2>&1; tail -1 llama_fill.log
   [ -n "$safetensors" ] && curl -s "$L/props" > reference.json   # engine, version, revision, quantization: the card states the reference
   rm -f "${files[@]}"
   if [ -n "$safetensors" ]; then "$S/vllm_server.sh" --stop "$lport"; else "$S/llamacpp_server.sh" --stop "$lport"; fi
-  loom_up || { echo "FAIL: could not restart Loom after the llama.cpp fill"; exit 1; }
+  loom_up || { echo "FAIL: could not restart Loom after the $reference_engine fill"; exit 1; }
 done
 for p in "${pending[@]}"; do result[$p]=1; order+=("$p"); echo "== $p: references still pending after 5 rounds (FAIL)"; done
 # Context admission probe (quick, full): the server is up here; a check, not a gate (see the header).
@@ -234,11 +240,15 @@ if [ "$level" = quick ] || [ "$level" = full ]; then
 fi
 args=()
 for n in "${order[@]}"; do args+=("$n" "${result[$n]}" "${secs[$n]}"); done
-"$T" - "$level${SPEC_ONLY:+-spec-only}" "$pkg_hash" $(( $(date +%s) - t_start )) "${args[@]}" <<'EOF'
+"$T" - "$level${SPEC_ONLY:+-spec-only}" "$pkg_hash" $(( $(date +%s) - t_start )) "$reference_engine" "${args[@]}" <<'EOF'
 import json, os, sys, time
-level, pkg_hash, total, rest = sys.argv[1], sys.argv[2], int(sys.argv[3]), sys.argv[4:]
+level, pkg_hash, total, reference_engine, rest = sys.argv[1], sys.argv[2], int(sys.argv[3]), sys.argv[4], sys.argv[5:]
 gates = {rest[i]: {"pass": rest[i + 1] == "0", "log": f"gates_{rest[i]}.log", "seconds": int(rest[i + 2])}
          for i in range(0, len(rest), 3)}
+if "vision" in gates:
+    gates["vision"]["reference_engine"] = reference_engine
+    if reference_engine == "vLLM":
+        gates["vision"]["detail"] = "vLLM reference with its default image encoder"
 admit = json.load(open("context_admit.json")) if os.path.exists("context_admit.json") else None
 verdict = "PASS" if all(g["pass"] for g in gates.values()) and (admit is None or admit["admitted"]) else "FAIL"
 out = {"verdict": verdict, "level": level, "pkg_hash": pkg_hash, "seconds": total,

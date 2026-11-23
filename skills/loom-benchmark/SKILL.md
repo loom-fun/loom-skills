@@ -135,6 +135,7 @@ closes the connection (no long prefill, no generation).
   re-recording and one with the image encoder on the CPU (`--no-mmproj-offload`; `llama_fill.py` restarts the
   server for it, `bench_common.SERVER_VARIANTS`): the encoder's rounding alone moved the first token of a text
   image by 5 nats (Ornith-1.5-35B-A3B `wide`: 'THE' by 2.4 nats on the GPU encoder, 'The' by 2.8 on the CPU one).
+  vLLM references use the engine's default encoder and its prefill view. `REFERENCE_ALT=record` can supply an independently recorded response from vLLM.
   The two are llama.cpp's own numerics, so following either one passes; a vision bug diverges from both.
   At each of those divergences the near-tie rule also gets llama.cpp's prefill views, as the text gates do
   (`llama_views`): the image and the reference's tokens before the divergence as one prompt, with the default encoder

@@ -43,4 +43,5 @@ for i, r in enumerate(queue):
     n = len(out.get("tokens") or out.get("completion_probabilities") or [])
     print(f"[fill {i + 1}/{len(todo)}] {len(r['body'].get('prompt', []))} prompt tokens -> {n} tokens"
           + (f" ({out['_suspect']})" if out.get("_suspect") else ""), flush=True)
-print(f"filled {len(todo)} llama.cpp references")
+engine = "vLLM" if os.environ.get("LLAMA_CACHE_BUILD", "").startswith("vllm-") else "llama.cpp"
+print(f"filled {len(todo)} {engine} references")

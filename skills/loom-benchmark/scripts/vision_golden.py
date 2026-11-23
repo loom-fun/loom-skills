@@ -1,4 +1,4 @@
-"""Image-input gate: Loom vs llama.cpp (llama-server --mmproj) on the same images and questions.
+"""Image-input gate: Loom and the selected reference engine on the same images and questions.
 
 usage: python vision_golden.py PACKAGE --url http://127.0.0.1:8160 --llama http://127.0.0.1:8130 [--images a.png,b.jpg] [--tokens 96]
                                 [--cases shapes,wide]   (a subset of the built-in images: gates.sh LEVEL=dev)
@@ -18,6 +18,7 @@ OpenAI chat request (an image_url part + a text part, greedy, thinking off). Per
     its first divergence from any of them is a near-tie: a vision bug diverges from all of them, early and by a wide gap.
 References go through bench_common.llama_completion: cached in $LLAMA_CACHE, deferred with
 $LLAMA_DEFER (gates.sh fills them with only llama.cpp loaded, started with MMPROJ=).
+For a vLLM reference, use its default encoder, a prefill view, and an independently recorded second response when available.
 Images: a built-in deterministic set (shapes + text, a chart, a dense text card, a photo-like gradient,
 a tall and a wide aspect ratio: they exercise resize, both grid directions and the token limits) plus
 --images. Prints per-case lines and VISION_RESULT {"verdict": "PASS"|"FAIL", ...}.
@@ -180,15 +181,15 @@ def cases(images_arg):
     return items
 
 
-def judge(pkg, ref, got, views_at=None):
-    """-> (status, detail). views_at(prefix_ids) -> llama.cpp's other views of the token after the prefix (prefill_view),
+def judge(pkg, ref, got, views_at=None, engine="llama.cpp"):
+    """-> (status, detail). views_at(prefix_ids) -> the reference's other views after the prefix (prefill_view),
     asked for only at a divergence the plain rule rejects."""
     from bench_common import near_tie, text_divergence, top_logprobs
     if got.get("error"):
         return "FAIL", got["error"]
     n_ref = ref.get("tokens_evaluated") or (ref.get("timings") or {}).get("prompt_n")
     if n_ref != got["prompt_tokens"]:
-        return "FAIL", f"prompt tokens differ: llama.cpp {n_ref} vs Loom {got['prompt_tokens']} (image token count, markers or rendering)"
+        return "FAIL", f"prompt tokens differ: {engine} {n_ref} vs Loom {got['prompt_tokens']} (image token count, markers or rendering)"
     cp = ref.get("completion_probabilities", []); gold = ref.get("tokens") or [x["id"] for x in cp]
     finished = got["finish"] == "stop"
     raws = [pkg.raw_from_chat(got["message"], finished, False)]
@@ -217,7 +218,7 @@ def judge(pkg, ref, got, views_at=None):
         nt = near_tie(top, gold[k], mine, views=views)
     gap = top.get(gold[k], 0) - top.get(mine, float("-inf"))
     gaps = [round(v[gold[k]] - v[mine], 2) for v in views if gold[k] in v and mine in v]
-    return ("PASS" if nt else "FAIL"), (f"diverged at token {k}: llama.cpp {pkg.tok.decode([gold[k]])!r} vs Loom "
+    return ("PASS" if nt else "FAIL"), (f"diverged at token {k}: {engine} {pkg.tok.decode([gold[k]])!r} vs Loom "
                                         f"{pkg.tok.decode([mine])!r} (gap {gap:.2f}{', near-tie' if nt else ''}"
                                         f"{f'; its prefill views {gaps}' if views else ''})")
 
@@ -240,41 +241,54 @@ def main():
         if unknown:
             raise SystemExit(f"unknown --cases {unknown}; have {sorted(items)}")
         items = {k: items[k] for k in want}
-    from bench_common import ALT_SALT_VISION, alt_record, cached, record_alt
+    from bench_common import ALT_SALT_VISION, alt_record, cached, record_alt, reference_identity
+    vllm = bool(reference_identity(pkg.cfg))
+    engine = "vLLM" if vllm else "llama.cpp"
+    # The vLLM key is written only by REFERENCE_ALT=record, which requires an existing primary recording.
+    alt_salt = "vllm-independent" if vllm else ALT_SALT_VISION
+    prefill_servers = (None,) if vllm else (None, "cpu-encoder")
     for name, (durl, q, size) in items.items():   # all references first: with LLAMA_DEFER they are queued
         refs[name] = reference(pkg, a.llama, durl, q, a.tokens)
         if alt_record():   # REFERENCE_ALT=record: the store's second recording of this case (the re-recording below reads it from the cache)
-            record_alt(a.llama, reference_body(pkg, durl, q, a.tokens), pkg, ALT_SALT_VISION, f" ({name})")
+            record_alt(a.llama, reference_body(pkg, durl, q, a.tokens), pkg, alt_salt, f" ({name})")
     if any(r.get("_pending") for r in refs.values()):
-        print("VISION_RESULT " + json.dumps({"verdict": "PENDING", "pending": sum(bool(r.get("_pending")) for r in refs.values())}))
+        print("VISION_RESULT " + json.dumps({"verdict": "PENDING", "reference_engine": engine,
+                                            "pending": sum(bool(r.get("_pending")) for r in refs.values())}))
         return 0
     if alt_record():   # a recording job: the references are all this run is for
-        print("VISION_RESULT " + json.dumps({"verdict": "RECORDED", "cases": len(items)}))
+        print("VISION_RESULT " + json.dumps({"verdict": "RECORDED", "reference_engine": engine, "cases": len(items)}))
         return 0
     model = requests.get(a.url + "/v1/models", timeout=30).json()["data"][0]["id"]
-    bad = []; rows = []; alt_decided = []; alt_stored = [n for n, (d, q, _) in items.items() if cached(reference_body(pkg, d, q, a.tokens), pkg, ALT_SALT_VISION)]
+    bad = []; rows = []; alt_decided = []; alt_stored = [n for n, (d, q, _) in items.items() if cached(reference_body(pkg, d, q, a.tokens), pkg, alt_salt)]
     for name, (durl, q, size) in items.items():
         got = request(a.url, model, durl, q, a.tokens)
-        def views_for(ref):   # llama.cpp's prefill views (default numerics, image encoder on the CPU) after the reference's tokens
+        def views_for(ref):
             n = ref.get("tokens_evaluated") or (ref.get("timings") or {}).get("prompt_n")
-            return lambda prefix: [v for v in (prefill_view(pkg, a.llama, durl, q, prefix, n, srv) for srv in (None, "cpu-encoder")) if v]
-        st, detail = judge(pkg, refs[name], got, views_for(refs[name]))
+            return lambda prefix: [v for v in (prefill_view(pkg, a.llama, durl, q, prefix, n, srv) for srv in prefill_servers) if v]
+        st, detail = judge(pkg, refs[name], got, views_for(refs[name]), engine)
         if st == "FAIL" and not got.get("error"):
-            for what, extra in (("re-recording", {"salt": ALT_SALT_VISION}), ("recording with its image encoder on the CPU", {"server": "cpu-encoder"})):
+            alternates = []
+            if not vllm or name in alt_stored:
+                alternates.append(("re-recording", {"salt": alt_salt}))
+            if not vllm:
+                alternates.append(("recording with its image encoder on the CPU", {"server": "cpu-encoder"}))
+            for what, extra in alternates:
                 alt = reference(pkg, a.llama, durl, q, a.tokens, **extra)
                 if alt.get("_pending"):
                     continue
-                st2, d2 = judge(pkg, alt, got, views_for(alt))
+                st2, d2 = judge(pkg, alt, got, views_for(alt), engine)
                 if st2 == "PASS":
-                    st, detail = "PASS", f"{d2} (matches llama.cpp's {what}; plain recording: {detail})"
+                    st, detail = "PASS", f"{d2} (matches {engine}'s {what}; plain recording: {detail})"
                     alt_decided.append(name)
                     break
         print(f"{st} {name} {size}: {detail}", flush=True)
         rows.append({"case": name, "status": st, "detail": detail, "loom": got.get("reasoning", "") + got.get("content", ""),
-                     "llama": refs[name].get("content", "")})
+                     "reference_engine": engine, "reference": refs[name].get("content", ""),
+                     **({"llama": refs[name].get("content", "")} if not vllm else {})})
         if st == "FAIL":
             bad.append(name)
-    print("VISION_RESULT " + json.dumps({"verdict": "FAIL" if bad else "PASS", "cases": len(rows), "failed": bad, "alt_stored": alt_stored, "alt_decided": alt_decided}))
+    print("VISION_RESULT " + json.dumps({"verdict": "FAIL" if bad else "PASS", "reference_engine": engine, "cases": len(rows),
+                                        "failed": bad, "alt_stored": alt_stored, "alt_decided": alt_decided}))
     json.dump(rows, open("vision_golden.json", "w"), indent=1)
     sys.exit(1 if bad else 0)
 
