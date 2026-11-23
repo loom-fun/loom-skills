@@ -361,6 +361,31 @@
       ],
       "device": "amdgpu://?completion_spin_ns=4294967295",
       "repeats": 3
+    },
+    {
+      "suite": "mla_xpf",
+      "dir": "mla_xpf",
+      "gen": "mla_xpf/gen_bench.py",
+      "gen_variants": [
+        "base",
+        "x"
+      ],
+      "files": [
+        "bench.loom",
+        "bench_x.loom"
+      ],
+      "tests": [
+        "test.loom"
+      ],
+      "config": [],
+      "args": [
+        "--measure=dispatch_complete",
+        "--batch-size=2",
+        "--profile-final-batch=true"
+      ],
+      "device": "amdgpu://?completion_spin_ns=4294967295",
+      "repeats": 3,
+      "case_timing": true
     }
   ]
 }

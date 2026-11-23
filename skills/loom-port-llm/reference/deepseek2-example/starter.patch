@@ -1,8 +1,6 @@
-diff --git a/build.py b/build.py
-index c5a221d..9b53598 100644
 --- a/build.py
 +++ b/build.py
-@@ -112,7 +112,9 @@ if DRAFT and DRAFT["kind"] == "dflash":
+@@ -112,7 +112,9 @@
  pos_bytes = 2 * max(cfg["kv_heads"] * (cfg.get("head_dim_swa") or cfg["head_dim"]),
                      (cfg.get("kv_heads_global") or cfg["kv_heads"]) * cfg["head_dim"])
  kv_layers = cfg.get("kv_layers", cfg["layers"])
@@ -13,7 +11,7 @@ index c5a221d..9b53598 100644
  if DRAFT and DRAFT["kind"] == "mtp":   # the MTP block's K/V shares the pool's pages
      kv_per_position += pos_bytes * 2 * len(cfg["mtp"]["layers"])
  if DRAFT and DRAFT["kind"] == "dflash":   # so does the drafter's context K/V
-@@ -453,8 +455,8 @@ def patch_role_suffixes(text):
+@@ -453,8 +455,8 @@
                 "        %role_suffix = scf.select %user, %suffix, %system_suffix : buffer\n"
                 "        %message = func.call @join4(%prefix, %text, %role_suffix, %empty)")
      # complete_text: the generated assistant turn
@@ -24,7 +22,7 @@ index c5a221d..9b53598 100644
  
  
  def patch_history_think_off(text):
-@@ -759,7 +761,7 @@ CALL_FORMATS = {"none": 0, "hermes": 1, "qwen_xml": 2, "glm": 3, "pythonic": 4,
+@@ -759,7 +761,7 @@
  custom_chat = os.path.join(HERE, "chat", chat["call_format"] + ".loom")
  custom_chat = custom_chat if chat["call_format"] not in CALL_FORMATS and os.path.exists(custom_chat) else None
  subs = {
@@ -33,7 +31,7 @@ index c5a221d..9b53598 100644
      "@@RECURRENT_BYTES@@": str(recurrent_bytes or 4),
      "@@LOGIT_REGION@@": "32768", "@@LOGIT_ROW_BYTES@@": str(((cfg["vocab"] + 127) // 128) * 512),   # gen_llm.LOGITS_OFFSET / CHUNKS * 512
      "@@MAX_CONTEXT@@": str(a.context), "@@TERMINAL@@": chat["terminal"], "@@HEX_TERMINAL@@": hx(chat["terminal"]),
-@@ -781,7 +783,7 @@ subs = {
+@@ -781,7 +783,7 @@
      "@@HEX_TOOLS_SYSTEM_SEPARATOR@@": hx(chat["tools_system_separator"]),
      "@@HEX_TOOL_TURN_PREFIX@@": hx(chat["tool_turn_prefix"]), "@@HEX_TOOL_ITEM_PREFIX@@": hx(chat["tool_item_prefix"]),
      "@@HEX_TOOL_ITEM_SUFFIX@@": hx(chat["tool_item_suffix"]), "@@HEX_TOOL_TURN_SUFFIX@@": hx(chat["tool_turn_suffix"]),
@@ -42,11 +40,9 @@ index c5a221d..9b53598 100644
      "@@HEX_CALL_MARKER@@": hx(chat.get("call_marker", "<tool_call>")),
      "@@DEFAULT_TEMPERATURE@@": repr(float(a.temperature)), "@@DEFAULT_TOP_P@@": repr(float(a.top_p)), "@@DEFAULT_TOP_K@@": str(a.top_k),
      "@@CALL_FORMAT@@": str(CALL_FORMATS[chat.get("base_call_format", "hermes") if custom_chat else chat["call_format"]]),
-diff --git a/chat_probe.py b/chat_probe.py
-index 6bc9d15..6c54872 100644
 --- a/chat_probe.py
 +++ b/chat_probe.py
-@@ -739,7 +739,7 @@ def simulate(chat, messages, tools=None, gen=False, enable_thinking=None, reason
+@@ -739,7 +739,7 @@
                  think = chat["think_open"] + chat["think_close"]
              calls = render_calls(chat, m.get("tool_calls") or [])
              text = "" if calls and chat.get("calls_drop_content") else text
@@ -55,11 +51,9 @@ index 6bc9d15..6c54872 100644
              out += chat["assistant_prefix"] + think + text + sep + calls + asst_suffix(chat)
          elif role == "user":
              out += chat["user_prefix"] + text + chat["suffix"]
-diff --git a/gen_flash2s.py b/gen_flash2s.py
-index 912402d..84ec80f 100644
 --- a/gen_flash2s.py
 +++ b/gen_flash2s.py
-@@ -27,6 +27,14 @@ import sys
+@@ -27,6 +27,14 @@
  _c = json.load(open(os.environ["LLM_CONFIG"]))
  P = "g"
  KVH, G, D = _c["kv_heads"], _c["heads"] // _c["kv_heads"], _c["head_dim"]
@@ -74,7 +68,7 @@ index 912402d..84ec80f 100644
  QH = KVH * G
  WINDOW = _c.get("sliding_window") or 262144
  GATE = bool(_c.get("attn_gate", False))
-@@ -55,13 +63,16 @@ KT = 32 if D == 256 and B_MODE != "2" else 16   # keys per tile (head_dim 512: K
+@@ -55,13 +63,16 @@
  if D == 256 and os.environ.get("FLASH2_KT256"):   # 16-key tiles at head_dim 256 (choice prefill.attn.flash2_kt256; gfx11 G = 6: two workgroups per WGP)
      KT = int(os.environ["FLASH2_KT256"])
  KB = KT // 16                     # 16-key blocks per tile
@@ -93,7 +87,7 @@ index 912402d..84ec80f 100644
  if D == 512 and os.environ.get("FLASH2_NG512"):   # experiment: query-head groups per KV head at head_dim 512 (more groups: fewer waves per workgroup, cheaper barriers)
      NG = int(os.environ["FLASH2_NG512"])
      assert G % NG == 0
-@@ -88,11 +99,15 @@ if KT == 16:
+@@ -88,11 +99,15 @@
      SEG_N = 2 * SEG_N
  while KT * SEG_N > LANES and SEG_N > 8 and B_MODE != "2":   # FLASH2_NG256 groups: fewer lanes, wider segments
      SEG_N //= 2
@@ -112,7 +106,7 @@ index 912402d..84ec80f 100644
  
  POSHI = """  // The last live position of the block: keys past it are not written yet (stale memory, possibly NaN), so they are
    // staged as zeros, which the causal mask already gives zero weight.
-@@ -238,7 +253,7 @@ A(f'''kernel.def export("{P}_attention_flash2") @{P}_attention_flash2(%tokens: i
+@@ -238,7 +253,7 @@
    %pos_last = index.add %pos0, %c15 : index
  {POSHI if PARTIAL else ""}  %padded = index.add %context, %c15 : index
    %blocks = index.div %padded, %c16 : index
@@ -121,7 +115,7 @@ index 912402d..84ec80f 100644
    %is_sliding = scalar.cmpi ne, %sliding, %c0_i32 : i32
    %window = index.constant {WINDOW} : index
    %window_less = index.constant {WINDOW - 1} : index
-@@ -276,13 +291,16 @@ A(f'''kernel.def export("{P}_attention_flash2") @{P}_attention_flash2(%tokens: i
+@@ -276,13 +291,16 @@
    %s_view = buffer.view %s_tile[%origin] : buffer -> view<{WAVES * KB * 16}x16xf32>
  
    // This wave's half of Q^T as MMA rhs, held for the whole key loop: lane column = token, 16 dims each.
@@ -144,7 +138,7 @@ index 912402d..84ec80f 100644
    %qh{c} = vector.fptrunc %qraw{c} : vector<16xf32> to vector<16xf16>
    %qf{c} = vector.fragment<rhs> %qh{c} shape [%c16, %c16] : vector<16xf16>''')
  A(f'''  %zero8 = vector.splatf 0.0 : vector<8xf32>
-@@ -316,11 +334,12 @@ A(f'''  %zero8 = vector.splatf 0.0 : vector<8xf32>
+@@ -316,11 +334,12 @@
    %st_seg = index.min %st_seg_value, %cseg_last : index
    %cseg_w = index.constant {SEG_W} : index
    %st_dim_value = index.mul %st_seg, %cseg_w : index
@@ -159,7 +153,7 @@ index 912402d..84ec80f 100644
  if WPH == 2:
      A(f'''  // S exchange slots: mine and my partner's (wave ^ 1).
    %my_s = index.mul %wave, %c{32 if KB == 2 else 16} : index
-@@ -351,10 +370,10 @@ A(f'''  %m_final, %l_final, {", ".join(f"%o{d}" for d in range(NFH))} = scf.for
+@@ -351,10 +370,10 @@
          %kp = index.assume %key_pos [range(%key_pos, 0, 262143)] : index
          %k_offset = func.call @{P}_kv_offset(%origins, %row, %kp, %blocks, %k_plane, %pool) : (buffer, index, index, index, index, index) -> (offset)
          %v_offset = index.add %k_offset, %v_plane_delta : offset
@@ -174,7 +168,7 @@ index 912402d..84ec80f 100644
          scf.yield %kh, %vh : vector<{SEG_W}xf16>, vector<{SEG_W}xf16>
        }} else {{
          scf.yield %kz, %kz : vector<{SEG_W}xf16>, vector<{SEG_W}xf16>
-@@ -363,8 +382,8 @@ A(f'''  %m_final, %l_final, {", ".join(f"%o{d}" for d in range(NFH))} = scf.for
+@@ -363,8 +382,8 @@
        scf.for %j = [%c0 to %cseg_w step %c1] unroll {{
          %vj = vector.extract %vvals[%j] : vector<{SEG_W}xf16> -> f16
          %vt_row_value = index.add %st_dim, %j : index
@@ -185,7 +179,7 @@ index 912402d..84ec80f 100644
        }}
      }}
      kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
-@@ -372,19 +391,19 @@ A(f'''  %m_final, %l_final, {", ".join(f"%o{d}" for d in range(NFH))} = scf.for
+@@ -372,19 +391,19 @@
  SV = f"view<{WAVES * KB * 16}x16xf32>"
  for kb in range(KB):
      accn = "%init"
@@ -209,7 +203,7 @@ index 912402d..84ec80f 100644
      else:          # all of the head's partials, in wave order
          A("\n".join(f"    %sp{kb}_{j} = vector.fragment.load<result> %s_view[%part{j}_s, %c0] shape [%c16, %c16] : {SV} -> vector<8xf32>"
                      for j in range(WPH)))
-@@ -493,10 +512,10 @@ A('''    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+@@ -493,10 +512,10 @@
    %one_f = scalar.constant 1.0 : f32
    %inv_l = scalar.divf %one_f, %l_final : f32
    %inv_v = vector.splat %inv_l : vector<8xf32>
@@ -222,7 +216,7 @@ index 912402d..84ec80f 100644
    %head_col = index.mul %head, %cdim : index
    %head_half = index.add %head_col, %dim_base : index
    %out_first = index.add %out_first_a, %head_half : index
-@@ -529,9 +548,9 @@ if PARTIAL:
+@@ -529,9 +548,9 @@
    %one_f = scalar.constant 1.0 : f32
    %inv_l = scalar.divf %one_f, %l_final : f32
    %inv_v = vector.splat %inv_l : vector<8xf32>
@@ -235,7 +229,7 @@ index 912402d..84ec80f 100644
    %head_col = index.mul %head, %cdim : index
    %head_half = index.add %head_col, %dim_base : index
    %col_base = index.add %head_half, %lane_half : index
-@@ -551,7 +570,7 @@ if PARTIAL:
+@@ -551,7 +570,7 @@
          for i in range(8):
              E.append(f"    %ov{d}_{i} = vector.extract %of{d}[%e{i}] : vector<8xf32> -> f32\n"
                       + ("" if GATE else f"    %dc{d}_{i} = index.constant {d * 16 + 2 * i} : index\n    %dm{d}_{i} = index.add %col_base, %dc{d}_{i} : index\n    %dn{d}_{i} = index.assume %dm{d}_{i} [lt(%dm{d}_{i}, %cqd)] : index\n")
@@ -244,11 +238,9 @@ index 912402d..84ec80f 100644
      E.append("  }\n")
      text = text[:i0] + "\n".join(E) + text[i1:]
      text = text.replace(f'"{P}_attention_flash2") @{P}_attention_flash2(', f'"{P}_attention_flash2_partial") @{P}_attention_flash2_partial(', 1)
-diff --git a/gen_llm.py b/gen_llm.py
-index 1ea6dec..ac05749 100644
 --- a/gen_llm.py
 +++ b/gen_llm.py
-@@ -81,12 +81,23 @@ G = QH // KVH                             # query heads per KV head (waves per a
+@@ -81,12 +81,25 @@
  # Prefill flash attention (gen_flash2.py) tiles head_dim over 32*G lanes: it needs a power-of-two group.
  # Otherwise (Qwen3.8: 6) every prefill token takes the listed split-K path (correct, slower prefill).
  NO_FLASH = os.environ.get("NO_FLASH2") == "1"
@@ -262,6 +254,8 @@ index 1ea6dec..ac05749 100644
 +    MLA_G = gen_mla.geometry(CFG)
 +    assert D == MLA_G["D"] and KVH == 1 and D % 32 == 0
 +    NO_FLASH = NO_FLASH or not gen_mla.flash_on()
++    import gen_mla_x  # noqa: E402
++    MLA_X = gen_mla_x.on() and not NO_FLASH   # expanded-MLA prefill attention (gen_mla_x.py) for the long segments' tiles
 +assert D in (64, 128, 256) or MLA, "attention kernels support head_dim 64, 128 or 256 (lane l owns dims l, l+32, ...)"
  DL = D // 32                              # head dims per lane in the attention kernels
  RD = CFG.get("rope_dims") or D            # rotary dims (partial RoPE rotates the first RD dims)
@@ -274,7 +268,7 @@ index 1ea6dec..ac05749 100644
  import attn_rules  # noqa: E402  decode attention variants (ATTN_* env), shared with make_kernel_tests.py
  from attn_rules import UNROLL, ATTN_MT, ATTN_MT_FROM  # noqa: E402
  POS_BYTES = KVH * D * 2                   # F16 K (or V) bytes per position
-@@ -4097,9 +4108,35 @@ def attention():
+@@ -4097,9 +4110,35 @@
      dec, _, _ = attention_text(64, "g")
      pre, split_l, combine_l = attention_text(16, "g16")
      count16 = pre[pre.index("// Splits for"):pre.index('kernel.def export("g16_attention_split")')]
@@ -310,7 +304,7 @@ index 1ea6dec..ac05749 100644
  FALLBACK = r"""
  // Prefill attention work lists, built once per epoch from the token info. A token's path depends only on its own
  // run (a run of one row's consecutive positions), never on where the epoch packs it or where the scheduler cut the
-@@ -5092,6 +5129,8 @@ NVAL = {"%nQH": QH, "%nQKV": (QH + 2 * KVH) * D, "%nH": H, "%nFF": FF, **({} if
+@@ -5092,6 +5131,8 @@
  NVAL.update({f"%nQ{h}": h * D for h in NARROW} | {f"%nQH{h}": h for h in NARROW})   # narrower layer_heads layers
  if GDN:
      NVAL.update({"%nC": GDN["C"], "%nVD": GDN["VD"], "%nHV": GDN["HV"]})
@@ -319,7 +313,7 @@ index 1ea6dec..ac05749 100644
  from mv_rows import pick_r, iq_r  # noqa: E402  (shared with make_kernel_tests.py)
  
  
-@@ -5298,7 +5337,7 @@ USED_MOEF = set()
+@@ -5298,7 +5339,7 @@
  def moe_iq(gu, fd, x):
      """Whether this layer's decode expert matvecs take int8 activations (needs the router input as %h: its h16q)."""
      return (ACT_Q8 and MOE_Q8 and x == "%h" and "+" not in gu and gu in IQ_FMTS and fd in IQ_FMTS
@@ -328,7 +322,7 @@ index 1ea6dec..ac05749 100644
              and H // 32 <= 1024 and MOE["ffn"] // 32 <= 1024 and not MOE.get("expert_bias"))
  
  
-@@ -5977,6 +6016,58 @@ def last_out_select(text):
+@@ -5977,6 +6018,89 @@
      return (head + sizes + "  scf.if %outsel {\n" + gather + comp + scatter + "  } else {\n" + tail + "  }\n")
  
  
@@ -359,7 +353,7 @@ index 1ea6dec..ac05749 100644
 +    kernel.launch @g_mla_kb_{kb}[%t](%t, %qb, %wkb_{i}, %q) : [index](index, buffer, view<{sz("attn_k_b")}xi8>, buffer)
 +  }}
 +  scf.if %gemm {{
-+    kernel.launch @g_attention_flash2[%t](%t, %layer_{i}, %sliding_{i}, %context, %pool, %q, %q, %info, %flash_tiles, %origins, %arena, %o) : [index](index, index, i32, index, index, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
++{{XEXP}}    kernel.launch @g_attention_flash2[%t](%t, %layer_{i}, %sliding_{i}, %context, %pool, %q, %q, %info, %flash_tiles, %origins, %arena, %o) : [index](index, index, i32, index, index, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
 +    kernel.launch @g16_attention_split_listed[%fallback_count](%t, %fallback_list, %layer_{i}, %sliding_{i}, %context, %pool, %q, %info, %origins, %arena, %pacc, %pml) : [buffer](index, buffer, index, i32, index, index, buffer, buffer, buffer, buffer, buffer, buffer)
 +    kernel.launch @g16_attention_combine_listed[%fallback_count](%t, %fallback_list, %sliding_{i}, %info, %pacc, %pml, %q, %o) : [buffer](index, buffer, i32, buffer, buffer, buffer, buffer, buffer)
 +  }} else {{
@@ -368,13 +362,19 @@ index 1ea6dec..ac05749 100644
 +  }}
 +  scf.if %gemm {{
 +    kernel.launch @g_mla_vbm_{vb}[%t](%t, %o, %wvb_{i}, %vo) : [index](index, buffer, view<{sz("attn_v_b")}xi8>, buffer)
-+  }} else {{
++{{XFLASH}}  }} else {{
 +    kernel.launch @g_mla_vb_{vb}[%t](%t, %o, %wvb_{i}, %vo) : [index](index, buffer, view<{sz("attn_v_b")}xi8>, buffer)
 +  }}
 +  scf.if %gemm {{
 +    kernel.launch @g_row_scale_f16[%t](%t, %nVO, %vo, %s_vo, %vo16) : [index](index, index, buffer, buffer, buffer)
 +  }}
 +""")
++    xexp = xflash = ""
++    if MLA_X:   # gen_mla_x.py: expansion weights + scratch of the epoch's expanded segments, then their flash (after v_b: it overwrites vo)
++        xexp = (f"    kernel.launch @g_mla_xdeq[%c1](%c1, %wkb_{i}, %wvb_{i}, %xw) : [index](index, view<{sz('attn_k_b')}xi8>, view<{sz('attn_v_b')}xi8>, buffer)\n"
++                f"    kernel.launch @g_mla_xexp[%xcnt](%t, %layer_{i}, %context, %pool, %xb, %origins, %arena, %xw, %xk, %xv, %xpe) : [buffer](index, index, index, index, buffer, buffer, buffer, buffer, buffer, buffer, buffer)\n")
++        xflash = "    kernel.launch @g_mla_xflash[%xcnt](%t, %xq, %info, %qb, %q, %xk, %xv, %xpe, %vo) : [buffer](index, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)\n"
++    T[-1] = T[-1].replace("{XEXP}", xexp).replace("{XFLASH}", xflash)
 +    if NO_FLASH:
 +        T[-1] = re.sub(r"    kernel\.launch @g_attention_flash2\[.*\n", "    // flash prefill off (MLA_FLASH=0 build): every prefill token takes the listed split-K kernels\n", T[-1], count=1)
 +    T.append("  " + lin(f("attn_output"), "%vo", "%s_vo", f"%wo_{i}", sz("attn_output"), "%y", "%nVO", "%nH", QH * g["VD"]) + "\n")
@@ -384,10 +384,35 @@ index 1ea6dec..ac05749 100644
 +MLA_FMTS = set()   # (k_b format, v_b format) pairs the MLA layers use
 +
 +
++def mla_x_alloc():
++    """Expanded-MLA (gen_mla_x.py) buffers of the epoch and its work lists (after the flash2 tile list: g_mla_xlist takes the
++    long segments' tiles out of it)."""
++    if not (MLA and MLA_X):
++        return ""
++    xk, xv, xpe, xw = gen_mla_x.scratch_bytes(CFG)
++    return f"""  %xq_bytes = index.constant {512 * 16} : offset
++  %xb_bytes = index.constant {gen_mla_x.XB_MAX * 16} : offset
++  %xk_bytes = index.constant {xk} : offset
++  %xv_bytes = index.constant {xv} : offset
++  %xpe_bytes = index.constant {xpe} : offset
++  %xw_bytes = index.constant {xw} : offset
++  %xq = buffer.alloca<global> align(256) %xq_bytes : buffer
++  %xb = buffer.alloca<global> align(256) %xb_bytes : buffer
++  %xcnt = buffer.alloca<global> align(256) %count_size : buffer
++  %xk = buffer.alloca<global> align(256) %xk_bytes : buffer
++  %xv = buffer.alloca<global> align(256) %xv_bytes : buffer
++  %xpe = buffer.alloca<global> align(256) %xpe_bytes : buffer
++  %xw = buffer.alloca<global> align(256) %xw_bytes : buffer
++  scf.if %gemm {{
++    kernel.launch @g_mla_xlist[%t](%t, %info, %flash_tiles, %xq, %xb, %xcnt) : [index](index, buffer, buffer, buffer, buffer, buffer)
++  }}
++"""
++
++
  MODEL_PARTS = {}   # model() records its pieces here for the speculative-decoding programs (draft/gen_draft.py)
  
  
-@@ -6157,6 +6248,15 @@ command.def public @llm_advance() launch(%weights: buffer, %residual: buffer, %m
+@@ -6157,6 +6281,15 @@
          L_.append(f"  %nC = index.constant {g['C']} : index\n  %nVD = index.constant {g['VD']} : index\n  %nHV = index.constant {g['HV']} : index\n")
      if not QK_NORM:
          L_.append("  %no_norm = buffer.alloca<global> align(256) %row_bytes : buffer\n")
@@ -403,7 +428,16 @@ index 1ea6dec..ac05749 100644
      if MOE:   # its own part: the MTP drafter programs reuse the prologue (all parts but the last), MoE layer included
          L_.append("\n" + moe_alloc())
      L_.append(f"""{"" if MOE else chr(10)}  kernel.launch @g_token_info[%t](%t, %spans, %metadata, %info) : [index](index, index, buffer, buffer)
-@@ -6195,11 +6295,13 @@ command.def public @llm_advance() launch(%weights: buffer, %residual: buffer, %m
+@@ -6169,7 +6302,7 @@
+   scf.if %gemm {{
+     kernel.launch @g_attention_fallback_list[%t](%t, %info, %flash_tiles, %fallback_list, %fallback_count) : [index](index, buffer, buffer, buffer, buffer)
+   }}
+-  %embedding = command.parameter %weights, "token_embd.weight" : view<{esize}xi8>
++{mla_x_alloc()}  %embedding = command.parameter %weights, "token_embd.weight" : view<{esize}xi8>
+   %first_norm = command.parameter %weights, "blk.0.attn_norm.weight" : view<{H}xf32>
+   kernel.launch @g_embed[%t](%t, %tokens{", %metadata, %info" if VISION else ""}, %embedding, %first_norm, %x, %h) : [index](index, buffer{", buffer, buffer" if VISION else ""}, view<{esize}xi8>, view<{H}xf32>, buffer, buffer)
+   %output_norm = command.parameter %weights, "output_norm.weight" : view<{H}xf32>
+@@ -6195,11 +6328,13 @@
              T.append(par("sinks", "attn_sinks", f"view<{QH}xf32>"))
          if i in RECUR:
              T.append(gdn_layer(i, b, nm, sz, par))
@@ -418,7 +452,7 @@ index 1ea6dec..ac05749 100644
              pass
          elif GATE and not FUSED_Q:
              T.append(par("wg", "attn_gate"))
-@@ -6215,7 +6317,7 @@ command.def public @llm_advance() launch(%weights: buffer, %residual: buffer, %m
+@@ -6215,7 +6350,7 @@
          # same format and size: one dual-weight launch at 8/16 tokens (PAIR_PROJ)
          same = lambda a, b: fmt_of(nm(a)) == fmt_of(nm(b)) and sz(a) == sz(b)
          qg = GATE and not FUSED_Q and not HEAD_GATE and not QKV_FUSED and i not in RECUR and same("attn_q", "attn_gate") and PAIR_PROJ in ("1", "qg")
@@ -427,7 +461,7 @@ index 1ea6dec..ac05749 100644
              pass
          elif QKV_FUSED:
              T.append("  " + lin(fmt_of(nm("attn_qkv")), "%h", "%s_h", f"%wqkv_{i}", sz("attn_qkv"), "%qkv", "%nH", "%nQKV", H) + "\n")
-@@ -6224,7 +6326,7 @@ command.def public @llm_advance() launch(%weights: buffer, %residual: buffer, %m
+@@ -6224,7 +6359,7 @@
              T.append("  " + lin2(fmt_of(nm("attn_q")), "%h", "%s_h", f"%wq_{i}", f"%wg_{i}", sz("attn_q"), "%q", "%gate", "%nH", "%nQ", H) + "\n")
          else:
              T.append("  " + lin(fmt_of(nm("attn_q")), "%h", "%s_h", f"%wq_{i}", sz("attn_q"), "%q", "%nH", nq, H) + "\n")
@@ -436,7 +470,7 @@ index 1ea6dec..ac05749 100644
            pass
          elif same("attn_k", "attn_v") and PAIR_PROJ in ("1", "kv"):
            T.append("  " + lin2(fmt_of(nm("attn_k")), "%h", "%s_h", f"%wk_{i}", f"%wv_{i}", sz("attn_k"), "%k", "%v", "%nH", "%nKV", H) + "\n")
-@@ -6239,7 +6341,7 @@ command.def public @llm_advance() launch(%weights: buffer, %residual: buffer, %m
+@@ -6239,7 +6374,7 @@
          qn, kn = (f"%q_norm_{i}", f"%k_norm_{i}") if QK_NORM else ("%no_norm", "%no_norm")
          gate, gty = (f"%sinks_{i}", f"view<{QH}xf32>") if SINKS else (gate0, "buffer")
          nty = f"view<{D}xf32>" if QK_NORM else "buffer"
@@ -445,7 +479,7 @@ index 1ea6dec..ac05749 100644
            rope_k = "g_qk_rope_store_swa" if SWA_ROPE and i in sliding else "g_qk_rope_store"
            T.append(f"""  kernel.launch @{rope_k}[%t](%t, %layer_{i}, %rope_{i}, %context, %pool, %q, %k, %v, {qn}, {kn}, %info, %origins, %arena{", %metadata, %tokens" if MROPE else ""}{bias_args}) : [index](index, index, i32, index, index, buffer, buffer, buffer, {nty}, {nty}, buffer, buffer, buffer{", buffer, buffer" if MROPE else ""}{bias_types})
    scf.if %gemm {{
-@@ -6255,7 +6357,7 @@ command.def public @llm_advance() launch(%weights: buffer, %residual: buffer, %m
+@@ -6255,7 +6390,7 @@
    }}
  """)
  
@@ -454,7 +488,7 @@ index 1ea6dec..ac05749 100644
            T.append("  " + lin(fmt_of(nm("attn_output")), "%o", "%s_o", f"%wo_{i}", sz("attn_output"), "%y", nq, "%nH", qd) + "\n")
            if OUT_BIAS:   # attention output projection bias (gpt-oss attn_output.bias)
              T.append(f'  %bo_{i} = command.parameter %weights, "{b}attn_output.bias" : view<{H}xf32>\n'
-@@ -6457,7 +6559,7 @@ if __name__ == "__main__":
+@@ -6457,7 +6592,7 @@
          from gen_mxfp4s import mxfp4s_icodes as _mx_icodes
          COMMON += _mx_icodes()
      if USED_MVQ or USED_MOEQ or PH_ONLY:   # ACT_Q8: int8-activation matvecs, their weight-code helpers and g_quant_q8
@@ -463,7 +497,7 @@ index 1ea6dec..ac05749 100644
              COMMON += IQ4_ICODES
          COMMON += ICODES + "".join(mv(fmt, K, R=R, TG=TG, swiglu=sw == 1, pair=sw == 2, suffix=f"_r{R}" if R != 16 else "", iq=True)
                                     for fmt, K, sw, R, TG in sorted(USED_MVQ))
-@@ -6515,8 +6617,10 @@ if __name__ == "__main__":
+@@ -6515,8 +6650,14 @@
              parts.append(mv(fmt, K, TG=TG, swiglu=sw))
      for fmt, K, sw, R, TG in sorted(USED_MV_R):
          parts.append(mv(fmt, K, R=R, TG=TG, swiglu=sw, suffix=f"_r{R}"))
@@ -472,10 +506,14 @@ index 1ea6dec..ac05749 100644
                head(), head_mv(1, head_fmt), head_mv(4, head_fmt)]
 +    if MLA:
 +        parts.append(gen_mla.kernels(CFG, EPS, THETA, L, FMT, SB, row_bytes, sorted({a for a, _ in MLA_FMTS}), sorted({b for _, b in MLA_FMTS})))
++        if MLA_X:
++            assert len(MLA_FMTS) == 1, MLA_FMTS
++            (_kbf, _vbf), = MLA_FMTS
++            parts.append(gen_mla_x.kernels(CFG, L - 1, _kbf, _vbf, row_bytes(_kbf, MLA_G["NOPE"]), row_bytes(_vbf, MLA_G["KL"]), FMT[_kbf], FMT[_vbf]))
      if FUSED_Q:
          parts.append(split_qgate(QH, D))
      if SWA_ROPE:
-@@ -6567,8 +6671,9 @@ if __name__ == "__main__":
+@@ -6567,8 +6708,9 @@
      parts.append(open(os.path.join(here, "tile_uniform.loom")).read())
      if not NO_FLASH:
          flash2 = os.path.join(out_dir, "flash2.loom")
@@ -487,11 +525,9 @@ index 1ea6dec..ac05749 100644
          parts.append(open(flash2).read())
          for h in NARROW:   # narrower layers' flash prefill: the same generator at their head count
              hcfg, hout = (os.path.join(out_dir, f"flash2_h{h}.{x}") for x in ("json", "loom"))
-diff --git a/gen_moe.py b/gen_moe.py
-index 0e507b4..a7395f4 100644
 --- a/gen_moe.py
 +++ b/gen_moe.py
-@@ -14,9 +14,11 @@ g_moe_combine      y[t, H]   = sg[t] * y[t, :] + sum_k wts[t, k] ys[t*KU + k, :]
+@@ -14,9 +14,11 @@
  """
  import os
  import re
@@ -505,11 +541,9 @@ index 0e507b4..a7395f4 100644
  GATE_NAME = {1: "softmax(logits)", 2: "sigmoid(logit)", 3: "logit"}   # llama.cpp's expert_gating_func values
  # gating 3 (SOFTMAX_WEIGHT): `bias` is the router's own bias (ffn_gate_inp.bias, added to the logits before the top-k)
  # and the k weights are a softmax over the k picked logits.
-diff --git a/inspect_gguf.py b/inspect_gguf.py
-index d2c3ee8..9b092f3 100644
 --- a/inspect_gguf.py
 +++ b/inspect_gguf.py
-@@ -94,7 +94,7 @@ if layer_heads:
+@@ -94,7 +94,7 @@
      cfg["layer_heads"] = layer_heads[:L]
      print(f"query heads per layer: {sorted(set(layer_heads))}")
  if arch not in ("llama", "mistral", "granite", "qwen2", "qwen3", "qwen35", "qwen3next", "gemma3", "gemma4", "phi3",
@@ -518,7 +552,7 @@ index d2c3ee8..9b092f3 100644
      print(f"WARNING: arch {arch!r} is unknown to the starter: rope_type '{cfg['rope_type']}' is a guess (neox pairs d/d+D/2, "
            "norm pairs 2d/2d+1; llama4-style models are norm). Check llama.cpp's src/models/<arch>.cpp (LLAMA_ROPE_TYPE_*) "
            "before trusting a golden FAIL or PASS")
-@@ -149,6 +149,29 @@ if A("rope.scaling.type") == "yarn" and (A("rope.scaling.factor") or 1.0) > 1.0:
+@@ -149,6 +149,29 @@
      if arch in ("mellum",) and cfg["sliding_layers"]:
          cfg["rope_scaling_swa"] = "none"
      print("rope scaling:", cfg["rope_scaling"], "(global layers only)" if cfg.get("rope_scaling_swa") else "")
@@ -548,7 +582,7 @@ index d2c3ee8..9b092f3 100644
  # The FFN's pre-norm stored as post_attention_norm (gpt-oss: attn_post_norm normalizes ffn_inp; no ffn_norm and no
  # Gemma-style post_ffw_norm): it is the FFN norm, not a post-attention norm.
  if ("blk.0.ffn_norm.weight" not in tensors and "blk.0.post_attention_norm.weight" in tensors
-@@ -286,7 +309,10 @@ cfg["attn_sinks"] = "blk.0.attn_sinks.weight" in tensors
+@@ -286,7 +309,10 @@
  # instead of writing them to the GGUF; MOE_DEFAULTS mirrors src/models/<arch>.cpp (build_moe_ffn's norm_w and gating).
  MOE_DEFAULTS = {"qwen3moe": {"gating": 1, "norm_weights": True}, "qwen35moe": {"gating": 1, "norm_weights": True},
                  "qwen3next": {"gating": 1, "norm_weights": True}, "qwen2moe": {"gating": 1, "norm_weights": False},
@@ -560,7 +594,7 @@ index d2c3ee8..9b092f3 100644
                  # gpt-oss: SOFTMAX_WEIGHT (top-k of the biased logits, softmax over the k), LLM_FFN_SWIGLU_OAI_MOE
                  "gpt-oss": {"gating": 3, "norm_weights": False, "act": "swiglu_oai", "swiglu_alpha": 1.702, "swiglu_limit": 7.0}}
  if A("expert_count"):
-@@ -364,7 +390,7 @@ print(f"{cfg['name']}: arch={arch} L={L} H={H} heads={heads}/{cfg['kv_heads']} d
+@@ -364,7 +390,7 @@
  unsupported = [f for f in fmts if f not in formats.DECODES]   # what gen_llm.py decodes (formats.py)
  if unsupported:
      print("WARNING: no kernels for", unsupported, "- add dequant helpers (see the loom-kb `porting` topic)")
@@ -569,11 +603,9 @@ index d2c3ee8..9b092f3 100644
      print("WARNING: head_dim", head_dim, "is not 64, 128 or 256: the attention kernels support only those")
  if cfg["chat"] is None:
      print("WARNING: no chat block; fill it by hand from tokenizer.chat_template (fields: see chat_probe.py)")
-diff --git a/ktest_more.py b/ktest_more.py
-index 370f722..d7f61a9 100644
 --- a/ktest_more.py
 +++ b/ktest_more.py
-@@ -117,9 +117,14 @@ def moe_combine_case(save, rng, k):
+@@ -117,9 +117,14 @@
      T = 3
      ys = rng.standard_normal((T, KU, W)).astype(np.float32)
      wts = rng.random((T, KU)).astype(np.float32)
@@ -590,11 +622,9 @@ index 370f722..d7f61a9 100644
      return c.text()
  
  
-diff --git a/make_kernel_tests.py b/make_kernel_tests.py
-index c485393..0d148d7 100644
 --- a/make_kernel_tests.py
 +++ b/make_kernel_tests.py
-@@ -26,6 +26,8 @@ _MIXED_FMTS = {"q4_k", "q5_k", "q6_k"} | ({"iq4_xs"} if _IQ4_NATIVE else set())
+@@ -26,6 +26,8 @@
  from gen_gemm_rdna4 import f16o_swiglu as _f16o_on  # noqa: E402  formats with no 256-row (_m256) GEMM
  ACT_Q8 = os.environ.get("ACT_Q8", "1") == "1"   # gen_llm.py's default: int8 activations for these formats
  from formats import ICODES as IQ_FMTS  # noqa: E402  (gen_llm.py takes int8 activations for these)
@@ -603,7 +633,7 @@ index c485393..0d148d7 100644
  import attn_rules  # noqa: E402
  
  
-@@ -218,7 +220,9 @@ if VIS:   # a media epoch: 8-word records, token 1 carries a feature row (copied
+@@ -218,7 +220,9 @@
  seen = set(); todo = []
  VD = cfg["gdn"]["inner"] if cfg.get("gdn") else 0
  for li in KT_LAYERS:
@@ -614,7 +644,7 @@ index c485393..0d148d7 100644
                     ("attn_qkv", H), ("attn_gate", H), ("ssm_alpha", H), ("ssm_out", VD),
                     ("ffn_gate_shexp", H), ("ffn_down_shexp", (cfg.get("moe") or {}).get("shared_ffn", 0)), ("nextn.eh_proj", 2 * H)]:
          name = f"blk.{li}.{nm_}.weight"
-@@ -504,6 +508,12 @@ for _ai, _a, pa, pb in [(i, l, x, y) for i, l in enumerate(_al.values()) for x,
+@@ -504,6 +508,12 @@
    check.return
  }}
  """)
@@ -627,7 +657,7 @@ index c485393..0d148d7 100644
  # 3. qk norm + rope on q (live = 0: no KV store)
  t = 4; pos = np.array([0, 1, 7, 300])
  A0 = next(i for i in range(cfg["layers"]) if i not in set(cfg.get("recurrent_layers", [])))
-@@ -531,7 +541,7 @@ def rope(a, RD=RD, theta=cfg["rope_theta"], factors=cfg.get("rope_freq_factors")
+@@ -531,7 +541,7 @@
      c, s = np.cos(ang)[:, None] * msc, np.sin(ang)[:, None] * msc
      if cfg["rope_type"] == "neox":
          a1, a2 = a[..., :RD // 2], a[..., RD // 2:RD]; return np.concatenate([a1 * c - a2 * s, a2 * c + a1 * s, a[..., RD:]], -1)
@@ -636,7 +666,7 @@ index c485393..0d148d7 100644
  # attention projection biases (cfg "attn_bias", qwen2): g_qk_rope_store adds them to q/k/v before the norm and RoPE
  BIAS = cfg.get("attn_bias") or []
  BW = {"q": QH * D, "k": KVH * D, "v": KVH * D}
-@@ -3144,6 +3154,10 @@ kernel.def export("test_copy_rows") @test_copy_rows(%rows: index) {
+@@ -3144,6 +3154,10 @@
      cases += [invariance_case(s, st) for s in ((0, 1) if WIN else (0,)) for st in (5, 0, 'zero')]
      cases += [order_case(s) for s in ((0, 1) if WIN else (0,))]
  
@@ -647,7 +677,7 @@ index c485393..0d148d7 100644
  # 6. MoE (gen_moe.py) on real tensors, one layer per expert-down format: the decode chain (router -> top-k ->
  # gate/up -> down -> combine, plus the prefill router with padding tokens) and the prefill chain (prefill router ->
  # bucket by expert -> grouped WMMA gate/up GEMM -> tile row scale -> grouped down GEMM -> combine of the sorted rows),
-@@ -3180,7 +3194,9 @@ if cfg.get("moe") and os.environ.get("MOE_TESTS", "1") == "1":
+@@ -3180,7 +3194,9 @@
              wts = wts / np.maximum(wts.sum(-1, keepdims=True), 6.103515625e-05)
          wts = wts * M.get("scale", 1.0)
          ss = np.sort(sel, -1)[:, ::-1]
@@ -658,7 +688,7 @@ index c485393..0d148d7 100644
          return ids, wts, rel
      def clear_tokens(t):
          """t random rows whose k-th and (k+1)-th scores differ by > 0.2 %: f32 kernels pick the same experts as the
-@@ -3220,7 +3236,7 @@ if cfg.get("moe") and os.environ.get("MOE_TESTS", "1") == "1":
+@@ -3220,7 +3236,7 @@
          fu = T[b + UN].tensor_type.name.lower(); gun = (fg if fg == fu else f"{fg}_{fu}") + ("_fused" if FUSED else "")   # gate+up formats (gen_moe)
          if (fd, gun) in done: continue
          done.add((fd, gun))
@@ -667,7 +697,7 @@ index c485393..0d148d7 100644
                and H // 32 <= 1024 and FE // 32 <= 1024 and not EB)   # gen_llm.moe_iq
          # gen_llm.moe_iq also needs the router input as the experts' input (gemma4's experts read %h2): the package says which it built
          MQ = MQ and (_pkg_llm_text() is None or f'"g_moe_gu_{gun}_q8_k{H}_' in _pkg_llm_text())
-@@ -3689,7 +3705,7 @@ def mv_cover_case(kern, m, crng):
+@@ -3689,7 +3705,7 @@
  
      def rule(n):
          return iq_r(n, K, tg, sw) if q8 else pick_r(n, K, tg)
@@ -676,11 +706,9 @@ index c485393..0d148d7 100644
      pick = fallback = None
      for src, layers in cover_sources():
          TT = src["T"]
-diff --git a/templates/control.loom b/templates/control.loom
-index c1e0be5..d39dd8d 100644
 --- a/templates/control.loom
 +++ b/templates/control.loom
-@@ -460,6 +460,7 @@ global.rodata.def @tool_item_suffix = bytes("@@HEX_TOOL_ITEM_SUFFIX@@")
+@@ -460,6 +460,7 @@
  global.rodata.def @tool_turn_suffix = bytes("@@HEX_TOOL_TURN_SUFFIX@@")
  
  global.rodata.def @content_call_separator = bytes("@@HEX_CONTENT_CALL_SEPARATOR@@")
@@ -688,7 +716,7 @@ index c1e0be5..d39dd8d 100644
  
  global.rodata.def @call_separator = bytes("@@HEX_CALL_SEPARATOR@@")
  
-@@ -873,7 +874,9 @@ func.def public @chat_message(%raw: buffer, %role: buffer, %content: buffer, %pa
+@@ -873,7 +874,9 @@
          %has_calls = index.cmp ne, %calls_length, %c0 : offset
          %separate = scalar.andi %has_text, %has_calls : i1
          %separator_value = global.load @content_call_separator : buffer
@@ -699,7 +727,7 @@ index c1e0be5..d39dd8d 100644
          %close_value = global.load @calls_close : buffer
          %close = scf.select %has_calls, %close_value, %empty : buffer
          %head = func.call @join4(%prefix, %think, %text, %separator) : (buffer, buffer, buffer, buffer) -> (buffer)
-@@ -2291,11 +2294,13 @@ func.def public @complete_text(%prompt: buffer, %response: buffer, %raw_content:
+@@ -2291,11 +2294,13 @@
    %has_calls = index.cmp ne, %tools_length, %c0 : offset
    %separate = scalar.andi %has_content, %has_calls : i1
    %separator_value = global.load @content_call_separator : buffer
