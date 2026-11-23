@@ -27,6 +27,8 @@ nixrun() {   # nixrun GPU(0|1) CMD: CMD in nixos/nix with the store volume and $
     nixos/nix:latest sh -c "mkdir -p /root/.config/nix && printf '%s\n' '$NIXCONF' > /root/.config/nix/nix.conf && git config --global --add safe.directory '*' && $2; rc=\$?; chown -R $(id -u):$(id -g) $W/src $W/out 2>/dev/null; exit \$rc"
 }
 docker volume create "$VOL" >/dev/null
+# trees an earlier run's build container left owned by root
+docker run --rm -v "$W":"$W" nixos/nix:latest chown -R "$(id -u):$(id -g)" "$W/src" "$W/out" 2>/dev/null || true
 
 # ---- model (Hugging Face, revision-pinned): resumable, HTTP/1.1 (a 17 GB HTTP/2 stream was cancelled mid-file), checked
 m=$(q 'print(e["model"])'); r=${m%/*}; name=${m##*/}; rev=${r#*@}; r=${r%@*}
