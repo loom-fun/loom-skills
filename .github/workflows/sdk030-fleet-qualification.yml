@@ -13,7 +13,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - slug: ggml-org-Muse-Glimmer-30B-loom
+          - slug: ggml-org-Flint-loom
             device: strix-halo
             labels: '["self-hosted","devlab-dispatch","strix-halo","Linux"]'
     runs-on: ${{ fromJSON(matrix.labels) }}
