@@ -8,7 +8,8 @@
    "model_id": "jdopensource/JoyAI-LLM-Flash",
    "env": {
     "HF_HUB_DOWNLOAD_TIMEOUT": "600",
-    "HF_HUB_ETAG_TIMEOUT": "600"
+    "HF_HUB_ETAG_TIMEOUT": "600",
+    "LLAMACPP_EXTRA_ARGS": "--skip-chat-parsing"
    }
   }
  ]
