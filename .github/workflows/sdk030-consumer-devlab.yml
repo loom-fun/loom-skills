@@ -25,7 +25,7 @@ jobs:
           work=$(mktemp -d "$RUNNER_TEMP/sdk030-consumers.XXXXXX")
           echo "WORK=$work" >> "$GITHUB_ENV"
           mkdir "$work/out"
-      - name: Verify release wheels and build the Lemonade contract
+      - name: Verify standalone archives and build the Lemonade contract
         shell: bash
         run: bash .github/sdk030-consumer/lemonade.sh
       - name: Store changes and lab evidence
