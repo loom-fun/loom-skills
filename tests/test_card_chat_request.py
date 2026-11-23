@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 CARD = ROOT / "skills/loom-benchmark/scripts/card"
 sys.path.insert(0, str(CARD))
 import render_card as renderer
+from card_lib import derive_features
 
 
 def request_body(lines):
@@ -35,6 +36,23 @@ class ChatRequestTests(unittest.TestCase):
             feats = {"thinking": {"status": "yes", "value": {"mode": "toggle", "default": default}}}
             body = request_body(renderer.chat_request({"model": {"id": "test"}}, feats))
             self.assertEqual(body["chat_template_kwargs"], {"enable_thinking": False})
+
+    def test_served_thinking_default_overrides_the_reference_template_for_toggle_mode(self):
+        cases = (
+            ({"chat": {"thinking": "toggle", "thinking_default": True}, "loom_thinking_default": False}, "toggle", False),
+            ({"chat": {"thinking": "toggle", "thinking_default": False}, "loom_thinking_default": True}, "toggle", True),
+            ({"chat": {"thinking": "toggle", "thinking_default": False}}, "toggle", False),
+            ({"chat": {"thinking": "toggle"}}, "toggle", True),
+            ({"chat": {"thinking": "always"}, "loom_thinking_default": False}, "always", True),
+        )
+        for cfg, mode, default in cases:
+            with self.subTest(cfg=cfg):
+                feat = derive_features({}, cfg, "chat", {}, {}, None)["thinking"]
+                self.assertEqual(feat, {"status": "yes", "value": {"mode": mode, "default": default}})
+                if not default:
+                    self.assertIn("off by default", renderer.feature_detail("thinking", feat))
+        disabled = {"chat": {"thinking": "never"}, "loom_thinking_default": True}
+        self.assertEqual(derive_features({}, disabled, "chat", {}, {}, None)["thinking"]["status"], "n/a")
 
     def test_always_thinking_uses_lowest_advertised_effort(self):
         feats = {"thinking": {"status": "yes", "value": {"mode": "always"}},

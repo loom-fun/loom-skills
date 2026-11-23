@@ -498,7 +498,10 @@ def derive_features(model, cfg, kind, execution, srcs, spec, upstream=None):
         if mode not in ("always", "toggle"):
             mode = "always" if chat.get("starts_in_reasoning") else None
         if mode:
-            default = chat.get("thinking_default", True) if mode == "toggle" else True
+            default = True
+            if mode == "toggle":
+                loom_default = cfg.get("loom_thinking_default")
+                default = loom_default if isinstance(loom_default, bool) else chat.get("thinking_default", True)
             f["thinking"] = {"status": "yes", "value": {"mode": mode, "default": bool(default)}}
         else:
             f["thinking"] = dict(na) if "thinking" in chat or glue else from_template("thinking")
