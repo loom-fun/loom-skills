@@ -1,12 +1,12 @@
 name: SDK 0.3.0 migration implementation proof
 on:
   pull_request:
-    types: [labeled, synchronize]
+    types: [labeled]
 permissions:
   contents: read
 jobs:
   implement:
-    if: github.event.pull_request.head.ref == 'codex/sdk030-migration' && github.event.pull_request.head.repo.full_name == github.repository && contains(github.event.pull_request.labels.*.name, 'sdk030-implement')
+    if: github.event.pull_request.head.ref == 'codex/sdk030-migration' && github.event.pull_request.head.repo.full_name == github.repository && github.event.label.name == 'sdk030-implement'
     runs-on: [strix-halo, devlab-dispatch, Linux, self-hosted]
     timeout-minutes: 45
     env:
@@ -29,7 +29,7 @@ jobs:
               text = path.read_text()
               for before, after in replacements:
                   assert before in text, (name, before)
-                  text = text.replace(before, after)
+                  text = text.replace(before, after, 1)
               path.write_text(text)
           
           edit("fleet/regen.py", [
