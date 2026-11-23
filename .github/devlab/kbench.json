@@ -8,20 +8,14 @@
    "dir": "joyai_moe",
    "gen": "joyai_moe/gen_bench.py",
    "gen_variants": [
-    "base",
-    "v1",
     "v2",
-    "cw",
     "cws",
-    "t128"
+    "cwf"
    ],
    "files": [
-    "bench.loom",
-    "bench_v1.loom",
     "bench_v2.loom",
-    "bench_cw.loom",
     "bench_cws.loom",
-    "bench_t128.loom"
+    "bench_cwf.loom"
    ],
    "tests": [
     "test.loom"

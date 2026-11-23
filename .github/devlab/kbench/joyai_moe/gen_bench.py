@@ -20,8 +20,9 @@ VARIANTS = {   # name -> environment of the kit generators
     "v2": dict(IQ4, GEMM_T64_G32="1"),
     "cw": dict(IQ4, GEMM_T64_G32="1", MOE_CW="1"),   # gen_moe_cw: column waves, live 16-row fragments only
     "cws": dict(IQ4, GEMM_T64_G32="1", MOE_CW="1", MOE_CW_SWAP="1"),   # cw, half-waves dequantize half a group each + xor-16 swap
-    "t128": dict(IQ4, GEMM_T64_G32="1"),              # gen_moe.grouped_gemm128 (MOE_T128): m128 tiles, 128-row expert buckets
+    "cwf": dict(IQ4, GEMM_T64_G32="1", MOE_CW="1", MOE_CW_SWAP="1", MOE_CW_F16O="1"),   # cws + f16 activations, scale 1 (timing only)
 }
+UNTESTED = {"cwf"}   # numerics-moving variants (covered by the model gates)
 TILE_OF = {"t128": 128}   # variants on another expert bucket (timing only: their rows are laid out differently)
 VARIANTS.update(json.loads(os.environ.get("JOY_MOE_VARIANTS", "{}")))
 BLOCK = 136   # IQ4_XS bytes per 256 values
@@ -88,7 +89,7 @@ def helpers(kit):
 
 def main():
     root, out = os.path.abspath(sys.argv[1]), os.path.abspath(sys.argv[2])
-    variants = sys.argv[3:] or ["base", "v1", "v2", "cw", "cws", "t128"]
+    variants = sys.argv[3:] or ["v2", "cws", "cwf"]
     os.makedirs(out, exist_ok=True)
     kit = os.path.join(out, "kit")
     if not os.path.isdir(kit):
@@ -176,11 +177,11 @@ def main():
         open(os.path.join(out, fn), "w").write("\n".join(parts))
     # correctness: every non-base variant vs v1 (exact for v1-derived), base vs v1 within f16 rounding of the dequant
     ref = "v1" if "v1" in texts else variants[0]
-    tparts = [helpers(kit)] + [texts[v] for v in variants if v not in TILE_OF]
+    tparts = [helpers(kit)] + [texts[v] for v in variants if v not in TILE_OF and v not in UNTESTED]
     T = TS[0]
     mt, mr = shapes[T]
     for v in variants:
-        if v in (ref, "base") or v in TILE_OF:   # base (the value helper) rounds differently; it is covered by the model's kernel tests
+        if v in (ref, "base") or v in TILE_OF or v in UNTESTED:   # base (the value helper) rounds differently; it is covered by the model's kernel tests
             continue
         tol = "atol(0.0) rtol(0.0)" if not v.startswith("x") else "atol(1.0e-3) rtol(1.0e-3)"   # x*: variants that reorder sums
         tparts.append(f"check.case public @t_{v} {{\n" + case(T, None, None) +

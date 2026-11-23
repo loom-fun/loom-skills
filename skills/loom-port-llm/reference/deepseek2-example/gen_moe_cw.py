@@ -19,6 +19,9 @@ import os
 # MOE_CW_SWAP=1: lanes 0-15 dequantize a group's low nibbles (K 0-15), lanes 16-31 the high nibbles (K 16-31) of the same
 # column, and an xor-16 shuffle swaps the halves (WMMA B wants both half-waves to hold the same 16 values): half the dequant.
 SWAP = os.environ.get("MOE_CW_SWAP", "0") not in ("", "0")
+# MOE_CW_F16O=1 (numerics-moving): gate/up stores the swiglu activations as f16 with row scale 1 straight into the down GEMM's
+# input (g_row_scale_f16_tiles goes) and down multiplies by no inverse scale (scale 1).
+F16O = os.environ.get("MOE_CW_F16O", "0") not in ("", "0")
 
 
 PLAIN_TAIL = '      %{o}_lo_i = vector.andi {packed}, %{o}_m15 : vector<16xi8>\n      %{o}_hn_s = vector.shrui {packed}, %{o}_f4 : vector<16xi8>\n      %{o}_hi_i = vector.andi %{o}_hn_s, %{o}_m15 : vector<16xi8>\n      %{o}_lo_u = vector.table.lookup %{o}_book[%{o}_lo_i] : vector<16xi8>, vector<16xi8> -> vector<16xi8>\n      %{o}_hi_u = vector.table.lookup %{o}_book[%{o}_hi_i] : vector<16xi8>, vector<16xi8> -> vector<16xi8>\n      %{o}_lo_f = vector.uitofp %{o}_lo_u : vector<16xi8> to vector<16xf16>\n      %{o}_hi_f = vector.uitofp %{o}_hi_u : vector<16xi8> to vector<16xf16>\n      %{o}_m128 = scalar.constant -128.0 : f32\n      %{o}_off32 = scalar.mulf %{o}_dlh32, %{o}_m128 : f32\n      %{o}_off_h = scalar.fptrunc %{o}_off32 : f32 to f16\n      %{o}_scales = vector.splat %{o}_dlh : vector<16xf16>\n      %{o}_offsets = vector.splat %{o}_off_h : vector<16xf16>\n      %{o}_v0 = vector.fmaf %{o}_lo_f, %{o}_scales, %{o}_offsets : vector<16xf16>\n      %{o}_v1 = vector.fmaf %{o}_hi_f, %{o}_scales, %{o}_offsets : vector<16xf16>\n'
@@ -141,6 +144,7 @@ def grouped_gemm_cw(fmt, mode, N, K, E, KU, tile=64):
   %cw_s4 = vector.splati 4 : vector<16xi8>
   %cw_hshift = scf.select %cw_hi, %cw_s4, %cw_s0 : vector<16xi8>
   %cw_x16 = scalar.constant 16 : i32
+  %cw_true = scalar.constant true : i1
   %cw_w32 = scalar.constant 32 : i32
   %row_origin = index.mul %row_group, %c64 : index
   %out_origin = index.mul %out_group, %cTN : index
@@ -246,8 +250,10 @@ def grouped_gemm_cw(fmt, mode, N, K, E, KU, tile=64):
   %y_layout = encoding.layout.strided [%n, %c1] : encoding<layout>
   %tile_first = index.madd %row_origin, %n, %out_origin : index
   %four = index.constant 4 : offset
-  %tile_offset = index.scale %tile_first, %four : index, offset -> offset''')
-    L.append(f"  %y_view = buffer.view %y[%tile_offset] : buffer -> view<64x{TN}xf32, %y_layout>")
+  %two_b = index.constant 2 : offset''')
+    YT = "f16" if F16O and sw else "f32"
+    L.append(f"  %tile_offset = index.scale %tile_first, %{'two_b' if YT == 'f16' else 'four'} : index, offset -> offset")
+    L.append(f"  %y_view = buffer.view %y[%tile_offset] : buffer -> view<64x{TN}x{YT}, %y_layout>")
 
     def body(nf):
         """the K loop + epilogue for nf live 16-row fragments"""
@@ -308,13 +314,14 @@ def grouped_gemm_cw(fmt, mode, N, K, E, KU, tile=64):
     %u{f} = vector.mulf %fin1_{f}, %inv{f} : vector<8xf32>
     %sg{f} = vector.siluf<afn> %g{f} : vector<8xf32>
     %act{f} = vector.mulf %sg{f}, %u{f} : vector<8xf32>
-    vector.fragment.store<result> %act{f}, %y_view[%er{f}, %wave_col] shape [%c16, %c16] : vector<8xf32>, view<64x{TN}xf32, %y_layout>""")
+    vector.fragment.store<result> %act{f}, %y_view[%er{f}, %wave_col] shape [%c16, %c16] : vector<8xf32>, view<64x{TN}x{YT}, %y_layout>""")
             else:
-                s.append(f"""    %o0_{f} = vector.mulf %fin0_{f}, %inv{f} : vector<8xf32>
-    %o1_{f} = vector.mulf %fin1_{f}, %inv{f} : vector<8xf32>
+                s.append((f"""    %o0_{f} = vector.mulf %fin0_{f}, %inv{f} : vector<8xf32>
+    %o1_{f} = vector.mulf %fin1_{f}, %inv{f} : vector<8xf32>""" if not F16O else f"""    %o0_{f} = scf.select %cw_true, %fin0_{f}, %fin0_{f} : vector<8xf32>
+    %o1_{f} = scf.select %cw_true, %fin1_{f}, %fin1_{f} : vector<8xf32>""") + f"""
     %wc16_{f} = index.add %wave_col, %c16 : index
-    vector.fragment.store<result> %o0_{f}, %y_view[%er{f}, %wave_col] shape [%c16, %c16] : vector<8xf32>, view<64x{TN}xf32, %y_layout>
-    vector.fragment.store<result> %o1_{f}, %y_view[%er{f}, %wc16_{f}] shape [%c16, %c16] : vector<8xf32>, view<64x{TN}xf32, %y_layout>""")
+    vector.fragment.store<result> %o0_{f}, %y_view[%er{f}, %wave_col] shape [%c16, %c16] : vector<8xf32>, view<64x{TN}x{YT}, %y_layout>
+    vector.fragment.store<result> %o1_{f}, %y_view[%er{f}, %wc16_{f}] shape [%c16, %c16] : vector<8xf32>, view<64x{TN}x{YT}, %y_layout>""")
         return _suffix("\n".join(s), f"_n{nf}")
 
     # uniform dispatch on the live fragment count
