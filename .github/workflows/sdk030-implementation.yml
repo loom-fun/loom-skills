@@ -143,6 +143,17 @@ jobs:
               ('                                  **({"old": st.jobs[first[s]]["old"]} if st.jobs[first[s]].get("old") else {})}',
                '''                                  **({key: st.jobs[first[s]][key] for key in ("old", "source_card")
                                                 if key in st.jobs[first[s]]})}'''),
+              ('    prev = json.load(open(os.path.join(W, "info_prev.json")))\n    mem =', '''    prev = json.load(open(os.path.join(W, "info_prev.json")))
+              baseline_info = "info_prev.json"
+              if sdk and target_sdk(st.d) == "0.3.0":
+                  source, revision = e["source_card"].split("@", 1)
+                  baseline_info = hf_file(source, "info.json", revision)
+              mem ='''),
+              ('"--baseline-from-info", "info_prev.json", "--package", out',
+               '"--baseline-from-info", baseline_info, "--package", out'),
+              ('''    return out, hf_head(f"{st.d['opts']['new_org']}/{slug}"), msg''',
+               '''    parent = rev if target_sdk(st.d) == "0.3.0" else hf_head(f"{st.d['opts']['new_org']}/{slug}")
+              return out, parent, msg'''),
               ('perf v0.2 vs v0.1:', 'SDK performance delta:'),
               ('    p.add_argument("--old", help=', '''    p.add_argument("--new-sdk", choices=(SDK_NEW, "0.3.0"), default=SDK_NEW,
                              help="explicit SDK target for sdk-ab or sdk-loom (default: %(default)s)")
@@ -208,9 +219,12 @@ jobs:
           ## 1. Summary
           
           The SDK supports published service ABI 1 and legacy HAL ownership. Preserve both in this
-          migration. On DevLab, 60 published package revisions had the same aggregate result under
-          both SDKs (one parse failure and one link failure). For 55 programs-only kit builds, both
-          SDKs parsed all 55 and reported one link failure.
+          migration. The frozen DevLab sweep covered all 61 accepted production revisions. Both SDKs
+          produced identical diagnostics for each package. The manual Inkling R9700 card hits the same
+          six STRUCTURE/034 pure-effect diagnostics under both SDKs. Flash-Next's vision group hits the
+          same joint-link SYMBOL/013 collision on @qwen38.packet_capacity in both corpora. All 55
+          programs-only kit builds parsed on both SDKs. These are offline findings; runtime proof is
+          tied to individual cards and devices.
           
           ## 2. Breaking changes
           
@@ -310,7 +324,7 @@ jobs:
           ## 12. Campaign evidence
           
           [Initial DevLab control and target sweep](https://github.com/loom-fun/loom-skills/actions/runs/45250755821) ·
-          [Per-package repeat](https://github.com/loom-fun/loom-skills/actions/runs/45251450721) ·
+          [Frozen per-package proof](https://github.com/loom-fun/loom-skills/actions/runs/45252435739) ·
           [Draft migration](https://github.com/loom-fun/loom-skills/pull/1366)
           DOC
           cat > skills/loom-migrate/versions/v0.2.0-to-v0.3.0-production.json <<'DATA'
@@ -406,9 +420,13 @@ jobs:
           "$py" fleet/scope_lint.py --local --head HEAD --base origin/main \
             --scope-block $'kind: architecture\nscopes: -\nkernels: -' --work "$WORK/scope" \
             --json "$WORK/evidence/scope.json" 2>&1 | tee "$WORK/evidence/scope.log"
-          "$py" fleet/build_fleet.py --ref "${{ github.event.pull_request.base.sha }}" --out "$WORK/base" --jobs 8 \
+          bash "$PWD/skills/loom-setup/scripts/install_loom.sh" "$WORK/control-sdk" release:0.2.0 \
+            2>&1 | tee "$WORK/evidence/install-control.log"
+          cp "$WORK/control-sdk/loom-install.json" "$WORK/evidence/control-sdk.json"
+          PATH="$WORK/control-sdk/.venv/bin:$PATH" LOOM_ROOT="$WORK/control-sdk" \
+            "$py" fleet/build_fleet.py --ref "${{ github.event.pull_request.base.sha }}" --out "$WORK/base" --jobs 8 \
             2>&1 | tee "$WORK/evidence/base-build.log"
-          "$py" fleet/build_fleet.py --tree "$PWD" --out "$WORK/head" --jobs 8 \
+          LOOM_ROOT="$WORK/sdk" "$py" fleet/build_fleet.py --tree "$PWD" --out "$WORK/head" --jobs 8 \
             2>&1 | tee "$WORK/evidence/head-build.log"
           "$py" fleet/diff_fleet.py "$WORK/base" "$WORK/head" --raw-spelling \
             --json "$WORK/evidence/program-diff.json" --md "$WORK/evidence/program-diff.md"
