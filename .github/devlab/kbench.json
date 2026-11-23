@@ -398,12 +398,10 @@
       "dir": "dec_step",
       "gen": "dec_step/gen_bench.py",
       "gen_variants": [
-        "base",
-        "old"
+        "base"
       ],
       "files": [
-        "bench.loom",
-        "bench_old.loom"
+        "bench.loom"
       ],
       "config": [],
       "args": [
