@@ -399,13 +399,13 @@
       "gen": "dec_step/gen_bench.py",
       "gen_variants": [
         "base",
-        "rt1",
-        "shslot"
+        "wg256",
+        "wg64"
       ],
       "files": [
         "bench.loom",
-        "bench_rt1.loom",
-        "bench_shslot.loom"
+        "bench_wg256.loom",
+        "bench_wg64.loom"
       ],
       "config": [],
       "args": [
@@ -414,7 +414,7 @@
         "--profile-final-batch=true"
       ],
       "device": "amdgpu://?completion_spin_ns=4294967295",
-      "repeats": 3,
+      "repeats": 2,
       "case_timing": true,
       "tests": [
         "test.loom"

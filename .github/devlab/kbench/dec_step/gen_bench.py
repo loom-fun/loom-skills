@@ -22,7 +22,7 @@ HEAD = "amdgpu.target<gfx11-generic> @w32 {subgroup_size = 32}\n\n"
 VARIANTS = {"split": {"MLA_DEC": "split"}, "pl1": {"MLA_DEC_PL": "1"}, "s32": {"MLA_DEC_S": "32"}, "b8": {"MLA_DEC_BMIN": "8"},
             "b2": {"MLA_DEC_BMIN": "2"}, "b1": {"MLA_DEC_BMIN": "1"}, "shslot": {"MOE_SHSLOT": "1"},
             "iq4q8": {"IQ4_Q8": "1"}, "wg1k": {"MV_WG1": "1024"}, "wg256": {"MV_WG1": "256"}, "moer4": {"MOE_R": "4"}, "moer1": {"MOE_R": "1"},
-            "rt1": {"MOE_ROUTE_SPLIT": "0"}}
+            "rt1": {"MOE_ROUTE_SPLIT": "0"}, "wg128": {"MV_WG1": "128"}, "wg64": {"MV_WG1": "64"}, "sh0": {"MOE_SHSLOT": "0"}}
 CTXS = [("short", 300, 1), ("2k", 2048, 1), ("8k", 8192, 1), ("c4", 1024, 4)]   # (tag, context, tokens = streams)
 ROLE_CTX = "short"   # role_<kernel> cases (host wall of that role's 39-40 launches alone) at this context
 OUT = None
@@ -257,6 +257,9 @@ def step_case(lib, body, tag, ctx, T=1):
                 np.save(os.path.join(OUT, f"info_{tag}.npy"), a)
                 used[used.index(defs["%info"])] = f'  %info = check.file.read.npy path("info_{tag}.npy") : tensor<{n}xi8>'
             r = k[2:]
+            # the step without this role: its in-situ cost (= k_case_<ROLE_CTX> - k_case_minus_<role>)
+            case += (f"check.case public @m_{r} {{\n" + "\n".join(ln for ln in lines if not ln.startswith(f"  kernel.launch @{k}["))
+                     + "\n  check.return\n}\n" + f"check.benchmark<@m_{r}> @minus_{r}\n")
             case += f"check.case public @r_{r} {{\n" + "\n".join(used + ls) + "\n  check.return\n}\n" + f"check.benchmark<@r_{r}> @role_{r}\n"
     return kdefs, case
 
@@ -318,7 +321,7 @@ if __name__ == "__main__" and len(sys.argv) > 2:
         np.save(os.path.join(OUT, f"x{T - 1}.npy"), rng.standard_normal((T, 2048)).astype(np.float32))
         np.save(os.path.join(OUT, f"h{T - 1}.npy"), rng.standard_normal((T, 2048)).astype(np.float32))
     for n in range(40):   # role cases: each layer's 8 distinct experts (int32, as the program's ids buffer, 256 bytes)
-        e = np.zeros(64, np.int32); e[:8] = rng.choice(256, 8, replace=False)
+        e = np.zeros(64, np.int32); e[:8] = (8 * n + np.arange(8)) % 256   # no expert re-read within 32 layers (MALL 32 MB)
         np.save(os.path.join(OUT, f"ids_{n}.npy"), e.view(np.int8))
     np.save(os.path.join(OUT, "rt_h.npy"), rng.standard_normal((4, 2048)).astype(np.float32))
     np.save(os.path.join(OUT, "rt_w.npy"), (rng.standard_normal(256 * 2048) * 0.05).astype(np.float32))

@@ -335,10 +335,10 @@
  # g_row_scale_f16, and the gate/up output quantized by a g_quant_q8 launch) and contract with integer dot4 products,
  # like the dense decode matvecs and llama.cpp's mul_mat_vec_q for experts. MOE_Q8=0: f32 activations.
  MOE_Q8 = os.environ.get("MOE_Q8", "1") == "1"
-+# MOE_SHSLOT=1: decode runs the shared expert as a ninth assignment slot of the routed expert matvecs (gen_moe
++# MOE_SHSLOT (default on; 0 = separate launches): decode runs the shared expert as a ninth assignment slot of the routed expert matvecs (gen_moe
 +# expert_mv shared=True + g_moe_combine_sh): 3 launches fewer per layer (shared gate/up, quant, down). Needs one shared
 +# expert of the routed experts' formats and width, no shared gate, f32 expert activations.
-+MOE_SHSLOT = os.environ.get("MOE_SHSLOT", "0") == "1"
++MOE_SHSLOT = os.environ.get("MOE_SHSLOT", "1") == "1"
 +# MOE_ROUTE_SPLIT=1: decode router in two launches (gen_moe.route_split: logits over E / 8 workgroups, then the top-k),
 +# bit-identical to g_moe_route.
 +MOE_ROUTE_SPLIT = os.environ.get("MOE_ROUTE_SPLIT", "1") == "1"
