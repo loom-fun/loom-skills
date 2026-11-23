@@ -19,6 +19,7 @@ import os
 import re
 import sys
 from datetime import datetime
+from statistics import median
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "..", "..", "loom-kb"))   # skills/loom-kb: devices, quants, methodology as data
@@ -923,19 +924,37 @@ def qualified_bare_quick_start(directory, package, repo, gpu, control, programs,
     artifact = evidence.get("artifact_id")
     if type(artifact) is not int or artifact <= 0 or not re.fullmatch(r"[a-f0-9]{64}", str(evidence.get("artifact_sha256"))):
         return None
-    deltas = evidence.get("default_delta_pct")
-    if not isinstance(deltas, dict) or not deltas or any(type(v) not in (int, float) or not -3 <= v <= 3 for v in deltas.values()):
-        return None
     sessions = evidence.get("sessions")
     if not isinstance(sessions, list) or len(sessions) != 4:
         return None
     context = package["model"]["presets"][preset].get("execution", {}).get("context_capacity")
+    if type(context) is not int or context <= 0:
+        return None
+    rates = {"tuned": [], "default": []}
     for session, mode in zip(sessions, ("tuned", "default", "default", "tuned")):
         if not isinstance(session, dict) or session.get("mode") != mode or session.get("answers_pass") is not True:
             return None
         admission = session.get("admission")
-        if not isinstance(admission, dict) or admission.get("admitted") is not True or not context or admission.get("context") != context:
+        if not isinstance(admission, dict) or admission.get("admitted") is not True or admission.get("context") != context:
             return None
+        tokens = admission.get("tokens")
+        if type(tokens) is not int or not 99 * context <= 100 * tokens <= 100 * context:
+            return None
+        metrics = session.get("metrics")
+        if not isinstance(metrics, dict) or metrics.keys() != ROOFLINE_METRIC.keys():
+            return None
+        if any(type(v) not in (int, float) or not math.isfinite(v) or v <= 0 for v in metrics.values()):
+            return None
+        rates[mode].append(metrics)
+    deltas = {}
+    for key in ROOFLINE_METRIC:
+        tuned, bare = (median(s[key] for s in rates[mode]) for mode in ("tuned", "default"))
+        change = 100 * (bare / tuned - 1)
+        if abs(change) >= 3:
+            return None
+        deltas[key] = round(change, 2)
+    if evidence.get("default_delta_pct") != deltas:
+        return None
     return {"preset": preset, "device": "amdgpu", "args": []}
 
 

@@ -175,9 +175,10 @@ class Cards(unittest.TestCase):
                  "package_sha256": card_lib.quick_start_package_sha256(pkg, package, preset),
                  "run": 1000, "job_url": "https://github.com/loom-fun/loom-skills/actions/runs/1000/job/2000",
                  "artifact_id": 3000, "artifact_sha256": "e" * 64,
-                 "default_delta_pct": {"decode": 1},
+                 "default_delta_pct": dict.fromkeys(card_lib.ROOFLINE_METRIC, 0),
                  "launch": {"tuned": [f"--device={control['device']}", *control["args"]], "default": ["--device=amdgpu"]},
-                 "sessions": [{"mode": mode, "answers_pass": True, "admission": {"admitted": True, "context": context}}
+                 "sessions": [{"mode": mode, "answers_pass": True, "metrics": dict.fromkeys(card_lib.ROOFLINE_METRIC, 100),
+                               "admission": {"admitted": True, "context": context, "tokens": context - 64}}
                               for mode in ("tuned", "default", "default", "tuned")]}
         proof_path = os.path.join(pkg, card_lib.QUICK_START_QUALIFICATION)
         card_lib.write_json(proof_path, proof)
@@ -200,6 +201,12 @@ class Cards(unittest.TestCase):
                        {"default_delta_pct": {"decode": -9}}, {"launch": {"tuned": [], "default": ["--device=amdgpu"]}}):
             with self.subTest(change=change):
                 self.assertIsNone(card_lib.qualified_bare_quick_start(pkg, package, before["repo"], gpu, control, programs, proof | change))
+        for bad_session in ({"admission": {"admitted": True, "context": context, "tokens": context // 2}},
+                            {"metrics": {"decode": 100}}, {"metrics": dict.fromkeys(card_lib.ROOFLINE_METRIC, 90)}):
+            sessions = list(proof["sessions"])
+            sessions[1] = sessions[1] | bad_session
+            with self.subTest(bad_session=bad_session):
+                self.assertIsNone(card_lib.qualified_bare_quick_start(pkg, package, before["repo"], gpu, control, programs, proof | {"sessions": sessions}))
         model_path = os.path.join(pkg, "model.json")
         package["model"]["presets"][preset]["execution"]["context_capacity"] += 1024
         card_lib.write_json(model_path, package["model"])
