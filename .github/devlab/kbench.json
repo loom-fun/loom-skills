@@ -399,12 +399,10 @@
       "gen": "dec_step/gen_bench.py",
       "gen_variants": [
         "base",
-        "split",
         "shslot"
       ],
       "files": [
         "bench.loom",
-        "bench_split.loom",
         "bench_shslot.loom"
       ],
       "config": [],

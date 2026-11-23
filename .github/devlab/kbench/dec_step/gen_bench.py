@@ -7,7 +7,8 @@ The program is generated from this checkout (apply_example.sh deepseek2 + gen_ll
 header config); its llm_advance command is specialized to tokens = spans = 1 (the scf.if branches a 1-token epoch takes)
 and becomes one check.case per context (cases CTXS) with every launch kept in order. Each kernel is renamed
 k_<kernel>__<output buffer> so profile rows separate roles (q_a vs kv_a ...). Benchmark rows: k_case_<ctx> = host wall of
-the whole step (launch gaps included); k_* = mean device ms per dispatch (x 39-40 per step for the per-layer kernels).
+the whole step (launch gaps included); k_case_role_<kernel> = host wall of one role's launches alone (all layers, ROLE_CTX):
+the per-role profile (the replay profile keeps only the first rows of a 760-dispatch step).
 Weights: zero bytes (same dequant work and bytes as real ones, no NaN), norms 1.0, routers random f32 per layer (from
 rng, so each layer picks its own 8 of 256 experts; the 256-expert tensors are one shared buffer per size, 0.7 GB,
 re-read across layers like a real step), x / h random. KV cache zero (attention reads every key; timing only).
@@ -21,6 +22,7 @@ HEAD = "amdgpu.target<gfx11-generic> @w32 {subgroup_size = 32}\n\n"
 VARIANTS = {"split": {"MLA_DEC": "split"}, "pl1": {"MLA_DEC_PL": "1"}, "s32": {"MLA_DEC_S": "32"}, "b8": {"MLA_DEC_BMIN": "8"},
             "b2": {"MLA_DEC_BMIN": "2"}, "b1": {"MLA_DEC_BMIN": "1"}, "shslot": {"MOE_SHSLOT": "1"}}
 CTXS = [("short", 300), ("2k", 2048), ("8k", 8192)]
+ROLE_CTX = "short"   # role_<kernel> cases (host wall of that role's 39-40 launches alone) at this context
 OUT = None
 
 
@@ -219,6 +221,27 @@ def step_case(lib, body, tag, ctx):
             assert mm, kn
             kdefs.append(mm.group(0).replace(f'export("{kn}") @{kn}(', f'export("{new}") @{new}(', 1))
     case = f"check.case public @c{tag} {{\n" + "\n".join(lines) + "\n  check.return\n}\n" + f"check.benchmark<@c{tag}> @{tag}\n"
+    if tag == ROLE_CTX:   # one case per kernel role: only that role's launches (all layers) and the values they read
+        defs = {}
+        for ln in lines:
+            m = re.match(r"  (%\w+) = ", ln)
+            if m:
+                defs[m.group(1)] = ln
+        for k in sorted({re.match(r"  kernel\.launch @(\w+)", ln).group(1) for ln in lines if ln.startswith("  kernel.launch")}):
+            ls = [ln for ln in lines if ln.startswith(f"  kernel.launch @{k}[")]
+            if any(", %ids," in ln for ln in ls):   # alone, the routed matvecs get each layer's own random experts
+                ls2 = []
+                for n, ln in enumerate(ls):
+                    ls2.append(f'  %ids_{n} = check.file.read.npy path("ids_{n}.npy") : {types["%ids"]}')
+                    ls2.append(ln.replace(", %ids,", f", %ids_{n},", 1))
+                ls = ls2
+            used = []
+            for ln in ls:
+                for v in re.findall(r"%\w+", ln.split(" : ")[0]):
+                    if v in defs and defs[v] not in used:
+                        used.append(defs[v])
+            r = k[2:]
+            case += f"check.case public @r_{r} {{\n" + "\n".join(used + ls) + "\n  check.return\n}\n" + f"check.benchmark<@r_{r}> @role_{r}\n"
     return kdefs, case
 
 
@@ -247,6 +270,9 @@ if __name__ == "__main__" and len(sys.argv) > 2:
         np.save(os.path.join(OUT, f"router_{i}.npy"), rng.standard_normal(256 * 2048).astype(np.float32) * 0.05)
     np.save(os.path.join(OUT, "x0.npy"), rng.standard_normal(2048).astype(np.float32))
     np.save(os.path.join(OUT, "h0.npy"), rng.standard_normal(2048).astype(np.float32))
+    for n in range(40):   # role cases: each layer's 8 distinct experts (int32, as the program's ids buffer, 256 bytes)
+        e = np.zeros(64, np.int32); e[:8] = rng.choice(256, 8, replace=False)
+        np.save(os.path.join(OUT, f"ids_{n}.npy"), e.view(np.int8))
     for v in sys.argv[3:] or ["base"]:
         if v != "base" and not all(x in VARIANTS for x in v.split("+")):
             raise SystemExit("unknown variant " + v)
