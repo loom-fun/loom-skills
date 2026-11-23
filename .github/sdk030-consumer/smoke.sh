@@ -65,21 +65,24 @@ wait_http() {
 }
 chat() {
   local endpoint=$1 model=$2 out=$3
-  python - "$endpoint" "$model" "$out" <<'PY'
+  python - "$endpoint" "$model" "$out" "${4:-golden}" <<'PY'
 import json
 from pathlib import Path
 import sys
 import urllib.request
 
-endpoint, model, out = sys.argv[1:]
-body = {"model": model, "messages": [{"role": "user", "content": "What is two plus two? Reply with the answer only. /no_think"}],
+endpoint, model, out, case = sys.argv[1:]
+prompt = "What is the capital of France? Answer in one word." if case == "golden" else "What is two plus two? Reply with the answer only. /no_think"
+body = {"model": model, "messages": [{"role": "user", "content": prompt}],
         "temperature": 0, "max_tokens": 256, "chat_template_kwargs": {"enable_thinking": False}}
 r = urllib.request.Request(endpoint, json.dumps(body).encode(), {"Content-Type": "application/json"})
 with urllib.request.urlopen(r, timeout=120) as response:
     data = json.load(response)
 Path(out).write_text(json.dumps(data, indent=2) + "\n")
 content = data["choices"][0]["message"].get("content") or ""
-assert "4" in content or "four" in content.lower(), data
+assert data["choices"][0]["finish_reason"] == "stop" and content.strip(), data
+if case == "golden":
+    assert content.strip().lower().rstrip(".!") == "paris", data
 print(model, repr(content))
 PY
 }
@@ -102,6 +105,18 @@ lemonade_smoke() {
     tail -42 "$WORK/out/lemonade-$mode-server.log"
     return 1
   fi
+  local direct
+  direct=$(sed -nE 's/.*loom-serve is ready at (http:\/\/127\.0\.0\.1:[0-9]+).*/\1/p' "$WORK/out/lemonade-$mode-server.log" | tail -1)
+  [ -n "$direct" ] || return 1
+  chat "$direct/v1/chat/completions" "Qwen/Qwen3-0.6B" "$WORK/out/direct-$mode-arithmetic.json" arithmetic || return 1
+  chat "http://127.0.0.1:$port/api/v1/chat/completions" "Qwen3-0.6B-Loom" "$WORK/out/lemonade-$mode-arithmetic.json" arithmetic || return 1
+  python - "$WORK/out/direct-$mode-arithmetic.json" "$WORK/out/lemonade-$mode-arithmetic.json" <<'PY' || return 1
+import json, sys
+from pathlib import Path
+answers = [json.loads(Path(p).read_text())["choices"][0]["message"]["content"] for p in sys.argv[1:]]
+assert answers[0] == answers[1], answers
+print("Arithmetic response matches the direct SDK backend:", repr(answers[0]))
+PY
   find "$WORK/lemon-cache" -name loom-serve -type f -exec {} --version \; | grep 'loom-serve 0.3.0'
 }
 rc=0
