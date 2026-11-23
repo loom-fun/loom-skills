@@ -367,24 +367,22 @@
       "dir": "mla_dec",
       "gen": "mla_dec/gen_bench.py",
       "gen_variants": [
-        "base",
         "s32+b8",
-        "s32+b2",
+        "s32+b8+pf1",
+        "s32+b8+pf2",
+        "s32+b4+pf1",
+        "s32+b8+xnopart",
         "s32+b8+xempty",
-        "s32+b8+xnoqk",
-        "s32+b8+xnostv",
-        "s32+b8+xnopv",
-        "s32+b8+xnosx"
+        "s32+b8+pf1+xnopart"
       ],
       "files": [
-        "bench.loom",
         "bench_s32+b8.loom",
-        "bench_s32+b2.loom",
+        "bench_s32+b8+pf1.loom",
+        "bench_s32+b8+pf2.loom",
+        "bench_s32+b4+pf1.loom",
+        "bench_s32+b8+xnopart.loom",
         "bench_s32+b8+xempty.loom",
-        "bench_s32+b8+xnoqk.loom",
-        "bench_s32+b8+xnostv.loom",
-        "bench_s32+b8+xnopv.loom",
-        "bench_s32+b8+xnosx.loom"
+        "bench_s32+b8+pf1+xnopart.loom"
       ],
       "tests": [
         "test.loom"
@@ -396,7 +394,7 @@
         "--profile-final-batch=true"
       ],
       "device": "amdgpu://?completion_spin_ns=4294967295",
-      "repeats": 3,
+      "repeats": 5,
       "case_timing": true
     }
   ]

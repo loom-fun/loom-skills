@@ -26,7 +26,10 @@ SMAX = int(os.environ.get("MLA_DEC_S", "64"))      # splits per token at most (g
 BMIN = int(os.environ.get("MLA_DEC_BMIN", "4"))    # 16-key blocks per split at least
 VTC = 16 + int(os.environ.get("MLA_DEC_VTPAD", "8"))   # padded V^T row (halves)
 # timing ablations (kbench only, results wrong): empty (no key blocks), noqk (no S MMAs), nostv (no V^T stores),
-# nopv (no PV MMAs), nosx (no S exchange: own partial, no first barrier)
+# nopv (no PV MMAs), nosx (no S exchange: own partial, no first barrier), nopart (no partial O stores)
+# prefetch: 0 = g_kv_offset per block (3 dependent loads), 1 = page map hoisted + next page index prefetched (1 load
+# round trip per block), 2 = 1 + the next block's K fragments loaded during this block's softmax / PV
+PF = int(os.environ.get("MLA_DEC_PF", "0"))
 ABL = set(x for x in os.environ.get("MLA_DEC_ABL", "").split(",") if x)
 
 
@@ -171,16 +174,66 @@ kernel.def export("g_mla_dsplit") @g_mla_dsplit(%tokens: index) {{
         a(f"""    %vd{d}_o = index.constant {16 * d} : index
     %vr{d} = index.add %vbase, %vd{d}_o : index""")
     acc = ", ".join(f"%a{d} = %init : vector<8xf32>" for d in range(8))
-    a(f"""    %m_final, %l_final, {", ".join(f"%o{d}" for d in range(8))} = scf.for %b = [%b0 to {"%b1e" if "empty" in ABL else "%b1"} step %c1](%m = %neg_big : f32, %l = %zero_f : f32, {acc}) -> (f32, f32, {", ".join(["vector<8xf32>"] * 8)}) {{
-      %tile_first = index.mul %b, %c16 : index
-      %k_off = func.call @{kvo}(%origins, %row, %tile_first, %blocks, %layer, %pool) : (buffer, index, index, index, index, index) -> (offset)
-      %kv = buffer.view %arena[%k_off] : buffer -> view<16x{D}xf16>
-      %key_pos = index.add %tile_first, %lane_col : index
+    acc_pf = ""
+    ty_pf = ""
+    if PF:
+        a(f"""    %rec_stride = index.constant 40 : offset
+    %rec_off = index.scale %row, %rec_stride : index, offset -> offset
+    %records = buffer.view %origins[%rec_off] : buffer -> view<5xi64>
+    %map64 = view.load %records[4] : view<5xi64> -> i64
+    %map_bound = scalar.assume %map64 [range(%map64, 0, 9223372036854775807)] : i64
+    %map_origin = index.cast %map_bound : i64 to offset
+    %page_map = buffer.view %origins[%map_origin] : buffer -> view<[%blocks]xi32>
+    %blk_last = index.sub %nblk, %c1 : index
+    %row_bytes = index.constant {D * 2} : offset
+    %blk_max = index.sub %blocks, %c1 : index
+    %pb0_v = index.min %b0, %blk_last : index
+    %pb0 = index.assume %pb0_v [range(%pb0_v, 0, %blk_max), lt(%pb0_v, %blocks)] : index
+    %ph0 = view.load %page_map[%pb0] : view<[%blocks]xi32> -> i32""")
+        acc_pf = ", %ph = %ph0 : i32"
+        ty_pf = ", i32"
+        if PF == 2:
+            a(f"""    %pb1_v = index.add %b0, %c1 : index
+    %pb1_m = index.min %pb1_v, %blk_last : index
+    %pb1 = index.assume %pb1_m [range(%pb1_m, 0, %blk_max), lt(%pb1_m, %blocks)] : index
+    %ph1 = view.load %page_map[%pb1] : view<[%blocks]xi32> -> i32
+    %phb0 = scalar.assume %ph0 [range(%ph0, 0, 134217727)] : i32
+    %phys0 = index.cast %phb0 : i32 to index
+    %pbase0 = index.mul %phys0, %c16 : index
+    %pslot0 = index.madd %layer, %pool, %pbase0 : index
+    %koff0 = index.scale %pslot0, %row_bytes : index, offset -> offset
+    %kv0 = buffer.view %arena[%koff0] : buffer -> view<16x{D}xf16>""")
+            for j in range(NJ):
+                a(f"""    %kq0_{j} = vector.load %kv0[%lane_col, %qd{j}] : view<16x{D}xf16> -> vector<16xf16>""")
+            acc_pf = ", %ph = %ph1 : i32" + "".join(f", %kc{j} = %kq0_{j} : vector<16xf16>" for j in range(NJ))
+            ty_pf = ", i32" + ", vector<16xf16>" * NJ
+    a(f"""    %m_final, %l_final, {", ".join(f"%o{d}" for d in range(8))}{", %ph_fin" if PF else ""}{"".join(f", %kc_fin{j}" for j in range(NJ)) if PF == 2 else ""} = scf.for %b = [%b0 to {"%b1e" if "empty" in ABL else "%b1"} step %c1](%m = %neg_big : f32, %l = %zero_f : f32, {acc}{acc_pf}) -> (f32, f32, {", ".join(["vector<8xf32>"] * 8)}{ty_pf}) {{
+      %tile_first = index.mul %b, %c16 : index""")
+    if PF == 0:
+        a(f"""      %k_off = func.call @{kvo}(%origins, %row, %tile_first, %blocks, %layer, %pool) : (buffer, index, index, index, index, index) -> (offset)
+      %kv = buffer.view %arena[%k_off] : buffer -> view<16x{D}xf16>""")
+    elif PF == 1:
+        a(f"""      %bn_v = index.add %b, %c1 : index
+      %bn_m = index.min %bn_v, %blk_last : index
+      %bn = index.assume %bn_m [range(%bn_m, 0, %blk_max), lt(%bn_m, %blocks)] : index
+      %ph_next = view.load %page_map[%bn] : view<[%blocks]xi32> -> i32
+      %phb = scalar.assume %ph [range(%ph, 0, 134217727)] : i32
+      %phys = index.cast %phb : i32 to index
+      %pbase = index.mul %phys, %c16 : index
+      %pslot = index.madd %layer, %pool, %pbase : index
+      %k_off = index.scale %pslot, %row_bytes : index, offset -> offset
+      %kv = buffer.view %arena[%k_off] : buffer -> view<16x{D}xf16>""")
+    else:
+        a(f"""      %bn_v = index.add %b, %c2 : index
+      %bn_m = index.min %bn_v, %blk_last : index
+      %bn = index.assume %bn_m [range(%bn_m, 0, %blk_max), lt(%bn_m, %blocks)] : index
+      %ph_next = view.load %page_map[%bn] : view<[%blocks]xi32> -> i32""")
+    a(f"""      %key_pos = index.add %tile_first, %lane_col : index
       %kvalid = index.cmp ule, %key_pos, %position : index""")
     prev = "%init"
     for j in range(NJ):
-        a(f"""      %kr{j} = vector.load %kv[%lane_col, %qd{j}] : view<16x{D}xf16> -> vector<16xf16>
-      %kh{j} = scf.select %kvalid, %kr{j}, %zero16h : vector<16xf16>
+        a((f"""      %kr{j} = vector.load %kv[%lane_col, %qd{j}] : view<16x{D}xf16> -> vector<16xf16>
+""" if PF < 2 else "") + f"""      %kh{j} = scf.select %kvalid, {"%kr" if PF < 2 else "%kc"}{j}, %zero16h : vector<16xf16>
       %kf{j} = vector.fragment<lhs> %kh{j} shape [%c16, %c16] : vector<16xf16>
 """ + (f"""      %s{j} = vector.mma %kf{j}, %qf{j}, {prev} : vector<16xf16>, vector<16xf16>, vector<8xf32>""" if "noqk" not in ABL else f"""      %s{j} = vector.addf {prev}, {prev} : vector<8xf32>"""))
         prev = f"%s{j}"
@@ -199,6 +252,15 @@ kernel.def export("g_mla_dsplit") @g_mla_dsplit(%tokens: index) {{
         a(f"""      scf.if %vst{j} {{
 {chr(10).join(st)}
       }}""")
+    if PF == 2:
+        a(f"""      %phb = scalar.assume %ph [range(%ph, 0, 134217727)] : i32
+      %phys = index.cast %phb : i32 to index
+      %pbase = index.mul %phys, %c16 : index
+      %pslot = index.madd %layer, %pool, %pbase : index
+      %k_off = index.scale %pslot, %row_bytes : index, offset -> offset
+      %kvn = buffer.view %arena[%k_off] : buffer -> view<16x{D}xf16>""")
+        for j in range(NJ):
+            a(f"""      %kn{j} = vector.load %kvn[%lane_col, %qd{j}] : view<16x{D}xf16> -> vector<16xf16>""")
     if "nosx" in ABL:
         a(f"""      %st = vector.addf %s{NJ - 1}, %s{NJ - 1} : vector<8xf32>
       %sc = vector.mulf %st, %scale_v : vector<8xf32>""")
@@ -248,7 +310,7 @@ kernel.def export("g_mla_dsplit") @g_mla_dsplit(%tokens: index) {{
       %vl{d} = vector.fragment.load<lhs> %vt_view[%vr{d}, %c0] shape [%c16, %c16] : view<{KL}x{VTC}xf16> -> vector<16xf16>
 """ + (f"""      %an{d} = vector.mma %vl{d}, %pt, %os{d} : vector<16xf16>, vector<16xf16>, vector<8xf32>""" if "nopv" not in ABL else f"""      %an{d} = vector.addf %os{d}, %os{d} : vector<8xf32>"""))
     a(f"""      kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
-      scf.yield %m_new, %l_new, {", ".join(f"%an{d}" for d in range(8))} : f32, f32, {", ".join(["vector<8xf32>"] * 8)}
+      scf.yield %m_new, %l_new, {", ".join(f"%an{d}" for d in range(8))}{", %ph_next" if PF else ""}{"".join(f", %kn{j}" for j in range(NJ)) if PF == 2 else ""} : f32, f32, {", ".join(["vector<8xf32>"] * 8)}{ty_pf}
     }}
     // partials: O^T (dim row, head col) through a transposed strided view of part_acc[token][split][head][512]
     %c512 = index.constant {KL} : index
@@ -261,7 +323,7 @@ kernel.def export("g_mla_dsplit") @g_mla_dsplit(%tokens: index) {{
     %four = index.constant 4 : offset
     %acc_off = index.scale %acc_first, %four : index, offset -> offset
     %acc_view = buffer.view %part_acc[%acc_off] : buffer -> view<128x16xf32, %acc_layout>""")
-    for d in range(8):
+    for d in range(8 if "nopart" not in ABL else 0):
         a(f"""    vector.fragment.store<result> %o{d}, %acc_view[%vd{d}_o, %c0] shape [%c16, %c16] : vector<8xf32>, view<128x16xf32, %acc_layout>""")
     a(f"""    %q0 = index.cmp eq, %qd, %c0 : index
     %lo_half = index.cmp eq, %lane_half, %c0 : index
