@@ -945,6 +945,32 @@ print('gufo', k, [x.get(k) for x in r if x.get(k)], 'median', round(st.median(v)
       EXTRA_GUFO_ARGS="${gp:+--loom-preset $gp}" BUNDLE=$GUFO_BUNDLE "$GUFO_BUNDLE/validation/devlab/run_conformance.sh" "$D/$p1/pkg" "$out/gufo_$p1" 8181 > "$out/gufo_$p1.log" 2>&1; rc=$?
       tail -4 "$out/gufo_$p1.log" | cut -c1-300
       res[$s]=$("$T" "$here/.github/scripts/gufo_gate.py" "$out/gufo_$p1" "$out/conformance_$p1.json" "$rc" 2>&1 | tail -1 | cut -c1-300);;
+    gufomodel)   # gufomodel:ID  (experiment) the extension's declared model ID as a user gets it: `gufo model install ID` (the bundle's
+                 # catalog), then Gufo conformance on the installed model directory, which is what `--model ID` resolves to
+      free_gpu
+      gufo_bundle || { res[$s]="not supported (no gufo bundle)"; continue; }
+      export GUFO_MODELS_DIR=$WORK/gufo-models
+      step "gufo model install $p1"
+      "$GUFO_BUNDLE/run-gufo.sh" model install "$p1" > "$out/gufomodel_$p1.install.log" 2>&1 || { tail -3 "$out/gufomodel_$p1.install.log"; res[$s]="INSTALL FAIL"; continue; }
+      tail -4 "$out/gufomodel_$p1.install.log"
+      BUNDLE=$GUFO_BUNDLE "$GUFO_BUNDLE/validation/devlab/run_conformance.sh" "$GUFO_MODELS_DIR/$p1" "$out/gufo_$p1" 8181 > "$out/gufo_$p1.log" 2>&1; rc=$?
+      tail -4 "$out/gufo_$p1.log" | cut -c1-300
+      grep -h "loom: preset\|parameter files found" "$out/gufo_$p1/gufo.log" | head -2
+      res[$s]=$("$T" "$here/.github/scripts/gufo_gate.py" "$out/gufo_$p1" "$out/conformance_$p1.json" "$rc" 2>&1 | tail -1 | cut -c1-300)
+      "$GUFO_BUNDLE/run-gufo.sh" model remove "$p1" > /dev/null 2>&1;;
+    gufosrc)   # gufosrc:REPO  (experiment) a Gufo with Loom built in (gufo-org/gufo#1315): `gufo model install REPO` (resolved from the
+               # Hub), then Gufo conformance on the installed model, which is what `--model REPO` resolves to
+      free_gpu
+      gufo_bundle || { res[$s]="not supported (no gufo bundle)"; continue; }
+      export GUFO_MODELS_DIR=$WORK/gufo-models
+      repo="$p1"; mid=$(printf '%s' "${repo#*/}" | tr 'A-Z' 'a-z'); tag=${mid}
+      step "gufo model install $repo"
+      "$GUFO_BUNDLE/run-gufo.sh" model install "$repo" > "$out/gufosrc_$tag.install.log" 2>&1 || { tail -3 "$out/gufosrc_$tag.install.log"; res[$s]="INSTALL FAIL"; continue; }
+      tail -3 "$out/gufosrc_$tag.install.log"
+      BUNDLE=$GUFO_BUNDLE "$GUFO_BUNDLE/validation/devlab/run_conformance.sh" "$GUFO_MODELS_DIR/$mid" "$out/gufo_$tag" 8181 > "$out/gufo_$tag.log" 2>&1; rc=$?
+      tail -4 "$out/gufo_$tag.log" | cut -c1-300
+      res[$s]=$("$T" "$here/.github/scripts/gufo_gate.py" "$out/gufo_$tag" "$out/conformance_$tag.json" "$rc" 2>&1 | tail -1 | cut -c1-300)
+      "$GUFO_BUNDLE/run-gufo.sh" model remove "$repo" > /dev/null 2>&1;;
     smoke)   # smoke:V  one served chat request (the iterate preset's whole functional check: build, serve, answer; func:V is the full list)
       serve_alone "$p1" || { res[$s]=ERROR; continue; }
       step "smoke $p1"

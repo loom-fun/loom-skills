@@ -1,47 +1,205 @@
 {
- "_comment": "R9700 per-model measurement (r9700_jobs.py): one job per model on one R9700 runner; loom-fun-staging card, llama.cpp ROCm b1375 + Vulkan b12211 with the matched drafting, reduced-context models served at served_context. Does not fit: none",
- "runner": "r9700",
- "memory_bytes": 34000000000,
- "llama_spec": "matched",
+ "_comment": "Which Inkling-2-Mini (and Flint) card revision broke host sampling under Gufo main + the inkling2 fix: every revision from the validated pin to head, loom-fetch packages, conformance.py --logits.",
+ "card": "loom-fun/unsloth-Inkling-2-Mini-loom@4e018e88a3aa9826286c71dfe2f6c905a491659b",
+ "memory_bytes": 17000000000,
+ "kit": null,
+ "llamacpp": "b1374",
  "jobs": [
   {
-   "name": "unsloth-qwen3-0-6b-loom",
-   "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
-   "kit": null,
-   "llamacpp": "b1375",
-   "llamacpp_vulkan": "b12211",
-   "memory_bytes_r9700": 17000000000,
+   "name": "ink-4e018e88",
+   "card": "loom-fun/unsloth-Inkling-2-Mini-loom@4e018e88a3aa9826286c71dfe2f6c905a491659b",
+   "memory_bytes": 17000000000,
    "variants": [
     {
-     "name": "card",
-     "build": {}
-    },
-    {
-     "name": "nodraft",
-     "build": {},
-     "execution": {
-      "draft_depth": 0
-     }
+     "name": "card"
     }
    ],
    "steps": [
-    "func:card",
-    "ktest:card",
-    "gates:card:dev",
-    "perf:card:3",
-    "perf:card:3:long",
-    "c4:nodraft",
-    "llama@rocm.np1:3",
-    "llama@rocm.np1:3:long",
-    "llamac4@rocm.nodraft",
-    "llama@vulkan.np1:3",
-    "llama@vulkan.np1:3:long",
-    "llamac4@vulkan.perslot.nodraft"
-   ]
+    "gufo:card"
+   ],
+   "bundle": {
+    "build": {
+     "extension": "loom-fun/loom-gufo-extension@69887b8e488700ca0728b90c3d92e7dd81dfb60c",
+     "gufo": "jeremyfowers/gufo@f9f893a821ae1fe96cb2e424cc641a1c94a7425f"
+    }
+   }
+  },
+  {
+   "name": "ink-24ceb67c",
+   "card": "loom-fun/unsloth-Inkling-2-Mini-loom@24ceb67c87147935f055c08ccce250c3f7de1f9c",
+   "memory_bytes": 17000000000,
+   "variants": [
+    {
+     "name": "card"
+    }
+   ],
+   "steps": [
+    "gufo:card"
+   ],
+   "bundle": {
+    "build": {
+     "extension": "loom-fun/loom-gufo-extension@69887b8e488700ca0728b90c3d92e7dd81dfb60c",
+     "gufo": "jeremyfowers/gufo@f9f893a821ae1fe96cb2e424cc641a1c94a7425f"
+    }
+   }
+  },
+  {
+   "name": "ink-a8354e77",
+   "card": "loom-fun/unsloth-Inkling-2-Mini-loom@a8354e77a701cd71f749e0a41ce0c41e33799156",
+   "memory_bytes": 17000000000,
+   "variants": [
+    {
+     "name": "card"
+    }
+   ],
+   "steps": [
+    "gufo:card"
+   ],
+   "bundle": {
+    "build": {
+     "extension": "loom-fun/loom-gufo-extension@69887b8e488700ca0728b90c3d92e7dd81dfb60c",
+     "gufo": "jeremyfowers/gufo@f9f893a821ae1fe96cb2e424cc641a1c94a7425f"
+    }
+   }
+  },
+  {
+   "name": "ink-fa6645a0",
+   "card": "loom-fun/unsloth-Inkling-2-Mini-loom@fa6645a0fecf5da5cc7a926461e917b1db364642",
+   "memory_bytes": 17000000000,
+   "variants": [
+    {
+     "name": "card"
+    }
+   ],
+   "steps": [
+    "gufo:card"
+   ],
+   "bundle": {
+    "build": {
+     "extension": "loom-fun/loom-gufo-extension@69887b8e488700ca0728b90c3d92e7dd81dfb60c",
+     "gufo": "jeremyfowers/gufo@f9f893a821ae1fe96cb2e424cc641a1c94a7425f"
+    }
+   }
+  },
+  {
+   "name": "ink-4cf6c1cc",
+   "card": "loom-fun/unsloth-Inkling-2-Mini-loom@4cf6c1cc4695fff2f765caf3b4ed0f4b093a72ea",
+   "memory_bytes": 17000000000,
+   "variants": [
+    {
+     "name": "card"
+    }
+   ],
+   "steps": [
+    "gufo:card"
+   ],
+   "bundle": {
+    "build": {
+     "extension": "loom-fun/loom-gufo-extension@69887b8e488700ca0728b90c3d92e7dd81dfb60c",
+     "gufo": "jeremyfowers/gufo@f9f893a821ae1fe96cb2e424cc641a1c94a7425f"
+    }
+   }
+  },
+  {
+   "name": "ink-a7877981",
+   "card": "loom-fun/unsloth-Inkling-2-Mini-loom@a78779814f545e254cffa9b346e85f236d54ea7c",
+   "memory_bytes": 17000000000,
+   "variants": [
+    {
+     "name": "card"
+    }
+   ],
+   "steps": [
+    "gufo:card"
+   ],
+   "bundle": {
+    "build": {
+     "extension": "loom-fun/loom-gufo-extension@69887b8e488700ca0728b90c3d92e7dd81dfb60c",
+     "gufo": "jeremyfowers/gufo@f9f893a821ae1fe96cb2e424cc641a1c94a7425f"
+    }
+   }
+  },
+  {
+   "name": "ink-b5e33e11",
+   "card": "loom-fun/unsloth-Inkling-2-Mini-loom@b5e33e11ecc753e2df9b066cad2397bc39abe16b",
+   "memory_bytes": 17000000000,
+   "variants": [
+    {
+     "name": "card"
+    }
+   ],
+   "steps": [
+    "gufo:card"
+   ],
+   "bundle": {
+    "build": {
+     "extension": "loom-fun/loom-gufo-extension@69887b8e488700ca0728b90c3d92e7dd81dfb60c",
+     "gufo": "jeremyfowers/gufo@f9f893a821ae1fe96cb2e424cc641a1c94a7425f"
+    }
+   }
+  },
+  {
+   "name": "ink-277f099b",
+   "card": "loom-fun/unsloth-Inkling-2-Mini-loom@277f099b5003b725e099d48caa1a2c0db1f9b650",
+   "memory_bytes": 17000000000,
+   "variants": [
+    {
+     "name": "card"
+    }
+   ],
+   "steps": [
+    "gufo:card"
+   ],
+   "bundle": {
+    "build": {
+     "extension": "loom-fun/loom-gufo-extension@69887b8e488700ca0728b90c3d92e7dd81dfb60c",
+     "gufo": "jeremyfowers/gufo@f9f893a821ae1fe96cb2e424cc641a1c94a7425f"
+    }
+   }
+  },
+  {
+   "name": "flint-pin-d60f073d",
+   "card": "loom-fun/ggml-org-Flint-loom@d60f073d32ca9f4c78fb20e79bb1187f8d60841f",
+   "memory_bytes": 17000000000,
+   "variants": [
+    {
+     "name": "card"
+    }
+   ],
+   "steps": [
+    "gufo:card"
+   ],
+   "env": {
+    "EXTRA_GUFO_ARGS": "--context 32768"
+   },
+   "bundle": {
+    "build": {
+     "extension": "loom-fun/loom-gufo-extension@69887b8e488700ca0728b90c3d92e7dd81dfb60c",
+     "gufo": "jeremyfowers/gufo@f9f893a821ae1fe96cb2e424cc641a1c94a7425f"
+    }
+   }
+  },
+  {
+   "name": "flint-head-d60f073d",
+   "card": "loom-fun/ggml-org-Flint-loom@d60f073d32ca9f4c78fb20e79bb1187f8d60841f",
+   "memory_bytes": 17000000000,
+   "variants": [
+    {
+     "name": "card"
+    }
+   ],
+   "steps": [
+    "gufo:card"
+   ],
+   "env": {
+    "EXTRA_GUFO_ARGS": "--context 32768"
+   },
+   "bundle": {
+    "build": {
+     "extension": "loom-fun/loom-gufo-extension@69887b8e488700ca0728b90c3d92e7dd81dfb60c",
+     "gufo": "jeremyfowers/gufo@f9f893a821ae1fe96cb2e424cc641a1c94a7425f"
+    }
+   }
   }
- ],
- "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
- "kit": null,
- "llamacpp": "b1375",
- "llamacpp_vulkan": "b12211"
+ ]
 }
