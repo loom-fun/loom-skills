@@ -57,16 +57,24 @@ def encode(pipe, prompt):
     return pipe.encode_prompt(**kwargs)[0]
 
 
+def snapshot_digest(root):
+    files = []
+    for path in sorted(root.rglob("*")):
+        if path.is_dir() and path.is_symlink():
+            raise ValueError(f"local snapshot contains a symlinked directory: {path}")
+        if path.is_file():
+            with path.open("rb") as handle:
+                digest = hashlib.file_digest(handle, "sha256").hexdigest()
+            files.append((path.relative_to(root).as_posix(), digest))
+    if not files:
+        raise ValueError(f"local snapshot is empty: {root}")
+    return hashlib.sha256(json.dumps(files).encode()).hexdigest()
+
+
 def provenance(args):
     local = Path(args.model).resolve()
     if local.is_dir():
-        files = []
-        for path in sorted(local.rglob("*")):
-            if path.is_file():
-                stat = path.stat()
-                files.append((path.relative_to(local).as_posix(), stat.st_size, stat.st_mtime_ns))
-        model = str(local)
-        snapshot = hashlib.sha256(json.dumps(files).encode()).hexdigest()
+        model, snapshot = "local snapshot", snapshot_digest(local)
     else:
         if not re.fullmatch(r"[0-9a-f]{40}", args.revision or ""):
             raise ValueError("a Hugging Face model requires --revision with the full commit SHA")
@@ -79,6 +87,20 @@ def provenance(args):
         "oracle_sha256": hashlib.sha256(source.read_bytes() + source.with_name("philox_noise.py").read_bytes()).hexdigest(),
         "versions": {name: importlib.metadata.version(name) for name in ("torch", "diffusers", "transformers", "numpy")},
     }
+
+
+def selected_cases(prompts, sizes, seeds):
+    ids = [case["id"] for case in prompts]
+    if not ids or any(not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]*", item) for item in ids):
+        raise ValueError("prompt IDs must start with a letter or digit and use only letters, digits, '-' or '_'")
+    if len({item.lower() for item in ids}) != len(ids):
+        raise ValueError("prompt IDs must be unique")
+    dimensions = [tuple(int(value) for value in size.lower().split("x")) for size in sizes]
+    if not dimensions or any(len(shape) != 2 or min(shape) < 1 for shape in dimensions):
+        raise ValueError("sizes must contain positive WxH dimensions")
+    if not seeds or len(set(seeds)) != len(seeds) or len(set(dimensions)) != len(dimensions):
+        raise ValueError("provide unique sizes and seeds")
+    return [(q, width, height, seed) for q in prompts for width, height in dimensions for seed in seeds]
 
 
 def stage_names(settings):
@@ -140,10 +162,6 @@ def main():
     args = ap.parse_args()
     if args.steps <= 0:
         ap.error("--steps must be positive")
-    try:
-        shared = provenance(args)
-    except (ValueError, importlib.metadata.PackageNotFoundError) as error:
-        ap.error(str(error))
 
     cfg = json.loads(Path(args.prompt_file).read_text(encoding="utf-8"))
     prompts = cfg["prompts"]
@@ -152,18 +170,25 @@ def main():
         prompts = [q for q in prompts if q["id"] in keep]
     seeds = [int(s) for s in args.seeds.split(",")] if args.seeds else cfg["seeds"]
     sizes = cfg["sizes"] if args.sizes == "all" else args.sizes.split(",")
+    try:
+        cases = selected_cases(prompts, sizes, seeds)
+        shared = provenance(args)
+    except (OSError, ValueError, importlib.metadata.PackageNotFoundError) as error:
+        ap.error(str(error))
     pending = []
-    for q in prompts:
-        for size in sizes:
-            width, height = (int(v) for v in size.lower().split("x"))
-            for seed in seeds:
-                case = Path(args.out) / args.dtype / f"{q['id']}_s{seed}_{width}x{height}"
-                settings = {**shared, "prompt_id": q["id"], "prompt": q["text"],
-                            "seed": seed, "width": width, "height": height}
-                if complete_case(case, settings):
-                    print(f"skip {case.name}")
-                else:
-                    pending.append((q, width, height, seed, case, settings))
+    output = Path(args.out) / args.dtype
+    if output.is_symlink():
+        ap.error(f"dtype directory is a symlink: {output}")
+    for q, width, height, seed in cases:
+        case = output / f"{q['id']}_s{seed}_{width}x{height}"
+        if case.is_symlink():
+            ap.error(f"case directory is a symlink: {case}")
+        settings = {**shared, "prompt_id": q["id"], "prompt": q["text"],
+                    "seed": seed, "width": width, "height": height}
+        if complete_case(case, settings):
+            print(f"skip {case.name}")
+        else:
+            pending.append((q, width, height, seed, case, settings))
     if not pending:
         return
 
@@ -174,7 +199,7 @@ def main():
     torch.backends.cudnn.enabled = False
     t0 = time.perf_counter()
     dtype = torch.float32 if args.dtype == "fp32" else torch.bfloat16
-    pipe = DiffusionPipeline.from_pretrained(shared["model"], revision=args.revision, torch_dtype=dtype)
+    pipe = DiffusionPipeline.from_pretrained(args.model, revision=args.revision, torch_dtype=dtype)
     pipe.set_progress_bar_config(disable=True)
     pipe.text_encoder.to("cuda")
     if not args.offload_text_encoder:
@@ -222,6 +247,7 @@ def main():
 
         meta = {
             **settings, "settings": settings,
+            "model_input": args.model,
             "noise": f"loom philox4x32-10, layout {args.layout}, bf16",
             "sigmas": [float(s) for s in pipe.scheduler.sigmas.cpu()],
             "timesteps": [float(t) for t in pipe.scheduler.timesteps.cpu()],

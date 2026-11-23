@@ -108,6 +108,11 @@ the card's Methodology list reports.
   For Loom, verify `denoising_steps` in the served card and supply
   `--loom-guidance LABEL=G` from the pinned program when guidance is absent from its interface.
   Supply `--loom-card LABEL=PATH` when timing an existing Loom process.
+  For a TheNoise checkpoint whose guidance 1.0 disables CFG, use `--thenoise-cfg-free LABEL`
+  to translate a comparison value of zero to 1.0 on that target. Record both values.
+- Run an externally managed `sd-server` or `loom-url` target in its own block with other image
+  backends stopped. The script rotates and unloads multiple targets only when it manages their
+  residency.
 - **Caches.** thenoise answers a repeat of its previous request from a stage cache, so consecutive
   requests to one backend must not share a prompt: order cases seed-major, prompt-minor.
 - **Own-RNG backends.** stable-diffusion.cpp and thenoise draw their own noise, so their images are a

@@ -5,6 +5,7 @@ usage: bench_images.py --target LABEL=SPEC [--target ...] --out DIR [--alternate
                        [--steps N] [--cfg-scale G] [--size 1024x1024] [--prompt-file prompts.json]
                        [--prompts fox,sign] [--seeds 0,42] [--loom-serve PATH] [--device amdgpu] [--port 8211]
                        [--lemonade http://localhost:13305] [--loom-card LABEL=PATH] [--loom-guidance LABEL=G]
+                       [--thenoise-cfg-free LABEL]
 
 SPEC is one of
   loom:PKG/model.json              loom-serve on that card; started and stopped by this script (needs --alternate)
@@ -19,6 +20,7 @@ Modes:
                warms up once, times every case once, then takes it down (stops loom-serve / Lemonade /v1/unload).
                A resident image server holds tens of GB, and a second resident model in a shared GPU carve-out
                spills to shared memory and slows both. Rotation spreads thermal drift over every target.
+               Multiple targets require script-managed Loom or Lemonade servers.
   default      every target already resident; each case visits all targets in a rotating order. Only valid when
                all targets fit in device memory together.
 Cases are ordered seed-major, prompt-minor so consecutive requests to one target never share a prompt: thenoise
@@ -36,6 +38,7 @@ import hashlib
 import json
 import math
 import platform
+import re
 import shutil
 import statistics
 import struct
@@ -95,6 +98,11 @@ class Target:
         elif self.kind == "lemonade":
             self.model, self.recipe, self.backend = rest.split(":")
             self.url = args.lemonade.rstrip("/")
+            if self.recipe == "thenoise" and self.cfg_scale == 0:
+                if self.label not in args.thenoise_cfg_free:
+                    raise ValueError(f"{self.label}: Lemonade omits zero guidance for TheNoise. "
+                                     "Use --thenoise-cfg-free LABEL only for a checkpoint where 1.0 disables CFG.")
+                self.cfg_scale = 1.0
         else:
             raise ValueError(f"unknown target kind {self.kind!r} in {spec!r}")
         if self.kind in ("loom", "loom-url"):
@@ -107,16 +115,16 @@ class Target:
                                  f"differ from requested {args.steps}/{args.cfg_scale}")
 
     def body(self, prompt, seed, size):
-        a = self.args
         body = {"prompt": prompt, "size": size, "seed": seed, "response_format": "b64_json"}
         if self.model:
             body["model"] = self.model
         if self.kind == "lemonade":
-            body.update(n=1, steps=a.steps, cfg_scale=a.cfg_scale)
+            body.update(n=1, steps=self.steps, cfg_scale=self.cfg_scale)
         elif self.kind == "sdserver":
             # sd-server reads sampler settings from a tag in the prompt, nested as Lemonade forwards them;
             # flat sample_steps / cfg_scale fields are ignored.
-            extra = {"seed": seed, "sample_params": {"sample_steps": a.steps, "guidance": {"txt_cfg": a.cfg_scale}}}
+            extra = {"seed": seed, "sample_params": {"sample_steps": self.steps,
+                                                      "guidance": {"txt_cfg": self.cfg_scale}}}
             body["prompt"] = f"{prompt}<sd_cpp_extra_args>{json.dumps(extra)}</sd_cpp_extra_args>"
         return body
 
@@ -132,14 +140,15 @@ class Target:
 
     def up(self):
         if self.kind == "lemonade":
-            http("POST", f"{self.url}/v1/load", {"model_name": self.model, "steps": self.args.steps,
-                                                 "cfg_scale": self.args.cfg_scale, f"{self.recipe}_backend": self.backend})
+            http("POST", f"{self.url}/v1/load", {"model_name": self.model, "steps": self.steps,
+                                                 "cfg_scale": self.cfg_scale, f"{self.recipe}_backend": self.backend,
+                                                 "save_options": False})
         elif self.kind == "loom":
             self.log = Path(self.args.out) / f"{self.label}_serve.log"
             self.log.parent.mkdir(parents=True, exist_ok=True)
             cmd = [self.args.loom_serve, f"--device={self.args.device}", f"--model={self.package}",
                    f"--listen=127.0.0.1:{self.args.port}"]
-            with self.log.open("w") as output:
+            with self.log.open("a") as output:
                 self.proc = subprocess.Popen(cmd, stdout=output, stderr=subprocess.STDOUT)
             try:
                 self.wait_ready()
@@ -162,10 +171,7 @@ class Target:
 
     def down(self):
         if self.kind == "lemonade":
-            try:
-                http("POST", f"{self.url}/v1/unload", {})
-            except SystemExit:
-                pass
+            http("POST", f"{self.url}/v1/unload", {"model_name": self.model})
         elif self.proc is not None:
             self.proc.terminate()
             try:
@@ -183,6 +189,11 @@ class Target:
             keep = ("model_name", "checkpoint", "device", "recipe", "recipe_options", "launch_command")
             if len(loaded) != 1 or loaded[0].get("recipe") != self.recipe:
                 raise ValueError(f"{self.label}: Lemonade did not load the requested recipe")
+            options = loaded[0].get("recipe_options", {})
+            for key, value in {"steps": self.steps, "cfg_scale": self.cfg_scale,
+                               f"{self.recipe}_backend": self.backend}.items():
+                if options.get(key) != value:
+                    raise ValueError(f"{self.label}: Lemonade reported {key}={options.get(key)!r}, requested {value!r}")
             return {"lemonade_version": health.get("version"), "loaded": {k: loaded[0].get(k) for k in keep}}
         if self.kind in ("loom", "loom-url"):
             status = http("GET", f"{self.url}/v1/status", timeout=3)
@@ -224,6 +235,7 @@ def main():
     ap.add_argument("--lemonade", default="http://localhost:13305")
     ap.add_argument("--loom-card", action="append", default=[], metavar="LABEL=PATH")
     ap.add_argument("--loom-guidance", action="append", default=[], metavar="LABEL=G")
+    ap.add_argument("--thenoise-cfg-free", action="append", default=[], metavar="LABEL")
     args = ap.parse_args()
 
     try:
@@ -235,14 +247,27 @@ def main():
             raise ValueError("--loom-card labels must name loom-url targets")
         if set(args.loom_guidance) - {t.label for t in targets if t.kind in ("loom", "loom-url")}:
             raise ValueError("--loom-guidance labels must name Loom targets")
-        if len({t.label for t in targets}) != len(targets):
+        if set(args.thenoise_cfg_free) - {t.label for t in targets if getattr(t, "recipe", None) == "thenoise"}:
+            raise ValueError("--thenoise-cfg-free labels must name TheNoise targets")
+        if args.thenoise_cfg_free and args.cfg_scale != 0:
+            raise ValueError("--thenoise-cfg-free requires --cfg-scale 0 for the other targets")
+        if len({t.label.lower() for t in targets}) != len(targets):
             raise ValueError("target labels must be unique")
+        if any(not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]*", t.label) for t in targets):
+            raise ValueError("target labels must start with a letter or digit and use only letters, digits, '-' or '_'")
+        output = Path(args.out)
+        for target in targets:
+            owned_paths = (output / target.label, output / f"{target.label}_serve.log")
+            if any(path.exists() or path.is_symlink() for path in owned_paths):
+                raise ValueError(f"{target.label}: use a new benchmark output path for this label")
         if args.steps < 1 or args.repeats < 1 or not math.isfinite(args.cfg_scale):
             raise ValueError("provide positive steps and repeats and finite guidance")
     except (KeyError, OSError, TypeError, ValueError) as error:
         ap.error(str(error))
     if not args.alternate and any(t.kind == "loom" for t in targets):
         ap.error("loom:PKG targets are started by the script and need --alternate; use loom-url:URL for a running server")
+    if args.alternate and len(targets) > 1 and any(t.kind in ("loom-url", "sdserver") for t in targets):
+        ap.error("--alternate with multiple targets requires the script to manage every target's residency")
     cfg = json.loads(Path(args.prompt_file).read_text(encoding="utf-8"))
     prompts = cfg["prompts"]
     if args.prompts:
@@ -251,6 +276,11 @@ def main():
     seeds = [int(s) for s in args.seeds.split(",")] if args.seeds else cfg["seeds"]
     if not prompts or not seeds:
         ap.error("select at least one prompt and seed")
+    prompt_ids = [q["id"] for q in prompts]
+    if any(not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]*", item) for item in prompt_ids):
+        ap.error("prompt IDs must start with a letter or digit and use only letters, digits, '-' or '_'")
+    if len({item.lower() for item in prompt_ids}) != len(prompt_ids) or len(set(seeds)) != len(seeds):
+        ap.error("provide unique prompt IDs and seeds")
     if len(prompts) < 2:
         print("warning: one prompt means consecutive requests share it; thenoise answers those from its stage cache")
     cases = [(q, s) for s in seeds for q in prompts]
@@ -277,7 +307,7 @@ def main():
                 t = targets[(rep + j) % k]
                 t.up()
                 try:
-                    info.setdefault(t.label, t.info())
+                    info.setdefault(t.label, []).append(t.info())
                     _, w = t.generate(WARMUP_PROMPT, 0, args.size)
                     warm.setdefault(t.label, []).append(w)
                     times = [timed(t, i) for i in range(len(cases))]
@@ -288,7 +318,7 @@ def main():
     else:
         for t in targets:
             t.up()
-            info[t.label] = t.info()
+            info[t.label] = [t.info()]
             _, w = t.generate(WARMUP_PROMPT, 0, args.size)
             warm[t.label] = [w]
         n = 0
@@ -311,7 +341,8 @@ def main():
                 "label": t.label, "kind": t.kind, "url": t.url, "model": t.model,
                 "recipe": getattr(t, "recipe", None), "backend": getattr(t, "backend", None),
                 "prompt_id": q["id"], "prompt": q["text"], "seed": seed, "width": width, "height": height,
-                "steps": t.steps, "cfg_scale": t.cfg_scale, "loom_card_sha256": t.card_sha256,
+                "steps": t.steps, "cfg_scale": t.cfg_scale, "comparison_cfg_scale": args.cfg_scale,
+                "loom_card_sha256": t.card_sha256,
                 "seconds": {"runs": r, "median": statistics.median(r), "min": min(r), "warmup": warm.get(t.label)},
                 "order": order, "deterministic_across_repeats": len(digests[(t.label, i)]) == 1,
                 "server_info": info.get(t.label), "host": platform.node(),

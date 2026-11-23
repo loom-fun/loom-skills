@@ -1,5 +1,6 @@
 """loom-port-image: wiring, bundled scripts, and the Philox noise generator the diffusers oracle depends on."""
 import json
+import os
 import py_compile
 import re
 import subprocess
@@ -161,11 +162,40 @@ class ImageEvidence(unittest.TestCase):
                            ("capture_stages", False), ("guidance_scale", 1)):
             self.assertFalse(self.oracle.complete_case(case, {**settings, key: value}), key)
 
+    def test_local_snapshot_identity_tracks_bytes_independent_of_mtime(self):
+        root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        first, second = root / "a", root / "b"
+        for directory in (first, second):
+            directory.mkdir()
+            (directory / "weights.bin").write_bytes(b"same")
+        other = second / "weights.bin"
+        os.utime(other, ns=(1000000000, 1000000000))
+        digest = self.oracle.snapshot_digest(first)
+        self.assertEqual(self.oracle.snapshot_digest(second), digest)
+        other.write_bytes(b"edit")
+        os.utime(other, ns=(1000000000, 1000000000))
+        self.assertNotEqual(self.oracle.snapshot_digest(second), digest)
+
+    def test_rejects_traversal_and_duplicate_case_ids(self):
+        for names in (["../outside"], ["/absolute"], ["same", "Same"]):
+            with self.subTest(names=names), self.assertRaises(ValueError):
+                self.oracle.selected_cases([{"id": name} for name in names], ["384x384"], [0])
+        output = Path(self.enterContext(tempfile.TemporaryDirectory())) / "out"
+        for labels in (["../outside"], ["/absolute"], ["same", "Same"]):
+            with self.subTest(labels=labels):
+                flags = [item for label in labels for item in ("--target", f"{label}=sdserver:http://localhost")]
+                result = subprocess.run([sys.executable, str(SCRIPTS / "bench_images.py"), *flags,
+                                         "--steps", "8", "--out", str(output)], capture_output=True, text=True)
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertIn("target labels", result.stderr)
+                self.assertFalse(output.exists())
+
     def test_timing_checks_card_and_sends_explicit_lemonade_options(self):
         card = Path(self.enterContext(tempfile.TemporaryDirectory())) / "model.json"
         card.write_text(json.dumps({"model": {"id": "image"}, "services": {
             "image": {"kind": "image", "interface": {"denoising_steps": 8, "guidance_scale": 0.0}}}}))
-        args = SimpleNamespace(steps=8, cfg_scale=0.0, loom_guidance={}, port=8271, lemonade="http://localhost")
+        args = SimpleNamespace(steps=8, cfg_scale=0.0, loom_guidance={}, port=8271, lemonade="http://localhost",
+                               thenoise_cfg_free=[])
         loom = self.bench.Target(f"loom=loom:{card}", args)
         lemon = self.bench.Target("lemon=lemonade:model:sd-cpp:rocm", args)
         direct = self.bench.Target("direct=sdserver:http://localhost", args)
@@ -175,6 +205,20 @@ class ImageEvidence(unittest.TestCase):
         self.assertIn('"txt_cfg": 0.0', direct.body("fox", 0, "384x384")["prompt"])
         with patch.object(self.bench, "http", return_value={"data": [{"id": "image", "loom": {"registration": "ready"}}]}):
             self.assertEqual(loom.info()["registration"]["registration"], "ready")
+        options = {"steps": 8, "cfg_scale": 0, "sd-cpp_backend": "rocm"}
+        health = {"all_models_loaded": [{"model_name": "model", "recipe": "sd-cpp", "recipe_options": options}]}
+        with patch.object(self.bench, "http", return_value=health) as client:
+            lemon.up()
+            self.assertEqual(client.call_args.args[2], {"model_name": "model", **options, "save_options": False})
+            self.assertEqual(lemon.info()["loaded"]["recipe_options"], options)
+            options["steps"] = 9
+            with self.assertRaisesRegex(ValueError, "reported steps=9"):
+                lemon.info()
+        with self.assertRaisesRegex(ValueError, "omits zero guidance"):
+            self.bench.Target("tn=lemonade:model:thenoise:rocm", args)
+        args.thenoise_cfg_free = ["tn"]
+        thenoise = self.bench.Target("tn=lemonade:model:thenoise:rocm", args)
+        self.assertEqual(thenoise.body("fox", 0, "384x384")["cfg_scale"], 1.0)
         args.steps = 9
         with self.assertRaisesRegex(ValueError, "differ from requested"):
             self.bench.Target(f"loom=loom:{card}", args)
@@ -193,6 +237,34 @@ class ImageEvidence(unittest.TestCase):
         (b / "fox/meta.json").write_text(json.dumps({**meta, "prompt": "a brown hare"}))
         with self.assertRaisesRegex(ValueError, "differs for paired case"):
             metrics.matching_metadata([a, b], ["fox"])
+
+    @unittest.skipIf(np is None, "numpy not installed")
+    def test_paired_metrics_report_mean_and_confidence_interval(self):
+        import metrics
+        from PIL import Image
+
+        root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        base, candidate = root / "base", root / "candidate"
+        for path, value in ((base, 10), (candidate, 20)):
+            for seed in (0, 42):
+                case = path / f"fox_s{seed}_16x16"
+                case.mkdir(parents=True)
+                case.joinpath("meta.json").write_text(json.dumps(
+                    {"prompt": "a red fox", "seed": seed, "width": 16, "height": 16}))
+                Image.new("RGB", (16, 16), (value, 0, 0)).save(case / "image.png")
+
+        class FixtureScorer:
+            name = "test scorer"
+
+            def __call__(self, image, prompt):
+                return image.getpixel((0, 0))[0]
+
+        with patch.object(metrics, "ClipScorer", return_value=FixtureScorer()), \
+                patch.object(metrics, "PickScorer", return_value=FixtureScorer()):
+            report = metrics.scores([base, candidate], "base", "cpu")
+        for name in ("clip", "pick"):
+            self.assertEqual(report["sets"]["candidate"][name]["vs_baseline"],
+                             {"mean": 10, "ci95": [10, 10], "win_rate": 1, "n": 2})
 
 
 class LoomDeps(unittest.TestCase):
