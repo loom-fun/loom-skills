@@ -1,68 +1,44 @@
 {
- "_comment": "JoyAI pfattn round 2: base (absorbed, MLA_X=0) vs x1 (round-1 expanded: global-load expansion, 2048+ keys) vs x2 (LDS-staged expansion, 1024+ keys: the new default); short + long rows ABBA, profiles, ktest, fullctx 131072 and dev gates on x2.",
+ "_comment": "JoyAI pfattn round 3: x2 (round-2 winner) vs x3 (+ xskip over padding tokens): short rows ABBA, pf2k profile, ktest, dev gates on x3.",
  "card": "loom-fun/jdopensource-JoyAI-LLM-Flash-loom@cb7861a81dbb586782044145ebb11f8cd48d8c8e",
  "memory_bytes": 47000000000,
  "kit": "deepseek2",
  "llamacpp": "b1386",
  "jobs": [
   {
-   "name": "pfattn-r2",
+   "name": "pfattn-r3",
    "variants": [
     {
-     "name": "base",
-     "build": {
-      "MLA_X": "0"
-     }
-    },
-    {
-     "name": "x1",
-     "build": {
-      "MLA_XE_LDS": "0",
-      "MLA_X_MIN_KEYS": "2048"
-     }
-    },
-    {
      "name": "x2",
+     "ref": "f2651c82",
+     "build": {}
+    },
+    {
+     "name": "x3",
      "build": {}
     }
    ],
    "steps": [
-    "ktest:x2",
-    "profile:x2:pf2k,pf8k",
-    "perf:base:1",
-    "perf:x1:1",
+    "ktest:x3",
+    "profile:x3:pf2k",
     "perf:x2:1",
+    "perf:x3:1",
+    "perf:x3:1",
     "perf:x2:1",
-    "perf:x1:1",
-    "perf:base:1",
-    "perf:x1:1:long",
     "perf:x2:1:long",
-    "perf:x2:1:long",
-    "perf:x1:1:long"
+    "perf:x3:1:long"
    ]
   },
   {
-   "name": "pfattn-r2-fullctx",
+   "name": "pfattn-r3-gates",
    "variants": [
     {
-     "name": "x2",
+     "name": "x3",
      "build": {}
     }
    ],
    "steps": [
-    "fullctx:x2"
-   ]
-  },
-  {
-   "name": "pfattn-r2-gates",
-   "variants": [
-    {
-     "name": "x2",
-     "build": {}
-    }
-   ],
-   "steps": [
-    "gates:x2:dev"
+    "gates:x3:dev"
    ]
   }
  ],

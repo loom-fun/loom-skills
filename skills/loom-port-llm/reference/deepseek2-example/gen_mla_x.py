@@ -202,16 +202,22 @@ kernel.def export("g_mla_xlist") @g_mla_xlist(%tokens: index) {{
     view.store %nq32, %cnt_view[0] : i32, view<4xi32>
     view.store %nb32, %cnt_view[1] : i32, view<4xi32>
   }}
-  // xskip[b] = 1 when tokens 64b .. 64b + 63 all lie in expanded tiles (the absorbed k_b / v_b GEMMs skip that block)
+  // xskip[b] = 1 when tokens 64b .. 64b + 63 all lie in expanded tiles or are padding (not live): the absorbed k_b / v_b
+  // GEMMs skip that block
   kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
   %m_bytes = index.constant 32768 : offset
   %m_tile = buffer.alloca<workgroup> align(16) %m_bytes : buffer
   %m_view = buffer.view %m_tile[%zero] : buffer -> view<8192xi32>
   %c32x = index.constant 32 : index
   %c1_i32 = scalar.constant 1 : i32
+  %mi_view = buffer.view %info[%zero] : buffer -> view<[%tokens]x4xi32>
   scf.for %z = [%lane to %tokens step %c32x] {{
     %zb = index.assume %z [range(%z, 0, 8191)] : index
-    view.store %c0_i32, %m_view[%zb] : i32, view<8192xi32>
+    %zt = index.assume %z [lt(%z, %tokens)] : index
+    %zlive = view.load %mi_view[%zt, 2] : view<[%tokens]x4xi32> -> i32
+    %zdead = scalar.cmpi eq, %zlive, %c0_i32 : i32
+    %zinit = scf.select %zdead, %c1_i32, %c0_i32 : i32
+    view.store %zinit, %m_view[%zb] : i32, view<8192xi32>
   }}
   kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
   %cv = buffer.view %xcnt[%zero] : buffer -> view<4xi32>
