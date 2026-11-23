@@ -1,43 +1,13 @@
 {
- "_comment": "JoyAI pfgemm round 1: base vs v2 (IQ4_XS inline dequant + T64_G32) vs v3 (v2 + MOE_CW + SWAP: column-wave MoE GEMMs, kbench -38 % per MoE layer vs base) vs v4 (v3 + MLA_BMM2=vbm, kbench vbm -28 %/-13 %) vs v5 (v4 + MOE_CW_F16O, numerics-moving: no row-scale pass between MoE GEMMs); ABBA, profiles, kernel tests.",
+ "_comment": "JoyAI pfgemm round 2: v4 (round-1 winner: IQ4_XS inline dequant + T64_G32 + MOE_CW/SWAP + MLA_BMM2=vbm; r1 run 45251424551 prefill 1k 1580 vs base 1294) gates:dev; v6 = v4 + MLA_BMM_LIVE (k_b/v_b skip padding token blocks); ABBA.",
  "card": "loom-fun/jdopensource-JoyAI-LLM-Flash-loom@cb7861a81dbb586782044145ebb11f8cd48d8c8e",
  "memory_bytes": 47000000000,
  "kit": "deepseek2",
  "llamacpp": "b1386",
  "jobs": [
   {
-   "name": "pfgemm-r1",
+   "name": "pfgemm-r2",
    "variants": [
-    {
-     "name": "base",
-     "build": {}
-    },
-    {
-     "name": "v2",
-     "build": {
-      "GEMM_IQ4_NATIVE": "1",
-      "GEMM_IQ4_F16LUT": "1",
-      "GEMM_IQ4_G32": "1",
-      "GEMM_M256_G32": "1",
-      "GEMM_M256_F16O": "1",
-      "GEMM_PRUNE": "1",
-      "GEMM_T64_G32": "1"
-     }
-    },
-    {
-     "name": "v3",
-     "build": {
-      "GEMM_IQ4_NATIVE": "1",
-      "GEMM_IQ4_F16LUT": "1",
-      "GEMM_IQ4_G32": "1",
-      "GEMM_M256_G32": "1",
-      "GEMM_M256_F16O": "1",
-      "GEMM_PRUNE": "1",
-      "GEMM_T64_G32": "1",
-      "MOE_CW": "1",
-      "MOE_CW_SWAP": "1"
-     }
-    },
     {
      "name": "v4",
      "build": {
@@ -54,7 +24,7 @@
      }
     },
     {
-     "name": "v5",
+     "name": "v6",
      "build": {
       "GEMM_IQ4_NATIVE": "1",
       "GEMM_IQ4_F16LUT": "1",
@@ -66,28 +36,22 @@
       "MOE_CW": "1",
       "MOE_CW_SWAP": "1",
       "MLA_BMM2": "vbm",
-      "MOE_CW_F16O": "1"
+      "MLA_BMM_LIVE": "1"
      }
     }
    ],
    "steps": [
-    "ktest:v3",
-    "ktest:v4",
-    "ktest:v5",
-    "profile:base:pf2k,pf8k",
-    "profile:v4:pf2k,pf8k",
-    "profile:v5:pf2k,pf8k",
-    "perf:base:1",
-    "perf:v2:1",
-    "perf:v3:1",
+    "ktest:v6",
+    "gates:v4:dev",
+    "profile:v6:pf2k",
     "perf:v4:1",
-    "perf:v5:1",
-    "perf:v5:1",
-    "perf:v4:1",
-    "perf:v3:1",
-    "perf:v2:1",
-    "perf:base:1"
+    "perf:v6:1",
+    "perf:v6:1",
+    "perf:v4:1"
    ]
   }
- ]
+ ],
+ "env": {
+  "LLAMACPP_EXTRA_ARGS": "--skip-chat-parsing"
+ }
 }

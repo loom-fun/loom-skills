@@ -503,11 +503,17 @@
      return "".join(parts)
  
  
-@@ -5977,6 +6048,58 @@
+@@ -5977,6 +6048,64 @@
      return (head + sizes + "  scf.if %outsel {\n" + gather + comp + scatter + "  } else {\n" + tail + "  }\n")
  
  
 +def mla_layer(i, b, nm, sz, par):
++    t = _mla_layer(i, b, nm, sz, par)
++    live = os.environ.get("MLA_BMM_LIVE", "0") not in ("", "0")
++    return t.replace("{LVA}", ", %info" if live else "").replace("{LVT}", ", buffer" if live else "")
++
++
++def _mla_layer(i, b, nm, sz, par):
 +    """MLA attention of layer i (gen_mla.py), from the normalized input %h to the attention output in %y:
 +    q_a -> rms * q_a_norm -> q_b; kv_a_mqa; the latent cache row + rotary Q halves (g_mla_rope_store); Q's latent part
 +    k_b q_nope (g_mla_kb_*); attention over the one-head cache (split-K decode / listed fallback / flash prefill) into
@@ -529,7 +535,7 @@
 +    kb, vb = f("attn_k_b"), f("attn_v_b")
 +    T.append(f"""  kernel.launch @g_mla_rope_store[%t](%t, %layer_{i}, %context, %pool, %qb, %k, %kvan_{i}, %q, %info, %origins, %arena) : [index](index, index, index, index, buffer, buffer, view<{g['KL']}xf32>, buffer, buffer, buffer, buffer)
 +  scf.if %gemm {{
-+    kernel.launch @g_mla_kbm_{kb}[%t](%t, %qb, %wkb_{i}, %q) : [index](index, buffer, view<{sz("attn_k_b")}xi8>, buffer)
++    kernel.launch @g_mla_kbm_{kb}[%t](%t, %qb, %wkb_{i}, %q{{LVA}}) : [index](index, buffer, view<{sz("attn_k_b")}xi8>, buffer{{LVT}})
 +  }} else {{
 +    kernel.launch @g_mla_kb_{kb}[%t](%t, %qb, %wkb_{i}, %q) : [index](index, buffer, view<{sz("attn_k_b")}xi8>, buffer)
 +  }}
@@ -542,7 +548,7 @@
 +    kernel.launch @g_attention_combine[%t](%t, %sliding_{i}, %info, %pacc, %pml, %q, %o) : [index](index, i32, buffer, buffer, buffer, buffer, buffer)
 +  }}
 +  scf.if %gemm {{
-+    kernel.launch @g_mla_vbm_{vb}[%t](%t, %o, %wvb_{i}, %vo) : [index](index, buffer, view<{sz("attn_v_b")}xi8>, buffer)
++    kernel.launch @g_mla_vbm_{vb}[%t](%t, %o, %wvb_{i}, %vo{{LVA}}) : [index](index, buffer, view<{sz("attn_v_b")}xi8>, buffer{{LVT}})
 +  }} else {{
 +    kernel.launch @g_mla_vb_{vb}[%t](%t, %o, %wvb_{i}, %vo) : [index](index, buffer, view<{sz("attn_v_b")}xi8>, buffer)
 +  }}
@@ -562,7 +568,7 @@
  MODEL_PARTS = {}   # model() records its pieces here for the speculative-decoding programs (draft/gen_draft.py)
  
  
-@@ -6157,6 +6280,15 @@
+@@ -6157,6 +6286,15 @@
          L_.append(f"  %nC = index.constant {g['C']} : index\n  %nVD = index.constant {g['VD']} : index\n  %nHV = index.constant {g['HV']} : index\n")
      if not QK_NORM:
          L_.append("  %no_norm = buffer.alloca<global> align(256) %row_bytes : buffer\n")
@@ -578,7 +584,7 @@
      if MOE:   # its own part: the MTP drafter programs reuse the prologue (all parts but the last), MoE layer included
          L_.append("\n" + moe_alloc())
      L_.append(f"""{"" if MOE else chr(10)}  kernel.launch @g_token_info[%t](%t, %spans, %metadata, %info) : [index](index, index, buffer, buffer)
-@@ -6195,11 +6327,13 @@
+@@ -6195,11 +6333,13 @@
              T.append(par("sinks", "attn_sinks", f"view<{QH}xf32>"))
          if i in RECUR:
              T.append(gdn_layer(i, b, nm, sz, par))
@@ -593,7 +599,7 @@
              pass
          elif GATE and not FUSED_Q:
              T.append(par("wg", "attn_gate"))
-@@ -6215,7 +6349,7 @@
+@@ -6215,7 +6355,7 @@
          # same format and size: one dual-weight launch at 8/16 tokens (PAIR_PROJ)
          same = lambda a, b: fmt_of(nm(a)) == fmt_of(nm(b)) and sz(a) == sz(b)
          qg = GATE and not FUSED_Q and not HEAD_GATE and not QKV_FUSED and i not in RECUR and same("attn_q", "attn_gate") and PAIR_PROJ in ("1", "qg")
@@ -602,7 +608,7 @@
              pass
          elif QKV_FUSED:
              T.append("  " + lin(fmt_of(nm("attn_qkv")), "%h", "%s_h", f"%wqkv_{i}", sz("attn_qkv"), "%qkv", "%nH", "%nQKV", H) + "\n")
-@@ -6224,7 +6358,7 @@
+@@ -6224,7 +6364,7 @@
              T.append("  " + lin2(fmt_of(nm("attn_q")), "%h", "%s_h", f"%wq_{i}", f"%wg_{i}", sz("attn_q"), "%q", "%gate", "%nH", "%nQ", H) + "\n")
          else:
              T.append("  " + lin(fmt_of(nm("attn_q")), "%h", "%s_h", f"%wq_{i}", sz("attn_q"), "%q", "%nH", nq, H) + "\n")
@@ -611,7 +617,7 @@
            pass
          elif same("attn_k", "attn_v") and PAIR_PROJ in ("1", "kv"):
            T.append("  " + lin2(fmt_of(nm("attn_k")), "%h", "%s_h", f"%wk_{i}", f"%wv_{i}", sz("attn_k"), "%k", "%v", "%nH", "%nKV", H) + "\n")
-@@ -6239,7 +6373,7 @@
+@@ -6239,7 +6379,7 @@
          qn, kn = (f"%q_norm_{i}", f"%k_norm_{i}") if QK_NORM else ("%no_norm", "%no_norm")
          gate, gty = (f"%sinks_{i}", f"view<{QH}xf32>") if SINKS else (gate0, "buffer")
          nty = f"view<{D}xf32>" if QK_NORM else "buffer"
@@ -620,7 +626,7 @@
            rope_k = "g_qk_rope_store_swa" if SWA_ROPE and i in sliding else "g_qk_rope_store"
            T.append(f"""  kernel.launch @{rope_k}[%t](%t, %layer_{i}, %rope_{i}, %context, %pool, %q, %k, %v, {qn}, {kn}, %info, %origins, %arena{", %metadata, %tokens" if MROPE else ""}{bias_args}) : [index](index, index, i32, index, index, buffer, buffer, buffer, {nty}, {nty}, buffer, buffer, buffer{", buffer, buffer" if MROPE else ""}{bias_types})
    scf.if %gemm {{
-@@ -6255,7 +6389,7 @@
+@@ -6255,7 +6395,7 @@
    }}
  """)
  
@@ -629,7 +635,7 @@
            T.append("  " + lin(fmt_of(nm("attn_output")), "%o", "%s_o", f"%wo_{i}", sz("attn_output"), "%y", nq, "%nH", qd) + "\n")
            if OUT_BIAS:   # attention output projection bias (gpt-oss attn_output.bias)
              T.append(f'  %bo_{i} = command.parameter %weights, "{b}attn_output.bias" : view<{H}xf32>\n'
-@@ -6457,7 +6591,7 @@
+@@ -6457,7 +6597,7 @@
          from gen_mxfp4s import mxfp4s_icodes as _mx_icodes
          COMMON += _mx_icodes()
      if USED_MVQ or USED_MOEQ or PH_ONLY:   # ACT_Q8: int8-activation matvecs, their weight-code helpers and g_quant_q8
@@ -638,7 +644,7 @@
              COMMON += IQ4_ICODES
          COMMON += ICODES + "".join(mv(fmt, K, R=R, TG=TG, swiglu=sw == 1, pair=sw == 2, suffix=f"_r{R}" if R != 16 else "", iq=True)
                                     for fmt, K, sw, R, TG in sorted(USED_MVQ))
-@@ -6515,8 +6649,10 @@
+@@ -6515,8 +6655,10 @@
              parts.append(mv(fmt, K, TG=TG, swiglu=sw))
      for fmt, K, sw, R, TG in sorted(USED_MV_R):
          parts.append(mv(fmt, K, R=R, TG=TG, swiglu=sw, suffix=f"_r{R}"))
@@ -650,7 +656,7 @@
      if FUSED_Q:
          parts.append(split_qgate(QH, D))
      if SWA_ROPE:
-@@ -6567,8 +6703,9 @@
+@@ -6567,8 +6709,9 @@
      parts.append(open(os.path.join(here, "tile_uniform.loom")).read())
      if not NO_FLASH:
          flash2 = os.path.join(out_dir, "flash2.loom")

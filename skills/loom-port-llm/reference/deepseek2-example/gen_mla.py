@@ -407,6 +407,13 @@ def kernels(cfg, eps, theta, layers, FMT, SB, row_bytes, kb_fmts, vb_fmts):
 
 
 def _bmm(kind=None):
+    f = _bmm0(kind)
+    if os.environ.get("MLA_BMM_LIVE", "0") not in ("", "0"):
+        return lambda *a, **k: bmm_live(f(*a, **k))
+    return f
+
+
+def _bmm0(kind=None):
     """MLA_BMM2: 1 = bmm2 for both products, or a list (kbm,vbm). kbench joyai_mla (run 45234212231): vbm -28 % (1k) / -13 % (4k),
     kbm +16 % / tie, so the useful setting is MLA_BMM2=vbm."""
     v = os.environ.get("MLA_BMM2", "0").strip()
@@ -547,3 +554,40 @@ kernel.def export("{name}") @{name}(%tokens: index) {{
   vector.fragment.store<result> %o{j}, %yv{j}[%c0, %c0] shape [%c16, %c16] : vector<8xf32>, view<16x16xf32, %y_layout>""")
     T.append("  kernel.return\n}\n")
     return "\n".join(T)
+
+
+def bmm_live(text):
+    """MLA_BMM_LIVE (choice mla.prefill.bmm_live): a bmm/bmm2 kernel given the epoch's %info skips 64-token blocks that are all
+    padding (info word 2 = 0; an epoch runs at the next power-of-two shape, so a 1151-token prompt pads 897 rows of a 2048
+    epoch). Live tokens get the same values; padding rows of the output are not written (flash and v_b of padding queries are
+    never read: their row scales are 0)."""
+    a = "launch(%tokens_arg: index, %x: buffer, %w: buffer, %y: buffer) {"
+    assert text.count(a) == 1
+    text = text.replace(a, "launch(%tokens_arg: index, %x: buffer, %w: buffer, %y: buffer, %info: buffer) {")
+    a = "  %tblk = index.assume %tb_id [lt(%tb_id, %tblocks)] : index\n"
+    assert text.count(a) == 1
+    text = text.replace(a, a + """  %lv_zero = index.constant 0 : offset
+  %lv_view = buffer.view %info[%lv_zero] : buffer -> view<[%tokens]x4xi32>
+  %lv_lane = kernel.subgroup.lane.id : index
+  %lv_c64 = index.constant 64 : index
+  %lv_c32 = index.constant 32 : index
+  %lv_t0 = index.mul %tblk, %lv_c64 : index
+  %lv_ta = index.add %lv_t0, %lv_lane : index
+  %lv_a = index.assume %lv_ta [lt(%lv_ta, %tokens)] : index
+  %lv_tb0 = index.add %lv_ta, %lv_c32 : index
+  %lv_b = index.assume %lv_tb0 [lt(%lv_tb0, %tokens)] : index
+  %lv_wa = view.load %lv_view[%lv_a, 2] : view<[%tokens]x4xi32> -> i32
+  %lv_wb = view.load %lv_view[%lv_b, 2] : view<[%tokens]x4xi32> -> i32
+  %lv_w = scalar.ori %lv_wa, %lv_wb : i32
+  %lv_dead = scalar.constant 0 : i32
+  %lv_l = scalar.cmpi ne, %lv_w, %lv_dead : i32
+  %lv_one = scalar.constant 1.0 : f32
+  %lv_nil = scalar.constant 0.0 : f32
+  %lv_f = scf.select %lv_l, %lv_one, %lv_nil : f32
+  %lv_any = kernel.subgroup.reduce<maxnumf> %lv_f : f32
+  %lv_live = scalar.cmpf ogt, %lv_any, %lv_nil : f32
+  scf.if %lv_live {
+""")
+    a = "  kernel.return\n}\n"
+    assert text.count(a) == 1
+    return text.replace(a, "  }\n" + a)
