@@ -1,9 +1,10 @@
 # Task: <one line> (engineer "<name>")
 Read first: BRIEF.md, DECISIONS.md (sections ...), notes/ENG_CONTRACT.md, <the files and PRs this task builds on>.
-Tier: <routine | hard coding> (routine includes docs and bounded research/review).
-Reason: <why the work fits; include any explicit owner preference>.
-Host model: <allowed family and current concrete ID; Codex routine Luna / hard coding Sol, Claude routine Sonnet / hard coding Opus>.
-Reasoning effort: <separate supported value or unavailable; never infer ultra from task tier>.
+Role: <PM | tech lead | engineer | bounded support>.
+Tier: <routine | hard coding>.
+Reason: <why the role and tier fit the work; include any explicit owner preference>.
+Host model: <family from campaign.md, "Model selection and dispatch", and concrete ID of its highest available version>.
+Reasoning effort: medium.
 Dispatch: <actual requested model/reasoning arguments, fork mode when relevant, call result/agent ID; state unavailable controls>.
 Verification: <host confirmation/evidence, or `unverified` and why; distinguish requested model from runtime identity>.
 Branch @INTEGRATION@-<name>, PR -> @INTEGRATION@. Dependencies in flight: <engineer: files, so you code against their schema or an adapter>.

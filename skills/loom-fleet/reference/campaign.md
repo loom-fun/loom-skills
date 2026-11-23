@@ -29,33 +29,35 @@ Narrow changes inside a campaign are [targeted fixes](targeted-fix.md).
 
 ## Model selection and dispatch
 
-Use the owner's exact model-family mapping; catalog descriptions such as "strongest available," "complex coding," or "fast and affordable" do
-not change it:
+Use the owner's model-family mapping for the role and the work it owns.
 
-| Work | Codex | Claude |
+| Role or work | Codex | Claude |
 |---|---|---|
-| Routine coding, docs, bounded research/review/packaging (default) | Luna | Sonnet |
-| Hard coding (for example difficult kernel or architecture design) | Sol | Opus |
+| PM (main session) | Sol | Opus |
+| Tech lead (design, integration, and review) | Astra | Opus |
+| Engineer (owns implementation through testing and validation) | Sol | Sonnet for routine work, Opus for hard coding |
+| Bounded support (dashboard updates, small prescribed edits, focused checks) | Sol | Sonnet |
 
-These are the allowed families, not examples. Never use Astra or Fable for any role, nested delegation, resume, or fallback. Do not substitute
-another family because a catalog describes it as stronger, cheaper, or better suited. Classify the work itself: a large campaign does not make
-every bounded task hard coding. Reasoning effort is a separate control; do not infer `ultra` from hard coding, and use it only when the owner
-explicitly requests it.
+Use the highest available version of the model family assigned to each role.
+Use Sol for bounded support because the cost of mistakes and rework outweighs the savings from a cheaper model.
+Use the engineer row for a worker who owns a fix or optimization through validation, including difficult kernel work.
+Reserve the support row for tasks with a prescribed change or a clear expected result. On Claude, difficult kernel or architecture design
+counts as hard coding. Medium reasoning effort should always be used.
 
-At startup and resume, inspect current host controls/catalog only to choose a currently supported concrete model ID within the mapped family
-and to learn which arguments the dispatch API accepts. Record the selected family and ID, task tier and reason, owner preference, and actual
-dispatch arguments/result. A changing catalog or model version does not authorize changing families. If the allowed family or required override
-is unavailable, disclose that dispatch limitation and continue unaffected work; do not silently substitute. Inherit only when the parent's
-concrete family is known, allowed, and appropriate to the task. An unknown inherited identity is unverified and does not count as compliance.
+At startup and resume, check the PM's main-session model and reasoning effort, then inspect the host catalog and dispatch controls for the
+lead and workers. Record the selected family and ID, role, tier and reason, owner preference, and actual dispatch arguments/result.
+If the PM session settings do not match, or the mapped family or a required setting is unavailable, state the limitation and continue
+unaffected work. Inherit settings only when the parent's concrete model matches the assignment and its reasoning effort is medium.
+Mark an unknown inherited identity `unverified`.
 
-Before every spawn, resume, or nested delegation, check the actual model argument against this policy. Each task payload has its own tier,
-reason, selected family/concrete ID, requested supported controls, and verification status; a parent's fields do not cover a child. Pass the
-selected model and any separately chosen reasoning value on the actual call. When an override requires a fresh/no-history fork, use it and
+Before every spawn, resume, or nested delegation, check the actual model and reasoning arguments against this policy. Each task payload records
+its own role, tier, reason, selected family/concrete ID, requested supported controls, and verification status. Pass the selected model and
+medium reasoning effort on the actual call. When an override requires a fresh/no-history fork, use it and
 provide a self-contained brief with the goal, scope, read-first files, constraints, and deliverables. Capture the accepted agent ID and actual
 call result. Report the requested model separately from runtime identity; mark runtime identity `unverified` when the host does not expose it.
 On resume, record continuing workers separately from new launches and do not relaunch or interrupt useful in-flight work solely to retier it.
 
-Every task brief includes `Tier`, `Reason`, `Host model`, `Dispatch`, and `Verification`. `Dispatch` records requested controls and the actual
+Every task brief includes `Role`, `Tier`, `Reason`, `Host model`, `Dispatch`, and `Verification`. `Dispatch` records requested controls and the actual
 call/result, including unavailable controls. `Verification` records host confirmation or says `unverified` with the limitation. Engineer briefs
 are self-contained and point to files to read; never assume the conversation.
 
