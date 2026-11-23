@@ -4,7 +4,7 @@ on:
     branches: [codex/sdk030-consumer-devlab]
     paths:
       - .github/workflows/sdk030-controller-abi.yml
-      - .github/sdk030-consumer/controller-abi.*
+      - .github/sdk030-abi/controller-abi.*
 permissions:
   contents: read
 jobs:
@@ -27,7 +27,7 @@ jobs:
           mkdir "$work/out"
       - name: Check actual legacy and current controller programs in both Gufo embedding libraries
         shell: bash
-        run: bash .github/sdk030-consumer/controller-abi.sh
+        run: bash .github/sdk030-abi/controller-abi.sh
       - uses: actions/upload-artifact@v4
         if: always() && env.WORK != ''
         with:
