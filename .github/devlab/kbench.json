@@ -399,15 +399,11 @@
       "gen": "dec_step/gen_bench.py",
       "gen_variants": [
         "base",
-        "dnr1",
-        "dnr4",
-        "dnr8"
+        "old"
       ],
       "files": [
         "bench.loom",
-        "bench_dnr1.loom",
-        "bench_dnr4.loom",
-        "bench_dnr8.loom"
+        "bench_old.loom"
       ],
       "config": [],
       "args": [
