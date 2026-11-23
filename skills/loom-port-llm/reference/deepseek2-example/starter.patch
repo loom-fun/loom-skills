@@ -1149,7 +1149,7 @@
  
  ADAPT = os.environ.get("MV_ADAPT", "1") not in ("", "0")
 -WG1 = int(os.environ.get("MV_WG1", "4096")); WG4 = int(os.environ.get("MV_WG4", "128"))
-+WG1 = int(os.environ.get("MV_WG1", "256"))   # deepseek2 example (JoyAI dec_step: 4096 -> 256 short -1.6 %, c4 -4 %); WG4 = int(os.environ.get("MV_WG4", "128"))
++WG1 = int(os.environ.get("MV_WG1", "256")); WG4 = int(os.environ.get("MV_WG4", "128"))   # WG1: deepseek2 example (JoyAI dec_step: 4096 -> 256 short -1.6 %, c4 -4 %)
  WG_LONG = int(os.environ.get("MV_WG_LONG", "640"))
  SAME_R = "MV_WG4" not in os.environ
  
