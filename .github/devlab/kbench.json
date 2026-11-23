@@ -7,13 +7,36 @@
    "suite": "joyai_moe",
    "dir": "joyai_moe",
    "gen": "joyai_moe/gen_bench.py",
-   "gen_variants": ["base", "v1", "v2"],
-   "files": ["bench.loom", "bench_v1.loom", "bench_v2.loom"],
-   "tests": ["test.loom"],
-   "negative_tests": [{"file": "negative.loom", "xfail": ["@t_negative=EXPECT/006"]}],
+   "gen_variants": [
+    "base",
+    "v1",
+    "v2",
+    "cw"
+   ],
+   "files": [
+    "bench.loom",
+    "bench_v1.loom",
+    "bench_v2.loom",
+    "bench_cw.loom"
+   ],
+   "tests": [
+    "test.loom"
+   ],
+   "negative_tests": [
+    {
+     "file": "negative.loom",
+     "xfail": [
+      "@t_negative=EXPECT/006"
+     ]
+    }
+   ],
    "device": "amdgpu://?completion_spin_ns=4294967295",
    "config": [],
-   "args": ["--measure=dispatch_complete", "--batch-size=4", "--profile-final-batch=true"]
+   "args": [
+    "--measure=dispatch_complete",
+    "--batch-size=4",
+    "--profile-final-batch=true"
+   ]
   }
  ]
 }

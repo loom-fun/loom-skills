@@ -18,6 +18,7 @@ VARIANTS = {   # name -> environment of the kit generators
     "base": {},
     "v1": IQ4,
     "v2": dict(IQ4, GEMM_T64_G32="1"),
+    "cw": dict(IQ4, GEMM_T64_G32="1", MOE_CW="1"),   # gen_moe_cw: column waves, live 16-row fragments only
 }
 VARIANTS.update(json.loads(os.environ.get("JOY_MOE_VARIANTS", "{}")))
 BLOCK = 136   # IQ4_XS bytes per 256 values
@@ -76,7 +77,7 @@ def helpers(kit):
 
 def main():
     root, out = os.path.abspath(sys.argv[1]), os.path.abspath(sys.argv[2])
-    variants = sys.argv[3:] or ["base", "v1", "v2"]
+    variants = sys.argv[3:] or ["base", "v1", "v2", "cw"]
     os.makedirs(out, exist_ok=True)
     kit = os.path.join(out, "kit")
     if not os.path.isdir(kit):
@@ -96,7 +97,9 @@ def main():
         np.save(os.path.join(out, "w", f"ti{T}.npy"), ti)
         np.save(os.path.join(out, "w", f"rm{T}.npy"), rm)
         np.save(os.path.join(out, "w", f"x{T}.npy"), rng.uniform(-1, 1, (T, H)).astype(np.float16))
-        np.save(os.path.join(out, "w", f"a{T}.npy"), rng.uniform(-1, 1, (mr, F)).astype(np.float16))
+        a = rng.uniform(-1, 1, (mr, F)).astype(np.float16)
+        a[rm < 0] = 0   # padding rows hold zeros (as g_moe_ggu writes them), so kernels that skip them compare exactly
+        np.save(os.path.join(out, "w", f"a{T}.npy"), a)
         np.save(os.path.join(out, "w", f"s{T}.npy"), np.tile(rng.uniform(0.5, 2, (T, 1)), (1, 2)).astype(np.float32))
         np.save(os.path.join(out, "w", f"sa{T}.npy"), np.tile(rng.uniform(0.5, 2, (mr, 1)), (1, 2)).astype(np.float32))
         shapes[T] = (mt, mr)
