@@ -8,6 +8,10 @@ split-K + combine (g16_attention_split / combine: the body of the _listed kernel
 launch from a device count) -> v_b), both paths vs numpy, with a dirty KV pool and padding tokens."""
 import os
 import numpy as np
+import gen_mla_dec   # decode attention: the WMMA kernels (MLA_DEC=wmma, default) or the per-head split-K (MLA_DEC=split)
+
+DSPLIT, DCOMB = ("g_mla_dsplit", "g_mla_dcombine") if gen_mla_dec.on() else ("g_attention_split", "g_attention_combine")
+SDEC = max(64, gen_mla_dec.SMAX)   # partial slots per (token, head): enough for either layout
 
 
 def rope_norm(a, pos, theta):
@@ -189,7 +193,7 @@ check.case public @mla_vb {{
             save(f"{tag}_{nn}", a)
         print(f"{tag}: layer {li} p0={p0} t={t} pad={pad} |vo| max {np.abs(vo).max():.4f} mean {np.abs(vo).mean():.5f}")
         AR = f"tensor<{planes * ctx * D}xf16>"
-        S, S16 = 64, 16
+        S, S16 = SDEC, 16
         QT, OT = f"tensor<{t}x{QH * D}xf32>", f"tensor<{t}x{QH * VD}xf32>"
         def st(tt, pre):
             return (f"  kernel.launch @g_mla_rope_store[%{pre}t](%{pre}t, %layer, %ctx, %pool, %{pre}qb, %{pre}kv, %w, %{pre}q, %{pre}info, %orig, %arena) : "
@@ -231,8 +235,8 @@ check.case public @mla_vb {{
 {st(p0, "h")}{st(t, "s")}  kernel.launch @g_mla_kb_{fmt("attn_k_b.weight")}[%st](%st, %sqb, %kbw, %sq) : [index](index, tensor<{t}x{QH * QB}xf32>, {KBT}, {QT})
 {list_launch("%st", t, "%sinfo")}{fl}{"" if flash else "  "}{"// " if flash else ""}kernel.launch @g16_attention_split[%st](%st, %layer, %sliding, %ctx, %pool, %sq, %sinfo, %orig, %arena, %pacc16, %pml16) : [index](index, index, i32, index, index, {QT}, tensor<{t}x4xi32>, tensor<{10 + blocks}xi32>, {AR}, {PA16}, {PM16})
   {"// " if flash else ""}kernel.launch @g16_attention_combine[%st](%st, %sliding, %sinfo, %pacc16, %pml16, %sq, %o_pre) : [index](index, i32, tensor<{t}x4xi32>, {PA16}, {PM16}, {QT}, {QT})
-  kernel.launch @g_attention_split[%st](%st, %layer, %sliding, %ctx, %pool, %sq, %sinfo, %orig, %arena, %pacc, %pml) : [index](index, index, i32, index, index, {QT}, tensor<{t}x4xi32>, tensor<{10 + blocks}xi32>, {AR}, {PA}, {PM})
-  kernel.launch @g_attention_combine[%st](%st, %sliding, %sinfo, %pacc, %pml, %sq, %o_dec) : [index](index, i32, tensor<{t}x4xi32>, {PA}, {PM}, {QT}, {QT})
+  kernel.launch @{DSPLIT}[%st](%st, %layer, %sliding, %ctx, %pool, %sq, %sinfo, %orig, %arena, %pacc, %pml) : [index](index, index, i32, index, index, {QT}, tensor<{t}x4xi32>, tensor<{10 + blocks}xi32>, {AR}, {PA}, {PM})
+  kernel.launch @{DCOMB}[%st](%st, %sliding, %sinfo, %pacc, %pml, %sq, %o_dec) : [index](index, i32, tensor<{t}x4xi32>, {PA}, {PM}, {QT}, {QT})
   kernel.launch @g_mla_vb_{fmt("attn_v_b.weight")}[%st](%st, %o_dec, %vbw, %vo_dec) : [index](index, {QT}, {VBT}, {OT})
   kernel.launch @g_mla_vb_{fmt("attn_v_b.weight")}[%st](%st, %o_pre, %vbw, %vo_pre) : [index](index, {QT}, {VBT}, {OT})
   check.expect.close actual(%vo_dec) expected(%evo) atol(1.0e-3) rtol(5.0e-3) nan(different) : {OT}
@@ -281,6 +285,8 @@ def layer_case(ns, ids, tag="mla_layer0"):
     s[:, np.triu(np.ones((t, t), bool), 1)] = -np.inf
     p = np.exp(s - s.max(-1, keepdims=True)); p /= p.sum(-1, keepdims=True)
     o = np.einsum("hts,sd->thd", p, K)                       # (t, QH, D): the tail dims too (V read from the whole row)
+    if gen_mla_dec.on():   # the WMMA decode kernels write o[..., :KL] only (v_b reads those); the tail keeps its fill
+        o = o.copy(); o[..., KL:] = 0.0
     vo = np.einsum("hvk,thk->thv", W("attn_v_b.weight"), o[..., :KL])
     y = vo.reshape(t, -1) @ W("attn_output.weight").T
     ctx = ((t + 15) // 16) * 16 + 64; blocks = ctx // 16
@@ -302,7 +308,7 @@ def layer_case(ns, ids, tag="mla_layer0"):
         return (f"  %n_{yb} = check.literal value({n}) : index\n"
                 f"  kernel.launch @{kern}[%n_{yb}, %t](%n_{yb}, %t, %acc, %{x}, %w_{nm}, %{yb}) : [index, index](index, index, i32, tensor<{t}x{K}xf32>, {WT[nm]}, tensor<{t}x{n}xf32>)\n")
     AR = f"tensor<{ctx * D}xf16>"
-    S = 64
+    S = SDEC
     PA, PM = f"tensor<{t * QH * S * D}xf32>", f"tensor<{t * QH * S * 2}xf32>"
     rd = lambda nn, shape: f'  %e_{nn} = check.file.read.npy path("{tag}_{nn}.npy") : tensor<{shape}xf32>\n'
     ex = lambda act, nn, shape, tol="atol(2.0e-3) rtol(1.0e-2)": f"  check.expect.close actual(%{act}) expected(%e_{nn}) {tol} nan(different) : tensor<{shape}xf32>\n"
@@ -334,8 +340,8 @@ def layer_case(ns, ids, tag="mla_layer0"):
       + mv("attn_q_b", QH * QB, QL, "qa", "qb")
       + f"""  kernel.launch @g_mla_rope_store[%t](%t, %layer, %ctx, %pool, %qb, %kv, %kvan, %q, %info, %orig, %arena) : [index](index, index, index, index, tensor<{t}x{QH * QB}xf32>, tensor<{t}x{D}xf32>, tensor<{KL}xf32>, tensor<{t}x{QH * D}xf32>, tensor<{t}x4xi32>, tensor<{10 + blocks}xi32>, {AR})
   kernel.launch @g_mla_kb_{fmt("attn_k_b")}[%t](%t, %qb, %w_attn_k_b, %q) : [index](index, tensor<{t}x{QH * QB}xf32>, {WT["attn_k_b"]}, tensor<{t}x{QH * D}xf32>)
-  kernel.launch @g_attention_split[%t](%t, %layer, %sliding, %ctx, %pool, %q, %info, %orig, %arena, %pacc, %pml) : [index](index, index, i32, index, index, tensor<{t}x{QH * D}xf32>, tensor<{t}x4xi32>, tensor<{10 + blocks}xi32>, {AR}, {PA}, {PM})
-  kernel.launch @g_attention_combine[%t](%t, %sliding, %info, %pacc, %pml, %q, %o) : [index](index, i32, tensor<{t}x4xi32>, {PA}, {PM}, tensor<{t}x{QH * D}xf32>, tensor<{t}x{QH * D}xf32>)
+  kernel.launch @{DSPLIT}[%t](%t, %layer, %sliding, %ctx, %pool, %q, %info, %orig, %arena, %pacc, %pml) : [index](index, index, i32, index, index, tensor<{t}x{QH * D}xf32>, tensor<{t}x4xi32>, tensor<{10 + blocks}xi32>, {AR}, {PA}, {PM})
+  kernel.launch @{DCOMB}[%t](%t, %sliding, %info, %pacc, %pml, %q, %o) : [index](index, i32, tensor<{t}x4xi32>, {PA}, {PM}, tensor<{t}x{QH * D}xf32>, tensor<{t}x{QH * D}xf32>)
   kernel.launch @g_mla_vb_{fmt("attn_v_b")}[%t](%t, %o, %w_attn_v_b, %vo) : [index](index, tensor<{t}x{QH * D}xf32>, {WT["attn_v_b"]}, tensor<{t}x{QH * VD}xf32>)
 """ + mv("attn_output", H, QH * VD, "vo", "y")
       + ex("qa", "qa", f"{t}x{QL}") + ex("kv", "kv", f"{t}x{D}") + ex("qb", "qb", f"{t}x{QH * QB}") + ex("q", "q", f"{t}x{QH * D}")
