@@ -65,5 +65,8 @@
     "gates:x2:dev"
    ]
   }
- ]
+ ],
+ "env": {
+  "LLAMACPP_EXTRA_ARGS": "--skip-chat-parsing"
+ }
 }
