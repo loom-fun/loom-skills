@@ -369,12 +369,12 @@
       "gen_variants": [
         "base",
         "x",
-        "xel"
+        "x2q"
       ],
       "files": [
         "bench.loom",
         "bench_x.loom",
-        "bench_xel.loom"
+        "bench_x2q.loom"
       ],
       "tests": [
         "test.loom"
