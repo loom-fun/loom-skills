@@ -1,0 +1,62 @@
+name: Weaver SDK 0.3 local agent qualification
+on:
+  push:
+    branches: [codex/sdk030-weaver-init]
+    paths: [.github/workflows/sdk030-weaver-init.yml]
+permissions:
+  contents: read
+jobs:
+  qualify:
+    runs-on: [self-hosted, devlab-dispatch, strix-halo, Linux]
+    timeout-minutes: 45
+    steps:
+      - name: Create isolated runtime and fetch tested Weaver revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          work=$(mktemp -d "$RUNNER_TEMP/weaver-init.XXXXXX")
+          echo "WORK=$work" >> "$GITHUB_ENV"
+          echo "WEAVER_HOME=$work/state" >> "$GITHUB_ENV"
+          mkdir -p "$work/out" "$work/state"
+          git init -q "$work/weaver"
+          git -C "$work/weaver" fetch -q --depth 1 https://github.com/loom-fun/weaver.git b0c74dbc1512f0f683b73f35739268bda8a19267
+          git -C "$work/weaver" checkout -q --detach FETCH_HEAD
+          test "$(git -C "$work/weaver" rev-parse HEAD)" = b0c74dbc1512f0f683b73f35739268bda8a19267
+          git -C "$work/weaver" submodule update --init --depth 1
+          git -C "$work/weaver" submodule status > "$work/out/submodule.txt"
+          hostname > "$work/out/runner.txt"
+      - name: Run Weaver init and its complete local Pi tool turn
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$WORK/weaver"
+          python3 -m venv "$WORK/venv"
+          source "$WORK/venv/bin/activate"
+          python -m pip install -q 'hrx-loom[hf]==0.3.0' .
+          loom-serve --version | tee "$WORK/out/sdk.txt"
+          python - <<'PY'
+          import socket
+          from weaver import config
+          cfg = config.load()
+          with socket.socket() as sock:
+              sock.bind(('127.0.0.1', 0))
+              cfg.agent.port = sock.getsockname()[1]
+          config.save(cfg)
+          PY
+          ulimit -S -l 8192
+          weaver init --skip-llamacpp 2>&1 | tee "$WORK/out/init.log"
+      - name: Stop isolated Weaver server
+        if: always() && env.WORK != ''
+        shell: bash
+        run: |
+          if [ -x "$WORK/venv/bin/weaver" ]; then "$WORK/venv/bin/weaver" agent-server stop; fi
+      - uses: actions/upload-artifact@v4
+        if: always() && env.WORK != ''
+        with:
+          name: sdk030-weaver-init
+          path: ${{ env.WORK }}/out
+      - name: Remove the job runtime
+        if: always() && env.WORK != ''
+        shell: bash
+        run: |
+          case "$WORK" in "$RUNNER_TEMP"/weaver-init.*) rm -rf -- "$WORK";; *) exit 1;; esac
