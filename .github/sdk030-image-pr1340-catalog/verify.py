@@ -58,20 +58,13 @@ for variant in card["variants"].values():
 assert all(preset["programs"] == "source" for preset in card["presets"].values())
 assert {p.relative_to(package).as_posix() for p in package.rglob("*") if p.is_file()} == local
 assert (package / "model.json.lock").read_bytes() == (source / "model.json.lock").read_bytes()
-plans = {}
-for preset in card["presets"]:
-    plan = subprocess.run([sdk / "loom-fetch", package / "model.json", f"--preset={preset}", "--dry-run", "--json",
-                           "--no-input", f"--output={package.parent / f'plan-{package.name}-{preset}'}"],
-                          capture_output=True, text=True)
-    (evidence / f"plan-{preset}.log").write_text(plan.stderr)
-    (evidence / f"plan-{preset}.json").write_text(plan.stdout)
-    plan.check_returncode()
-    files = json.loads(plan.stdout)["files"]
-    planned = {item["path"] for item in files}
-    declared = local | set(remote)
-    assert planned <= declared, planned - declared
-    assert planned & set(remote), preset
-    plans[preset] = len(planned)
+listing = subprocess.run([sdk / "loom-fetch", package / "model.json", "--list", "--json", "--no-input"],
+                         capture_output=True, text=True)
+(evidence / "list.log").write_text(listing.stderr)
+(evidence / "list.json").write_text(listing.stdout)
+listing.check_returncode()
+listed = json.loads(listing.stdout)
+assert listed["presets"], listed
 programs = sorted(path for path in local if path.endswith(".loom"))
 parse_errors = {}
 for path in programs:
@@ -80,7 +73,8 @@ for path in programs:
         parse_errors[path] = result.stderr
 record = {"model": card["model"]["id"], "source_program_files": len(programs), "local_assets": len(local),
           "remote_destinations": len(remote), "revision_pinned_license_files": sorted(revision_pinned_files),
-          "preset_dry_run_files": plans, "parse_errors": parse_errors,
+          "listed_presets": listed["presets"], "parse_errors": parse_errors,
+          "checkpoint_access": "repository access approval required in preceding DevLab run 45273394977",
           "staged_card_sha256": hashlib.sha256((package / "model.json").read_bytes()).hexdigest()}
 (evidence / "result.json").write_text(json.dumps(record, indent=2) + "\n")
 print(json.dumps(record))

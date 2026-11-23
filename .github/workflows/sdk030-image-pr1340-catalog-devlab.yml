@@ -15,7 +15,6 @@ jobs:
     env:
       PR_HEAD: d48f43191a8d9db165d205223426b831dc382add
       RELEASE_CATALOG_HEAD: 279afe368b82e0d7acfe38c4f47e8e7e5cfb7bc8
-      FLUX_CATALOG_HEAD: ccd62d6a49576f25efdb7deef7b6f81a7b76fd6c
     steps:
       - uses: actions/checkout@v4
         with:

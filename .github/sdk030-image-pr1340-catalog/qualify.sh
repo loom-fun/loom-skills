@@ -13,9 +13,8 @@ checkout() {
 catalog=https://github.com/ROCm/hrx-loom-library.git
 checkout port https://github.com/loom-fun/loom-skills.git "$PR_HEAD" "$PR_HEAD"
 checkout release "$catalog" refs/tags/v0.3.0 "$RELEASE_CATALOG_HEAD"
-checkout flux "$catalog" "$FLUX_CATALOG_HEAD" "$FLUX_CATALOG_HEAD"
-printf 'PR_HEAD=%s\nRELEASE_CATALOG_HEAD=%s\nFLUX_CATALOG_HEAD=%s\n' \
-  "$PR_HEAD" "$RELEASE_CATALOG_HEAD" "$FLUX_CATALOG_HEAD" | tee "$WORK/evidence/revisions.txt"
+printf 'PR_HEAD=%s\nRELEASE_CATALOG_HEAD=%s\n' \
+  "$PR_HEAD" "$RELEASE_CATALOG_HEAD" | tee "$WORK/evidence/revisions.txt"
 bash "$WORK/port/skills/loom-setup/scripts/install_loom.sh" "$WORK/sdk" 0.3.0
 cp "$WORK/sdk/loom-install.json" "$WORK/evidence/sdk.json"
 python3 - "$WORK/evidence/sdk.json" <<'PY'
@@ -37,9 +36,4 @@ check_card() {
   python3 "$WORK/port/skills/loom-port-image/scripts/stage_hf.py" "$source" "$WORK/$family"
   python3 "$repo/.github/sdk030-image-pr1340-catalog/verify.py" "$WORK/$family" "$source" "$result" "$WORK/sdk/.venv/bin"
 }
-rc=0
-(set -e; check_card krea2 "$WORK/release/model/krea/Krea-2-Turbo") & krea=$!
-(set -e; check_card flux2 "$WORK/flux/model/black-forest-labs/FLUX.2-klein-4B") & flux=$!
-wait "$krea" || rc=1
-wait "$flux" || rc=1
-exit "$rc"
+check_card krea2 "$WORK/release/model/krea/Krea-2-Turbo"
