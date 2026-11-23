@@ -425,7 +425,7 @@
  
  
  MOE_R = _moe_rows_per_workgroup()
-+MOE_R_DN = int(os.environ.get("MOE_R_DN") or MOE_R)   # rows per workgroup of the shared-slot down matvec (a row's sum does not depend on R)
++MOE_R_DN = int(os.environ.get("MOE_R_DN") or 4)   # rows per workgroup of the shared-slot down matvec (a row's sum does not depend on R)
  # MOE_Q8=1 (default, with ACT_Q8): the decode expert matvecs read int8 activations (the router's input h16q, made beside
  # g_row_scale_f16, and the gate/up output quantized by a g_quant_q8 launch) and contract with integer dot4 products,
  # like the dense decode matvecs and llama.cpp's mul_mat_vec_q for experts. MOE_Q8=0: f32 activations.
