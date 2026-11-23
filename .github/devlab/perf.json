@@ -1,9 +1,9 @@
 {
  "_comment": "JoyAI pfgemm round 1: base vs v2 (IQ4_XS inline dequant + T64_G32) vs v3 (v2 + MOE_CW + SWAP: column-wave MoE GEMMs, kbench -38 % per MoE layer vs base) vs v4 (v3 + MLA_BMM2=vbm, kbench vbm -28 %/-13 %) vs v5 (v4 + MOE_CW_F16O, numerics-moving: no row-scale pass between MoE GEMMs); ABBA, profiles, kernel tests.",
- "card": "loom-fun/jdopensource-JoyAI-LLM-Flash-loom",
+ "card": "loom-fun/jdopensource-JoyAI-LLM-Flash-loom@cb7861a81dbb586782044145ebb11f8cd48d8c8e",
  "memory_bytes": 47000000000,
  "kit": "deepseek2",
- "llamacpp": "b1374",
+ "llamacpp": "b1386",
  "jobs": [
   {
    "name": "pfgemm-r1",
