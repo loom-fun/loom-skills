@@ -1,0 +1,229 @@
+name: SDK 0.3 generated-card default elastic ABBA
+on:
+  push:
+    branches: [codex/sdk030-elastic-default]
+    paths: [.github/workflows/sdk030-elastic-default.yml]
+
+permissions:
+  contents: read
+
+jobs:
+  compare:
+    name: ${{ matrix.gpu }} Gemma 4 E2B
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - gpu: strix-halo
+            preset: chat
+            labels: '["self-hosted","devlab-dispatch","strix-halo","Linux"]'
+          - gpu: radeon-r9700
+            preset: chat-r9700
+            labels: '["self-hosted","devlab-dispatch","radeon-r9700"]'
+    runs-on: ${{ fromJSON(matrix.labels) }}
+    timeout-minutes: 70
+    env:
+      GPU: ${{ matrix.gpu }}
+      PRESET: ${{ matrix.preset }}
+      HF_REF: https://huggingface.co/loom-fun-staging/unsloth-gemma-4-E2B-it-loom/resolve/783ee344b761da90de8e50d668e84f912234df96
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 02ddced5c08599706fd110c68af9884d0ab0eeeb
+          persist-credentials: false
+      - name: Fetch the verified device preset and SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          work="$(dirname "$GITHUB_WORKSPACE")/sdk030-elastic-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$GPU"
+          mkdir -p "$work/out"
+          echo "WORK=$work" >> "$GITHUB_ENV"
+          cd "$work"
+          hostname > out/runner.txt
+          uname -a > out/uname.txt
+          printf '%s\n' "$HF_REF" > out/card-url.txt
+          for asset in llm_config.json info.json; do
+            curl -fsSL --retry 3 "$HF_REF/$asset" -o "out/$asset"
+          done
+          sdk=$(bash "$GITHUB_WORKSPACE/skills/loom-setup/scripts/ensure_sdk.sh" "$work/loom" "$work/out/llm_config.json")
+          echo "SDK_ROOT=$sdk" >> "$GITHUB_ENV"
+          cp "$sdk/loom-install.json" out/sdk.json
+          "$sdk/.venv/bin/loom-serve" --help > out/loom-serve.help
+          HF_HOME="$work/hf-home" "$sdk/.venv/bin/loom-fetch" "$HF_REF/model.json" --preset="$PRESET" --materialize=copy --no-input --cache "$work/fetch-cache" --output="$work/model" 2>&1 | tee out/fetch.log
+          cp out/llm_config.json model/
+          cp model/model.json out/model.json
+          "$sdk/.tools/bin/python" -I -c 'import sys; sys.path.insert(0, sys.argv[1]); from card_lib import programs_sha256; print(programs_sha256(sys.argv[2]))' "$GITHUB_WORKSPACE/skills/loom-benchmark/scripts/card" "$work/model" > out/programs_sha256.txt
+      - name: Compare tuned Quick Start and SDK defaults on the same runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$SDK_ROOT/.tools/bin/python" -u - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import resource
+          import socket
+          import statistics
+          import subprocess
+          import sys
+          import time
+
+          import requests
+
+          work = Path(os.environ['WORK'])
+          out = work / 'out'
+          model = work / 'model'
+          sdk = Path(os.environ['SDK_ROOT'])
+          bench = Path(os.environ['GITHUB_WORKSPACE']) / 'skills/loom-benchmark/scripts'
+          preset = os.environ['PRESET']
+          gpu = os.environ['GPU']
+          env = {**os.environ, 'XDG_CACHE_HOME': str(work / 'cache')}
+
+          def load(path):
+              return json.loads(path.read_text())
+
+          def save(path, value):
+              path.write_text(json.dumps(value, indent=2) + '\n')
+
+          card = load(out / 'model.json')
+          model_id = card['model']['id']
+          assert preset in card['presets'], (preset, card['presets'].keys())
+          assert (out / 'programs_sha256.txt').read_text().strip() == '2a918f41edc2ccc26d9a490ef57aed49dedddfd1d3df78a2beeb287af5b377f4'
+          assert load(out / 'sdk.json')['wheel_sha256'] == '6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f'
+          quick_start = load(out / 'info.json')['devices'][gpu]['quick_start']
+          assert quick_start['preset'] == preset, quick_start
+          assert quick_start['args'] == ['--pool_backing=fixed'], quick_start
+          assert not load(out / 'llm_config.json').get('serve'), 'unexpected package-wide serving override'
+          modes = {
+              'tuned': ['--device=' + quick_start['device'], *quick_start['args']],
+              'default': ['--device=amdgpu'],
+          }
+          soft, hard = resource.getrlimit(resource.RLIMIT_MEMLOCK)
+          target = 8 * 1024 * 1024
+          resource.setrlimit(resource.RLIMIT_MEMLOCK, (target if hard == resource.RLIM_INFINITY else min(target, hard), hard))
+          save(out / 'memlock.json', {'before': [soft, hard], 'during': resource.getrlimit(resource.RLIMIT_MEMLOCK)})
+
+          def benchmark(directory, name, args, timeout):
+              with (directory / f'{name}.log').open('w') as log:
+                  subprocess.run([sys.executable, str(bench / args[0]), *args[1:]], cwd=directory, env=env,
+                                 stdout=log, stderr=subprocess.STDOUT, check=True, timeout=timeout)
+
+          def ask(url, directory):
+              probes = [('Name the capital of France. Reply with only the city name.', 'paris'),
+                        ('What is 6 times 7? Reply with only the number.', '42'),
+                        ('Repeat this word once and nothing else: violet', 'violet')]
+              results = []
+              for prompt, expected in probes:
+                  reply = requests.post(url + '/v1/chat/completions', timeout=45, json={
+                      'model': model_id, 'messages': [{'role': 'user', 'content': prompt}],
+                      'temperature': 0, 'max_tokens': 20, 'chat_template_kwargs': {'enable_thinking': False},
+                  })
+                  reply.raise_for_status()
+                  choice = reply.json()['choices'][0]
+                  answer = choice['message']['content']
+                  results.append({'prompt': prompt, 'expected': expected, 'answer': answer, 'finish': choice['finish_reason']})
+              save(directory / 'answers.json', results)
+              return all(x['answer'].strip().lower().rstrip('.') == x['expected'] and x['finish'] == 'stop' for x in results)
+
+          def session(number, mode):
+              directory = out / f'{number}-{mode}'
+              directory.mkdir()
+              with socket.socket() as listener:
+                  listener.bind(('127.0.0.1', 0))
+                  port = listener.getsockname()[1]
+              url = f'http://127.0.0.1:{port}'
+              argv = [str(sdk / '.venv/bin/loom-serve'), f'--model={model / "model.json"}',
+                      f'--listen=127.0.0.1:{port}', *modes[mode]]
+              started = time.monotonic()
+              report = {'session': number, 'mode': mode}
+              with (directory / 'serve.log').open('w') as log:
+                  server = subprocess.Popen(argv, cwd=work, env=env, stdout=log, stderr=subprocess.STDOUT)
+                  try:
+                      deadline = time.monotonic() + 300
+                      while time.monotonic() < deadline and server.poll() is None:
+                          try:
+                              status = requests.get(url + '/v1/status', timeout=2).json()
+                              save(directory / 'status.json', status)
+                              registrations = [x['loom']['registration'] for x in status['data']]
+                              if 'failed' in registrations:
+                                  raise RuntimeError('model registration failed')
+                              if registrations and all(x == 'ready' for x in registrations):
+                                  break
+                          except (requests.RequestException, ValueError):
+                              pass
+                          time.sleep(1)
+                      else:
+                          raise RuntimeError(f'model registration timed out or server exited ({server.poll()})')
+                      actual = Path(f'/proc/{server.pid}/cmdline').read_bytes().decode().rstrip('\0').split('\0')
+                      save(directory / 'argv.json', actual)
+                      assert actual[-len(argv) + 1:] == argv[1:], (actual, argv)
+                      benchmark(directory, 'ready', ['wait_model.py', url, '--model', model_id, '--wait', '180'], 240)
+                      report['answers_pass'] = ask(url, directory)
+                      common = ['--model', model_id, '--no-campaign', '--thinking', 'off', '--repeat-rows', '3']
+                      benchmark(directory, 'short', ['perf.py', url, mode, *common, '--log', 'short.jsonl'], 240)
+                      benchmark(directory, 'long', ['perf.py', url, mode, *common, '--long', '--log', 'long.jsonl'], 540)
+                      concurrency = []
+                      for i in range(3):
+                          name = f'c4-{i + 1}'
+                          benchmark(directory, name, ['c4_steady.py', url, '4', '--model', model_id, '--thinking', 'off'], 180)
+                          concurrency.append(json.loads((directory / f'{name}.log').read_text().splitlines()[-1])['agg_tps'])
+                      short = json.loads((directory / 'short.jsonl').read_text().splitlines()[-1])
+                      long = json.loads((directory / 'long.jsonl').read_text().splitlines()[-1])
+                      report['metrics'] = {
+                          'decode_2k': short['decode_tps'],
+                          'prefill_8k': long['prefill_long'][0]['prefill_tps'],
+                          'prefill_16k': long['prefill_long'][1]['prefill_tps'],
+                          'prefill_32k': long['prefill_long'][2]['prefill_tps'],
+                          'decode_32k': long['decode_tps_32k'],
+                          'streams4': statistics.median(concurrency),
+                      }
+                      assert all(report['metrics'].values()), report['metrics']
+                      benchmark(directory, 'admission', ['ctx_admit.py', str(model), url, '--preset', preset,
+                                                          '--wait', '90', '--out', 'admission.json'], 175)
+                      report['admission'] = load(directory / 'admission.json')
+                  finally:
+                      if server.poll() is None:
+                          server.terminate()
+                          try:
+                              server.wait(timeout=20)
+                          except subprocess.TimeoutExpired:
+                              server.kill()
+                              server.wait()
+                      report['seconds'] = round(time.monotonic() - started, 1)
+                      save(directory / 'session.json', report)
+              return report
+
+          reports = []
+          for number, mode in enumerate(('tuned', 'default', 'default', 'tuned'), 1):
+              print(f'Session {number}: {mode}', flush=True)
+              try:
+                  report = session(number, mode)
+              except (AssertionError, RuntimeError, OSError, ValueError, KeyError, IndexError, subprocess.SubprocessError, requests.RequestException) as error:
+                  saved = out / f'{number}-{mode}' / 'session.json'
+                  report = load(saved) if saved.exists() else {'session': number, 'mode': mode}
+                  report['error'] = f'{type(error).__name__}: {error}'
+              reports.append(report)
+              save(out / 'sessions.json', reports)
+          assert all('error' not in r and r.get('answers_pass') and r['admission']['admitted'] for r in reports), reports
+          answers = [[x['answer'] for x in load(out / f'{r["session"]}-{r["mode"]}' / 'answers.json')] for r in reports]
+          assert all(answer == answers[0] for answer in answers), answers
+          medians = {mode: {metric: statistics.median(r['metrics'][metric] for r in reports if r['mode'] == mode)
+                            for metric in reports[0]['metrics']} for mode in modes}
+          delta = {metric: round(100 * (medians['default'][metric] / medians['tuned'][metric] - 1), 2) for metric in medians['tuned']}
+          summary = {'gpu': gpu, 'preset': preset, 'median': medians, 'default_delta_pct': delta, 'sessions': reports}
+          save(out / 'comparison.json', summary)
+          print(json.dumps(summary, indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sdk030-elastic-${{ matrix.gpu }}
+          path: ${{ env.WORK }}/out
+          retention-days: 30
+      - name: Release job disk
+        if: always()
+        shell: bash
+        run: |
+          if [ "${WORK:-}" = "$(dirname "$GITHUB_WORKSPACE")/sdk030-elastic-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$GPU" ]; then
+            rm -rf -- "$WORK"
+          fi
