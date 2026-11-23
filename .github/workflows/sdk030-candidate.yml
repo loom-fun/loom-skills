@@ -39,7 +39,7 @@ jobs:
           printf '%s  %s\n' "$PERFORMANCE_DIGEST" "$WORK/performance.zip" | sha256sum -c
           unzip -q "$WORK/performance.zip" -d "$WORK/job"
           python3 -m venv "$WORK/venv"
-          "$WORK/venv/bin/pip" install -q huggingface_hub requests
+          "$WORK/venv/bin/pip" install -q huggingface_hub requests jinja2 tokenizers numpy gguf pyyaml
           "$WORK/venv/bin/python" - "$PWD/skills/loom-benchmark/scripts/card" <<'PY'
           import json
           import os
@@ -97,7 +97,8 @@ jobs:
           pkg="$WORK/out/package"
           evid=(--source-kind devlab --run "$PERFORMANCE_RUN" --url "https://github.com/loom-fun/loom-skills/actions/runs/$PERFORMANCE_RUN/job/$PERFORMANCE_JOB")
           "$py" "$card/pull_devlab.py" --identity "$j" --gpu strix-halo \
-            --device-out "$WORK/device.json" --hrx-out "$WORK/hrx.json"
+            --device-out "$WORK/device.json" --hrx-out "$WORK/hrx-recovered.json"
+          cp "$j/sdk_staging.json" "$WORK/hrx.json"
           "$py" "$card/make_info.py" perf --gpu strix-halo --loom-jsonl "$j/perf_staging.jsonl" --c4-loom "$j/c4_staging.txt" \
             --baseline-from-info "$WORK/previous-info.json" --package "$pkg" "${evid[@]}" \
             --device "$WORK/device.json" --hrx-loom "$WORK/hrx.json" --fetched-programs "$PROGRAMS_SHA256" -o "$WORK/perf.json"
