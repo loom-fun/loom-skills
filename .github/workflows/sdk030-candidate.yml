@@ -27,6 +27,169 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           persist-credentials: false
+      - name: Implement SDK-aware launch flags and card evidence
+        shell: bash
+        run: |
+          mkdir -p "$WORK/oobe-code/changes"
+          python3 - <<'PY'
+          from pathlib import Path
+          
+          def edit(name, replacements):
+              path = Path(name)
+              data = path.read_text()
+              for old, new in replacements:
+                  assert old in data, (name, old)
+                  data = data.replace(old, new, 1)
+              path.write_text(data)
+          
+          card = "skills/loom-benchmark/scripts/card/"
+          edit(card + "card_lib.py", [
+              ('def info_serve_args(info, gpu, weight_bytes=None):', 'def info_serve_args(info, gpu, weight_bytes=None, sdk=None):'),
+              ('    return list(dev["serve_args"]) if "serve_args" in dev else card_serve_args(gpu, weight_bytes)',
+               '''    if "serve_args" in dev:
+                  return sdk_serve_args(dev["serve_args"], sdk)
+              return card_serve_args(gpu, weight_bytes, sdk)'''),
+              ('PRELOAD_FLAG = "--parameter_mode=preload"',
+               '''PRELOAD_FLAG = "--parameter_mode=preload"
+          
+          
+          def sdk_uses_file_parameters(sdk):
+              """SDK 0.3 and later default to buffered file reads and retired the preload flag."""
+              match = re.match(r"(\\d+)\\.(\\d+)\\.", (sdk or {}).get("hrx_loom") or "")
+              return bool(match and tuple(map(int, match.groups())) >= (0, 3))
+          
+          
+          def sdk_serve_args(args, sdk):
+              """Keep recorded flags compatible with the SDK that will run them."""
+              if sdk_uses_file_parameters(sdk):
+                  return [arg for arg in args if arg != PRELOAD_FLAG]
+              return list(args)'''),
+              ('def card_serve_args(gpu, weight_bytes=None):', 'def card_serve_args(gpu, weight_bytes=None, sdk=None):'),
+              ('    return gpu_serve_args(gpu) + ([PRELOAD_FLAG] if preload_mode(gpu, weight_bytes) == "preload" else [])',
+               '''    args = gpu_serve_args(gpu)
+              if not sdk_uses_file_parameters(sdk) and preload_mode(gpu, weight_bytes) == "preload":
+                  args.append(PRELOAD_FLAG)
+              return sdk_serve_args(args, sdk)'''),
+              ('gpu_serve = info_serve_args(info, gpu, facts.get("weight_bytes"))',
+               'gpu_serve = info_serve_args(info, gpu, facts.get("weight_bytes"), facts.get("sdk"))'),
+              ('    return {"preset": gpu_preset(facts, gpu) or (facts.get("presets") or [None])[0], "device": QUICK_START_DEVICE, "args": args}',
+               '''    return {"preset": gpu_preset(facts, gpu) or (facts.get("presets") or [None])[0], "device": QUICK_START_DEVICE,
+                      "args": sdk_serve_args(args, facts.get("sdk"))}'''),
+              ('    return ((info.get("devices") or {}).get(gpu) or {}).get("quick_start") or quick_start(info, facts, gpu)',
+               '''    recorded = ((info.get("devices") or {}).get(gpu) or {}).get("quick_start")
+              if recorded:
+                  return dict(recorded, args=sdk_serve_args(recorded["args"], facts.get("sdk")))
+              return quick_start(info, facts, gpu)'''),
+              ('def package_serve_args(gpu, pkg_dir):', 'def package_serve_args(gpu, pkg_dir, sdk=None):'),
+              ('    return card_serve_args(gpu, package_weight_bytes(pf["model"], pf["lock"]))',
+               '    return card_serve_args(gpu, package_weight_bytes(pf["model"], pf["lock"]), sdk or pf["cfg"].get("sdk"))'),
+          ])
+          edit(card + "make_info.py", [
+              ('        devices[gpu]["quick_start"] = quick_start(info, served, gpu)',
+               '''        if "serve_args" in devices[gpu]:
+                      devices[gpu]["serve_args"] = sdk_serve_args(devices[gpu]["serve_args"], served.get("sdk"))
+                  devices[gpu]["quick_start"] = quick_start(info, served, gpu)'''),
+              ('    from make_info import device_meta' if False else '    from make_info import device_meta' if False else
+               'historical_xsj_gate, xsj_enabled, xsj_evidence_errors, xsj_measurement_errors, xsj_vulkan_comparison_errors,',
+               'historical_xsj_gate, sdk_serve_args, xsj_enabled, xsj_evidence_errors, xsj_measurement_errors, xsj_vulkan_comparison_errors,'),
+          ])
+          edit(card + "publish_package.py", [
+              ('        quick = {"preset": name, "device": device, "args": meta["serve_args"]}',
+               '''        args = card_lib.sdk_serve_args(meta["serve_args"], facts.get("sdk"))
+                  quick = {"preset": name, "device": device, "args": args}'''),
+              ('or dev.get("serve_args") != meta["serve_args"]', 'or dev.get("serve_args") != args'),
+          ])
+          edit(card + "render_card.py", [
+              ('package_facts, programs_sha256, require_valid, stale_metrics, with_gate_features, historical_xsj_gate, xsj_enabled)',
+               'package_facts, programs_sha256, require_valid, stale_metrics, with_gate_features, historical_xsj_gate, sdk_uses_file_parameters, xsj_enabled)'),
+              ('        if (preload_mode(g, facts.get("weight_bytes")) is None',
+               '        if (sdk_uses_file_parameters(pin) or preload_mode(g, facts.get("weight_bytes")) is None'),
+              ('    paused, steps = info.get("status") == "paused",',
+               '''    if sdk_uses_file_parameters(pin):
+                  current = pin["hrx_loom"]
+                  history = []
+                  for gpu in gpus:
+                      perf = info["devices"][gpu].get("performance") or {}
+                      measured_versions = {(info["sources"][s["source"]].get("hrx_loom") or {}).get("hrx_loom")
+                                  for s in perf.get("sessions", [])}
+                      previous = sorted(v for v in measured_versions if v and v != current)
+                      if previous:
+                          sdks = ", ".join(f"`{v}`" for v in previous)
+                          history.append(f"- {GPUS[gpu]['name']} has historical Loom measurements on hrx-loom {sdks}.")
+                  if history:
+                      L += ["", "## SDK evidence", "", f"The Quick start installs hrx-loom `{current}`.", "", *history]
+              paused, steps = info.get("status") == "paused",'''),
+          ])
+          path = Path(".github/scripts/devlab_perf.sh")
+          source = path.read_text()
+          original = next(ln for ln in source.splitlines(keepends=True) if ln.lstrip().startswith('gsa=$("$T" -I -c'))
+          resolve = '  sdk_root "$1" || { echo "FAIL: SDK of variant $1"; return 1; }; local vroot=$SDKR\n'
+          source = source.replace(resolve, "", 1)
+          replacement = original.replace("import sys;", "import os, sys;")
+          replacement = replacement.replace("import card_lib; print", "import card_lib; pin = card_lib.load_json(sys.argv[4]) if os.path.isfile(sys.argv[4]) else None; print")
+          replacement = replacement.replace("sys.argv[2], sys.argv[3]", "sys.argv[2], sys.argv[3], pin")
+          replacement = replacement.replace('"$D/$1/pkg")', '"$D/$1/pkg" "$vroot/loom-install.json")')
+          assert replacement != original and "loom-install.json" in replacement
+          path.write_text(source.replace(original, resolve + replacement, 1))
+          
+          edit("skills/loom-migrate/versions/v0.2.0-to-v0.3.0.md", [
+              ('| Speculative telemetry |', '''| Parameter loading | SDK 0.2.0 supports preload. SDK 0.3.0 defaults to file, which reads on demand through buffered platform APIs. The direct mode is uncached and constrained by filesystem alignment, and debug-preload is diagnostic. | Drop the obsolete preload flag without substituting direct. Verify the rendered Quick start on an ordinary 8 MiB memlock host. [Upstream parameter parser](https://github.com/ROCm/hrx-system/blob/v0.3.0/runtime/src/iree/tooling/parameter_util.c#L22-L59). |
+          | Speculative telemetry |'''),
+              ("   staging copy's llm_config.json. Preserve the model, origin, program and tokenizer files.",
+               '''   staging copy's llm_config.json when it already uses that metadata. Image packages without
+             llm_config.json keep their native package layout and update their pinned install instructions
+             after an image request passes. Preserve the model, origin, program and tokenizer files.'''),
+          ])
+          edit("tests/test_preload.py", [
+              ('    def render(self, weights):', '    def render(self, weights, sdk=None):'),
+              ('            json.dump(info, open(os.path.join(w, "info.json"), "w"))',
+               '''            if sdk:
+                          pin_file = os.path.join(w, "llm_config.json")
+                          cfg = card_lib.load_json(pin_file)
+                          cfg["sdk"] = {"hrx_loom": sdk, "source": "pypi"}
+                          with open(pin_file, "w", encoding="utf-8") as f:
+                              json.dump(cfg, f)
+                          for dev in info["devices"].values():
+                              dev["serve_args"] = card_lib.gpu_serve_args("strix-halo") + [PRE]
+                      json.dump(info, open(os.path.join(w, "info.json"), "w"))'''),
+              ('    def test_big_strix_card_keeps_default_and_says_how_to_start(self):',
+               '''    def test_sdk_030_uses_default_file_mode_even_with_legacy_device_flags(self):
+                  readme = self.render(30_000_000_000, "0.3.0")
+                  self.assertIn('--pool_backing=fixed', readme)
+                  self.assertNotIn('--parameter_mode=', readme)
+                  self.assertNotIn(STOCK, readme)
+                  self.assertEqual(card_lib.card_serve_args("radeon-r9700", None, {"hrx_loom": "0.3.0"}),
+                                   ["--pool_backing=fixed"])
+                  legacy = {"args": ["--pool_backing=fixed", PRE], "device": card_lib.QUICK_START_DEVICE, "preset": "chat"}
+                  info = {"devices": {"strix-halo": {"quick_start": legacy}}}
+                  self.assertEqual(card_lib.recorded_quick_start(info, {"sdk": {"hrx_loom": "0.3.0"}}, "strix-halo")["args"],
+                                   ["--pool_backing=fixed"])
+                  self.assertEqual(card_lib.recorded_quick_start(info, {"sdk": {"hrx_loom": "0.2.0"}}, "strix-halo"), legacy)
+          
+              def test_big_strix_card_keeps_default_and_says_how_to_start(self):'''),
+          ])
+          edit("tests/test_devlab_perf_serve.py", [
+              ('def serve_line(variant, rdev="", rsuf="-", mem="17000000000", weights=None):',
+               'def serve_line(variant, rdev="", rsuf="-", mem="17000000000", weights=None, runtime_sdk=None):'),
+              ('        os.makedirs(f"{w}/D/v/pkg"); os.makedirs(f"{w}/state")',
+               '''        os.makedirs(f"{w}/D/v/pkg"); os.makedirs(f"{w}/state")
+                  if runtime_sdk:
+                      os.makedirs(f"{w}/sdk")
+                      with open(f"{w}/sdk/loom-install.json", "w", encoding="utf-8") as f:
+                          json.dump({"hrx_loom": runtime_sdk}, f)'''),
+              ('sdk_root() {{ SDKR=/sdk; }}', 'sdk_root() {{ SDKR={w}/sdk; }}'),
+              ('    def test_strix_preloads_up_to_40_gb_of_weights(self):',
+               '''    def test_runtime_sdk_030_does_not_preload_r9700(self):
+                  got = serve_line({"name": "v"}, rdev="radeon-r9700", rsuf="-r9700", runtime_sdk="0.3.0")
+                  self.assertTrue(got.endswith("-- --pool_backing=fixed"), got)
+                  self.assertNotIn("preload", got)
+          
+              def test_strix_preloads_up_to_40_gb_of_weights(self):'''),
+          ])
+          PY
+          git diff --check
+          git diff --name-only -z | xargs -0 cp --parents -t "$WORK/oobe-code/changes"
+          git diff --binary > "$WORK/oobe-code/changes.patch"
       - name: Validate pinned run and production package
         shell: bash
         env:
@@ -89,6 +252,15 @@ jobs:
           shutil.copyfile(pkg / "model.json", w / "production-model.json")
           (w / "completed.txt").write_text(job["completed_at"])
           PY
+      - name: Verify legacy and SDK 0.3.0 serving behavior
+        shell: bash
+        run: |
+          export HF_ENDPOINT=https://huggingface.co
+          py="$WORK/venv/bin/python"
+          for test in test_preload.py test_devlab_perf_serve.py test_card_publish.py test_device_results.py test_card_flag_notes.py; do
+            "$py" -m unittest discover -s tests -p "$test" > "$WORK/oobe-code/$test.log" 2>&1 || { tail -80 "$WORK/oobe-code/$test.log"; exit 1; }
+            tail -4 "$WORK/oobe-code/$test.log"
+          done
       - name: Render and check the card using qualified measurements
         shell: bash
         run: |
@@ -162,12 +334,11 @@ jobs:
                       assert sources[source_id] == descriptor, source_id
                   else:
                       sources[source_id] = descriptor
-          steps = info.setdefault("next_steps", [])
-          steps.append("Measure Radeon AI PRO R9700 and gfx1201 on hrx-loom 0.3.0 to update their historical Loom rows.")
-          for key, entry in changes.items():
-              if abs(entry["percent"]) > 3.0:
-                  label = {"prefill_16k": "16k prefill"}.get(key, key)
-                  steps.append(f"Confirm the {label} change ({entry['percent']:+.2f}% versus the {old_session['date']} Strix Halo session) in a same-runner SDK comparison.")
+          for view in info["devices"].values():
+              if "serve_args" in view:
+                  view["serve_args"] = [a for a in view["serve_args"] if a != "--parameter_mode=preload"]
+              if view.get("quick_start"):
+                  view["quick_start"]["args"] = [a for a in view["quick_start"]["args"] if a != "--parameter_mode=preload"]
           p.write_text(json.dumps(info, indent=1, sort_keys=True) + "\n")
           shutil.copyfile(w / "production-model.json", p.parent / "model.json")
           evidence = {
@@ -181,6 +352,78 @@ jobs:
           PY
           "$py" "$card/render_card.py" "$pkg"
           "$py" "$card/render_card.py" --check "$pkg" "$pkg/README.md"
+          mkdir -p "$WORK/quick-start-proof"
+          bash "$PWD/skills/loom-setup/scripts/install_loom.sh" "$WORK/runtime" 0.3.0 > "$WORK/quick-start-proof/install.log" 2>&1
+          test "$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["wheel_sha256"])' "$WORK/runtime/loom-install.json")" = "$WHEEL_SHA256"
+          PATH="$WORK/runtime/.venv/bin:$PATH" "$py" - "$pkg" <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import resource
+          import shlex
+          import subprocess
+          import sys
+          import time
+          from urllib.request import Request, urlopen
+
+          work = Path(os.environ["WORK"])
+          pkg = Path(sys.argv[1])
+          readme = (pkg / "README.md").read_text()
+          assert "## SDK evidence" in readme and "historical Loom measurements" in readme
+          command_lines = [line for line in readme.splitlines() if line.startswith("loom-serve ")]
+          assert len(command_lines) == 3 and all("--parameter_mode=" not in line for line in command_lines)
+          info = json.loads((pkg / "info.json").read_text())
+          model = json.loads((pkg / "model.json").read_text())
+          quick = info["devices"]["strix-halo"]["quick_start"]
+          launch = next(line for line in command_lines
+                        if shlex.split(line)[2:] == ["--device=" + quick["device"], *quick["args"]])
+          argv = shlex.split(launch)
+          scratch = work / "quick-start-proof"
+          output = argv[1].removeprefix("--model=")
+          assert "/" not in output and output not in ("", ".", "..")
+          fetch = subprocess.run(["loom-fetch", str(pkg / "model.json"), f"--output={output}", "--preset", quick["preset"]],
+                                 cwd=scratch, capture_output=True, text=True, timeout=65)
+          (scratch / "fetch.log").write_text(fetch.stdout + fetch.stderr)
+          if fetch.returncode:
+              raise RuntimeError(fetch.stderr[-2500:])
+          (scratch / "serve-command.txt").write_text(launch + "\n")
+          def stock_memlock():
+              resource.setrlimit(resource.RLIMIT_MEMLOCK, (8 * 1024 * 1024, 8 * 1024 * 1024))
+          with (scratch / "serve.log").open("w") as output_file:
+              process = subprocess.Popen(argv, cwd=scratch, stdout=output_file, stderr=subprocess.STDOUT, preexec_fn=stock_memlock)
+              try:
+                  limits = Path(f"/proc/{process.pid}/limits").read_text()
+                  assert any("Max locked memory" in line and line.split().count("8388608") == 2 for line in limits.splitlines())
+                  (scratch / "limits.log").write_text(limits)
+                  for attempt in range(45):
+                      if process.poll() is not None:
+                          raise RuntimeError((scratch / "serve.log").read_text()[-3000:])
+                      try:
+                          with urlopen("http://127.0.0.1:8080/readyz", timeout=1) as r:
+                              if json.loads(r.read())["status"] == "ready":
+                                  break
+                      except OSError:
+                          time.sleep(1)
+                  else:
+                      raise RuntimeError("The exact printed command failed to reach readyz")
+                  body = {"model": model["model"]["id"], "messages": [{"role": "user", "content": "What is the capital of France?"}],
+                          "chat_template_kwargs": {"enable_thinking": False}, "temperature": 0, "max_tokens": 16}
+                  request = Request("http://127.0.0.1:8080/v1/chat/completions", data=json.dumps(body).encode(),
+                                    headers={"Content-Type": "application/json"})
+                  with urlopen(request, timeout=40) as r:
+                      response = json.loads(r.read())
+                  assert "Paris" in response["choices"][0]["message"]["content"], response
+                  summary = {"command": launch, "memlock_bytes": 8388608, "response": response["choices"][0]["message"]["content"]}
+                  (scratch / "result.json").write_text(json.dumps(summary, indent=2) + "\n")
+                  print(json.dumps(summary))
+              finally:
+                  process.terminate()
+                  try:
+                      process.wait(timeout=5)
+                  except subprocess.TimeoutExpired:
+                      process.kill()
+                      process.wait()
+          PY
           "$py" "$card/publish_package.py" upload "$pkg" --org loom-fun-staging \
             --repo "$PACKAGE_SLUG" --parent-commit "$STAGING_PARENT" --dry-run
       - name: Retain the reviewed card candidate
@@ -190,6 +433,21 @@ jobs:
           path: ${{ env.WORK }}/out
           include-hidden-files: true
           retention-days: 30
+      - name: Retain the DevLab implementation and regression tests
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdk030-oobe-code
+          path: ${{ env.WORK }}/oobe-code
+      - name: Retain exact Quick start proof
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdk030-qwen-quick-start-proof
+          path: |
+            ${{ env.WORK }}/quick-start-proof/*.log
+            ${{ env.WORK }}/quick-start-proof/*.json
+            ${{ env.WORK }}/quick-start-proof/*.txt
       - name: Remove runner scratch
         if: always()
         shell: bash
