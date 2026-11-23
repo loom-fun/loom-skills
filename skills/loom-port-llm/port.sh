@@ -214,6 +214,26 @@ if [ "$irc" = 0 ] && [ "$ref" != off ] && [ -s reference.json ] && [ -f cfg.json
     echo "the reference's chat block does not match this template (chat_verify.log)"
   fi
 fi
+# Still failing and the kit is an example of this architecture with its own reviewed cfg.json (no category A package to
+# take it from): its chat block, verified against THIS model's template, replaces the derived one (deepseek2: JoyAI's
+# call_lead / assistant_suffix are not derivable).
+if [ "$irc" = 0 ] && [ -n "${ex:-}" ] && [ -f "$here/reference/$ex-example/cfg.json" ] && [ -f cfg.json ] \
+   && grep -q "^chat FAIL\|not derivable\|WARNING: no chat block" inspect.log && ! grep -q "Traceback$hd" inspect.log; then
+  cp cfg.json cfg.derived.json
+  "$T" - "$here/reference/$ex-example/cfg.json" <<'EOF'
+import json, sys
+c, e = json.load(open("cfg.json", encoding="utf-8")), json.load(open(sys.argv[1], encoding="utf-8"))
+if e.get("chat"):
+    c["chat"] = e["chat"]
+    json.dump(c, open("cfg.json", "w", encoding="utf-8"), indent=1, ensure_ascii=False)
+EOF
+  if "$T" -I "$K/chat_probe.py" "$gguf" --verify cfg.json > chat_verify.log 2>&1; then
+    echo "chat block from reference/$ex-example: verified against this template ($(grep -c '^OK' chat_verify.log) probes OK)"
+    sed -i 's/^chat FAIL/chat (replaced by the example) FAIL/; s/not derivable/not derivable (example block verified)/; s/WARNING: no chat block/no chat block (example block verified)/' inspect.log
+  else
+    echo "reference/$ex-example's chat block does not match this template (chat_verify.log)"; mv cfg.derived.json cfg.json
+  fi
+fi
 # ("not derivable automatically": the sed above marks a verified reference block between those words)
 if [ "$irc" != 0 ] || grep -q "^chat FAIL\|not derivable automatically\|WARNING: no chat block$hd\|WARNING: unsupported layout\|Traceback" inspect.log; then
   arch=$("$T" -c "import json;print(json.load(open('cfg.json')).get('arch',''))" 2>/dev/null)
