@@ -1,0 +1,153 @@
+name: SDK 0.3 image-service compatibility
+on:
+  pull_request:
+    types: [labeled]
+permissions:
+  contents: read
+jobs:
+  image-services:
+    if: github.head_ref == 'codex/sdk030-image-services' && github.event.label.name == 'devlab-experiment'
+    runs-on: [strix-halo, devlab-dispatch, Linux, self-hosted]
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Install and verify release SDKs
+        shell: bash
+        run: |
+          set -euo pipefail
+          work="$(dirname "$GITHUB_WORKSPACE")/sdk030-images-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          mkdir -p "$work/results"
+          echo "WORK=$work" >> "$GITHUB_ENV"
+          for version in 0.2.0 0.3.0; do
+            bash skills/loom-setup/scripts/install_loom.sh "$work/sdk-$version" "$version" > "$work/results/install-$version.log" 2>&1
+            cp "$work/sdk-$version/loom-install.json" "$work/results/sdk-$version.json"
+          done
+          python3 - "$work" <<'PY'
+          import json,sys
+          from pathlib import Path
+          for v,d in [('0.2.0','5148f9e3a264af400ec4bae38bd7b06bf551d28cc33b7a61d67f7bcefa590438'),('0.3.0','6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f')]:
+              identity=json.loads((Path(sys.argv[1])/f'results/sdk-{v}.json').read_text())
+              assert identity['hrx_loom']==v and identity['wheel_sha256']==d
+          PY
+      - name: Compare deterministic outputs and timings
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$WORK/sdk-0.3.0/.tools/bin/python" - <<'PY'
+          import base64, hashlib, io, json, os, shutil, subprocess, time
+          from pathlib import Path
+          import requests
+          from PIL import Image
+          import numpy as np
+
+          work=Path(os.environ['WORK'])
+          out=work/'results'
+          base='http://127.0.0.1:8189'
+          def save(path,value):
+              path.write_text(json.dumps(value,indent=2)+'\n')
+          cases=[
+            ('xinntao-Real-ESRGAN-x4plus-loom','d7126ceb45f03476c8f6608ba77959dd48fe4515','upscale'),
+            ('black-forest-labs-FLUX.2-klein-4B-loom','b21b10a168c368d67303fea32f5dbc5f6398375e','image'),
+            ('Tongyi-MAI-Z-Image-Turbo-loom','77e103e314324c35a88b62350286b07e8dc0f05d','image')]
+          all_results=[]
+          for slug,rev,preset in cases:
+              root=work/slug
+              root.mkdir()
+              model_out=out/slug
+              model_out.mkdir()
+              result={'repo':'loom-fun/'+slug,'revision':rev,'preset':preset,'runs':{}}
+              for version in ('0.2.0','0.3.0'):
+                  observations=[]
+                  run={'observations':observations}
+                  result['runs'][version]=run
+                  sdk=work/('sdk-'+version)/'.venv'/'bin'
+                  pkg=root/version
+                  server=None
+                  try:
+                      started=time.monotonic()
+                      env=dict(os.environ,HF_HOME=str(root/'hub'))
+                      with (model_out/f'fetch-{version}.log').open('w') as f:
+                          subprocess.run([sdk/'loom-fetch',f'https://huggingface.co/loom-fun/{slug}/resolve/{rev}/model.json',f'--preset={preset}','--no-input','--materialize=share','--cache',root/'cache','--output',pkg],env=env,stdout=f,stderr=subprocess.STDOUT,check=True,timeout=2400)
+                      run['fetch_s']=time.monotonic()-started
+                      card=json.loads((pkg/'model.json').read_text())
+                      spec=card['presets'][preset]
+                      run['programs'] = {str(f.relative_to(pkg)):hashlib.sha256(f.read_bytes()).hexdigest() for f in sorted(pkg.rglob('*.loom'))}
+                      expected=(1024,1024)
+                      body=dict(spec.get('request') or {},model=card['model']['id'],response_format='b64_json')
+                      if preset=='upscale':
+                          w,h=64,16
+                          expected=(4*w,4*h)
+                          raw=bytes((x*5+y*9+c*47)%256 for y in range(h) for x in range(w) for c in range(3))
+                          body.update(prompt=base64.b64encode(raw).decode(),size=f'{4*w}x{4*h}')
+                      else:
+                          body['seed']=42
+                      run['request_sha256']=hashlib.sha256(json.dumps(body,sort_keys=True).encode()).hexdigest()
+                      started=time.monotonic()
+                      with (model_out/f'server-{version}.log').open('w') as log:
+                          server=subprocess.Popen([sdk/'loom-serve','--device=amdgpu','--listen=127.0.0.1:8189',f'--model={pkg}/model.json'],stdout=log,stderr=subprocess.STDOUT)
+                          deadline=started+900
+                          while time.monotonic()<deadline:
+                              if server.poll() is not None: raise RuntimeError(f'loom-serve exited {server.returncode}')
+                              try: response=requests.get(base+'/v1/status',timeout=3)
+                              except requests.ConnectionError: time.sleep(1);continue
+                              if response.ok:
+                                  status=response.json()
+                                  records=status.get('data') or []
+                                  if any(r.get('loom',{}).get('registration')=='failed' for r in records): raise RuntimeError(str(status)[:1200])
+                                  if records and all(r.get('loom',{}).get('registration')=='ready' for r in records): break
+                              time.sleep(2)
+                          else: raise RuntimeError('registration timed out')
+                          run['registration_s']=time.monotonic()-started
+                          for i in range(3):
+                              start=time.monotonic()
+                              while True:
+                                  response=requests.post(base+'/v1/images/generations',json=body,timeout=900)
+                                  if response.status_code!=503 or time.monotonic()-start>900:break
+                                  time.sleep(2)
+                              if not response.ok:raise RuntimeError(f'{response.status_code}: {response.text[:500]}')
+                              image=Image.open(io.BytesIO(base64.b64decode(response.json()['data'][0]['b64_json'],validate=True)))
+                              assert image.format=='PNG' and image.size==expected, (image.format,image.size,expected)
+                              rgb=image.convert('RGB')
+                              assert np.asarray(rgb).std()>1, 'output has no visual variation'
+                              if preset=='upscale':
+                                  assert image.mode=='RGBA' and image.getchannel('A').getextrema()==(255,255)
+                              if i==0:rgb.save(model_out/f'{version}.png')
+                              observations.append({'seconds':time.monotonic()-start,'width':rgb.width,'height':rgb.height,'rgb_sha256':hashlib.sha256(rgb.tobytes()).hexdigest()})
+                      run['deterministic']=len({x['rgb_sha256'] for x in observations})==1
+                  except Exception as exc:
+                      run['error']=f'{type(exc).__name__}: {exc}'
+                  finally:
+                      if server and server.poll() is None:
+                          server.terminate()
+                          try:server.wait(timeout=45)
+                          except subprocess.TimeoutExpired:server.kill();server.wait()
+                      save(model_out/'result.json',result)
+                  print(slug,version,run.get('error') or observations,flush=True)
+              old,new=result['runs'].values()
+              if old.get('deterministic') and new.get('deterministic'):
+                  a=np.asarray(Image.open(model_out/'0.2.0.png')).astype(np.int16)
+                  b=np.asarray(Image.open(model_out/'0.3.0.png')).astype(np.int16)
+                  result['max_abs_channel_diff']=int(np.abs(a-b).max())
+                  result['mean_abs_channel_diff']=float(np.abs(a-b).mean())
+                  result['programs_match']=old['programs']==new['programs']
+                  result['pixels_match']=bool(np.array_equal(a,b))
+              save(model_out/'result.json',result)
+              all_results.append(result)
+              shutil.rmtree(root)
+          save(out/'summary.json',all_results)
+          if not all(r.get('programs_match') and r.get('pixels_match') for r in all_results): raise SystemExit('Inspect individual results and retained PNGs')
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: image-service-sdk-comparison
+          path: ${{ env.WORK }}/results
+          retention-days: 30
+      - name: Release job disk
+        if: always()
+        shell: bash
+        run: |
+          if [ "${WORK:-}" = "$(dirname "$GITHUB_WORKSPACE")/sdk030-images-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" ]; then rm -rf -- "$WORK"; fi
