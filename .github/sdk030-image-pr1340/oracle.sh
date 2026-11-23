@@ -24,8 +24,11 @@ cp -a "$pip_packages/pip" "$pip_packages"/pip-*.dist-info "$WORK/pip-module/"
 libdirs=$(find "$WORK/oracle-runtime/lib" -type d \
   \( -path '*/_rocm_sdk_*/lib' -o -path '*/_rocm_sdk_*/lib/llvm/lib' -o -path '*/torch/lib' \) -print | paste -sd:)
 export LD_LIBRARY_PATH="$WORK/oracle-runtime/lib:$libdirs${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+printf 'LD_LIBRARY_PATH=%s\n' "$LD_LIBRARY_PATH" >> "$GITHUB_ENV"
+printf 'HF_HOME=%s\n' "$HF_HOME" >> "$GITHUB_ENV"
+printf 'TORCH_HOME=%s\n' "$TORCH_HOME" >> "$GITHUB_ENV"
 PYTHONPATH="$WORK/pip-module" "$runtime" -m pip install --no-cache-dir 'diffusers==0.43.0' 'transformers==5.24.0' 'lpips==0.1.4' \
-  'scikit-image==0.26.0' 'accelerate==1.16.0'
+  'scikit-image==0.26.0' 'accelerate==1.16.0' 'numpy==2.5.5'
 PYTHONPATH="$WORK/pip-module" "$runtime" -m pip freeze > "$WORK/evidence/oracle-dependencies.txt"
 "$runtime" - "$digest" "$WORK/evidence/oracle-runtime.json" <<'PY'
 import importlib.metadata

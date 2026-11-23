@@ -15,7 +15,7 @@ jobs:
     timeout-minutes: 130
     env:
       PR_HEAD: 0cef7984accf91d500bb8375664a6755a2078e79
-      IMAGE_GATE_RUN: '45265066356'
+      IMAGE_GATE_RUN: '45266207646'
     steps:
       - uses: actions/checkout@v4
         with:
@@ -28,7 +28,7 @@ jobs:
           echo "WORK=$work" >> "$GITHUB_ENV"
       - uses: actions/download-artifact@v4
         with:
-          name: sdk030-image-pr1340-evidence
+          name: sdk030-image-pr1340-oracle-evidence
           path: ${{ env.WORK }}/evidence
           run-id: ${{ env.IMAGE_GATE_RUN }}
           github-token: ${{ github.token }}
@@ -57,10 +57,14 @@ jobs:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         shell: bash
         run: bash .github/sdk030-image-pr1340/oracle.sh
+      - name: Diagnose stock and manual Z-Image generation
+        shell: bash
+        run: |
+          "$WORK/oracle-runtime/bin/python3" .github/sdk030-image-pr1340/diagnose_zimage.py "$WORK"
       - uses: actions/upload-artifact@v4
         if: always() && env.WORK != ''
         with:
-          name: sdk030-image-pr1340-oracle-evidence
+          name: sdk030-image-pr1340-diagnostic-evidence
           path: ${{ env.WORK }}/evidence
           if-no-files-found: error
       - name: Remove isolated workspace
