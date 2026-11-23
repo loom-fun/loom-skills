@@ -150,7 +150,8 @@ class ImageEvidence(unittest.TestCase):
 
     def test_skip_requires_identical_and_complete_oracle_evidence(self):
         case = Path(self.enterContext(tempfile.TemporaryDirectory()))
-        settings = {"model": "first", "revision": "first-sha", "steps": 2, "capture_stages": True, "guidance_scale": 0}
+        settings = {"model": "first", "revision": "first-sha", "steps": 2, "capture_stages": True,
+                    "guidance_scale": 0, "vae_device": "cpu"}
         (case / "image.png").write_bytes(b"png")
         self.assertFalse(self.oracle.complete_case(case, settings))
         (case / "meta.json").write_text(json.dumps({"settings": settings}))
@@ -159,7 +160,7 @@ class ImageEvidence(unittest.TestCase):
             (case / name).write_bytes(b"tensor")
         self.assertTrue(self.oracle.complete_case(case, settings))
         for key, value in (("model", "other"), ("revision", "other"), ("steps", 4),
-                           ("capture_stages", False), ("guidance_scale", 1)):
+                           ("capture_stages", False), ("guidance_scale", 1), ("vae_device", "cuda")):
             self.assertFalse(self.oracle.complete_case(case, {**settings, key: value}), key)
 
     def test_local_snapshot_identity_tracks_bytes_independent_of_mtime(self):

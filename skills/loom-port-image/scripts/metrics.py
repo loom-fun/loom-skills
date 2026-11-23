@@ -211,15 +211,16 @@ def scores(sets, baseline, device):
 def markdown(report):
     if report["kind"] == "parity":
         stages = sorted({k for r in report["cases"] for k in r.get("stages", {})})
+        columns = ["case", "PSNR dB", "SSIM", "LPIPS", *(f"{stage} rel-L2" for stage in stages)]
         lines = [f"# Parity: `{Path(report['test']).name}` vs `{Path(report['ref']).name}`", "",
-                 "| case | PSNR dB | SSIM | LPIPS | " + " | ".join(f"{s} rel-L2" for s in stages) + " |",
-                 "|---|---|---|---|" + "---|" * len(stages)]
+                 "| " + " | ".join(columns) + " |", "|" + "---|" * len(columns)]
         for r in report["cases"]:
             if "error" in r:
-                lines.append(f"| {r['case']} | {r['error']} |")
+                lines.append(f"| {r['case']} | {r['error']} |" + " |" * (len(columns) - 2))
                 continue
             st = [f"{r['stages'][s]['rel_l2']:.2e}" if s in r["stages"] else "-" for s in stages]
-            lines.append(f"| {r['case']} | {r['psnr']:.2f} | {r['ssim']:.4f} | {r['lpips']:.4f} | " + " | ".join(st) + " |")
+            cells = [r["case"], f"{r['psnr']:.2f}", f"{r['ssim']:.4f}", f"{r['lpips']:.4f}", *st]
+            lines.append("| " + " | ".join(cells) + " |")
         s = report["summary"]
         if s:
             lines += ["", f"Mean PSNR {s['psnr']['mean']:.2f} dB (min {s['psnr']['min']:.2f}), SSIM {s['ssim']['mean']:.4f}, "

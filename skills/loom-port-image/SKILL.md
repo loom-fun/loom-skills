@@ -52,7 +52,9 @@ CATALOG_CARD="$CATALOG/model/Tongyi-MAI/Z-Image-Turbo"
   `loom-install.json` with the test evidence. On Linux x86-64 (glibc ≥ 2.39) the release wheel
   SHA-256 is `6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f`.
 - A reference Python with PyTorch ROCm, `diffusers`, `transformers`, `open_clip_torch` and `lpips`
-  for the oracle and the quality metrics. Keep it separate from the SDK venv.
+  for the oracle and quality metrics. Keep it separate from the SDK venv. The Z-Image check uses
+  PyTorch `2.14.0+rocm10.1.0rc2`, Diffusers `0.43.0`, Transformers `5.24.0`, NumPy `2.5.5`,
+  scikit-image `0.26.0` and LPIPS `0.1.4`.
 - Optional, for the comparison: [Lemonade](https://github.com/lemonade-sdk/lemonade) with its
   stable-diffusion.cpp (ROCm and Vulkan) and [thenoise](https://github.com/lemonade-sdk/thenoise) backends.
 
@@ -69,7 +71,10 @@ loom-serve --version
    (`motif/tensor/random.loom`). `scripts/philox_noise.py` reproduces that draw in NumPy for a
    latent shape and seed; `scripts/oracle_diffusers.py` runs the diffusers pipeline from those
    latents and saves the image plus per-stage tensors (prompt embeddings, each transformer step,
-   the final latent). Without the shared noise the only comparison left is distributional.
+   the final latent). Use `--offload-text-encoder` for the Z-Image Strix Halo reference.
+   This keeps the denoiser on ROCm and decodes on CPU in FP32 using the original VAE input
+   precision and scaling. Match the decode device and precision when comparing oracle runs.
+   Without shared noise, compare distributional scores.
 2. **Read the checkpoint, not the paper.** List every tensor (`safetensors` header) and map it to a
    `command.parameter` name before writing the card. Pin geometry rules from the pipeline code
    (patch size, latent channels, allowed sizes) rather than from documentation.

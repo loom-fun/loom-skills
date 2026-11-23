@@ -3,7 +3,8 @@
 
 usage: oracle_diffusers.py --model REPO_OR_DIR --layout {flux2,zimage} --steps N --guidance G
                            [--revision SHA] [--dtype fp32|bf16] [--prompt-file prompts.json] [--prompts fox,sign]
-                           [--seeds 0,42] [--sizes 1024x1024|all] [--out DIR] [--offload-text-encoder] [--no-stages]
+                           [--seeds 0,42] [--sizes 1024x1024|all] [--out DIR]
+                           [--offload-text-encoder] [--vae-device cpu|cuda] [--no-stages]
 
 Run it in the reference Python (PyTorch ROCm, diffusers, transformers), never in the SDK venv. --model is a
 Hugging Face repo id or a local snapshot; pin --revision to the commit the card's model.json.lock names.
@@ -18,8 +19,10 @@ Per case it writes OUT/<dtype>/<prompt>_s<seed>_<WxH>/ (the layout metrics.py re
   vae_in.npy    the tensor handed to the VAE decoder
 Run fp32 and bf16: bf16 against fp32 is the noise floor a BF16 Loom port is judged against.
 
---offload-text-encoder encodes every prompt first, then moves the text encoder to the CPU before the
-transformer and VAE load; use it when fp32 does not fit in the GPU carve-out.
+--offload-text-encoder encodes every prompt first and then moves the text encoder to CPU. With this
+option the VAE defaults to CPU FP32 decode, which also avoids an observed corrupt GPU decode on
+gfx1151. The denoiser stays on the GPU. --vae-device selects the decoder explicitly. CPU decode
+preserves the pipeline's original latent scaling and input precision before promoting to FP32.
 cuDNN/MIOpen convolution is disabled: on gfx1151 under Windows it made the VAE decode take minutes and fail
 at 1024x1024, while the native PyTorch convolution path is fast.
 A new architecture needs a latent layout in philox_noise.py and possibly its VAE de-normalization below.
@@ -41,10 +44,10 @@ def save(path, t):
     np.save(path, t.detach().float().cpu().numpy())
 
 
-def vae_input(pipe, layout, latent):
+def vae_input(pipe, layout, latent, dtype=None):
     # Flux2KleinPipeline returns an unpatchified, de-normalized latent for output_type="latent";
     # ZImagePipeline returns the raw latent, which the VAE expects scaled and shifted.
-    latent = latent.to(pipe.vae.dtype)
+    latent = latent.to(pipe.vae.dtype if dtype is None else dtype)
     if layout == "zimage":
         return latent / pipe.vae.config.scaling_factor + pipe.vae.config.shift_factor
     return latent
@@ -84,6 +87,7 @@ def provenance(args):
         "model": model, "revision": args.revision, "snapshot": snapshot, "layout": args.layout,
         "steps": args.steps, "guidance_scale": args.guidance, "dtype": args.dtype,
         "offload_text_encoder": args.offload_text_encoder, "capture_stages": not args.no_stages,
+        "vae_device": args.vae_device, "vae_decode_dtype": "fp32" if args.vae_device == "cpu" else args.dtype,
         "oracle_sha256": hashlib.sha256(source.read_bytes() + source.with_name("philox_noise.py").read_bytes()).hexdigest(),
         "versions": {name: importlib.metadata.version(name) for name in ("torch", "diffusers", "transformers", "numpy")},
     }
@@ -158,8 +162,12 @@ def main():
     ap.add_argument("--sizes", default="1024x1024", help="comma-separated WxH, or 'all'")
     ap.add_argument("--out", default="oracle")
     ap.add_argument("--offload-text-encoder", action="store_true")
+    ap.add_argument("--vae-device", choices=("cpu", "cuda"),
+                    help="decoder device (default: cpu when the text encoder is offloaded, cuda otherwise)")
     ap.add_argument("--no-stages", action="store_true", help="only write image.png and meta.json")
     args = ap.parse_args()
+    if args.vae_device is None:
+        args.vae_device = "cpu" if args.offload_text_encoder else "cuda"
     if args.steps <= 0:
         ap.error("--steps must be positive")
 
@@ -218,7 +226,9 @@ def main():
         pipe.text_encoder.to("cpu")
         torch.cuda.empty_cache()
         pipe.transformer.to("cuda")
-        pipe.vae.to("cuda")
+    vae_input_dtype = pipe.vae.dtype
+    vae_decode_dtype = torch.float32 if args.vae_device == "cpu" else vae_input_dtype
+    pipe.vae.to(device=args.vae_device, dtype=vae_decode_dtype)
     device = torch.cuda.get_device_name(0)
     print(f"loaded {args.model} {args.dtype} in {load_s:.1f}s on {device}")
 
@@ -239,8 +249,9 @@ def main():
                           callback_on_step_end=None if args.no_stages else on_step).images
             torch.cuda.synchronize()
             t_dit = time.perf_counter() - t1
-            vae_in = vae_input(pipe, args.layout, latent)
-            pixels = pipe.vae.decode(vae_in, return_dict=False)[0]
+            vae_in = vae_input(pipe, args.layout, latent, vae_input_dtype)
+            decoder_input = vae_in.to(device=args.vae_device, dtype=vae_decode_dtype)
+            pixels = pipe.vae.decode(decoder_input, return_dict=False)[0]
             image = pipe.image_processor.postprocess(pixels, output_type="pil")[0]
             torch.cuda.synchronize()
         t_dec = time.perf_counter() - t1 - t_dit
