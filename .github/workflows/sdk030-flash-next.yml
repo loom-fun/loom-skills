@@ -1,0 +1,84 @@
+name: SDK 0.3 Flash Next source and backing comparison
+on:
+  push:
+    branches: [codex/sdk030-flash-next]
+    paths: [.github/workflows/sdk030-flash-next.yml]
+permissions:
+  contents: read
+jobs:
+  compare:
+    runs-on: [strix-halo, devlab-dispatch, Linux, self-hosted]
+    timeout-minutes: 220
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Prepare pinned ABI 2 source and matched workload
+        shell: bash
+        run: |
+          set -euo pipefail
+          export WORK="$GITHUB_WORKSPACE/../sdk030-flash-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          mkdir -p "$WORK"
+          echo "WORK=$WORK" >> "$GITHUB_ENV"
+          git clone -q --depth 1 --branch v0.3.0 https://github.com/ROCm/hrx-loom-library "$WORK/library"
+          test "$(git -C "$WORK/library" rev-parse HEAD)" = 279afe368b82e0d7acfe38c4f47e8e7e5cfb7bc8
+          example=skills/loom-port-llm/reference/qwen4exp-example
+          mv "$example/catalog" "$WORK/previous-catalog"
+          mkdir "$example/catalog"
+          python3 "$example/flatten.py" "$WORK/library" "$example/catalog"
+          cp "$WORK/previous-catalog/catalog.json" "$example/catalog/"
+          python3 - <<'PY'
+          from pathlib import Path
+          import json
+          p = Path('skills/loom-port-llm/reference/qwen4exp-example/catalog/catalog.json')
+          meta = json.loads(p.read_text())
+          # The launcher supplies fixed backing explicitly in the tuned arm.
+          del meta['serve']
+          meta['sdk'] = dict(hrx_loom='0.3.0', source='pypi', hrx_system_sha='e2c41a720363911c04606ce0f4417e2d55630352', wheel_sha256='6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f')
+          p.write_text(json.dumps(meta, indent=1))
+          # Prove each serving process used the designated memory settings and capture its actual launch.
+          h = Path('.github/scripts/devlab_perf.sh')
+          source = h.read_text()
+          anchor = '  # "ready" is the compiled registration;'
+          assert source.count(anchor) == 1
+          check = '''  local argfile="$out/argv_$1.txt"
+            tr '\\0' '\\n' < "/proc/$(cat "$LOOM_SERVE_STATE/perf-$1.pid")/cmdline" > "$argfile" || return 1
+            if [ "$1" = elastic ]; then
+              if grep -Eq '^--(memory_bytes|pool_backing)=' "$argfile"; then echo "Wrong elastic launch"; return 1; fi
+            elif ! grep -qx -- '--pool_backing=fixed' "$argfile"; then echo "Wrong fixed launch"; return 1; fi
+          '''
+          h.write_text(source.replace(anchor, check + anchor))
+          job = {'name':'flash', 'card':'loom-fun/unsloth-Qwen3.8-Flash-Next-loom@d847c21bc93c0c6bc45752a9edaf91d80ac74490', 'sdk':'0.3.0', 'kit':'qwen4exp', 'memory_bytes':100000000000, 'llamacpp':'b1371', 'env':{'MIN_MEMAVAIL_GB':110}, 'variants': [
+              {'name':'published', 'sdk':'0.3.0'},
+              {'name':'tuned', 'build':{}, 'sdk':'0.3.0','execution':{'max_tokens':4096}},
+              {'name':'elastic', 'build':{}, 'sdk':'0.3.0','elastic':True,'memory_bytes':'none','execution':{'max_tokens':4096}}],
+              'steps':[]}
+          for name in ('published','tuned','elastic'):
+              job['steps'].extend(['func:'+name,'perf:'+name+':1','perf:'+name+':1:long','c4:'+name])
+          Path('flash-exp.json').write_text(json.dumps({'jobs':[job]}, indent=2))
+          PY
+      - name: Compare model sources and memory settings
+        run: bash .github/scripts/devlab_perf.sh flash-exp.json flash
+      - name: Collect model settings
+        if: always()
+        shell: bash
+        run: |
+          set -eu
+          mkdir -p "$WORK/flash/out"
+          cp flash-exp.json "$WORK/flash/out/"
+          for v in published tuned elastic; do
+            for f in model.json llm_config.json; do
+              [ ! -f "$WORK/flash/$v/pkg/$f" ] || cp "$WORK/flash/$v/pkg/$f" "$WORK/flash/out/${v}_$f"
+            done
+          done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: flash-next-comparison
+          path: ${{ env.WORK }}/flash/out
+          retention-days: 30
+      - name: Release job disk
+        if: always()
+        shell: bash
+        run: |
+          if [ "${WORK:-}" = "$GITHUB_WORKSPACE/../sdk030-flash-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" ]; then rm -rf -- "$WORK"; fi
