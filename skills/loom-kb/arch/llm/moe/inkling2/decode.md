@@ -17,9 +17,8 @@ that leave outputs bit-identical; faster variants that change outputs are listed
 - Bandwidth-bound work is ~27 ms and at or near the 228 GB/s roof: NVFP4 MoE matvecs 13 ms (~15 expert-equivalents of
   the 16 (token, expert) pairs), dense q/gate/k/v/rel 5.0 ms (93 % of bandwidth after multi-matrix matvecs), target head
   2.36 ms (92 %), proposal head 1.3 ms, Q8_0 MoE 2.1 ms, sliding-window attention 0.74 ms (4 MB per layer).
-- The rest, ~7 ms in round 2 and ~3.7 ms by round 7, is ~15 families of 3-9 us kernels (loop controllers, mixes,
-  shortconv, norms, glue) over ~1,350-1,900 dispatches per step. Each fusion was worth 0.3-0.8 ms. HAL busy time equals
-  wall time on decode (no host gaps), so the tail is kernel latency, not launch gaps.
+- The rest, ~7 ms in round 2 and ~3.7 ms by round 7, is ~15 families of small kernels: loop controllers, mixes,
+  shortconv, norms, glue (the per-pass tail is in facet looped).
 
 ## Kept: dispatch count and fusions
 

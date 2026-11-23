@@ -5,7 +5,7 @@ GGUF arch `inkling2` (llama.cpp PR #32695 schema; the layout of unsloth/Inkling-
 thinkingmachines/Inkling-2-Mini (17.6 GB UD-Q4_K_XL). Published package: `loom-fun/unsloth-Inkling-2-Mini-loom` (pinned
 `ea0c79b2`, gfx1151). The port uses its own kit beside the starter (kernels `gen_inkling2.py`, prefill attention
 `gen_ink_flash2.py`, drafter `draft/gen_dspark.py`, channel chat template); it is not in `loom-port-llm/starter/` yet.
-Facets: moe, sliding-window; drafted (DSpark) and vision (`inkling2v` projector) when the package has them.
+Facets: looped, moe, sliding-window; drafted (DSpark) and vision (`inkling2v` projector) when the package has them.
 
 Published card (2026-11-23, Strix Halo, DSpark, f16 KV cache, 256k context) vs llama.cpp ROCm b1383: decode short / 2k / 32k
 48.5 / 45.2 / 39.1 vs 15.7 / 14.9 / 10.7 tok/s; prefill 1k-32k 1,589-1,857 vs 158-293 tok/s; 4 streams 95.8 vs 39.4.
@@ -14,8 +14,7 @@ Mainline llama.cpp HIP builds are faster than b1383 on this model (24.3 tok/s tg
 ## Graph (verified against llama.cpp's trace)
 
 - 24 physical blocks run as **48 logical layers**: `blk.0..5` prelude, `blk.6..17` looped 3 times, `blk.18..23` epilogue.
-  Every per-layer cost (bytes, launches, KV planes, recurrent state) counts 48 layers, not the 24 `roofline.py` sees
-  (`roofline.py` gives 98.5 tok/s decode on Strix Halo; the 48-layer ceiling is ~56 tok/s at 4.0-4.1 GB per token).
+  Per-layer costs and the roofline count the 48 logical layers (facet looped).
 - `H=2304`, 24 query / 8 KV heads, head_dim 128, no RoPE, final logit softcap 30, vocab 200,058 (padded 201,024).
 - Attention: block index `% 6 != 5` is sliding (window 1024): 40 sliding and 8 full logical layers (blocks 5, 11, 17,
   23). Learned relative-position bias (d_rel 16, extent 1024), Q/K L2 clip 22.6274, R clip 8.0, weightless V RMSNorm,

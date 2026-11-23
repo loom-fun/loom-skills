@@ -17,7 +17,7 @@ relative bias, reordered sums); every kept change passed the golden/compare/spec
   ~28, full-attention flash2 ~12.5, sliding flash2 ~10, elementwise kernels at DRAM bandwidth.
 - 1k (1,243 tokens, 864 ms TTFT, round 6): MoE GEMMs 49 % (m128 padding alone +98 ms at ~78 tokens per expert), non-GEMM
   kernels 18 %. Token 1 is an invisible `<|thought|>`, so a streaming client's TTFT includes the first decode step (+56 ms).
-- The 48-layer compute ceiling is ~4,380 tok/s at 43.8 TFLOP/s (~10 GFLOP per token); shipped 1k-32k reach 1,590-1,860.
+- Published 1k-32k prefill is 1,590-1,860 tok/s, 36-42 % of the logical-layer ceiling (facet looped).
 
 ## Kept: attention
 
