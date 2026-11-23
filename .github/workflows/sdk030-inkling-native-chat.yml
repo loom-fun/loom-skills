@@ -17,6 +17,9 @@ jobs:
             quant: Q4_K_XL
             sha: e64276656f072e9b2197a61723667cbdb71da66a716ffd966e572c21088f3cd3
 
+            - preset: chat-q8
+              quant: Q8_K_XL
+              sha: 2da51788d43a17e1f033bec420fa83ba9cb87ac1f0130dc9135a4d2ed2678b68
     runs-on: [self-hosted, devlab-dispatch, radeon-r9700]
     timeout-minutes: 240
     env:
@@ -46,7 +49,7 @@ jobs:
           repo = 'loom-fun/' + slug
           pins = json.loads(Path('skills/loom-migrate/versions/v0.2.0-to-v0.3.0-production.json').read_text())
           job = dict(name='special', card=repo+'@'+pins[repo], sdk='0.3.0',
-                     llamacpp='b1383',
+                     llamacpp='b1383', llama_spec='',
                      variants=[dict(name='staging', sdk='0.3.0'),dict(name='stagingnd', sdk='0.3.0', execution=dict(draft_depth=0))],
                      steps=['nativeprobe:staging'])
           job['require_preset_r9700']=True
@@ -107,12 +110,15 @@ jobs:
           named=data['named_tool_result']['choices'][0]['message']['content']
           assert '17' in named and data['unnamed_tool_result']['http_error']==400, named
           reference=json.loads((out/'native-reference.json').read_text())
-          assert all('choices' in case['reply'] for case in reference['cases'].values()), reference
+          for label,case in reference['cases'].items():
+              content=case['reply']['choices'][0]['message']['content']
+              assert case['expected'] in content.lower(), (label,content)
+              assert case['native_render'].get('prompt'), (label,case['native_render'])
           PY
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: sdk030-inkling-native-chat
+          name: sdk030-inkling-native-${{ matrix.preset }}
           path: ${{ env.WORK }}/receipt
           retention-days: 30
       - name: Release job disk
