@@ -12,9 +12,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - slug: unsloth-gemma-4-E2B-it-loom
-            device: strix-halo
-            labels: '["self-hosted","devlab-dispatch","strix-halo","Linux"]'
+          - slug: bartowski-Qwen2.5-0.5B-Instruct-loom
+            device: radeon-r9700
+            labels: '["self-hosted","devlab-dispatch","radeon-r9700"]'
     runs-on: ${{ fromJSON(matrix.labels) }}
     timeout-minutes: 240
     env:
