@@ -22,7 +22,8 @@ HEAD = "amdgpu.target<gfx11-generic> @w32 {subgroup_size = 32}\n\n"
 VARIANTS = {"split": {"MLA_DEC": "split"}, "pl1": {"MLA_DEC_PL": "1"}, "s32": {"MLA_DEC_S": "32"}, "b8": {"MLA_DEC_BMIN": "8"},
             "b2": {"MLA_DEC_BMIN": "2"}, "b1": {"MLA_DEC_BMIN": "1"}, "shslot": {"MOE_SHSLOT": "1"},
             "iq4q8": {"IQ4_Q8": "1"}, "wg1k": {"MV_WG1": "1024"}, "wg256": {"MV_WG1": "256"}, "moer4": {"MOE_R": "4"}, "moer1": {"MOE_R": "1"},
-            "rt1": {"MOE_ROUTE_SPLIT": "0"}, "wg128": {"MV_WG1": "128"}, "wg64": {"MV_WG1": "64"}, "sh0": {"MOE_SHSLOT": "0"}, "qadual": {"MLA_QA_DUAL": "1"}, "rmsx": {"MLA_RMSQ_FUSE": "1"}}
+            "rt1": {"MOE_ROUTE_SPLIT": "0"}, "wg128": {"MV_WG1": "128"}, "wg64": {"MV_WG1": "64"}, "sh0": {"MOE_SHSLOT": "0"}, "qadual": {"MLA_QA_DUAL": "1"}, "rmsx": {"MLA_RMSQ_FUSE": "1"},
+            "dnr1": {"MOE_R_DN": "1"}, "dnr4": {"MOE_R_DN": "4"}, "dnr8": {"MOE_R_DN": "8"}}
 CTXS = [("short", 300, 1), ("2k", 2048, 1), ("8k", 8192, 1), ("c4", 1024, 4)]   # (tag, context, tokens = streams)
 ROLE_CTX = "short"   # role_<kernel> cases (host wall of that role's 39-40 launches alone) at this context
 OUT = None
@@ -409,8 +410,9 @@ def shslot_test(lib, rng):
     swiglu matvec + down matvec into y, routed gu / dn, g_moe_combine accumulating): 2 tokens, 16 experts, IQ4_XS."""
     MS = re.search(r"kernel\.launch @(g_mv_iq4_xs_k2048_swiglu(?:_r\d+)?)\[%nFS, %t\]", lib).group(1)
     MD = re.search(r"kernel\.launch @(g_mv_iq4_xs_k768(?:_r\d+)?)\[%nH, %t\]", lib).group(1)
+    DSH = re.search(r"kernel\.launch @(g_moe_dn_iq4_xs_k768_r\d+_sh)\[", lib).group(1)
     names = [MS, MD, "g_moe_gu_iq4_xs_k2048_r2", "g_moe_dn_iq4_xs_k768_r2",
-             "g_moe_combine", "g_moe_gu_iq4_xs_k2048_r2_sh", "g_moe_dn_iq4_xs_k768_r2_sh", "g_moe_combine_sh"]
+             "g_moe_combine", "g_moe_gu_iq4_xs_k2048_r2_sh", DSH, "g_moe_combine_sh"]
     ks = []
     for k in names:
         m = re.search(rf'^kernel\.def export\("{k}"\) @{k}\((?:.|\n)*?^\}}\n', lib, re.M)
@@ -450,7 +452,7 @@ def shslot_test(lib, rng):
   kernel.launch @g_moe_dn_iq4_xs_k768_r2[%nH, %ta](%nH, %ta, %ids, %act, %wd, %ys) : [index, index](index, index, {IT}, {AT}, {W}, {YS})
   kernel.launch @g_moe_combine[%t](%t, %ys, %wts, %y) : [index](index, {YS}, {WT}, {HT})
   kernel.launch @g_moe_gu_iq4_xs_k2048_r2_sh[%nF, %ta](%nF, %ta, %ids, %h, %wg, %wu, %sg, %su, %act2) : [index, index](index, index, {IT}, {HT}, {W}, {W}, {S}, {S}, {AT2})
-  kernel.launch @g_moe_dn_iq4_xs_k768_r2_sh[%nH, %ta](%nH, %ta, %ids, %act2, %wd, %sd, %ys2) : [index, index](index, index, {IT}, {AT2}, {W}, {S}, {YS2})
+  kernel.launch @{DSH}[%nH, %ta](%nH, %ta, %ids, %act2, %wd, %sd, %ys2) : [index, index](index, index, {IT}, {AT2}, {W}, {S}, {YS2})
   kernel.launch @g_moe_combine_sh[%t](%t, %ys2, %wts, %y2) : [index](index, {YS2}, {WT}, {HT})
   check.expect.approximate actual(%y2) expected(%y) atol(1.0e-2) rtol(1.0e-3) nan(different) : {HT}, {HT}
   check.return

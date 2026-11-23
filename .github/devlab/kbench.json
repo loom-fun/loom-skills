@@ -399,11 +399,15 @@
       "gen": "dec_step/gen_bench.py",
       "gen_variants": [
         "base",
-        "rmsx"
+        "dnr1",
+        "dnr4",
+        "dnr8"
       ],
       "files": [
         "bench.loom",
-        "bench_rmsx.loom"
+        "bench_dnr1.loom",
+        "bench_dnr4.loom",
+        "bench_dnr8.loom"
       ],
       "config": [],
       "args": [
@@ -412,7 +416,7 @@
         "--profile-final-batch=true"
       ],
       "device": "amdgpu://?completion_spin_ns=4294967295",
-      "repeats": 3,
+      "repeats": 2,
       "case_timing": true,
       "tests": [
         "test.loom"
