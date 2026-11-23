@@ -17,8 +17,9 @@ ROOT = os.path.abspath(sys.argv[1]) if len(sys.argv) > 1 else os.path.abspath(os
 HEAD = "amdgpu.target<gfx11-generic> @w32 {subgroup_size = 32}\n\n"
 QH, D, PB = 32, 576, 1152
 VARIANTS = {"wmma": {}, "s32": {"MLA_DEC_S": "32"}, "s128": {"MLA_DEC_S": "128"}, "b2": {"MLA_DEC_BMIN": "2"}, "b8": {"MLA_DEC_BMIN": "8"},
-            "vp4": {"MLA_DEC_VTPAD": "4"}}
-CASES = [("2k", 2048, 40, 1), ("8k", 8192, 40, 1), ("32k", 32768, 40, 1), ("131k", 131072, 4, 1), ("c4_8k", 8192, 40, 4)]
+            "vp4": {"MLA_DEC_VTPAD": "4"}, "s16": {"MLA_DEC_S": "16"}, "b1": {"MLA_DEC_BMIN": "1"},
+            **{"x" + a: {"MLA_DEC_ABL": a} for a in ("empty", "noqk", "nostv", "nopv", "nosx")}}   # x*: timing ablations (no tests)
+CASES = [("256", 256, 40, 1), ("1k", 1024, 40, 1), ("2k", 2048, 40, 1), ("8k", 8192, 40, 1), ("32k", 32768, 40, 1), ("131k", 131072, 4, 1), ("c4_8k", 8192, 40, 4)]
 OUT = None
 _KIT = None
 
@@ -158,6 +159,8 @@ def tests(variants):
     for name, rows, toks, layers, layer, ctx in TESTS:
         refs[name] = test_inputs(name, rng, rows, toks, layers, layer, ctx)
     for v in variants:
+        if any(x.startswith("x") for x in v.split("+")):
+            continue
         for name, rows, toks, layers, layer, ctx in TESTS:
             ref, t, alen, olen, pool = refs[name]
             e = ref.copy()
