@@ -1,5 +1,5 @@
 {
- "_comment": "JoyAI-LLM-Flash pfgemm lane round 1: base (this branch, card settings) vs v1 (IQ4_XS inline dequant: iq4_native + iq4_f16lut + iq4_g32 + m256_g32 + m256_f16o + prune) on one Strix Halo runner, ABBA; per-kernel profiles pf2k/pf8k; kernel tests of v1.",
+ "_comment": "JoyAI-LLM-Flash pfgemm lane round 1: base (this branch, card settings) vs v1 (IQ4_XS inline dequant: iq4_native + iq4_f16lut + iq4_g32 + m256_g32 + m256_f16o + prune) vs v2 (v1 + GEMM_T64_G32: 64-row tiles incl. the grouped MoE GEMMs stage IQ4 a 32-group per thread) on one Strix Halo runner, ABBA; per-kernel profiles pf2k/pf8k; kernel tests.",
  "card": "loom-fun/jdopensource-JoyAI-LLM-Flash-loom",
  "memory_bytes": 47000000000,
  "kit": "deepseek2",
@@ -8,10 +8,47 @@
   {
    "name": "pfgemm-r1",
    "variants": [
-    {"name": "base", "build": {}},
-    {"name": "v1", "build": {"GEMM_IQ4_NATIVE": "1", "GEMM_IQ4_F16LUT": "1", "GEMM_IQ4_G32": "1", "GEMM_M256_G32": "1", "GEMM_M256_F16O": "1", "GEMM_PRUNE": "1"}}
+    {
+     "name": "base",
+     "build": {}
+    },
+    {
+     "name": "v1",
+     "build": {
+      "GEMM_IQ4_NATIVE": "1",
+      "GEMM_IQ4_F16LUT": "1",
+      "GEMM_IQ4_G32": "1",
+      "GEMM_M256_G32": "1",
+      "GEMM_M256_F16O": "1",
+      "GEMM_PRUNE": "1"
+     }
+    },
+    {
+     "name": "v2",
+     "build": {
+      "GEMM_IQ4_NATIVE": "1",
+      "GEMM_IQ4_F16LUT": "1",
+      "GEMM_IQ4_G32": "1",
+      "GEMM_M256_G32": "1",
+      "GEMM_M256_F16O": "1",
+      "GEMM_PRUNE": "1",
+      "GEMM_T64_G32": "1"
+     }
+    }
    ],
-   "steps": ["ktest:v1", "profile:base:pf2k,pf8k", "profile:v1:pf2k,pf8k", "perf:base:1", "perf:v1:1", "perf:v1:1", "perf:base:1"]
+   "steps": [
+    "ktest:v1",
+    "ktest:v2",
+    "profile:base:pf2k,pf8k",
+    "profile:v1:pf2k,pf8k",
+    "profile:v2:pf2k,pf8k",
+    "perf:base:1",
+    "perf:v1:1",
+    "perf:v2:1",
+    "perf:v2:1",
+    "perf:v1:1",
+    "perf:base:1"
+   ]
   }
  ]
 }
