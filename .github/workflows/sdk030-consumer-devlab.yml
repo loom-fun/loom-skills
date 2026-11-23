@@ -11,9 +11,10 @@ concurrency:
 jobs:
   consumers:
     runs-on: [strix-halo, devlab-dispatch, Linux, self-hosted]
-    timeout-minutes: 45
+    timeout-minutes: 50
     env:
       CMAKE_BUILD_PARALLEL_LEVEL: '8'
+      SDK030_GPU_SMOKE: '1'
     steps:
       - uses: actions/checkout@v4
         with:
@@ -25,9 +26,17 @@ jobs:
           work=$(mktemp -d "$RUNNER_TEMP/sdk030-consumers.XXXXXX")
           echo "WORK=$work" >> "$GITHUB_ENV"
           mkdir "$work/out"
-      - name: Build and test the Weaver SDK 0.3.0 bundle
+      - name: Prepare Gufo and the extension and build the embed runtime
         shell: bash
-        run: bash .github/sdk030-consumer/weaver.sh
+        run: bash .github/sdk030-consumer/gufo.sh
+      - name: Build the refreshed Lemonade contract and server
+        shell: bash
+        run: bash .github/sdk030-consumer/lemonade.sh
+      - name: Serve the pinned staging package through Lemonade and both Gufo embeds
+        env:
+          HF_TOKEN: '${{ secrets.HF_TOKEN }}'
+        shell: bash
+        run: bash .github/sdk030-consumer/smoke.sh
       - name: Store changes and lab evidence
         if: always() && env.WORK != ''
         uses: actions/upload-artifact@v4

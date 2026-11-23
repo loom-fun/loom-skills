@@ -106,6 +106,27 @@ update(header,
        '// Legacy Loom 0.2 --parameter_mode=preload reads weights into host memory first, which')
 bundle = "src/cpp/server/backends/loom/loom_bundle.cpp"
 update(bundle,
+       '    std::string repository;\n    std::string revision;\n};',
+       '    std::string repository;\n    std::string revision;\n    bool bundle_local = false;\n};')
+update(bundle,
+       '        if (kind != "hf") {',
+       '        // Loom 0.3 loom-fetch gives materialized bundle files a document origin.\n'
+       '        // Those files are checked locally and never downloaded from that origin.\n'
+       '        if ((kind == "url" || kind == "local") && name.compare(0, 8, "document") == 0 &&\n'
+       '            name.find_first_not_of(\'_\', 8) == std::string::npos) {\n'
+       '            origins.emplace(name, Origin{"", "", true});\n'
+       '            continue;\n'
+       '        }\n'
+       '        if (kind != "hf") {')
+update(bundle,
+       '        plan.origin_files.push_back(OriginFile{path, source->second.repository,',
+       '        if (source->second.bundle_local) {\n'
+       '            plan.locked_files.push_back(LockedFile{path, digest->second.size,\n'
+       '                                                   digest->second.sha256});\n'
+       '            return;\n'
+       '        }\n'
+       '        plan.origin_files.push_back(OriginFile{path, source->second.repository,')
+update(bundle,
        '                                           const std::vector<std::string>& serve_args,\n'
        '                                           const std::string& custom_args) {',
        '                                           const std::vector<std::string>& serve_args,\n'
@@ -155,6 +176,22 @@ new_test = '''
 #endif
 '''
 test.write_text(text[:start] + new_test + text[start:])
+update(test,
+       '    json missing_digest = kLock;',
+       '    json materialized = kCard;\n'
+       '    materialized["origins"]["document"] = {{"kind", "url"}};\n'
+       '    materialized["programs"]["source"]["inputs"][0]["origin"] = "@document/program/prepare.loom";\n'
+       '    json materialized_lock = kLock;\n'
+       '    materialized_lock["files"].push_back({{"origin", "@document/program/prepare.loom"},\n'
+       '                                           {"size", 123u}, {"sha256", "digest"}});\n'
+       '    const auto installed = loom::plan_bundle(materialized, materialized_lock);\n'
+       '    check("Installed document files are verified locally",\n'
+       '          installed.origin_files.size() == 2 && installed.locked_files.size() == 2 &&\n'
+       '              installed.locked_files[0].path == "program/prepare.loom");\n'
+       '    check("Installed document files still require a locked digest",\n'
+       '          throws_exception([&] { (void)loom::plan_bundle(materialized, kLock); }));\n'
+       '\n'
+       '    json missing_digest = kLock;')
 update(test,
        '    check("Serve flags are passed through in order",\n'
        '          loom::build_server_argv("/run", 1, "", {"--pool_backing=fixed", loom::kPreloadFlag}, "") ==',

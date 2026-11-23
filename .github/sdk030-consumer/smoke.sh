@@ -2,8 +2,10 @@
 set -euo pipefail
 exec > >(tee "$WORK/out/downstream-gpu.log") 2>&1
 cd "$WORK"
-repo=loom-fun/unsloth-Qwen3-0.6B-loom
-revision=564d578f4e487c6fbabd84915439f873651b5953
+repo=loom-fun-staging/unsloth-Qwen3-0.6B-loom
+revision=f3ffda86d7bd1fa98d615f4972a7d3f82345294c
+# The registered Lemonade model keeps its catalog alias. Seed its isolated cache
+# with the exact stage revision instead of mutating the bundled registry.
 cache="$WORK/hf/hub/models--loom-fun--unsloth-Qwen3-0.6B-loom"
 snapshot="$cache/snapshots/$revision"
 python3 -m venv "$WORK/gpu-sdk"
@@ -19,7 +21,13 @@ timeout 240s loom-fetch "huggingface:$repo:chat@$revision" --materialize=copy --
 rm -rf -- "$snapshot"
 mv "$materialized" "$snapshot"
 printf '%s\n' "$revision" > "$cache/refs/main"
-printf '{"loom":"v0.2.0"}\n' > "$snapshot/.lemonade-loom.json"
+auth=()
+if [ -n "${HF_TOKEN:-}" ]; then auth=(-H "Authorization: Bearer $HF_TOKEN"); fi
+mkdir "$WORK/raw-card"
+for f in model.json model.json.lock info.json; do
+  curl -fsSL --retry 3 "${auth[@]}" "https://huggingface.co/$repo/resolve/$revision/$f" -o "$WORK/raw-card/$f"
+done
+cp "$WORK/raw-card/info.json" "$snapshot/info.json"
 python - "$snapshot" <<'PY'
 import json
 from pathlib import Path
@@ -27,10 +35,10 @@ import sys
 root = Path(sys.argv[1])
 card = json.loads((root / "model.json").read_text())
 cfg = json.loads((root / "llm_config.json").read_text())
-assert cfg["sdk"]["hrx_loom"] == "0.2.0" and card["services"]["chat"]["version"] == 1
-print("Testing the exact published SDK 0.2.0 package with retained controller ABI 1")
+assert cfg["sdk"]["hrx_loom"] == "0.3.0" and card["services"]["chat"]["version"] == 1
+print("Testing the exact staged SDK 0.3.0 card with retained controller ABI 1")
 PY
-sha256sum "$snapshot/model.json"
+sha256sum "$WORK/raw-card/model.json"
 free_port() {
   python - <<'PY'
 import socket
@@ -77,61 +85,43 @@ PY
 }
 
 lemonade_smoke() {
-  local port
+  local mode=$1 port
   port=$(free_port)
   mkdir -p "$WORK/lemon-cache" "$WORK/lemon-config"
   (
     ulimit -S -l 8192
     echo "Lemonade and its backend memlock limit: $(ulimit -l) KiB"
     exec "$WORK/lemonade/build/lemond" "$WORK/lemon-cache" "$WORK/lemon-config" --port "$port" --host 127.0.0.1
-  ) > "$WORK/out/lemonade-server.log" 2>&1 &
+  ) > "$WORK/out/lemonade-$mode-server.log" 2>&1 &
   pid=$!
   if ! wait_http "http://127.0.0.1:$port/api/v1/health"; then
-    tail -40 "$WORK/out/lemonade-server.log"
+    tail -40 "$WORK/out/lemonade-$mode-server.log"
     return 1
   fi
-  chat "http://127.0.0.1:$port/api/v1/chat/completions" "Qwen3-0.6B-Loom" "$WORK/out/lemonade-chat.json" || return 1
+  if ! chat "http://127.0.0.1:$port/api/v1/chat/completions" "Qwen3-0.6B-Loom" "$WORK/out/lemonade-$mode-chat.json"; then
+    tail -42 "$WORK/out/lemonade-$mode-server.log"
+    return 1
+  fi
   find "$WORK/lemon-cache" -name loom-serve -type f -exec {} --version \; | grep 'loom-serve 0.3.0'
 }
 rc=0
-if ! lemonade_smoke; then rc=1; fi
+if ! lemonade_smoke materialized; then rc=1; fi
 stop_child
 pid=
 
-extension_smoke() {
-  cc -I "$WORK/extension/loom-embed" "$WORK/extension/validation/devlab/embed_probe.c" \
-    -L "$WORK/hrx-build" -Wl,-rpath,"$WORK/hrx-build" -lloom_text_embed -lm -o "$WORK/embed-probe" || return 1
-  timeout 180s "$WORK/embed-probe" "$snapshot" 6 2 chat | tee "$WORK/out/extension-logits.json"
-}
-if ! extension_smoke; then rc=1; fi
-
-gufo_smoke() {
-  local port binary model asset
-  asset=gufo_0.36.0-1_amd64.deb
-  curl -fsSL --retry 3 "https://github.com/gufo-org/gufo/releases/download/v0.36.0/$asset" -o "$asset" || return 1
-  echo "c43b9e5e785e6819dd5c45aef48845618453bd9db3bd3808d51198030564016d  $asset" | sha256sum -c - || return 1
-  dpkg-deb -x "$asset" gufo-app || return 1
-  binary=$(find "$WORK/gufo-app" -path '*/bin/gufo' -type f -print -quit)
-  find "$WORK/gufo-app" -name libloom_text_embed.so -print > "$WORK/out/gufo-lib-paths.txt"
-  if [ -z "$binary" ] || [ ! -s "$WORK/out/gufo-lib-paths.txt" ]; then
-    find "$WORK/gufo-app" -maxdepth 4 -type f | head -60
-    return 1
-  fi
-  while IFS= read -r path; do
-    cp --remove-destination "$WORK/libloom_text_embed-gufo.so" "$path" || return 1
-  done < "$WORK/out/gufo-lib-paths.txt"
-  "$binary" --version || return 1
-  port=$(free_port)
-  "$binary" serve llm --model "$snapshot" --sessions 2 --port "$port" --host 127.0.0.1 > "$WORK/out/gufo-server.log" 2>&1 &
-  pid=$!
-  if ! wait_http "http://127.0.0.1:$port/health"; then
-    tail -40 "$WORK/out/gufo-server.log"
-    return 1
-  fi
-  model=$(curl -fsS "http://127.0.0.1:$port/v1/models" | python -c 'import json,sys; print(json.load(sys.stdin)["data"][0]["id"])') || return 1
-  chat "http://127.0.0.1:$port/v1/chat/completions" "$model" "$WORK/out/gufo-chat.json"
-}
-if ! gufo_smoke; then rc=1; fi
+cp "$WORK/raw-card/model.json" "$WORK/raw-card/model.json.lock" "$snapshot/"
+if ! lemonade_smoke raw; then rc=1; fi
 stop_child
 pid=
+
+probe() {
+  local name=$1 headers=$2 library=$3
+  cc -I "$headers" "$WORK/extension/validation/devlab/embed_probe.c" \
+    -L "$library" -Wl,-rpath,"$library" -lloom_text_embed -lm -o "$WORK/$name-embed-probe" || return 1
+  timeout 180s "$WORK/$name-embed-probe" "$snapshot" 6 2 chat | tee "$WORK/out/$name-logits.json"
+}
+if ! probe extension "$WORK/extension/loom-embed" "$WORK/hrx-build"; then rc=1; fi
+mkdir "$WORK/gufo-runtime"
+cp "$WORK/libloom_text_embed-gufo.so" "$WORK/gufo-runtime/libloom_text_embed.so"
+if ! probe gufo "$WORK/gufo/src/models/loom/embed" "$WORK/gufo-runtime"; then rc=1; fi
 exit "$rc"
