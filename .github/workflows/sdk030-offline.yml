@@ -1,0 +1,160 @@
+name: SDK 0.3.0 offline fleet proof
+on:
+  pull_request:
+    types: [labeled, synchronize]
+permissions:
+  contents: read
+jobs:
+  sdk-offline:
+    if: github.event.pull_request.head.ref == 'codex/sdk030-migration' && github.event.pull_request.head.repo.full_name == github.repository && contains(github.event.pull_request.labels.*.name, 'devlab-debug')
+    runs-on: [strix-halo, devlab-dispatch, Linux, self-hosted]
+    timeout-minutes: 85
+    env:
+      WORK: ${{ github.workspace }}/../sdk030-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install and compare official SDKs
+        shell: bash
+        run: |
+          mkdir -p "$WORK/evidence"
+          export LOOM_SKILL_DIR="$PWD/skills/loom-setup"
+          for sdk in 0.2.0 0.3.0; do
+            bash "$LOOM_SKILL_DIR/scripts/install_loom.sh" "$WORK/$sdk" "release:$sdk" 2>&1 | tee "$WORK/evidence/install-$sdk.log"
+            cp "$WORK/$sdk/loom-install.json" "$WORK/evidence/sdk-$sdk.json"
+            git -C "$WORK/$sdk/library" rev-parse HEAD > "$WORK/evidence/catalog-$sdk.txt"
+          done
+          grep -Fq 6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f "$WORK/evidence/sdk-0.3.0.json"
+          for tool in loom-serve loom-fetch loom-opt loom-link loom-test loom-translate loom-compile loom-import-cxx; do
+            for sdk in 0.2.0 0.3.0; do
+              "$WORK/$sdk/.venv/bin/$tool" --help > "$WORK/evidence/$tool-$sdk.help" 2>&1 || true
+            done
+            diff -u "$WORK/evidence/$tool-0.2.0.help" "$WORK/evidence/$tool-0.3.0.help" > "$WORK/evidence/$tool.diff" || true
+          done
+          git -C "$WORK/0.3.0/library" diff --stat v0.2.0..v0.3.0 > "$WORK/evidence/library-diff.txt"
+      - name: Snapshot production packages and build the old kit
+        shell: bash
+        run: |
+          cat > "$WORK/snapshot.py" <<'PY'
+          import concurrent.futures
+          import hashlib
+          import json
+          import os
+          from pathlib import Path, PurePosixPath
+          import time
+          from urllib.parse import quote
+          import urllib.request
+
+          work = Path(os.environ["WORK"])
+
+          def request(path):
+              for attempt in range(4):
+                  try:
+                      with urllib.request.urlopen("https://huggingface.co" + path, timeout=45) as response:
+                          return response.read()
+                  except OSError:
+                      if attempt == 3:
+                          raise
+                      time.sleep(2 ** attempt)
+
+          def card(repo):
+              meta = json.loads(request("/api/models/" + repo))
+              revision = meta["sha"]
+              root = work / "published" / repo.split("/")[-1]
+              root.mkdir(parents=True)
+              base = f"/{repo}/resolve/{revision}/"
+              files = {f["rfilename"] for f in meta["siblings"]}
+              raw = request(base + "model.json")
+              model = json.loads(raw)
+              (root / "model.json").write_bytes(raw)
+              used = set()
+              for p in model["programs"].values():
+                  for entry in p.get("inputs", []) + p.get("libraries", []):
+                      path = entry if isinstance(entry, str) else entry["path"]
+                      used.add(path)
+                      if isinstance(entry, dict):
+                          used.update(
+                              x if isinstance(x, str) else x["path"]
+                              for x in entry.get("data", [])
+                              if (x if isinstance(x, str) else x["path"]).endswith(".loom")
+                          )
+              assert used and used <= files, (repo, used - files)
+              for file in sorted(used):
+                  parts = PurePosixPath(file)
+                  assert not parts.is_absolute() and ".." not in parts.parts
+                  dst = root / file
+                  dst.parent.mkdir(parents=True, exist_ok=True)
+                  dst.write_bytes(request(base + quote(file)))
+              pin = json.loads(request(base + "llm_config.json")).get("sdk") if "llm_config.json" in files else None
+              return dict(
+                  repo=repo, revision=revision, sdk=pin,
+                  model_json_sha256=hashlib.sha256(raw).hexdigest(),
+                  services={key: {"kind": value.get("kind"), "version": value.get("version")}
+                            for key, value in model.get("services", {}).items()},
+                  variants=list(model.get("variants", {})),
+                  presets=list(model.get("presets", {})),
+                  program_files=len(used), has_info="info.json" in files,
+              )
+
+          repos = sorted(x["id"] for x in json.loads(request("/api/models?author=loom-fun&limit=1000")))
+          assert len(repos) == 60, repos
+          results, errors = [], []
+          with concurrent.futures.ThreadPoolExecutor(max_workers=12) as executor:
+              tasks = {executor.submit(card, repo): repo for repo in repos}
+              for task in concurrent.futures.as_completed(tasks):
+                  try:
+                      results.append(task.result())
+                  except Exception as error:
+                      errors.append({"repo": tasks[task], "error": repr(error)})
+          (work / "evidence/inventory.json").write_text(json.dumps(
+              {"packages": sorted(results, key=lambda r: r["repo"]), "errors": errors}, indent=2))
+          print(f"Published snapshots: {len(results)}/{len(repos)}; missing: {errors}", flush=True)
+          PY
+          "$WORK/0.3.0/.tools/bin/pip" install -q pyyaml
+          "$WORK/0.3.0/.tools/bin/python" "$WORK/snapshot.py" &
+          snapshot_pid=$!
+          old_root="$WORK/0.2.0"
+          PATH="$old_root/.venv/bin:$PATH" LOOM_ROOT="$old_root" \
+            "$WORK/0.3.0/.tools/bin/python" fleet/build_fleet.py \
+              --ref "${{ github.event.pull_request.base.sha }}" --out "$WORK/generated" --jobs 8 \
+              2>&1 | tee "$WORK/evidence/generated-build.log" || true
+          cp "$WORK/generated/summary.json" "$WORK/evidence/generated-summary.json"
+          wait "$snapshot_pid"
+      - name: Compare published and generated programs on both SDKs
+        shell: bash
+        run: |
+          export LOOM_SKILL_DIR="$PWD/skills/loom-migrate"
+          # Older sweep assumes every data entry is a string. Resolve dicts in the
+          # sweep's temporary copy so exact published model.json bytes remain intact.
+          python3 - "$LOOM_SKILL_DIR/scripts/sweep.py" "$WORK/sweep.py" <<'PY'
+          import pathlib, sys
+          sweep = pathlib.Path(sys.argv[1]).read_text()
+          sweep = sweep.replace('if p.endswith(".loom") and p not in out:',
+                                'p = p["path"] if isinstance(p, dict) else p\n                if p.endswith(".loom") and p not in out:')
+          pathlib.Path(sys.argv[2]).write_text(sweep)
+          PY
+          for corpus in published generated; do
+            for sdk in 0.2.0 0.3.0; do
+              set +e
+              timeout 22m python3 "$WORK/sweep.py" "$WORK/$corpus" \
+                --sdk "$WORK/$sdk/.venv" --jobs 8 --json "$WORK/evidence/$corpus-$sdk.json" \
+                2>&1 | tee "$WORK/evidence/$corpus-$sdk.log"
+              status=${PIPESTATUS[0]}
+              set -e
+              printf '%s\n' "$status" > "$WORK/evidence/$corpus-$sdk.exit"
+            done
+          done
+      - name: Upload proof
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdk030-offline-proof
+          path: ${{ env.WORK }}/evidence
+          retention-days: 30
+      - name: Remove runner scratch
+        if: always()
+        shell: bash
+        run: rm -rf -- "$WORK"
