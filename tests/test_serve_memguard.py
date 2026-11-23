@@ -1,5 +1,6 @@
 """A rejected host-memory guard must prevent the AMD server from starting."""
 import os
+import json
 from pathlib import Path
 import shutil
 import subprocess
@@ -13,7 +14,7 @@ SOURCE = ROOT / 'skills/loom-setup/scripts/serve.sh'
 
 @unittest.skipUnless(os.name == 'posix' and shutil.which('bash'), 'POSIX shell fixture')
 class ServeMemoryGuard(unittest.TestCase):
-    def probe(self, device, active_wait='1', budget='none', bound='115000049320'):
+    def probe(self, device, active_wait='1', budget='none', bound='115000049320', sdk_version=None):
         with tempfile.TemporaryDirectory() as temp:
             work = Path(temp)
             shutil.copyfile(SOURCE, work / 'serve.sh')
@@ -34,6 +35,13 @@ class ServeMemoryGuard(unittest.TestCase):
             env = dict(os.environ, VENV=str(work / 'sdk'), REC=str(events),
                        LOOM_SERVE_STATE=str(work / 'state'), LOOM_MEMNEED=bound,
                        LOOM_ACTIVE_WAIT=active_wait, PATH=str(work / 'bin') + ':' + os.environ['PATH'])
+            if sdk_version:
+                dist_info = work / f'hrx_loom-{sdk_version}.dist-info'
+                dist_info.mkdir()
+                (dist_info / 'METADATA').write_text(f'Name: hrx-loom\nVersion: {sdk_version}\n')
+                (work / 'llm_config.json').write_text(json.dumps({'serve': {'args': ['--parameter_mode=preload', '--workers=4']}}))
+                (work / 'sdk/bin/loom-serve').write_text('#!/bin/sh\nprintf "%s\\n" "$@" > "$REC"\nexit 1\n')
+                env['PYTHONPATH'] = str(work)
             result = subprocess.run(['bash', str(work / 'serve.sh'), 'fixture', '48196', device,
                                      budget, str(work / 'missing-model.json')], env=env,
                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=10)
@@ -52,6 +60,14 @@ class ServeMemoryGuard(unittest.TestCase):
     def test_cpu_driver_keeps_its_existing_path(self):
         _, events = self.probe('local-sync')
         self.assertEqual(events, ['binary'])
+
+    def test_package_preload_flag_depends_on_installed_sdk(self):
+        for version in ('0.2.0', '0.3.0'):
+            with self.subTest(version=version):
+                _, events = self.probe('local-sync', sdk_version=version)
+                self.assertIn('--workers=4', events)
+                self.assertEqual('--parameter_mode=preload' in events, version == '0.2.0')
+                self.assertFalse(any(arg.startswith('--memory_bytes=') for arg in events))
 
 
 if __name__ == '__main__':

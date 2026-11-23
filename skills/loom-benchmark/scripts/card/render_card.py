@@ -886,6 +886,8 @@ def render(d):
             bound = "`--pool_backing=elastic` grows the memory pool as needed"
             if mem:
                 bound += f" within the `{mem}` budget"
+        elif not mem and sdk_uses_file_parameters(pin):
+            bound = "the SDK's default elastic backing grows the memory pool as needed"
         else:
             mem = mem or f"--memory_bytes={gpu_memory(info, facts['memory_bytes'], g)}"
             bound = f"`{mem}` bounds the memory pool"

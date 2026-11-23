@@ -2,7 +2,7 @@
 # Start loom-serve in the background and wait until every model is registered.
 # usage: VENV=~/loom/.venv serve.sh NAME PORT DEVICE MEMORY_BYTES MODEL_JSON [MODEL_JSON...] [-- extra loom-serve flags]
 #   DEVICE: amdgpu | 'xdna://0?columns=8' (NPU; add -- --pool_backing=fixed)
-#   MEMORY_BYTES: always set it (or `none` with -- --pool_backing=fixed, which sizes its pools itself) (e.g. 16000000000); it caps weights + KV pool + workspace.
+#   MEMORY_BYTES: a byte budget (e.g. 16000000000), or `none` for the package's fixed pool or the SDK's default elastic budget.
 #   LOOM_MEMNEED=N with MEMORY_BYTES none: N bytes is what the fixed backing may commit; memcheck.sh checks it as it checks a budget.
 #   amdgpu gets ?completion_spin_ns=4294967295 (active wait): Loom's retire thread spins on the GPU's completion
 #   signal while work is in flight (one core, 0% when idle) instead of parking on the KFD interrupt. On Strix Halo
@@ -38,7 +38,25 @@ if listeners >/dev/null; then echo "port $port busy:"; listeners; exit 1; fi
 # A package may declare how it must be served (llm_config.json "serve": {"args": [...], "committed_bytes": N}): e.g.
 # --pool_backing=fixed, which takes no --memory_bytes (it sizes its pools itself); memcheck then checks committed_bytes.
 if [ ${#models[@]} -gt 0 ] && [ -f "$(dirname "${models[0]#--model=}")/llm_config.json" ]; then
-  IFS='|' read -r pkgargs pkgbytes < <("$py" -c "import json,sys; s=json.load(open(sys.argv[1])).get('serve') or {}; print(' '.join(s.get('args', [])) + '|' + str(s.get('committed_bytes', '')))" "$(dirname "${models[0]#--model=}")/llm_config.json" 2>/dev/null)
+  IFS='|' read -r pkgargs pkgbytes < <("$py" -c '
+import importlib.metadata as metadata
+import json
+import re
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as config:
+    serve = json.load(config).get("serve") or {}
+args = serve.get("args", [])
+if "--parameter_mode=preload" in args:
+    try:
+        version = metadata.version("hrx-loom")
+    except metadata.PackageNotFoundError:
+        version = ""
+    match = re.match(r"(\d+)\.(\d+)\.", version)
+    if match and tuple(map(int, match.groups())) >= (0, 3):
+        args = [a for a in args if a != "--parameter_mode=preload"]
+print(" ".join(args) + "|" + str(serve.get("committed_bytes", "")))
+' "$(dirname "${models[0]#--model=}")/llm_config.json" 2>/dev/null)
   if [ -n "${pkgargs:-}" ]; then
     extra=($pkgargs "${extra[@]}")
     case " $pkgargs " in *" --pool_backing=fixed "*) echo "serve.sh: the package serves with $pkgargs (no --memory_bytes); committed ${pkgbytes:-unknown} bytes" >&2; mem=none; memneed=${pkgbytes:-};; esac

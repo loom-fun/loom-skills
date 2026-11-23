@@ -78,6 +78,16 @@ class QuickstartFlagNotes(unittest.TestCase):
                     self.assertIn(f'{description}: this package serves up to 40,960 tokens', text)
                     self.assertNotIn(f'`{elastic}` commits it up front', text)
 
+            cfg_path = Path(work) / 'llm_config.json'
+            cfg = json.loads(cfg_path.read_text(encoding='utf-8'))
+            cfg['sdk'] = {'hrx_loom': '0.3.0', 'source': 'pypi'}
+            cfg_path.write_text(json.dumps(cfg), encoding='utf-8')
+            gpu['quick_start']['args'] = ['--workers=8']
+            path.write_text(json.dumps(info), encoding='utf-8')
+            text = R.render(work)
+            self.assertIn("the SDK's default elastic backing grows the memory pool as needed: this package serves up to 40,960 tokens", text)
+            self.assertNotIn('--memory_bytes=', next(line for line in text.splitlines() if line.startswith('loom-serve ')))
+
 
 if __name__ == '__main__':
     unittest.main()

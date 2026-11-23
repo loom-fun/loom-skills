@@ -864,14 +864,16 @@ def quick_start(info, facts, gpu):
     launchers read (a launcher that picks its own device keeps the URI's query)."""
     args = []
     pkg_serve = (facts.get("serve") or {}).get("args")   # llm_config.json "serve": flags the package must be served with
-    gpu_serve = info_serve_args(info, gpu, facts.get("weight_bytes"), facts.get("sdk"))
+    sdk = facts.get("sdk")
+    gpu_serve = info_serve_args(info, gpu, facts.get("weight_bytes"), sdk)
+    explicit_args = "serve_args" in ((info.get("devices") or {}).get(gpu) or {})
     memory = gpu_memory(info, facts["memory_bytes"], gpu)
     if gpu_serve or pkg_serve:
         args += gpu_serve + [a for a in (pkg_serve or []) if a not in gpu_serve]   # e.g. --pool_backing=fixed, which takes no --memory_bytes
-    elif memory:
+    elif memory and not (explicit_args and sdk_uses_file_parameters(sdk)):
         args.append(f"--memory_bytes={memory}")
     return {"preset": gpu_preset(facts, gpu) or (facts.get("presets") or [None])[0], "device": QUICK_START_DEVICE,
-            "args": sdk_serve_args(args, facts.get("sdk"))}
+            "args": sdk_serve_args(args, sdk)}
 
 
 def recorded_quick_start(info, facts, gpu):

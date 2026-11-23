@@ -85,6 +85,14 @@ class Render(unittest.TestCase):
                          ["--pool_backing=fixed"])
         self.assertEqual(card_lib.recorded_quick_start(info, {"sdk": {"hrx_loom": "0.2.0"}}, "strix-halo"), legacy)
 
+    def test_sdk_030_quick_start_keeps_default_elastic_backing_when_device_args_are_empty(self):
+        gpu = "strix-halo"
+        facts = {"sdk": {"hrx_loom": "0.3.0"}, "memory_bytes": 40_000_000_000, "presets": ["chat"]}
+        info = {"devices": {gpu: {"serve_args": []}}}
+        self.assertEqual(card_lib.quick_start(info, facts, gpu)["args"], [])
+        info["devices"][gpu]["serve_args"] = ["--pool_backing=fixed"]
+        self.assertEqual(card_lib.quick_start(info, facts, gpu)["args"], ["--pool_backing=fixed"])
+
     def test_big_strix_card_keeps_default_and_says_how_to_start(self):
         md = self.render(70_000_000_000)
         self.assertNotIn(PRE + "\n", md)
