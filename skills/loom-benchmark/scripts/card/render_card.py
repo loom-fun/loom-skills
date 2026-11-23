@@ -1281,6 +1281,8 @@ def render_report(d):
             perf = gpu_view(info, g).get("performance") or {"baseline": {"name": "llama.cpp", "version": None, "args": None}}
             L += [base_line(perf["baseline"]), ""]
             report_gpu(L, info, facts, g, here, "###", False)
+    if info.get("next_steps"):
+        L += ["## Next steps", "", *(f"- {step}" for step in info["next_steps"]), ""]
     while L[-1] == "":
         L.pop()
     return "\n".join(L) + "\n"
