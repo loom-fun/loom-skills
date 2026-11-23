@@ -1,6 +1,15 @@
 {
  "_comment": "JoyAI-LLM-Flash (deepseek2 / MLA) IQ4_XS end-to-end on Strix Halo: port.sh with reference/deepseek2-example -> qualify.sh -> finalize.sh, card evidence and the publishable package.",
  "jobs": [
-  {"name": "joyai-iq4xs", "spec": "jdopensource/JoyAI-LLM-Flash-GGUF:JoyAI-LLM-Flash-IQ4_XS.gguf", "reference": "auto", "model_id": "jdopensource/JoyAI-LLM-Flash"}
+  {
+   "name": "joyai-iq4xs",
+   "spec": "jdopensource/JoyAI-LLM-Flash-GGUF:JoyAI-LLM-Flash-IQ4_XS.gguf",
+   "reference": "auto",
+   "model_id": "jdopensource/JoyAI-LLM-Flash",
+   "env": {
+    "HF_HUB_DOWNLOAD_TIMEOUT": "600",
+    "HF_HUB_ETAG_TIMEOUT": "600"
+   }
+  }
  ]
 }
