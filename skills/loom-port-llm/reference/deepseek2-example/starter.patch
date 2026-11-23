@@ -392,7 +392,7 @@
 +USED_MV_DUAL = set()  # (fmt, K, R) of mv_dual (MLA_QA_DUAL); 1- and 4-token kernels
 +MLA_QA_DUAL = os.environ.get("MLA_QA_DUAL", "1") == "1"
 +USED_MV_RMSX = set()  # (fmt, K, R) of mv_rmsx (MLA_RMSQ_FUSE)
-+MLA_RMSQ_FUSE = os.environ.get("MLA_RMSQ_FUSE", "0") == "1"
++MLA_RMSQ_FUSE = os.environ.get("MLA_RMSQ_FUSE", "1") == "1"
  NVAL = {"%nQH": QH, "%nQKV": (QH + 2 * KVH) * D, "%nH": H, "%nFF": FF, **({} if FF_UNIFORM else {f"%nFF{w}": w for w in set(FFL)}), "%nKV": KVH * D, "%nQ": QH * D, "%nQ2": 2 * QH * D, "%nFS": FS}
  NVAL.update({f"%nQ{h}": h * D for h in NARROW} | {f"%nQH{h}": h for h in NARROW})   # narrower layer_heads layers
  if GDN:
