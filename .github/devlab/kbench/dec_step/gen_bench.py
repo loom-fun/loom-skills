@@ -21,7 +21,8 @@ ROOT = os.path.abspath(sys.argv[1]) if len(sys.argv) > 1 else os.path.abspath(os
 HEAD = "amdgpu.target<gfx11-generic> @w32 {subgroup_size = 32}\n\n"
 VARIANTS = {"split": {"MLA_DEC": "split"}, "pl1": {"MLA_DEC_PL": "1"}, "s32": {"MLA_DEC_S": "32"}, "b8": {"MLA_DEC_BMIN": "8"},
             "b2": {"MLA_DEC_BMIN": "2"}, "b1": {"MLA_DEC_BMIN": "1"}, "shslot": {"MOE_SHSLOT": "1"},
-            "iq4q8": {"IQ4_Q8": "1"}, "wg1k": {"MV_WG1": "1024"}, "wg256": {"MV_WG1": "256"}, "moer4": {"MOE_R": "4"}, "moer1": {"MOE_R": "1"}}
+            "iq4q8": {"IQ4_Q8": "1"}, "wg1k": {"MV_WG1": "1024"}, "wg256": {"MV_WG1": "256"}, "moer4": {"MOE_R": "4"}, "moer1": {"MOE_R": "1"},
+            "rt1": {"MOE_ROUTE_SPLIT": "0"}}
 CTXS = [("short", 300), ("2k", 2048), ("8k", 8192)]
 ROLE_CTX = "short"   # role_<kernel> cases (host wall of that role's 39-40 launches alone) at this context
 OUT = None
@@ -263,6 +264,36 @@ def bench(variant):
     return HEAD + "\n".join(parts + list(kd.values()) + cases)
 
 
+def route_test(lib):
+    """test.loom: the split decode router (g_moe_route_lg + g_moe_route_tk) against g_moe_route, ids and weights equal,
+    4 tokens of random h, random router and bias (random npy written by main)."""
+    ks = []
+    for k in ("g_moe_route", "g_moe_route_lg", "g_moe_route_tk"):
+        m = re.search(rf'^kernel\.def export\("{k}"\) @{k}\((?:.|\n)*?^\}}\n', lib, re.M)
+        assert m, k
+        ks.append(m.group(0))
+    T = 4
+    case = f"""check.case public @route_split {{
+  %t = check.literal value({T}) : index
+  %h = check.file.read.npy path("rt_h.npy") : tensor<{T}x2048xf32>
+  %w = check.file.read.npy path("rt_w.npy") : tensor<{256 * 2048}xf32>
+  %b = check.file.read.npy path("rt_b.npy") : tensor<256xf32>
+  %ids_a = check.generate.fill value(0) : tensor<{T}x8xi32>
+  %wts_a = check.generate.fill value(0.0) : tensor<{T}x8xf32>
+  %ids_b = check.generate.fill value(0) : tensor<{T}x8xi32>
+  %wts_b = check.generate.fill value(0.0) : tensor<{T}x8xf32>
+  %lg = check.generate.fill value(0.0) : tensor<{T}x256xf32>
+  kernel.launch @g_moe_route[%t](%t, %h, %w, %b, %ids_a, %wts_a) : [index](index, tensor<{T}x2048xf32>, tensor<{256 * 2048}xf32>, tensor<256xf32>, tensor<{T}x8xi32>, tensor<{T}x8xf32>)
+  kernel.launch @g_moe_route_lg[%t](%t, %h, %w, %lg) : [index](index, tensor<{T}x2048xf32>, tensor<{256 * 2048}xf32>, tensor<{T}x256xf32>)
+  kernel.launch @g_moe_route_tk[%t](%t, %lg, %b, %ids_b, %wts_b) : [index](index, tensor<{T}x256xf32>, tensor<256xf32>, tensor<{T}x8xi32>, tensor<{T}x8xf32>)
+  check.expect.equal actual(%ids_b) expected(%ids_a) : tensor<{T}x8xi32>
+  check.expect.equal actual(%wts_b) expected(%wts_a) : tensor<{T}x8xf32>
+  check.return
+}}
+"""
+    return HEAD + strip_kernels(lib) + "\n".join(ks) + case
+
+
 if __name__ == "__main__" and len(sys.argv) > 2:
     OUT = sys.argv[2]
     os.makedirs(OUT, exist_ok=True)
@@ -274,6 +305,11 @@ if __name__ == "__main__" and len(sys.argv) > 2:
     for n in range(40):   # role cases: each layer's 8 distinct experts (int32, as the program's ids buffer, 256 bytes)
         e = np.zeros(64, np.int32); e[:8] = rng.choice(256, 8, replace=False)
         np.save(os.path.join(OUT, f"ids_{n}.npy"), e.view(np.int8))
+    np.save(os.path.join(OUT, "rt_h.npy"), rng.standard_normal((4, 2048)).astype(np.float32))
+    np.save(os.path.join(OUT, "rt_w.npy"), (rng.standard_normal(256 * 2048) * 0.05).astype(np.float32))
+    np.save(os.path.join(OUT, "rt_b.npy"), (rng.standard_normal(256) * 0.01).astype(np.float32))
+    lib0, _ = split_program(program("base"))
+    open(os.path.join(OUT, "test.loom"), "w").write(route_test(lib0))
     for v in sys.argv[3:] or ["base"]:
         if v != "base" and not all(x in VARIANTS for x in v.split("+")):
             raise SystemExit("unknown variant " + v)
