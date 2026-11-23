@@ -1,6 +1,6 @@
 # Family inkling2: prefill
 
-Strix Halo gfx1151, hrx-loom 0.2.0, FP16 KV, chunk (`prefill_capacity`) 4096. Prefill numerics may change (f16
+Measured on Strix Halo gfx1151, hrx-loom 0.2.0, f16 KV cache, chunk (`prefill_capacity`) 4096. Prefill numerics may change (f16
 relative bias, reordered sums); every kept change passed the golden/compare/spec gates.
 
 ## Contents
@@ -52,7 +52,7 @@ relative bias, reordered sums); every kept change passed the golden/compare/spec
 - Vec4 shortconv fused with the residual add: 137 -> 39 ms at 8k. Tiled shortconv (3 launches -> 1 on sliding K/V): 1.85x.
 - Mix + norm + f16 in one pass; the RMS row scale of a unit-RMS row is exactly 1.0 (|y| <= sqrt(2304) = 48), so the
   concat-RMS output skips the row-scale pass exactly. Live-row skip in the mixes.
-- Chunk 4096 over 2048: +6 % (needed the workspace cut in porting.md to keep 1M admission).
+- Chunk 4096 over 2048: +6 %, at ~2 GiB more workspace (sizing in porting.md).
 
 ## Did not help
 

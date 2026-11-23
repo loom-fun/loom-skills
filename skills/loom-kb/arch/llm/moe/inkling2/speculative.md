@@ -23,18 +23,18 @@ Propose cost 3.16 -> 2.14 ms per step at depth 1, 6.02 -> ~3.20 at depth 3; spec
   token; state + out + Q8 quantize fused; select + commit 15.9 -> 9 us. Markov + select 133 -> 84 us at depth 1.
 - Trunk: 3-matrix QKV multi-matvec (9 -> 3 launches, 244 -> 214 us), 2-matrix warm KV (6 -> 3), embed/add-norm with Q8
   output (-9 `g_quant_q8` per step).
-- Not kept: Q4_0 drafter trunk (`DSPARK_Q4=all`: prose acceptance 0.556 -> 0.494, net slower; `ffn` only: -0.42 ms but
-  12/13 parity).
+- Q4_0 drafter trunk: `DSPARK_Q4=all` lowers prose acceptance 0.556 -> 0.494 and is net slower; `ffn` only saves 0.42 ms
+  per step at a small acceptance cost (12/13 identical on the spec check), a trade-off left opt-in.
 
 ## Depth
 
 - Depth 2 verifies 3 tokens, which loom-serve pads to 4: slower than depth 3 (50.2 vs 47.5 ms per step). Depth 4 pads to 8.
 - Fixed depth 3 wins code and math and loses prose (round 8, T = 1.0: essay 42.1 vs 46.1 at depth 1, code 64.7 vs 52.1).
 - Adaptive depth (`SPEC_ADAPTIVE=1`, host `draft_depth` 3): per-row integer EMA of acceptance in the control state,
-  ema = ((8 - trials) * ema + successes * 1024) >> 3; up at 640, down at 560 (tuned at T = 1.0; 760 / 670 tuned greedy),
-  up threshold 850 past position 16384, multi-stream gate `SPEC_OCC_MIN=2`. At T = 1.0 vs fixed depth 1: essay 45.4 vs
+  ema = ((8 - trials) * ema + successes * 1024) >> 3; up at 640, down at 560 (tuned for T = 1.0 sampling; 760 / 670 is
+  the greedy tuning), up threshold 850 past position 16384, multi-stream gate `SPEC_OCC_MIN=2`. At T = 1.0 vs fixed depth 1: essay 45.4 vs
   46.1, code 58.5 vs 52.1, reasoning 64.0 vs 56.6. The 640 / 560 thresholds cost greedy code ~10 % against 760 / 670
-  (61.8 vs 68.5).
+  (61.8 vs 68.5): tune to the sampling the package defaults to.
 - A per-request `draft_depth` (omitted or -1 adaptive, 1 fixed, >= 2 full) does not turn drafting off at 0: the host still
   plans proposals. Only the deployment's `"draft_depth": 0` does.
 - Greedy output across depths matches up to near-ties, not byte for byte (t = 1 / 2 / 4 matvec rounding).

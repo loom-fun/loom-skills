@@ -7,7 +7,7 @@ thinkingmachines/Inkling-2-Mini (17.6 GB UD-Q4_K_XL). Published package: `loom-f
 `gen_ink_flash2.py`, drafter `draft/gen_dspark.py`, channel chat template); it is not in `loom-port-llm/starter/` yet.
 Facets: moe, sliding-window; drafted (DSpark) and vision (`inkling2v` projector) when the package has them.
 
-Published card (2026-11-23, Strix Halo, DSpark, FP16 KV, 256k context) vs llama.cpp ROCm b1383: decode short / 2k / 32k
+Published card (2026-11-23, Strix Halo, DSpark, f16 KV cache, 256k context) vs llama.cpp ROCm b1383: decode short / 2k / 32k
 48.5 / 45.2 / 39.1 vs 15.7 / 14.9 / 10.7 tok/s; prefill 1k-32k 1,589-1,857 vs 158-293 tok/s; 4 streams 95.8 vs 39.4.
 Mainline llama.cpp HIP builds are faster than b1383 on this model (24.3 tok/s tg128, 383 pp2048 reported in gufo PR #1340).
 

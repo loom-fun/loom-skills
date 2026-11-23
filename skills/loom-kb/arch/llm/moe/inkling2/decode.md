@@ -1,7 +1,7 @@
 # Family inkling2: decode
 
-Strix Halo gfx1151, hrx-loom 0.2.0, FP16 KV, rounds 2-9 (2026-11-21..23). Every kept change below is bit-identical to the
-build before it unless it says otherwise.
+Measured on Strix Halo gfx1151, hrx-loom 0.2.0, f16 KV cache, rounds 2-9 (2026-11-21..23). These rounds only kept changes
+that leave outputs bit-identical; faster variants that change outputs are listed as trade-offs, not as failures.
 
 ## Contents
 
@@ -34,7 +34,8 @@ build before it unless it says otherwise.
   weights. -7.71 ms per step (+28.5 % MoE) on a 3-row depth-2 verify, and no 4 -> 5 row padding cliff with several streams.
   Fused Q8-out Q8_0 MoE for the 4 Q8_0 layers: -0.29 ms per step at depth 3. Credit: Annieren (llama.cpp #26301), shawnshekari.
 - One 96-thread workgroup per (row, token) for the decode bf16 projection: 4 streams +6 %. A 1-wave subgroup-reduce
-  version was faster but reordered the sum (short-prompt compare 8 -> 6 full matches): not kept.
+  version is faster but reorders the sum (short-prompt compare 8 -> 6 full matches): a trade-off for a port that accepts
+  near-tie divergence.
 
 ## Kept: Loom low-level controls (round 7)
 

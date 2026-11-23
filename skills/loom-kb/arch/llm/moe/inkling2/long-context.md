@@ -1,6 +1,6 @@
 # Family inkling2: long-context
 
-Strix Halo gfx1151, FP16 KV, hrx-loom 0.2.0, 2026-11-22/23. Same-session cool A/B (start below ~65 C, sclk recorded).
+Measured on Strix Halo gfx1151, hrx-loom 0.2.0, f16 KV cache, 2026-11-22/23. Same-session cool A/B (start below ~65 C, sclk recorded).
 
 ## Prefill attention past 32k (`g_ink_attention_flash2_far`) — kept
 
