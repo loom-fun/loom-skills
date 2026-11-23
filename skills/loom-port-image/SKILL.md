@@ -72,18 +72,18 @@ Prerequisites:
 7. **Time it locally.** `scripts/bench_images.py` times request in, PNG out over HTTP for Loom, Lemonade
    (stable-diffusion.cpp ROCm and Vulkan, thenoise) and a hand-started `sd-server`, on the fixed
    prompt set in `reference/prompts.json` (8 prompts × seeds 0, 42, 1234). Use `--alternate`
-   (below). Timings guide optimization; keep them with your logs, not in the card.
+   (below). Keep every run in your log; the card publishes the final build's timings.
 8. **Optimize** with `loom-optimize` and the profile from `loom-serve --device_profiling_mode=dispatch-events,executable-metadata`.
    Re-run steps 5 to 7 after every build you keep; keep each build's timing and quality in your own log.
 9. **Card.** `scripts/stage_hf.py` turns the hrx-loom-library card into a self-contained
    package (motifs copied under `library/motif/`, Bazel archive program set dropped, checkpoint
-   origins kept). Write `README.md` from `reference/card-template.md` (accuracy, no timings), then fetch the
-   staged package with `loom-fetch` into a clean directory and run `image_check` on it before upload.
+   origins kept). Write `README.md` and `REPORT.md` from `reference/card-template.md`
+   (performance and accuracy, best value per column in bold), then fetch the staged package with `loom-fetch` into a clean directory and run `image_check` on it before upload.
 
 ## Timing fairly
 
-These rules keep local timings comparable from build to build and backend to backend. Published
-cards carry accuracy only.
+These rules keep timings comparable from build to build and backend to backend, and they are what
+the card's Methodology list reports.
 
 - **One resident model.** A resident 4B image server holds about 21 GB; on a 32 GB GPU carve-out a
   second resident model spills into shared memory and both slow down. Time backends in

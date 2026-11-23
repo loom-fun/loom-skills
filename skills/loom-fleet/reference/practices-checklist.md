@@ -151,7 +151,7 @@ the repo root; `campaign.md`, `targeted-fix.md` and `architecture.md` are in `sk
 | 75 | An image port is judged against diffusers started from Loom's own Philox noise: PSNR and LPIPS within the bf16 reference's spread of fp32, before any digest is pinned | owner rule | `skills/loom-port-image/SKILL.md` steps 1, 5 and 6; `scripts/philox_noise.py`, `scripts/oracle_diffusers.py` |
 | 76 | Image backends are timed in block-alternating sessions (one resident model, block order rotated per repeat, cases seed-major), with the same size, steps and guidance sent to every backend | owner rule | `skills/loom-port-image/SKILL.md` "Timing fairly"; `scripts/bench_images.py --alternate` |
 | 77 | Backends that draw their own noise are compared on CLIPScore and PickScore with a paired bootstrap interval, never on PSNR or LPIPS | owner rule | `skills/loom-port-image/SKILL.md` step 6; `scripts/metrics.py scores --baseline` |
-| 78 | Image timings stay in the porter's local logs; library cards, Hugging Face READMEs and pull requests carry accuracy only | owner rule | `skills/loom-port-image/SKILL.md` steps 7 and 9, "Timing fairly"; `reference/card-template.md` |
+| 78 | A Hugging Face image card publishes performance like the LLM cards: every backend timed, the quality columns, a Methodology list and `REPORT.md`; bold marks the best value in each column, not the Loom row | owner rule | `skills/loom-port-image/SKILL.md` steps 7 and 9, "Timing fairly"; `reference/card-template.md` |
 
 ## Rules that are project history, not practice
 
