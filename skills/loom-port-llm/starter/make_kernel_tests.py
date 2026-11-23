@@ -3987,9 +3987,12 @@ if flash2_deep_from(cfg):   # gen_llm.py launches the deep pairs' kernel after e
 # Layers with fewer query heads (cfg layer_heads) run gen_llm.py's _h<heads> attention kernels: this script's attention
 # chain and flash cases at that head count, from a child run whose kernels, cases and files take the suffix.
 if KS:
+    # Variant cases can already name data written with this child's suffix.
+    unsuffixed_npy = re.compile(rf'(?<!{re.escape(KS)})\.npy"\)')
     cases = [re.sub(r"check\.case public @(\w+) \{", rf"check.case public @\1{KS} {{", re.sub(
         r"@(g_qk_rope_store|g_attention_split|g_attention_combine|g_gate_heads|g_attention_flash2(?:_deep|_partial)?)\[", rf"@\1{KS}[", c))
-        .replace('.npy")', f'{KS}.npy")') for c in cases if re.match(r"\s*check\.case public @(attention_chain|attention_span|flash_prefill)", c)]
+        for c in cases if re.match(r"\s*check\.case public @(attention_chain|attention_span|flash_prefill)", c)]
+    cases = [unsuffixed_npy.sub(lambda _: f'{KS}.npy")', case) for case in cases]
 for h in sorted(set(cfg.get("layer_heads") or []) - {QH}):
     hc = os.path.join(out, f"cfg_h{h}.json"); json.dump(dict(cfg, heads=h, layer_heads=None), open(hc, "w"))
     import subprocess

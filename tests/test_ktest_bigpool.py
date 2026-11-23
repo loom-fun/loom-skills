@@ -2,6 +2,7 @@
 
 The case used to be derived from `cases[-1]`, which gemma4's per-head-dim chains (`@attention_chain_d<D>`, followed by `@ple_prep`) are not: the
 generation of unsloth-gemma-4-E2B-it's kernel tests died on an assert (0.2.0 sweep: ktest ERROR on both devices)."""
+import ast
 import importlib.util
 import os
 import re
@@ -15,6 +16,25 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 FLEET = ROOT / "fleet"
 HAVE = all(importlib.util.find_spec(m) for m in ("gguf", "numpy", "jinja2", "yaml"))
+
+
+class HeadSuffix(unittest.TestCase):
+    def test_attention_child_preserves_suffixed_variant_data_paths(self):
+        path = ROOT / "skills/loom-port-llm/starter/make_kernel_tests.py"
+        body = ast.parse(path.read_text(encoding="utf-8")).body
+        suffix_block = next(node for node in reversed(body)
+                            if isinstance(node, ast.If) and isinstance(node.test, ast.Name) and node.test.id == "KS")
+        case = '''check.case public @attention_chain_listed {
+  %q = check.file.read.npy path("q.npy") : tensor<1xf32>
+  %k = check.file.read.npy path("klist_4_h48.npy") : tensor<1xi32>
+}
+'''
+        context = {"cases": [case], "KS": "_h48", "re": re}
+        program = ast.Module(body=[suffix_block], type_ignores=[])
+        exec(compile(program, str(path), "exec"), context)
+        (child,) = context["cases"]
+        self.assertIn("@attention_chain_listed_h48", child)
+        self.assertEqual(re.findall(r'path\("([^"]+)"\)', child), ["q_h48.npy", "klist_4_h48.npy"])
 
 
 def bigpool_cases(slug):
