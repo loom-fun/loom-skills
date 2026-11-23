@@ -27,13 +27,13 @@
     "perf:dec:1",
     "perf:dec:1",
     "perf:base:1",
-    "c4:base",
-    "c4:dec",
     "c4:dec",
     "c4:base",
-    "perf:base:1:long",
+    "c4:base",
+    "c4:dec",
     "perf:dec:1:long",
-    "profile:dec:dec"
+    "profile:dec:dec",
+    "gates:dec:dev"
    ]
   }
  ]
