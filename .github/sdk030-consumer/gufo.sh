@@ -120,6 +120,18 @@ for path in ("gufo/src/models/loom/embed/loom_text_embed.h",
              "extension/loom-embed/loom_text_embed.h"):
     edit(path, '#define LOOM_TEXT_EMBED_HRX_LOOM "0.2.0"',
          '#define LOOM_TEXT_EMBED_HRX_LOOM "0.3.0"', 1)
+edit("gufo/src/models/loom/embed/loom_text_embed.h",
+     '// The Loom SDK release (hrx-loom, ROCm/hrx-system) this library is built from:\n'
+     '// packages must be built for it (their llm_config.json "sdk": {"hrx_loom":\n'
+     '// ...}). ../runtime.cmake (which checks this) and',
+     '// The Loom SDK release (hrx-loom, ROCm/hrx-system) this library uses.\n'
+     '// loom_package.hpp defines the compatible package SDK versions.\n'
+     '// ../runtime.cmake (which checks this) and', 1)
+edit("extension/loom-embed/loom_text_embed.h",
+     '// The Loom SDK release (hrx-loom, ROCm/hrx-system) this library is built from:\n'
+     '// packages must be built for it (their llm_config.json "sdk": {"hrx_loom": ...}).',
+     '// The Loom SDK release (hrx-loom, ROCm/hrx-system) this library uses.\n'
+     '// src/loom_package.hpp defines the compatible package SDK versions.', 1)
 for path in ("gufo/src/models/loom/loom_package.hpp", "extension/src/loom_package.hpp"):
     old = "SdkSeries(built) == SdkSeries(runtime)"
     file = Path(path)
@@ -154,6 +166,36 @@ for path in ("gufo/src/models/loom/tests/package_test.cpp", "extension/tests/pac
     file.write_text(text)
 edit("extension/README.md", "pipx install 'hrx-loom[hf]==0.2.0'", "pipx install 'hrx-loom[hf]==0.3.0'", 1)
 edit("extension/DESIGN.md", "v0.2.0 (the release loom-fun targets)", "v0.3.0", 1)
+edit("extension/DESIGN.md",
+     '  default branch, and refuses a revision whose `llm_config.json` targets\n'
+     '  another SDK; `--check` verifies the current pins.\n'
+     '- At load, a package whose `llm_config.json` names another SDK series (none:\n'
+     '  0.1.0) is refused with what to fetch instead, rather than failing inside\n'
+     '  Loom.',
+     '  default branch, then checks the SDK named in `llm_config.json`.\n'
+     '  `--check` verifies the current pins.\n'
+     '- The loader and model lock checker accept packages from the runtime SDK\n'
+     '  series. Loom 0.3 also accepts published Loom 0.2 packages through\n'
+     '  controller ABI 1. A missing SDK pin implies 0.1.0.', 1)
+edit("extension/tools/models.py",
+     "one), else the default branch; the revision's llm_config.json must say it is\n"
+     "built for that SDK. Then it reads its",
+     "one), else the default branch. Its llm_config.json must name an SDK the\n"
+     "runtime supports. Then it reads its", 1)
+edit("extension/tools/models.py",
+     "# every pinned package is built for the runtime's SDK",
+     "# every pinned package can be used by the runtime", 1)
+edit("extension/tools/models.py",
+     "    if series(built) != series(sdk):\n"
+     '        raise SystemExit(f"{repo}@{revision[:8]} is built for Loom SDK {built}, the runtime is {sdk}: "\n'
+     '                         f"it has no v{sdk} tag and its default branch targets another SDK")',
+     "    built_series, runtime_series = series(built), series(sdk)\n"
+     "    # Keep this rule in step with src/loom_package.hpp.\n"
+     '    if built_series != runtime_series and (built_series, runtime_series) != ("0.2", "0.3"):\n'
+     '        raise SystemExit(f"{repo}@{revision[:8]} is built for Loom SDK {built}, the runtime is {sdk}")', 1)
+edit("extension/tools/models.py",
+     "{len(manifest['models'])} packages built for Loom SDK {sdk}",
+     "{len(manifest['models'])} packages compatible with Loom SDK {sdk}", 1)
 PY
 
 python3 extension/nix/hrx-deps.py generate "$revision" extension/nix/hrx-deps.nix
@@ -163,6 +205,11 @@ for repo in gufo extension; do
   git -C "$repo" diff --check
   git -C "$repo" diff --binary > "$WORK/out/$repo.patch"
 done
+
+if [ "${SDK030_COMPAT_ONLY:-0}" = 1 ]; then
+  python3 extension/tools/models.py --check
+  exit
+fi
 
 extra=()
 if command -v clang >/dev/null && command -v clang++ >/dev/null; then
