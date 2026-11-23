@@ -402,7 +402,7 @@ def staged(v, kbd, vbd, kb_bytes, only=None):
     xk[:, :nk] = c[:nk, :KL] @ W16[:, :128].transpose(0, 2, 1)
     xv[:, :, :nk] = (c[:nk, :KL] @ W16[:, 128:].transpose(0, 2, 1)).transpose(0, 2, 1)
     xpe[:nk] = c[:nk, KL:]
-    save(f"{pfx}_xk_e", xk.reshape(-1).astype(np.float16)); save(f"{pfx}_xv_e", xv.reshape(-1).astype(np.float16)); save(f"{pfx}_xpe_e", xpe.reshape(-1).astype(np.float16))
+    save(f"{pfx}_xk_e", xk.reshape(-1).astype(np.float16)); save(f"{pfx}_xv_e", xv.reshape(QH, 128, XCAP // 32, 32).transpose(0, 2, 1, 3).reshape(-1).astype(np.float16)); save(f"{pfx}_xpe_e", xpe.reshape(-1).astype(np.float16))
     ref = reference(inp, kbd, vbd, layer)
     expanded = np.zeros(t, bool)
     for tok, nt, _, _ in xq:

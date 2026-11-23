@@ -20,7 +20,7 @@ Per layer:
   g_mla_xexp   per (64-key block, head): [k_nope | v] = c W[h]^T on WMMA, c read from the paged latent cache; k_nope stored
                key-major xk[h][pos][128], v stored TRANSPOSED xv[h][dim][pos] (dims contiguous over keys: the V^T operand
                of the flash kernel loads straight from it); head 0's workgroups copy k_pe to xpe[pos][64]. Keys >= nk: zero.
-  g_mla_xflash per (quad, head), 4 waves (one 16-query tile each, no workgroup memory, no barriers): S^T = K Q^T over 12
+  g_mla_xflash per (quad, head), 4 waves (scores in the log2 domain: scale * log2 e, exp2) (one 16-query tile each, no workgroup memory, no barriers): S^T = K Q^T over 12
                16-dim chunks (8 from xk, 4 from xpe; Q^T fragments [q_nope from qb | rope(q_pe) from q] in registers), causal
                mask, online softmax (gen_mla_dec.py's transposed form: a lane's column is one query), O^T += V^T P^T (8 dim
                tiles); vo[token][h][128] = O / l (the v_b product of the absorbed path is already in it).
@@ -467,10 +467,13 @@ kernel.def export("g_mla_xexp") @g_mla_xexp(%count_buffer: buffer) {{
     vector.fragment.store<result> %o{pp}{tt}, %xk_view[%sk{pp}{tt}_r, %sk{pp}{tt}_c] shape [%c16, %c16] : vector<8xf32>, view<{XCAP}x128xf16>""")
     a(f"""  }} else {{""")
     loop(True)
-    a(f"""    %hv_e = index.mul %head, %c128 : index
-    %hv_e2 = index.mul %hv_e, %cxcap : index
+    a(f"""    %cnb = index.constant {XCAP // 32} : index
+    %c4096v = index.constant 4096 : index
+    %vblk = index.div %xrow0, %c32 : index
+    %hv_e = index.madd %head, %cnb, %vblk : index
+    %hv_e2 = index.mul %hv_e, %c4096v : index
     %hv_o = index.scale %hv_e2, %two : index, offset -> offset
-    %xv_view = buffer.view %xv[%hv_o] : buffer -> view<128x{XCAP}xf16>
+    %xv_view = buffer.view %xv[%hv_o] : buffer -> view<128x32xf16>
     %qdv = index.sub %qd, %c2 : index
     %qdv64 = index.mul %qdv, %c64 : index""")
     for pp in range(2):
@@ -481,7 +484,7 @@ kernel.def export("g_mla_xexp") @g_mla_xexp(%count_buffer: buffer) {{
     %sv{pp}{tt}_c0 = index.constant {16 * tt} : index
     %sv{pp}{tt}_c1 = index.add %qdv64, %sv{pp}{tt}_c0 : index
     %sv{pp}{tt}_c = index.assume %sv{pp}{tt}_c1 [range(%sv{pp}{tt}_c1, 0, 112)] : index
-    vector.fragment.store<result> %o{pp}{tt}, %xv_view[%sv{pp}{tt}_c, %sv{pp}{tt}_r] shape [%c16, %c16] : vector<8xf32>, view<128x{XCAP}xf16>""")
+    vector.fragment.store<result> %o{pp}{tt}, %xv_view[%sv{pp}{tt}_c, %sv{pp}{tt}_r0] shape [%c16, %c16] : vector<8xf32>, view<128x32xf16>""")
     a(f"""  }}
   // k_pe (shared by the heads): head 0's workgroups copy it, thread = (key, 16-dim quarter)
   %h0 = index.cmp eq, %head, %c0 : index
@@ -605,14 +608,15 @@ kernel.def export("g_mla_xflash") @g_mla_xflash(%count_buffer: buffer) {{
     %hk_o = index.scale %hk_e2, %two : index, offset -> offset
     %xk_view = buffer.view %xk[%hk_o] : buffer -> view<{XCAP}x128xf16>
     %xv_view = buffer.view %xk[%zero] : buffer -> view<1xf16>
-    %hv_o = index.scale %hk_e2, %two : index, offset -> offset
-    %vt_view = buffer.view %xv[%hv_o] : buffer -> view<128x{XCAP}xf16>
+    %cnb = index.constant {XCAP // 32} : index
+    %c4096v = index.constant 4096 : index
+    %hv_b = index.mul %head, %cnb : index
     %pe_view = buffer.view %xpe[%zero] : buffer -> view<{XCAP}x64xf16>
     %zero8 = vector.splatf 0.0 : vector<8xf32>
     %init = vector.fragment<init> %zero8 shape [%c16, %c16] : vector<8xf32>
     %zero_f = scalar.constant 0.0 : f32
     %neg_big = scalar.constant -3.0e38 : f32
-    %scale = scalar.constant {scale!r} : f32
+    %scale = scalar.constant {scale * 1.4426950408889634!r} : f32
     %scale_v = vector.splat %scale : vector<8xf32>
     %neg_v = vector.splat %neg_big : vector<8xf32>
     %exchange = scalar.constant 16 : i32
@@ -670,7 +674,13 @@ kernel.def export("g_mla_xflash") @g_mla_xflash(%count_buffer: buffer) {{
     acc = ", ".join(f"%a{d} = %init : vector<8xf32>" for d in range(8))
     TY = ", ".join(["vector<8xf32>"] * 8)
     a(f"""    %m_final, %l_final, {", ".join(f"%o{d}" for d in range(8))} = scf.for %b = [%c0 to {"%nblk_q" if lds else "%nblk"} step %c1](%m = %neg_big : f32, %l = %zero_f : f32, {acc}) -> (f32, f32, {TY}) {{
-      %kf = index.mul %b, %c32 : index""")
+      %kf = index.mul %b, %c32 : index
+      %vb_pos = index.add %base, %kf : index
+      %vb_i = index.div %vb_pos, %c32 : index
+      %vb_e = index.add %hv_b, %vb_i : index
+      %vb_e2 = index.mul %vb_e, %c4096v : index
+      %vb_o = index.scale %vb_e2, %two : index, offset -> offset
+      %vt_view = buffer.view %xv[%vb_o] : buffer -> view<128x32xf16>""")
     if lds:
         a(f"""      %sk_base = index.add %base, %kf : index
       %sk_r0_v = index.add %sk_base, %st_kk0 : index
@@ -685,8 +695,8 @@ kernel.def export("g_mla_xflash") @g_mla_xflash(%count_buffer: buffer) {{
       %gk0 = vector.load %xk_view[%sk_r0, %st_kc0] : view<{XCAP}x128xf16> -> vector<16xf16>
       %gk1 = vector.load %xk_view[%sk_r1, %st_kc0] : view<{XCAP}x128xf16> -> vector<16xf16>
       %gkp = vector.load %pe_view[%sk_rp, %st_pc] : view<{XCAP}x64xf16> -> vector<16xf16>
-      %gv0 = vector.load %vt_view[%st_vd0, %sv_c] : view<128x{XCAP}xf16> -> vector<16xf16>
-      %gv1 = vector.load %vt_view[%st_vd1, %sv_c] : view<128x{XCAP}xf16> -> vector<16xf16>
+      %gv0 = vector.load %vt_view[%st_vd0, %st_vh] : view<128x32xf16> -> vector<16xf16>
+      %gv1 = vector.load %vt_view[%st_vd1, %st_vh] : view<128x32xf16> -> vector<16xf16>
       vector.store %gk0, %ks_view[%st_kk0, %st_kc0] : vector<16xf16>, view<32x200xf16>
       vector.store %gk1, %ks_view[%st_kk1, %st_kc0] : vector<16xf16>, view<32x200xf16>
       vector.store %gkp, %ks_view[%st_pk, %st_pc_l] : vector<16xf16>, view<32x200xf16>
@@ -728,11 +738,11 @@ kernel.def export("g_mla_xflash") @g_mla_xflash(%count_buffer: buffer) {{
       %tmax = scalar.maxnumf %lmax, %omax : f32
       %m_new = scalar.maxnumf %m, %tmax : f32
       %m_shift = scalar.subf %m, %m_new : f32
-      %alpha = scalar.expf<afn> %m_shift : f32
+      %alpha = scalar.exp2f<afn> %m_shift : f32
       %m_new_v = vector.splat %m_new : vector<8xf32>""")
     for hh in range(2):
         a(f"""      %sh{hh} = vector.subf %masked{hh}, %m_new_v : vector<8xf32>
-      %pe{hh} = vector.expf<afn> %sh{hh} : vector<8xf32>
+      %pe{hh} = vector.exp2f<afn> %sh{hh} : vector<8xf32>
       %p{hh} = vector.select %valid{hh}, %pe{hh}, %zero8 : vector<8xf32>
       %ls{hh} = vector.reduce<addf> %p{hh}, %zero_f : vector<8xf32>, f32""")
         for i in range(8):
@@ -754,7 +764,7 @@ kernel.def export("g_mla_xflash") @g_mla_xflash(%count_buffer: buffer) {{
         a(f"""      %os{d} = vector.mulf %a{d}, %alpha_v : vector<8xf32>""")
         cur = f"%os{d}"
         for hh in range(2):
-            a(f"""      %vl{d}_{hh} = vector.load %vs_view[%vr{d}, {16 * hh}] : view<128x40xf16> -> vector<16xf16>""" if lds else f"""      %vl{d}_{hh} = vector.load %vt_view[%vr{d}, %xc{hh}] : view<128x{XCAP}xf16> -> vector<16xf16>""")
+            a(f"""      %vl{d}_{hh} = vector.load %vs_view[%vr{d}, {16 * hh}] : view<128x40xf16> -> vector<16xf16>""" if lds else f"""      %vl{d}_{hh} = vector.load %vt_view[%vr{d}, {16 * hh}] : view<128x32xf16> -> vector<16xf16>""")
             a(f"""
       %vf{d}_{hh} = vector.fragment<lhs> %vl{d}_{hh} shape [%c16, %c16] : vector<16xf16>
       %an{d}_{hh} = vector.mma %vf{d}_{hh}, %pt{hh}, {cur} : vector<16xf16>, vector<16xf16>, vector<8xf32>""")
