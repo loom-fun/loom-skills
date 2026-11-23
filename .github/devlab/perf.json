@@ -19,21 +19,29 @@
     {
      "name": "dec",
      "build": {}
+    },
+    {
+     "name": "w4k",
+     "build": {
+      "MV_WG1": "4096"
+     }
+    },
+    {
+     "name": "w4kn",
+     "build": {
+      "MV_WG1": "4096",
+      "MLA_RMSQ_FUSE": "0"
+     }
     }
    ],
    "steps": [
-    "ktest:dec",
-    "perf:base:1",
+    "ab:8",
     "perf:dec:1",
-    "perf:dec:1",
-    "perf:base:1",
-    "c4:dec",
-    "c4:base",
-    "c4:base",
-    "c4:dec",
-    "perf:dec:1:long",
-    "profile:dec:dec",
-    "gates:dec:dev"
+    "perf:w4k:1",
+    "perf:w4kn:1",
+    "perf:w4kn:1",
+    "perf:w4k:1",
+    "perf:dec:1"
    ]
   }
  ]
