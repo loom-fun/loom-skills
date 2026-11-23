@@ -17,7 +17,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          export WORK="$GITHUB_WORKSPACE/../sdk030-flash-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          export WORK="$(dirname "$GITHUB_WORKSPACE")/sdk030-flash-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
           mkdir -p "$WORK"
           echo "WORK=$WORK" >> "$GITHUB_ENV"
           git clone -q --depth 1 --branch v0.3.0 https://github.com/ROCm/hrx-loom-library "$WORK/library"
@@ -71,6 +71,9 @@ jobs:
               [ ! -f "$WORK/flash/$v/pkg/$f" ] || cp "$WORK/flash/$v/pkg/$f" "$WORK/flash/out/${v}_$f"
             done
           done
+          if [ -d "$WORK/flash/tuned/pkg/program" ]; then
+            tar -czf "$WORK/flash/out/catalog-source.tar.gz" -C "$WORK/flash/tuned/pkg" program model.json llm_config.json tokenizer.json
+          fi
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -81,4 +84,4 @@ jobs:
         if: always()
         shell: bash
         run: |
-          if [ "${WORK:-}" = "$GITHUB_WORKSPACE/../sdk030-flash-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" ]; then rm -rf -- "$WORK"; fi
+          if [ "${WORK:-}" = "$(dirname "$GITHUB_WORKSPACE")/sdk030-flash-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" ]; then rm -rf -- "$WORK"; fi
