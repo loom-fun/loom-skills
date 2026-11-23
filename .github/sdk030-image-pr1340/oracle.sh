@@ -8,7 +8,7 @@ export PYTHONNOUSERSITE=1
 archive=thenoise-0.15.0-rocm10.1.0-gfx1151-x64.tar.gz
 tag=thenoise-0.15.0-rocm10.1.0
 digest=cc467ea02582017fdf5afede2f1476abac83397b1502b1cff55abe2dc3fade84
-curl -fL --retry 3 "https://github.com/lemonade-sdk/thenoise/releases/download/$tag/$archive" -o "$archive"
+curl -fsSL --retry 3 "https://github.com/lemonade-sdk/thenoise/releases/download/$tag/$archive" -o "$archive"
 printf '%s  %s\n' "$digest" "$archive" | sha256sum -c -
 mkdir "$WORK/oracle-runtime"
 tar -xzf "$archive" -C "$WORK/oracle-runtime"
@@ -17,11 +17,16 @@ runtime="$WORK/oracle-runtime/bin/python3"
 if [ ! -x "$runtime" ]; then
   runtime=$(find "$WORK/oracle-runtime/bin" -maxdepth 1 -type f -name 'python3.[0-9]*' | sort | head -1)
 fi
-libdirs=$(find "$WORK/oracle-runtime/lib" -type d \( -path '*/_rocm_sdk_*/lib' -o -path '*/torch/lib' \) -print | paste -sd:)
+python3 -m venv "$WORK/pip-bootstrap"
+pip_packages=$("$WORK/pip-bootstrap/bin/python" -c 'from pathlib import Path; import pip; print(Path(pip.__file__).parent.parent)')
+mkdir "$WORK/pip-module"
+cp -a "$pip_packages/pip" "$pip_packages"/pip-*.dist-info "$WORK/pip-module/"
+libdirs=$(find "$WORK/oracle-runtime/lib" -type d \
+  \( -path '*/_rocm_sdk_*/lib' -o -path '*/_rocm_sdk_*/lib/llvm/lib' -o -path '*/torch/lib' \) -print | paste -sd:)
 export LD_LIBRARY_PATH="$WORK/oracle-runtime/lib:$libdirs${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-"$runtime" -m pip install --no-cache-dir 'diffusers==0.43.0' 'transformers==5.24.0' 'lpips==0.1.4' \
+PYTHONPATH="$WORK/pip-module" "$runtime" -m pip install --no-cache-dir 'diffusers==0.43.0' 'transformers==5.24.0' 'lpips==0.1.4' \
   'scikit-image==0.26.0' 'accelerate==1.16.0'
-"$runtime" -m pip freeze > "$WORK/evidence/oracle-dependencies.txt"
+PYTHONPATH="$WORK/pip-module" "$runtime" -m pip freeze > "$WORK/evidence/oracle-dependencies.txt"
 "$runtime" - "$digest" "$WORK/evidence/oracle-runtime.json" <<'PY'
 import importlib.metadata
 import json
