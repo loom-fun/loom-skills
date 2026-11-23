@@ -420,55 +420,61 @@ kernel.def export("g_mla_xexp") @g_mla_xexp(%count_buffer: buffer) {{
   %nr{t}_b = index.add %nr{t}_a, %lane_col : index
   %nr{t} = index.assume %nr{t}_b [range(%nr{t}_b, 0, {QH * 256 - 1})] : index""")
     accs = [f"a{pp}{t}" for pp in range(2) for t in range(4)]
-    a(f"""  {", ".join("%o" + x[1:] for x in accs)} = scf.for %j = [%c0 to %c32 step %c1]({", ".join(f"%{x} = %init : vector<8xf32>" for x in accs)}) -> ({", ".join(["vector<8xf32>"] * 8)}) {{
-    %jc_v = index.mul %j, %c16 : index
-    %jc = index.assume %jc_v [range(%jc_v, 0, 496)] : index""")
-    for pp in range(2):
-        a(f"""    %lr{pp} = vector.load %kv{pp}[%lane_col, %jc] : view<16x{D}xf16> -> vector<16xf16>
-    %lh{pp} = scf.select %kval{pp}, %lr{pp}, %zero16h : vector<16xf16>
-    %lf{pp} = vector.fragment<lhs> %lh{pp} shape [%c16, %c16] : vector<16xf16>""")
-    for t in range(4):
-        a(f"""    %wr{t} = vector.load %w_view[%nr{t}, %jc] : view<{QH * 256}x512xf16> -> vector<16xf16>
-    %wf{t} = vector.fragment<rhs> %wr{t} shape [%c16, %c16] : vector<16xf16>""")
-    for pp in range(2):
-        for t in range(4):
-            a(f"""    %m{pp}{t} = vector.mma %lf{pp}, %wf{t}, %a{pp}{t} : vector<16xf16>, vector<16xf16>, vector<8xf32>""")
-    a(f"""    scf.yield {", ".join(f"%m{pp}{t}" for pp in range(2) for t in range(4))} : {", ".join(["vector<8xf32>"] * 8)}
-  }}
-  %two = index.constant 2 : offset
+
+    def loop(vt):
+        """the 32-step latent loop: K waves S = c W^T (lhs latent, rhs W); V waves (vt) V^T = W c^T (lhs W, rhs latent),
+        so V^T lands in its natural row-major layout xv[h][dim][pos]."""
+        a(f"""    {", ".join("%o" + x[1:] for x in accs)} = scf.for %j = [%c0 to %c32 step %c1]({", ".join(f"%{x} = %init : vector<8xf32>" for x in accs)}) -> ({", ".join(["vector<8xf32>"] * 8)}) {{
+      %jc_v = index.mul %j, %c16 : index
+      %jc = index.assume %jc_v [range(%jc_v, 0, 496)] : index""")
+        for pp in range(2):
+            a(f"""      %lr{pp} = vector.load %kv{pp}[%lane_col, %jc] : view<16x{D}xf16> -> vector<16xf16>
+      %lh{pp} = scf.select %kval{pp}, %lr{pp}, %zero16h : vector<16xf16>
+      %lf{pp} = vector.fragment<{"rhs" if vt else "lhs"}> %lh{pp} shape [%c16, %c16] : vector<16xf16>""")
+        for tt in range(4):
+            a(f"""      %wr{tt} = vector.load %w_view[%nr{tt}, %jc] : view<{QH * 256}x512xf16> -> vector<16xf16>
+      %wf{tt} = vector.fragment<{"lhs" if vt else "rhs"}> %wr{tt} shape [%c16, %c16] : vector<16xf16>""")
+        for pp in range(2):
+            for tt in range(4):
+                x, y = (f"%wf{tt}", f"%lf{pp}") if vt else (f"%lf{pp}", f"%wf{tt}")
+                a(f"""      %m{pp}{tt} = vector.mma {x}, {y}, %a{pp}{tt} : vector<16xf16>, vector<16xf16>, vector<8xf32>""")
+        a(f"""      scf.yield {", ".join(f"%m{pp}{tt}" for pp in range(2) for tt in range(4))} : {", ".join(["vector<8xf32>"] * 8)}
+    }}""")
+    a(f"""  %two = index.constant 2 : offset
   %is_k = index.cmp ult, %qd, %c2 : index
   %xrow0 = index.add %xpos, %kg32 : index
-  scf.if %is_k {{
-    %hk_e = index.mul %head, %cxcap : index
+  scf.if %is_k {{""")
+    loop(False)
+    a(f"""    %hk_e = index.mul %head, %cxcap : index
     %hk_e2 = index.mul %hk_e, %c128 : index
     %hk_o = index.scale %hk_e2, %two : index, offset -> offset
     %xk_view = buffer.view %xk[%hk_o] : buffer -> view<{XCAP}x128xf16>""")
     for pp in range(2):
-        for t in range(4):
-            a(f"""    %sk{pp}{t}_r0 = index.constant {16 * pp} : index
-    %sk{pp}{t}_r1 = index.add %xrow0, %sk{pp}{t}_r0 : index
-    %sk{pp}{t}_r = index.assume %sk{pp}{t}_r1 [range(%sk{pp}{t}_r1, 0, {XCAP - 16})] : index
-    %sk{pp}{t}_c0 = index.constant {16 * t} : index
-    %sk{pp}{t}_c1 = index.add %qd64, %sk{pp}{t}_c0 : index
-    %sk{pp}{t}_c = index.assume %sk{pp}{t}_c1 [range(%sk{pp}{t}_c1, 0, 112)] : index
-    vector.fragment.store<result> %o{pp}{t}, %xk_view[%sk{pp}{t}_r, %sk{pp}{t}_c] shape [%c16, %c16] : vector<8xf32>, view<{XCAP}x128xf16>""")
-    a(f"""  }} else {{
-    %hv_e = index.mul %head, %c128 : index
+        for tt in range(4):
+            a(f"""    %sk{pp}{tt}_r0 = index.constant {16 * pp} : index
+    %sk{pp}{tt}_r1 = index.add %xrow0, %sk{pp}{tt}_r0 : index
+    %sk{pp}{tt}_r = index.assume %sk{pp}{tt}_r1 [range(%sk{pp}{tt}_r1, 0, {XCAP - 16})] : index
+    %sk{pp}{tt}_c0 = index.constant {16 * tt} : index
+    %sk{pp}{tt}_c1 = index.add %qd64, %sk{pp}{tt}_c0 : index
+    %sk{pp}{tt}_c = index.assume %sk{pp}{tt}_c1 [range(%sk{pp}{tt}_c1, 0, 112)] : index
+    vector.fragment.store<result> %o{pp}{tt}, %xk_view[%sk{pp}{tt}_r, %sk{pp}{tt}_c] shape [%c16, %c16] : vector<8xf32>, view<{XCAP}x128xf16>""")
+    a(f"""  }} else {{""")
+    loop(True)
+    a(f"""    %hv_e = index.mul %head, %c128 : index
     %hv_e2 = index.mul %hv_e, %cxcap : index
     %hv_o = index.scale %hv_e2, %two : index, offset -> offset
-    %vt_layout = encoding.layout.strided [%c1, %cxcap] : encoding<layout>
-    %xv_view = buffer.view %xv[%hv_o] : buffer -> view<{XCAP}x128xf16, %vt_layout>
+    %xv_view = buffer.view %xv[%hv_o] : buffer -> view<128x{XCAP}xf16>
     %qdv = index.sub %qd, %c2 : index
     %qdv64 = index.mul %qdv, %c64 : index""")
     for pp in range(2):
-        for t in range(4):
-            a(f"""    %sv{pp}{t}_r0 = index.constant {16 * pp} : index
-    %sv{pp}{t}_r1 = index.add %xrow0, %sv{pp}{t}_r0 : index
-    %sv{pp}{t}_r = index.assume %sv{pp}{t}_r1 [range(%sv{pp}{t}_r1, 0, {XCAP - 16})] : index
-    %sv{pp}{t}_c0 = index.constant {16 * t} : index
-    %sv{pp}{t}_c1 = index.add %qdv64, %sv{pp}{t}_c0 : index
-    %sv{pp}{t}_c = index.assume %sv{pp}{t}_c1 [range(%sv{pp}{t}_c1, 0, 112)] : index
-    vector.fragment.store<result> %o{pp}{t}, %xv_view[%sv{pp}{t}_r, %sv{pp}{t}_c] shape [%c16, %c16] : vector<8xf32>, view<{XCAP}x128xf16, %vt_layout>""")
+        for tt in range(4):
+            a(f"""    %sv{pp}{tt}_r0 = index.constant {16 * pp} : index
+    %sv{pp}{tt}_r1 = index.add %xrow0, %sv{pp}{tt}_r0 : index
+    %sv{pp}{tt}_r = index.assume %sv{pp}{tt}_r1 [range(%sv{pp}{tt}_r1, 0, {XCAP - 16})] : index
+    %sv{pp}{tt}_c0 = index.constant {16 * tt} : index
+    %sv{pp}{tt}_c1 = index.add %qdv64, %sv{pp}{tt}_c0 : index
+    %sv{pp}{tt}_c = index.assume %sv{pp}{tt}_c1 [range(%sv{pp}{tt}_c1, 0, 112)] : index
+    vector.fragment.store<result> %o{pp}{tt}, %xv_view[%sv{pp}{tt}_c, %sv{pp}{tt}_r] shape [%c16, %c16] : vector<8xf32>, view<128x{XCAP}xf16>""")
     a(f"""  }}
   // k_pe (shared by the heads): head 0's workgroups copy it, thread = (key, 16-dim quarter)
   %h0 = index.cmp eq, %head, %c0 : index
