@@ -13,9 +13,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - slug: ggml-org-Qwen3.6-27B-loom
-            device: strix-halo
-            labels: '["self-hosted","devlab-dispatch","strix-halo","Linux"]'
+          - slug: ggml-org-Qwen3.6-35B-A3B-loom
+            device: radeon-r9700
+            labels: '["self-hosted","devlab-dispatch","radeon-r9700"]'
     runs-on: ${{ fromJSON(matrix.labels) }}
     timeout-minutes: 240
     env:
