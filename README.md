@@ -37,6 +37,7 @@ skill directly.
 | `loom-setup` | Install Loom, fetch catalog models, and manage GPU or NPU servers |
 | `loom-demo-ui` | Open a browser playground for chat, audio, images and embeddings |
 | `loom-port-llm` | Turn a GGUF model into a runnable Loom package |
+| `loom-port-image` | Port a diffusers text-to-image model to Loom, check it against diffusers on the same noise, and benchmark it against stable-diffusion.cpp |
 | `loom-roofline` | Estimate performance limits and choose targets and a budget |
 | `loom-optimize` | Improve a port's speed while checking correctness |
 | `loom-benchmark` | Validate a port, measure it against llama.cpp, and generate reports |
