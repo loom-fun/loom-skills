@@ -1,5 +1,5 @@
 {
- "_comment": "JoyAI combined (experiment only): every lane's kept wins in one build (pfgemm v6 choices via the model scope, pfattn expanded MLA prefill, decode lane defaults) vs the published card; llama.cpp rows with the matched drafting (none: the package does not draft).",
+ "_comment": "JoyAI combined (experiment only), round 2: fullctx on combined at the default size (context minus the answer); round 1 run 45272522814 had perf/c4/profiles/llama.cpp/ktest/gates.",
  "card": "loom-fun/jdopensource-JoyAI-LLM-Flash-loom@58159cc30c1b9a18fb883f75188b35d03bfea4ed",
  "memory_bytes": 47000000000,
  "kit": "deepseek2",
@@ -9,48 +9,15 @@
  },
  "jobs": [
   {
-   "name": "combined-perf",
-   "llama_spec": "",
-   "variants": [
-    {"name": "card"},
-    {"name": "combined", "build": {}}
-   ],
-   "steps": [
-    "ktest:combined",
-    "perf:card:1",
-    "perf:combined:1",
-    "perf:combined:1",
-    "perf:card:1",
-    "perf:card:1:long",
-    "perf:combined:1:long",
-    "perf:combined:1:long",
-    "perf:card:1:long",
-    "c4:combined",
-    "c4:card",
-    "c4:card",
-    "c4:combined",
-    "profile:combined:pf2k,pf8k,dec",
-    "llama:2",
-    "llama:1:long",
-    "llamac4"
-   ]
-  },
-  {
    "name": "combined-fullctx",
    "variants": [
-    {"name": "combined", "build": {}}
+    {
+     "name": "combined",
+     "build": {}
+    }
    ],
    "steps": [
-    "fullctx:combined:131072"
-   ]
-  },
-  {
-   "name": "combined-gates",
-   "variants": [
-    {"name": "combined", "build": {}}
-   ],
-   "steps": [
-    "gates:combined:dev"
+    "fullctx:combined"
    ]
   }
  ]
