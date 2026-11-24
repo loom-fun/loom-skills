@@ -7,7 +7,7 @@ permissions:
   contents: read
   actions: read
 env:
-  LEMONADE_REVISION: 7809cd08b78e96219f50e10d23c759e490cb5c98
+  LEMONADE_REVISION: 833d6e019f8deef7435c1b1ad357f0a8a10517f0
 jobs:
   build:
     runs-on: windows-latest
