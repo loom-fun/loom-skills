@@ -477,6 +477,16 @@ assert 'pre-release' not in r and 'releases/download' not in r and 'loom-fetch h
 assert \"loom-serve --model=Qwen3-0.6B '--device=amdgpu://?completion_spin_ns=4294967295' --memory_bytes=15000000000 --state_slab_bytes=4mib\" in r and '/model.json' not in r.split('## Performance')[0].split('loom-serve')[1]" "$tmp/gpus4_pypi" \
   && echo "OK   gpus4: a PyPI 0.2.0 pin installs hrx-loom[hf]==0.2.0 in every GPU's block, no pre-release note" \
   || { echo "FAIL gpus4: PyPI 0.2.0 Quick start"; bad=1; }
+# SDK 0.3.0 Quick starts use automatic materialization. The legacy output above retains the explicit copy.
+mkdir -p "$tmp/gpus4_pypi_030"; cp -r "$tmp/gpus4_pypi/." "$tmp/gpus4_pypi_030/"
+py -c "import json, sys; p = sys.argv[1] + '/llm_config.json'; c = json.load(open(p)); c['sdk']['hrx_loom'] = '0.3.0'; json.dump(c, open(p, 'w'), indent=1)" "$tmp/gpus4_pypi_030"
+py "$C/render_card.py" "$tmp/gpus4_pypi_030" 2>/dev/null
+py -c "import sys; r = open(sys.argv[1] + '/README.md', encoding='utf-8').read().split('## Quick start', 1)[1].split('## Send a request', 1)[0]
+expected = ['loom-fetch huggingface:loom-fun-staging/unsloth-Qwen3-0.6B-loom:' + p + ' --output=Qwen3-0.6B' for p in ('chat', 'chat-r9700', 'chat-16gb', 'chat-gfx1150')]
+assert [line for line in r.splitlines() if line.startswith('loom-fetch ')] == expected, r
+assert '--materialize' not in r and r.count('pipx install \"hrx-loom[hf]==0.3.0\"') == 4, r" "$tmp/gpus4_pypi_030" \
+  && echo "OK   gpus4: exact SDK 0.3.0 Quick starts omit the copy flag on every GPU" \
+  || { echo "FAIL gpus4: PyPI 0.3.0 Quick start"; bad=1; }
 # the data file is the only source of a device's data: rebuilding the card from itself (--from-info) with the same files doubles nothing
 mkdir -p "$tmp/gpus4b"; cp -r "$tmp/gpus4/." "$tmp/gpus4b/"
 py "$C/make_info.py" build "$tmp/gpus4b" --from-info "$tmp/gpus4/info.json" --generator-commit $GEN --device-results "$tmp/dev4" --report generated -o "$tmp/gpus4b/info.json" 2>/dev/null

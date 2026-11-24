@@ -82,6 +82,9 @@ Notes:
   fetch complains about a card/lock mismatch add `--origin=library=$PWD/library` so program sources resolve against it.
 - A published card fetches by repo: `loom-fetch huggingface:loom-fun/REPO[:PRESET] --output=NAME` (the revision is resolved and
   pinned for you; the `[hf]` extra, installed by `install_loom.sh`, provides the Hugging Face client).
+- SDK 0.3.0 copies the programs and can share cached assets through a hardlink or a readable symlink. If the destination cannot
+  use either link, fetch warns and copies the affected files. Use `--materialize=copy` for an installation you intend to move or
+  keep after removing its backing cache.
 - Catalog models seen working on Strix Halo:
 
   | Model | Kind | Preset |
