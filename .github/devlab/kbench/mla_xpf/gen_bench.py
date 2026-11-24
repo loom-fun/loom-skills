@@ -23,12 +23,17 @@ XCAP = 131072
 QW = 4
 VARIANTS = {"x": {}, "xg": {"MLA_XF": "global"},   # x: LDS-staged flash (default); xg: fragments straight from the scratch
             "xe8": {"MLA_XE_NT": "8"}, "xel": {"MLA_XE_LDS": "1"}, "x8": {"MLA_XQ": "8"}, "x2q": {"MLA_XQ": "2"}, "xg8": {"MLA_XF": "global", "MLA_XQ": "8"},   # 8 query tiles (waves) per workgroup
+            "xt": {"MLA_X_TAIL": "1"},   # x + the run's tail block on the expanded path (case tC)
             "t": {"MLA_XCAP": "4096"}, "tg": {"MLA_XCAP": "4096", "MLA_XF": "global"},
             **{f"e{d}": {"MLA_XCAP": "4096", "MLA_XE_DBG": str(d)} for d in (1, 2, 3, 4, 8, 12, 15)}}   # g_mla_xexp fault bisection   # small-scratch twins for the staged tests
 
 
+TAIL = False
+
+
 def set_xcap(variant):
-    global XCAP, QW
+    global XCAP, QW, TAIL
+    TAIL = any(VARIANTS.get(x, {}).get("MLA_X_TAIL") == "1" for x in variant.split("+"))
     QW = int(next((VARIANTS[x]["MLA_XQ"] for x in variant.split("+") if x in VARIANTS and "MLA_XQ" in VARIANTS[x]), 4))
     XCAP = int(next((VARIANTS[x]["MLA_XCAP"] for x in variant.split("+") if x in VARIANTS and "MLA_XCAP" in VARIANTS[x]), 131072))
 CASES = [   # tag, context end (chunk = last t positions), tokens, layers
@@ -155,6 +160,24 @@ def tile_list(t, info):
         if p % 16 == 0 and all(info[i + k, 0] == r and info[i + k, 1] == p + k and info[i + k, 2] for k in range(16)):
             tl[1 + n] = i; n += 1
     tl[0] = n
+    # partial blocks of runs of 9+ live tokens (g_attention_fallback_list: the first live token of each 16-position block a run
+    # covers in part), listed from t / 2
+    parts, i = [], 0
+    while i < t:
+        if not info[i, 2]:
+            i += 1; continue
+        j = i
+        while j + 1 < t and info[j + 1, 2] and info[j + 1, 0] == info[i, 0] and info[j + 1, 1] == info[j, 1] + 1: j += 1
+        if j - i + 1 >= 9:
+            k = i
+            while k <= j:
+                p = info[k, 1]; end = min(j, k + (15 - p % 16))
+                if not (p % 16 == 0 and end - k == 15):
+                    parts.append(k)
+                k = end + 1
+        i = j + 1
+    if parts:
+        tl[t // 2] = len(parts); tl[t // 2 + 1:t // 2 + 1 + len(parts)] = parts
     return tl
 
 
@@ -173,12 +196,32 @@ def xlists(info, tiles, xmin=16):
     if cur: segs.append(cur)
     out = tiles.copy(); xq, xb = [], []
     base = nc = 0
+    t = len(info)
     for sg in segs:
-        nk = sg[-1][2] + 16
+        cnt = 0
+        if TAIL:   # g_mla_xlist's tail rule
+            tt, pp = sg[-1][0] + 16, sg[-1][2]
+            run, ok = True, True
+            for j in range(16):
+                k = tt + j
+                if k >= t: ok = False; break
+                is_run = run and info[k, 0] == sg[0][1] and info[k, 1] == pp + 16 + j and info[k, 2] != 0
+                run = is_run
+                cnt += int(is_run)
+                ok = ok and (is_run or info[k, 2] == 0)
+            if not (ok and 1 <= cnt <= 15):
+                cnt = 0
+        nk = sg[-1][2] + 16 + cnt
         nk64 = (nk + 63) // 64 * 64
+        ntq = len(sg) + (1 if cnt else 0)
         if base + nk64 <= XCAP and len(sg) >= xmin:
-            for q in range(0, len(sg), QW):
-                xq.append((sg[q][0], min(QW, len(sg) - q), base, sg[0][1]))
+            for q in range(0, ntq, QW):
+                xq.append((sg[0][0] + 16 * q, min(QW, ntq - q), base, sg[0][1]))
+            if cnt:   # the tail block leaves the partial list (last entry into its slot)
+                h = t // 2; pc = out[h]
+                for j in range(pc):
+                    if out[h + 1 + j] == sg[-1][0] + 16:
+                        out[h + 1 + j] = out[h + pc]; out[h] = pc - 1; break
             for k0 in range(0, nk64, 64):
                 xb.append((sg[0][1], k0, base + k0, nk))
             base += nk64
@@ -208,10 +251,12 @@ def make_inputs(pfx, rng, rows, toks, layers, ctx, keys_of=None, garbage=1000.0)
             arena[:, m[j] * 16:m[j] * 16 + seg.shape[1]] = seg
     t = len(toks)
     info = np.zeros((t, 4), np.int32)
-    for i, (r, p) in enumerate(toks): info[i] = (r, p, 1, 0)
+    for i, tk in enumerate(toks): info[i] = (tk[0], tk[1], tk[2] if len(tk) > 2 else 1, 0)
     qb = rng.standard_normal((t, QH * QB)).astype(np.float32)
     q = np.zeros((t, QH * D), np.float32)
     q.reshape(t, QH, D)[:, :, KL:] = rng.standard_normal((t, QH, 64)).astype(np.float32)
+    dead = info[:, 2] == 0   # padding: zero queries (the expanded kernels may compute them: a uniform average of the keys)
+    qb[dead] = 0.0; q[dead] = 0.0
     save(f"{pfx}_arena", arena.reshape(-1).view(np.int8)); save(f"{pfx}_orig", origins(maps)); save(f"{pfx}_info", info)
     save(f"{pfx}_qb", qb); save(f"{pfx}_q", q)
     return dict(t=t, info=info, qb=qb, q=q, lat=lat, pool=pool, alen=layers * pool * PB, olen=len(origins(maps)), ctx=ctx)
@@ -228,6 +273,9 @@ def reference(inp, kbd, vbd, layer):
         sel = np.nonzero(info[:, 0] == r)[0]
         if not len(sel): continue
         c = lat[layer].astype(np.float64)                      # (n, 576)
+        nmax = int(info[sel, 1].max()) + 1
+        if nmax > len(c):   # padding tokens past the row's keys (case tC): zero keys, as the scratch holds past nk
+            c = np.concatenate([c, np.zeros((nmax - len(c), c.shape[1]))])
         kn = c[:, :KL] @ kbd                                   # (QH, n, 128)
         vv = c[:, :KL] @ vbd.transpose(0, 2, 1)                # (QH, n, 128)
         pos = info[sel, 1]
@@ -331,6 +379,9 @@ def bench(variant, res):
 TESTS = [   # name, rows (keys per row), tokens (row, position), layers, layer, ctx
     ("tA", [480, 64], [(0, 160 + i) for i in range(320)] + [(1, i) for i in range(64)], 2, 1, 512),
     ("tB", [40000], [(0, 40000 - 256 + i) for i in range(256)], 1, 0, 40960),
+    # a 300-token run (18 whole tiles + a 12-token tail) then padding: the tail window (positions 288..303) is expanded under
+    # MLA_X_TAIL; the padding tokens carry the window's positions and zero queries; base (absorbed) skips this case
+    ("tC", [300], [(0, i) for i in range(300)] + [(0, 300 + i, 0) for i in range(4)] + [(0, 0, 0)] * 16, 1, 0, 512),
 ]
 
 
@@ -349,8 +400,13 @@ def tests(variants, kbd, vbd):
         for tok, nt, _, _ in xq:
             expanded[tok:tok + 16 * nt] = True
         for v in variants:
+            if name == "tC" and v == "base":
+                continue
             set_xcap(v)
             after, xq, xb = xlists(inp["info"], tiles)
+            expanded = np.zeros(t, bool)
+            for tok, nt, _, _ in xq:
+                expanded[tok:tok + 16 * nt] = True
             s = f"{name}{v.replace('+', '')}"
             e = ref.copy()
             if v != "base":
