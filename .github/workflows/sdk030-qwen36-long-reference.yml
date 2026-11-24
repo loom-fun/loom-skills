@@ -1,0 +1,70 @@
+name: DevLab Qwen3.6 matched 32K independent reference
+on:
+  push:
+    branches: [codex/sdk030-qwen36-r9700-recovery]
+    paths: [.github/workflows/sdk030-qwen36-long-reference.yml, .github/sdk030-qwen36-long-reference/**]
+permissions:
+  contents: read
+jobs:
+  radeon:
+    runs-on: [self-hosted, devlab-dispatch, radeon-r9700]
+    timeout-minutes: 100
+    env:
+      SLUG: ggml-org-Qwen3.6-35B-A3B-loom
+      SDK_GPU_KEY: radeon-r9700
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Pin frozen and repaired source for long-context comparison
+        shell: bash
+        run: |
+          set -euo pipefail
+          work=$(mktemp -d "$(dirname "$GITHUB_WORKSPACE")/sdk030-qwen36-golden.XXXXXX")
+          export WORK="$work"
+          echo "WORK=$WORK" >> "$GITHUB_ENV"
+          mkdir -p "$WORK/receipt"
+          python3 .github/scripts/ab_jobs.py --device "$SDK_GPU_KEY" --gates full --sdk-ab --old-sdk card --new-sdk 0.3.0 --old-rev 9a06cc9ba5ca93e2de3a5fa40b2ad4e415d191fe "$SLUG" > "$WORK/receipt/experiment.json"
+          python3 - <<'PY' >> "$GITHUB_ENV"
+          import json
+          import os
+          from pathlib import Path
+          path = Path(os.environ['WORK']) / 'receipt/experiment.json'
+          plan = json.loads(path.read_text())
+          job, = plan['jobs']
+          assert job['card'].endswith('@9a06cc9ba5ca93e2de3a5fa40b2ad4e415d191fe')
+          assert job['llamacpp'] == 'b1375'
+          job['variants'] = [variant for variant in job['variants'] if variant['name'] in ('fun', 'staging')]
+          job['llama_kv_rocm'] = 35000
+          job['steps'] = ['qwen36capture:fun', 'qwen36capture:staging', 'qwen36reference@rocm.np1.nodraft']
+          path.write_text(json.dumps(plan, indent=2) + '\n')
+          print('JOB=' + job['name'])
+          PY
+      - name: Compare matched 128-token replies against pinned llama.cpp ROCm
+        run: bash .github/scripts/devlab_perf.sh "$WORK/receipt/experiment.json" "$JOB"
+      - name: Retain benchmark replies and reference probabilities
+        if: always() && env.JOB != ''
+        shell: bash
+        run: cp -r "$WORK/$JOB/out" "$WORK/receipt/"
+      - name: Verify immutable variant digests and nine complete reference cases
+        shell: bash
+        run: |
+          cd "$WORK/receipt/out"
+          test "$(cat programs_sha256_fun.txt)" = 014ae6cd00d911b8c6e2c984661ed0b390aa78185fae433c502bd36ee1157951
+          test "$(cat programs_sha256_staging.txt)" = 367fe64b24bd638729d365c201eeb3e16cb5b099561d764dcfed7138fa9569f6
+          python3 -c 'import json; d=json.load(open("long-reference.json")); assert len(d)==9, d.keys()'
+      - uses: actions/upload-artifact@v4
+        if: always() && env.WORK != ''
+        with:
+          name: sdk030-qwen36-r9700-long-reference
+          path: ${{ env.WORK }}/receipt
+          if-no-files-found: error
+          retention-days: 30
+      - name: Release job disk
+        if: always() && env.WORK != ''
+        shell: bash
+        run: |
+          case "$WORK" in
+            "$(dirname "$GITHUB_WORKSPACE")"/sdk030-qwen36-golden.*) rm -rf -- "$WORK" ;;
+            *) exit 1 ;;
+          esac

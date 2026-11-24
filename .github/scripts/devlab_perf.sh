@@ -746,6 +746,22 @@ while [ "$qi" -lt "${#queue[@]}" ]; do
 import json,statistics as st; r=[json.loads(l) for l in open('$out/perf_$p1.jsonl')]
 k='decode_tps_32k' if '${p3:-}' else 'decode_tps'
 print('$p1', k, [x.get(k) for x in r if x.get(k)], 'median', round(st.median(v), 2) if (v := [x[k] for x in r if x.get(k)]) else 'n/a (no row served: beyond the served context)')");;
+    qwen36capture)
+      serve_alone "$p1" || { res[$s]=ERROR; continue; }
+      step "capture exact Qwen3.6 32K replies for $p1"
+      if "$T" "$here/.github/sdk030-qwen36-long-reference/review.py" capture "$url" "$D/$p1/pkg" "$out/long_$p1.json"; then
+        res[$s]=PASS
+      else
+        res[$s]=ERROR
+      fi;;
+    qwen36reference)
+      llama_up || { res[$s]=ERROR; continue; }
+      step "compare exact Qwen3.6 32K replies with llama.cpp"
+      if "$T" "$here/.github/sdk030-qwen36-long-reference/review.py" reference "$lurl" "$D/staging/pkg" "$out"; then
+        res[$s]=PASS
+      else
+        res[$s]=ERROR
+      fi;;
     qwen36decode)
       serve_alone "$p1" || { res[$s]=ERROR; continue; }
       step "matched Qwen3.6 decode $p1 session $p2"
