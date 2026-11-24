@@ -26,7 +26,7 @@ jobs:
           mkdir "$work/out"
           hostname > "$work/out/runner.txt"
           awk '/MemAvailable/ { print; if ($2 < 107421875) exit 1 }' /proc/meminfo | tee "$work/out/memavailable.txt"
-      - name: Build both pinned Nix runtimes and run the staged model probes
+      - name: Build both pinned Nix runtimes and verify warm and cold staged checkpoints
         shell: bash
         run: bash .github/sdk030-staged-cxx/run.sh
       - uses: actions/upload-artifact@v4

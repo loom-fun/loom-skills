@@ -13,8 +13,9 @@ EOF
 nix --version
 GUFO_RUNTIME=$(nix build -L --no-link --no-write-lock-file --no-update-lock-file --print-out-paths path:/gufo#loom-runtime)
 EXTENSION_RUNTIME=$(nix build -L --no-link --no-write-lock-file --no-update-lock-file --print-out-paths path:/extension#runtime)
+EXTENSION_PACKAGE=$(nix build -L --no-link --no-write-lock-file --no-update-lock-file --print-out-paths path:/extension#default)
 export GUFO_RUNTIME EXTENSION_RUNTIME
-nix path-info --json "$GUFO_RUNTIME" "$EXTENSION_RUNTIME" > /proof/nix-outputs.json
+nix path-info --json "$GUFO_RUNTIME" "$EXTENSION_RUNTIME" "$EXTENSION_PACKAGE" > /proof/nix-outputs.json
 
 toolchain='let
   f = builtins.getFlake "path:/gufo";
