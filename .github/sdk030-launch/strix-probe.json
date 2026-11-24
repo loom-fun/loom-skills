@@ -1,14 +1,14 @@
 [
   {
     "gpu": "strix-halo",
-    "slug": "ggml-org-Flint-loom",
-    "repo": "loom-fun-staging/ggml-org-Flint-loom",
-    "revision": "d9f8f69c9923dd1e343f73a837a29311ed1738be",
+    "slug": "ggml-org-LFM2.5-24B-A2B-loom",
+    "repo": "loom-fun-staging/ggml-org-LFM2.5-24B-A2B-loom",
+    "revision": "6e159b12fd85ff025617b95bec99927608396672",
     "device": "amdgpu://?completion_spin_ns=4294967295",
     "args": [
       "--pool_backing=fixed"
     ],
-    "model_id": "flint",
+    "model_id": "LiquidAI/LFM2.5-24B-A2B",
     "features": {
       "api": "yes",
       "audio": "unknown",
@@ -18,7 +18,7 @@
       "max_output_tokens": "yes",
       "reasoning_effort": "n/a",
       "sampling": "yes",
-      "speculative_decoding": "yes",
+      "speculative_decoding": "n/a",
       "thinking": "yes",
       "tool_calling": "yes"
     },
@@ -29,10 +29,10 @@
       "wheel_sha256": "6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f"
     },
     "files": {
-      "info.json": "750cbbd27125f4a7746c5306778877c22ce87d53240ae14ef62e246557df7efa",
-      "model.json": "8ea0ab75cfc5c522377454e393ae2c90e067dc97c108f29d9c34e6dca7bf74b7",
-      "model.json.lock": "fdf52625d05116b3b8b6a7d106f39e1400d63e16e6a5d399b9293d1f5adc97da",
-      "llm_config.json": "f7cd28e2db2a771e4c4fe2b5f55d6478603274fd47945ce03be81e831d791f63"
+      "info.json": "6d9c889752ecad6f1e72940dd9abe4154240346d6e68b92d35cdb6f966ba705e",
+      "model.json": "25ab1d6ae6c754513ac0554aabb95c526264209545f331e21cbf3943af1083eb",
+      "model.json.lock": "166b4b4797187808c2a0b1f205dd4a6588cb8287ad8fd35d18055ebb0c0db12b",
+      "llm_config.json": "b93960546facca6a14527af3629c65495ab90751c21f7536a0e2212b371c1f45"
     },
     "package_serve": null,
     "published_rows": [
@@ -47,7 +47,7 @@
       "streams4"
     ],
     "preset": "chat",
-    "context_tokens": 262144,
+    "context_tokens": 131072,
     "execution_rows": 4,
     "focus": [
       "functional"

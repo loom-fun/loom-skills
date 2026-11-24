@@ -13,7 +13,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        row: ${{ fromJSON('[{"slug":"ggml-org-Flint-loom","preset":"chat"}]') }}
+        row: ${{ fromJSON('[{"slug":"ggml-org-LFM2.5-24B-A2B-loom","preset":"chat"}]') }}
     runs-on: [self-hosted, devlab-dispatch, strix-halo, Linux]
     timeout-minutes: 60
     env:
