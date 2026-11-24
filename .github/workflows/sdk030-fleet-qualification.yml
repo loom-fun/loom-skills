@@ -14,10 +14,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - slug: ggml-org-Qwen3-Coder-30B-A3B-Instruct-loom
+          - slug: unsloth-Qwen3-30B-A3B-Instruct-2507-loom
             device: radeon-r9700
             labels: '["self-hosted","devlab-dispatch","radeon-r9700"]'
-            correctness: '{"run":45275710722,"job":138046837164,"artifact":14881951432,"digest":"sha256:e9f2a8505b66d5f51d9f970f82514d56b3e665747da352c7ab6e645035c20fca","production":"loom-fun/ggml-org-Qwen3-Coder-30B-A3B-Instruct-loom@90f4d2874d066ab7ad0c16daab9a383fa55f47a5","generator":"3adfe7b7b6e68f753042e9f89b318e29a6088579"}'
+            correctness: '{"run":45275710722,"job":138046836821,"artifact":14881479311,"digest":"sha256:05e1aeebefa29fca0f1360540421aa8bc7d0fa72ab499f3eddd187c4f63b7eed","production":"loom-fun/unsloth-Qwen3-30B-A3B-Instruct-2507-loom@c6598438289b2cbb1543e73e90b749136c888797","generator":"3adfe7b7b6e68f753042e9f89b318e29a6088579"}'
     runs-on: ${{ fromJSON(matrix.labels) }}
     timeout-minutes: 240
     env:
