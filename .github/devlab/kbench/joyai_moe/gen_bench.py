@@ -24,6 +24,8 @@ VARIANTS = {   # name -> environment of the kit generators
     # pf2 MoE sub-lane
     "dq": dict(IQ4, GEMM_T64_G32="1", MOE_CW="1", MOE_CW_SWAP="1", MOE_CW_DQ="1"),   # cws, cheaper dequant (bit-identical)
     "xpair": dict(IQ4, GEMM_T64_G32="1", MOE_CW="1", MOE_CW_SWAP="1", MOE_CW_DQ="1", MOE_CW_PAIR="1"),   # dq, no select after the exchange
+    "ws": dict(IQ4, GEMM_T64_G32="1", MOE_CW="1", MOE_CW_SWAP="1", MOE_CW_DQ="1", MOE_CW_WS="1"),   # dq, weight-stationary pair tiles
+    "xwsp": dict(IQ4, GEMM_T64_G32="1", MOE_CW="1", MOE_CW_SWAP="1", MOE_CW_DQ="1", MOE_CW_PAIR="1", MOE_CW_WS="1"),   # ws + pair
 }
 UNTESTED = {"cwf"}   # numerics-moving variants (covered by the model gates)
 TILE_OF = {"t128": 128}   # variants on another expert bucket (timing only: their rows are laid out differently)

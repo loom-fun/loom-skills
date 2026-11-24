@@ -8,12 +8,16 @@
       "gen_variants": [
         "cws",
         "dq",
-        "xpair"
+        "xpair",
+        "ws",
+        "xwsp"
       ],
       "files": [
         "bench_cws.loom",
         "bench_dq.loom",
-        "bench_xpair.loom"
+        "bench_xpair.loom",
+        "bench_ws.loom",
+        "bench_xwsp.loom"
       ],
       "tests": [
         "test.loom"
