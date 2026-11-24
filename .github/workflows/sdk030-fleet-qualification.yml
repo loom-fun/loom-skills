@@ -14,10 +14,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - slug: unsloth-Qwen3.5-4B-loom
+          - slug: bartowski-Qwen3.8-27B-loom
             device: radeon-r9700
             labels: '["self-hosted","devlab-dispatch","radeon-r9700"]'
-            pinned_programs: '6a47f53f1466bb7cad142b6b2874ccf9c5ee8b96aa77490155252e5d8d7c8f62'
+            correctness: '{"run":45275710722,"job":138046833634,"artifact":14879821783,"digest":"sha256:2a86fa1892b8af06d248e7c182410f93a93439f090cb3778e7d89b509c6d9bd2","production":"loom-fun/bartowski-Qwen3.8-27B-loom@a73a11eba342bde5e2ab489b2687cf731b9c7128","generator":"3adfe7b7b6e68f753042e9f89b318e29a6088579"}'
     runs-on: ${{ fromJSON(matrix.labels) }}
     timeout-minutes: 240
     env:
