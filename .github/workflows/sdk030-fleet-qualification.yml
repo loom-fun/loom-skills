@@ -14,9 +14,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - slug: unsloth-Qwen3-4B-Instruct-2507-loom
-            device: strix-halo
-            labels: '["self-hosted","devlab-dispatch","strix-halo","Linux"]'
+          - slug: nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom
+            device: radeon-r9700
+            labels: '["self-hosted","devlab-dispatch","radeon-r9700"]'
+            correctness: '{"run":45275710722,"job":138046833568,"artifact":14877263375,"digest":"sha256:ccf23f4b9d65dcea49329d8785835808620bd1a371125e5b3cc7430445ad1893","production":"loom-fun/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom@3f36ed722f6c8bdb51d90526bc05e03a05f24dbf","generator":"3adfe7b7b6e68f753042e9f89b318e29a6088579"}'
     runs-on: ${{ fromJSON(matrix.labels) }}
     timeout-minutes: 240
     env:
