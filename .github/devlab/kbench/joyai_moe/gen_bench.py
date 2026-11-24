@@ -21,8 +21,17 @@ VARIANTS = {   # name -> environment of the kit generators
     "cw": dict(IQ4, GEMM_T64_G32="1", MOE_CW="1"),   # gen_moe_cw: column waves, live 16-row fragments only
     "cws": dict(IQ4, GEMM_T64_G32="1", MOE_CW="1", MOE_CW_SWAP="1"),   # cw, half-waves dequantize half a group each + xor-16 swap
     "cwf": dict(IQ4, GEMM_T64_G32="1", MOE_CW="1", MOE_CW_SWAP="1", MOE_CW_F16O="1"),   # cws + f16 activations, scale 1 (timing only)
+    # pf2 MoE sub-lane
+    "dq": dict(IQ4, GEMM_T64_G32="1", MOE_CW="1", MOE_CW_SWAP="1", MOE_CW_DQ="1"),   # cws, cheaper dequant (bit-identical)
+    "xpair": dict(IQ4, GEMM_T64_G32="1", MOE_CW="1", MOE_CW_SWAP="1", MOE_CW_DQ="1", MOE_CW_PAIR="1"),   # dq, no select after the exchange
+    "ws": dict(IQ4, GEMM_T64_G32="1", MOE_CW="1", MOE_CW_SWAP="1", MOE_CW_DQ="1", MOE_CW_WS="1"),   # dq, weight-stationary pair tiles
+    "dqz": dict(IQ4, GEMM_T64_G32="1", MOE_CW="1", MOE_CW_SWAP="1", MOE_CW_DQ="1", MOE_CW_ZS="1"),   # dq + zero-staged padding rows
+    "pf2": dict(IQ4, GEMM_T64_G32="1", MOE_CW="1", MOE_CW_SWAP="1", MOE_CW_DQ="1", MOE_CW_PF2="1"),   # dq, weights 2 chunks ahead
+    "pf2z": dict(IQ4, GEMM_T64_G32="1", MOE_CW="1", MOE_CW_SWAP="1", MOE_CW_DQ="1", MOE_CW_PF2="1", MOE_CW_ZS="1"),
+    "nodq": dict(IQ4, GEMM_T64_G32="1", MOE_CW="1", MOE_CW_SWAP="1", MOE_CW_DQ="1", MOE_CW_NODQ="1"),   # probe: no codebook/scale (wrong values)
+    "xwsp": dict(IQ4, GEMM_T64_G32="1", MOE_CW="1", MOE_CW_SWAP="1", MOE_CW_DQ="1", MOE_CW_PAIR="1", MOE_CW_WS="1"),   # ws + pair
 }
-UNTESTED = {"cwf"}   # numerics-moving variants (covered by the model gates)
+UNTESTED = {"cwf", "nodq"}   # numerics-moving variants (covered by the model gates)
 TILE_OF = {"t128": 128}   # variants on another expert bucket (timing only: their rows are laid out differently)
 VARIANTS.update(json.loads(os.environ.get("JOY_MOE_VARIANTS", "{}")))
 BLOCK = 136   # IQ4_XS bytes per 256 values
@@ -184,12 +193,13 @@ def main():
         if v in (ref, "base") or v in TILE_OF or v in UNTESTED:   # base (the value helper) rounds differently; it is covered by the model's kernel tests
             continue
         tol = "atol(0.0) rtol(0.0)" if not v.startswith("x") else "atol(1.0e-3) rtol(1.0e-3)"   # x*: variants that reorder sums
-        tparts.append(f"check.case public @t_{v} {{\n" + case(T, None, None) +
+        for nm, tl in [(f"t_{v}", tol)] + ([(f"t_{v}_bitexact", "atol(0.0) rtol(0.0)")] if v.startswith("x") else []):   # x*: also say whether bit-exact (informational)
+          tparts.append(f"check.case public @{nm} {{\n" + case(T, None, None) +
                       f"  %g0 = check.generate.fill value(0.0) : tensor<{mr}x{F}xf32>\n  %d0 = check.generate.fill value(0.0) : tensor<{mr}x{H}xf32>\n"
                       f"  %g1 = check.generate.fill value(0.0) : tensor<{mr}x{F}xf32>\n  %d1 = check.generate.fill value(0.0) : tensor<{mr}x{H}xf32>\n" +
                       launches(T, f"k_ggu_{ref}", f"k_gdn_{ref}", "%g0", "%d0") + launches(T, f"k_ggu_{v}", f"k_gdn_{v}", "%g1", "%d1") +
-                      f"  check.expect.approximate actual(%g1) expected(%g0) {tol} nan(different) : tensor<{mr}x{F}xf32>, tensor<{mr}x{F}xf32>\n"
-                      f"  check.expect.approximate actual(%d1) expected(%d0) {tol} nan(different) : tensor<{mr}x{H}xf32>, tensor<{mr}x{H}xf32>\n  check.return\n}}\n")
+                      f"  check.expect.approximate actual(%g1) expected(%g0) {tl} nan(different) : tensor<{mr}x{F}xf32>, tensor<{mr}x{F}xf32>\n"
+                      f"  check.expect.approximate actual(%d1) expected(%d0) {tl} nan(different) : tensor<{mr}x{H}xf32>, tensor<{mr}x{H}xf32>\n  check.return\n}}\n")
     open(os.path.join(out, "test.loom"), "w").write("\n".join(tparts))
     neg = [helpers(kit), texts[ref], f"check.case public @t_negative {{\n" + case(T, None, None) +
            f"  %g0 = check.generate.fill value(0.0) : tensor<{mr}x{F}xf32>\n  %d0 = check.generate.fill value(0.0) : tensor<{mr}x{H}xf32>\n" +
