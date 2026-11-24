@@ -7,25 +7,17 @@
    "gen": "mla_xpf/gen_bench.py",
    "gen_variants": [
     "x",
-    "sv",
-    "sp",
-    "sk",
-    "spv",
-    "skp",
-    "anobar",
-    "anofrag",
-    "aboth"
+    "s4",
+    "s4f",
+    "aw",
+    "sp"
    ],
    "files": [
     "bench_x.loom",
-    "bench_sv.loom",
-    "bench_sp.loom",
-    "bench_sk.loom",
-    "bench_spv.loom",
-    "bench_skp.loom",
-    "bench_anobar.loom",
-    "bench_anofrag.loom",
-    "bench_aboth.loom"
+    "bench_s4.loom",
+    "bench_s4f.loom",
+    "bench_aw.loom",
+    "bench_sp.loom"
    ],
    "tests": [
     "test.loom"

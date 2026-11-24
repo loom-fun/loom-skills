@@ -785,7 +785,7 @@ kernel.def export("g_mla_xflash") @g_mla_xflash(%count_buffer: buffer) {{
     %vr{d}_v = index.add %vd{d}, %lane_col : index
     %vr{d} = index.assume %vr{d}_v [range(%vr{d}_v, 0, 127)] : index""")
     TR = set(t for t in os.environ.get("MLA_XF_T", "").split(",") if t)   # xflash trims (see xflash docstring)
-    assert TR <= {"diag", "fma", "lazy", "u2"}, TR
+    assert TR <= {"diag", "fma", "lazy", "u2", "s4"}, TR   # s4: two independent 6-chunk S accumulation chains per half
     diag, fma, lazy = "diag" in TR, "fma" in TR, "lazy" in TR
     u2 = "u2" in TR   # two 32-key blocks per loop step (the second clamped to the last block and fully masked past the end)
     assert not (u2 and (diag or not lds))
@@ -872,8 +872,14 @@ kernel.def export("g_mla_xflash") @g_mla_xflash(%count_buffer: buffer) {{
                     a(f"""      %qlr{hh}_{c} = vector.load %ql_view[%ql_r, {16 * (c - (NCH - QL))}] : view<{QW * 16}x{QLW}xf16> -> vector<16xf16>
       {qf} = vector.fragment<rhs> %qlr{hh}_{c} shape [%c16, %c16] : vector<16xf16>""")
                 kreg = f"%kr{hh}_0" if ("nofrag" in ABL and c > 0) else f"%kr{hh}_{c}"
+                s4 = "s4" in TR
+                if s4 and c == NCH // 2:
+                    prev = "%init"
+                out = f"%s{hh}_{c}b" if (s4 and c == NCH - 1) else f"%s{hh}_{c}"
                 a(f"""      %kfr{hh}_{c} = vector.fragment<lhs> {kreg} shape [%c16, %c16] : vector<16xf16>
-      %s{hh}_{c} = vector.mma %kfr{hh}_{c}, {qf}, {prev} : vector<16xf16>, vector<16xf16>, vector<8xf32>""")
+      {out} = vector.mma %kfr{hh}_{c}, {qf}, {prev} : vector<16xf16>, vector<16xf16>, vector<8xf32>""")
+                if s4 and c == NCH - 1:
+                    a(f"""      %s{hh}_{c} = vector.addf %s{hh}_{NCH // 2 - 1}, {out} : vector<8xf32>""")
                 prev = f"%s{hh}_{c}"
             raw = f"%s{hh}_{NCH - 1}"
             if fma or lazy:   # max over raw scores (scale > 0), scaled once as a scalar
