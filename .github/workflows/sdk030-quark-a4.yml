@@ -52,18 +52,18 @@ jobs:
           experiment = {"name": "quark-a4", "card": production, "runner": "r9700", "sdk": "0.3.0",
                         "memory_bytes": 34000000000, "memory_bytes_r9700": 34000000000, "require_preset_r9700": True,
                         "reference_cache": ".github/sdk030-quark-refs.tgz",
-                        "variants": [dict(variant, name=name) for name in ("half", "a4")],
-                        "steps": ["gates:half:quick", "gates:a4:quick"]}
+                        "variants": [dict(variant, name=name) for name in ("half", "a4", "a4bf16")],
+                        "steps": ["gates:half:quick", "gates:a4:quick", "gates:a4bf16:quick"]}
           (work / "receipt/experiment.json").write_text(json.dumps({"jobs": [experiment]}, indent=2) + "\n")
 
           harness = Path(".github/scripts/devlab_perf.sh")
           source = harness.read_text()
           hook = '  # ablation: every kernel.launch in PROGRAM matching REGEX'
           assert source.count(hook) == 1
-          source = source.replace(hook, '''  if [ "$v" = a4 ]; then
-              sha256sum "$pkg/program/llm.loom" > "$WORK/receipt/source-before-a4.txt"
-              cp "$pkg/program/llm.loom" "$WORK/receipt/a4-before.loom"
-              "$T" - "$WORK/receipt" "$pkg" <<'PATCH_GEN' || exit 1
+          source = source.replace(hook, '''  if [ "$v" = a4 ] || [ "$v" = a4bf16 ]; then
+              sha256sum "$pkg/program/llm.loom" > "$WORK/receipt/source-before-$v.txt"
+              cp "$pkg/program/llm.loom" "$WORK/receipt/$v-before.loom"
+              "$T" - "$WORK/receipt" "$pkg" "$v" <<'PATCH_GEN' || exit 1
           import json
           from pathlib import Path
           import sys
@@ -73,12 +73,13 @@ jobs:
           package = Path(sys.argv[2])
           path = package / "program/llm.loom"
           original = path.read_text()
-          modified = apply(original, json.loads((package / "llm_config.json").read_text()))
+          config = json.loads((package / "llm_config.json").read_text())
+          modified = apply(original, config, round_outputs=sys.argv[3] == "a4bf16")
           assert modified != original and "@g_quark_a4_f16[" in modified
           path.write_text(modified)
           PATCH_GEN
               grep -Fq 'kernel.launch @g_quark_a4_f16[' "$pkg/program/llm.loom" || exit 1
-              cp "$pkg/program/llm.loom" "$WORK/receipt/a4-after.loom"
+              cp "$pkg/program/llm.loom" "$WORK/receipt/$v-after.loom"
             fi
           ''' + hook)
           hook = '      nref1=$("$T" "$B/reference_cache.py" count "$D/$p1/bench"'
@@ -98,21 +99,72 @@ jobs:
           vision.write_text(source)
           PY
           bash -n .github/scripts/devlab_perf.sh
-      - name: Measure the original chart gate and passing control on both arms
+      - name: Measure the original chart gate and wide control on all three arms
         shell: bash
         run: bash .github/scripts/devlab_perf.sh "$WORK/receipt/experiment.json" quark-a4
+      - name: Capture the native first-token scores for all exact programs
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL -H "Authorization: Bearer $GH_TOKEN" \
+            'https://api.github.com/repos/loom-fun/loom-skills/actions/artifacts/14888387655/zip' \
+            -o "$WORK/embed.zip"
+          echo "e49f5fe2e69d09a5f79fb36f6928bd68236f1c4132557d1e348b65b5be8b1764  $WORK/embed.zip" | sha256sum -c -
+          unzip -q "$WORK/embed.zip" 'embed/gufo/*' -d "$WORK"
+          lib="$WORK/embed/gufo/lib"
+          chmod +x "$lib/ld-linux-x86-64.so.2"
+          echo "e61e489514807022bb689d96261b1dff83daec5d7209b99370fe3e1a333bf706  $lib/libloom_text_embed.so" | sha256sum -c -
+          curl -fsSL 'https://raw.githubusercontent.com/loom-fun/gufo/bccf173b2664432d03d068413a91639bdd6242f7/src/models/loom/embed/loom_text_embed.h' -o "$WORK/loom_text_embed.h"
+          git show "$GITHUB_SHA":.github/scripts/sdk030_quark_chart_logits.c > "$WORK/chart-logits.c"
+          gcc -std=c17 -Wall -Wextra -Werror -I "$WORK" "$WORK/chart-logits.c" \
+            -Wl,--allow-shlib-undefined -L "$lib" -lloom_text_embed -o "$WORK/chart-logits"
+          export PYTHONPATH="$GITHUB_WORKSPACE/skills/loom-benchmark/scripts"
+          "$WORK/loom-sdk-0.3.0/.tools/bin/python" - <<'PY'
+          import json
+          import os
+          import subprocess
+          from pathlib import Path
+
+          import numpy as np
+          from vision_golden import builtin_images, data_url
+
+          work = Path(os.environ["WORK"])
+          lib = work / "embed/gufo/lib"
+          receipt = work / "receipt"
+          report = {}
+          for fixture in ("chart", "wide"):
+              image, question = builtin_images()[fixture]
+              request = work / f"{fixture}.json"
+              request.write_text(json.dumps({"model": "qwen3.8-27b-mxfp4", "messages": [
+                  {"role": "user", "content": [{"type": "image_url", "image_url": {"url": data_url(image)}},
+                                               {"type": "text", "text": question}]}
+              ], "temperature": 0, "enable_thinking": False, "max_tokens": 1, "logits": True}))
+              rows = {}
+              for arm in ("half", "a4", "a4bf16"):
+                  output = receipt / f"{arm}-{fixture}.f32"
+                  pkg = work / "quark-a4" / arm / "pkg" / "model.json"
+                  args = (lib / "ld-linux-x86-64.so.2", "--library-path", lib, work / "chart-logits", pkg, "chat", request, output)
+                  metadata = json.loads(subprocess.check_output(args, text=True).splitlines()[-1])
+                  logits = np.fromfile(output, dtype=np.float32)
+                  assert len(logits) == metadata["vocabulary"] and not np.isnan(logits).any()
+                  assert logits[metadata["device_token"]] == logits.max()
+                  metadata["the_minus_based_nats"] = float(logits[760] - logits[27775])
+                  rows[arm] = metadata
+              report[fixture] = rows
+              (receipt / "first-token-comparison.json").write_text(json.dumps(report, indent=2) + "\n")
+          PY
       - name: Preserve measurements and check the reference identity
         if: always() && env.WORK != ''
         shell: bash
         run: |
           set -euo pipefail
           cp -r "$WORK/quark-a4/out" "$WORK/receipt/"
-          for variant in half a4; do
+          for variant in half a4 a4bf16; do
             sha256sum "$WORK/quark-a4/$variant/pkg/program/llm.loom" >> "$WORK/receipt/llm-source-digests.txt"
             grep '^VISION_RESULT ' "$WORK/receipt/out/gates_$variant/gates_vision.log"
             cat "$WORK/receipt/out/gates_$variant/reference_cache.txt"
           done
-          test "$(cut -d' ' -f1 "$WORK/receipt/llm-source-digests.txt" | sort -u | wc -l)" = 2
+          test "$(cut -d' ' -f1 "$WORK/receipt/llm-source-digests.txt" | sort -u | wc -l)" = 3
       - uses: actions/upload-artifact@v4
         if: always() && env.WORK != ''
         with:
