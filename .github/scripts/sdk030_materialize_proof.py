@@ -97,6 +97,10 @@ def inspect_links(work):
         result["cross_filesystem"] = "unavailable for probe"
     denied = work / "links-denied"
     progress = mock.Mock()
+    if os.name == "nt" and not result["administrator"]:
+        with mock.patch.object(fetch_filesystem.os, "link", side_effect=OSError(errno.EXDEV, "cross-filesystem")):
+            shared = fetch._try_share(source, work / "stock-user-link", automatic=True, progress=progress)
+        result["restricted_user_after_exdev"] = "readable symlink" if shared else "warn and copy"
     with mock.patch.object(fetch_filesystem.os, "link", side_effect=OSError(errno.EXDEV, "cross-filesystem")), \
             mock.patch.object(fetch_filesystem.os, "symlink", side_effect=OSError(errno.EPERM, "no symlink privilege")):
         assert not fetch._try_share(source, denied, automatic=True, progress=progress)
@@ -112,10 +116,10 @@ def inspect_links(work):
     return result
 
 
-def main():
-    output = Path("materialize-proof").resolve()
+def main(workspace):
+    output = workspace / "materialize-proof"
     output.mkdir(exist_ok=True)
-    scratch = Path(os.environ["GITHUB_WORKSPACE"]).resolve().parent
+    scratch = workspace.parent
     with tempfile.TemporaryDirectory(prefix="sdk030-materialize-", dir=scratch) as tmp:
         work = Path(tmp)
         bin_dir = work / "venv" / ("Scripts" if os.name == "nt" else "bin")
@@ -157,6 +161,7 @@ def main():
         assert auto["weight_link"] in ("hardlink", "symlink") and copied["weight_link"] == "copy", result
         assert all(auto[k] == copied[k] for k in ("weight_sha256", "model_json_sha256", "programs", "chat")), result
         assert "paris" in auto["chat"]["answer"].lower() and auto["chat"]["finish"] == "stop", result
+        (output / "passed.txt").write_text("full fetch and serve parity passed\n", encoding="utf-8")
         print(json.dumps({"auto_weight": auto["weight_link"], "copy_weight": copied["weight_link"],
                           "chat": auto["chat"], "link_probes": result["link_probes"]}))
 
@@ -164,5 +169,8 @@ def main():
 if __name__ == "__main__":
     if len(sys.argv) == 3 and sys.argv[1] == "--link-probes":
         print(json.dumps(inspect_links(Path(sys.argv[2]))))
+    elif len(sys.argv) == 3 and sys.argv[1] == "--stock-workspace":
+        assert os.name == "nt" and not ctypes.windll.shell32.IsUserAnAdmin(), "expected a non-administrator Windows token"
+        main(Path(sys.argv[2]).resolve())
     else:
-        main()
+        main(Path(os.environ["GITHUB_WORKSPACE"]).resolve())

@@ -6,17 +6,8 @@ on:
 permissions:
   contents: read
 jobs:
-  fetch:
-    name: ${{ matrix.platform }} fetch and serve
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - platform: linux
-            labels: '["Linux","strix-halo","devlab-dispatch"]'
-          - platform: windows
-            labels: '["Windows","strix-halo","devlab-dispatch"]'
-    runs-on: ${{ fromJSON(matrix.labels) }}
+  stock-windows:
+    runs-on: [Windows, strix-halo, devlab-dispatch]
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
@@ -25,10 +16,26 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Compare the official SDK wheel's two fetch modes
-        run: python .github/scripts/sdk030_materialize_proof.py
+      - name: Compare both fetch modes with a basic-user token
+        shell: pwsh
+        run: |
+          $script = Join-Path $env:GITHUB_WORKSPACE '.github/scripts/sdk030_materialize_proof.py'
+          $python = (Get-Command python).Source
+          $arguments = '"{0}" "{1}" --stock-workspace "{2}"' -f $python, $script, $env:GITHUB_WORKSPACE
+          & runas.exe /trustlevel:0x20000 $arguments
+          if ($LASTEXITCODE -ne 0) { throw "Windows Basic User launch failed ($LASTEXITCODE)" }
+          $path = Join-Path $env:GITHUB_WORKSPACE 'materialize-proof/result.json'
+          $passed = Join-Path $env:GITHUB_WORKSPACE 'materialize-proof/passed.txt'
+          $deadline = (Get-Date).AddMinutes(8)
+          while (-not (Test-Path -LiteralPath $passed) -and (Get-Date) -lt $deadline) { Start-Sleep -Seconds 2 }
+          if (-not (Test-Path -LiteralPath $passed)) { throw 'Basic User proof did not complete' }
+          $result = Get-Content -Raw -LiteralPath $path | ConvertFrom-Json
+          if ($result.link_probes.administrator -ne $false -or $result.errors.Count -ne 0) { throw 'Basic User proof failed' }
+          if ($result.modes.auto.weight_link -ne 'hardlink' -or $result.modes.copy.weight_link -ne 'copy') { throw 'Unexpected link behavior' }
+          if ($result.modes.auto.chat.answer -ne $result.modes.copy.chat.answer -or $result.modes.auto.chat.finish -ne 'stop') { throw 'Replies differ' }
+          Get-Content -LiteralPath $path
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: materialize-${{ matrix.platform }}
+          name: materialize-windows-basic-user
           path: materialize-proof
