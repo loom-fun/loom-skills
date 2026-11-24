@@ -853,13 +853,16 @@ def render(d):
           f"[loom-skills]({SKILLS_URL}) workflow. {LEARN_MORE}", ""]
 
     pin = required_sdk(facts, versions, sources)
+    fetch_output = [f"--output={output}"]
+    if not (pin and pin.get("hrx_loom") == "0.3.0" and pin.get("source") in ("pypi", "release")):
+        fetch_output.insert(0, "--materialize=copy")
 
     def fetch_for(g):   # the fetch command of a GPU: its preset (the R9700's own when the package has one)
         pr = recorded_quick_start(info, facts, g)["preset"]   # always named: a preset added later must not break a published command
         if sdk02(pin):   # SDK 0.2: SOURCE is PROVIDER:OWNER/REPO[:PRESET]; the revision is resolved and pinned by loom-fetch
-            return " ".join(["loom-fetch", f"huggingface:{info['repo']}" + (f":{pr}" if pr else ""), "--materialize=copy", f"--output={output}"])
+            return " ".join(["loom-fetch", f"huggingface:{info['repo']}" + (f":{pr}" if pr else ""), *fetch_output])
         return " ".join(["loom-fetch", f"{HF}/{info['repo']}/resolve/main/model.json"] + ([f"--preset={pr}"] if pr else [])
-                        + ["--materialize=copy", f"--output={output}"])
+                        + fetch_output)
     api = ("answers OpenAI-style `/v1/chat/completions` requests" if kind == "chat"
            else f"answers SystemOne decision requests at `{feats['api']['value']['endpoint']}`")
     if release(pin):   # a GitHub release is not on PyPI: install the wheel by URL, checked against its sha256
