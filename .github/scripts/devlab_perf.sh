@@ -64,7 +64,7 @@
 # Job/experiment "env": {"NAME": "value"}: environment for every step.
 # Job "thinking": off (default) | on: chat_template_kwargs.enable_thinking sent to BOTH engines in every step.
 # Steps S: ab:R[:on|off]        every variant in ONE loom-serve (small context), ab_decode.py R interleaved rounds
-#          perf:V:N:ctx         perf.py --decode-ctx 16000,128000 (decode_tps_16k / decode_tps_128k rows)
+#          perf:V:N:ctx         perf.py --decode-ctx 16000,124000 (decode_tps_16k / decode_tps_128k rows)
 #          perf:V:N[:long]      V served alone with its own settings: perf.py N times (+ --long); N runs = one session (its value: the median of
 #                               its samples); one run per session = perf:V:1 repeated (a round each). Job "repeat_rows": R (fast models: 3) adds --repeat-rows R
 #          profile:V[:LIST]     per-kernel device time of one prefill (pf2k, pf8k) and one drafted decode (dec): V served per scenario with --print_device_statistics
@@ -739,13 +739,13 @@ while [ "$qi" -lt "${#queue[@]}" ]; do
       serve_alone "$p1" || { res[$s]=ERROR; continue; }
       step "perf $p1 x $p2 ${p3:-} (thinking $TH)"
       for i in $(seq 1 "$p2"); do
-        (cd "$out" && "$T" "$B/perf.py" "$url" "$p1" --model "$cardid" --no-campaign --thinking "$TH" --repeat-rows "$rrows" --log "perf_$p1.jsonl" $([ "${p3:-}" = ctx ] && echo --decode-ctx 16000,128000 || echo ${p3:+--long}) | tail -1)
+        (cd "$out" && "$T" "$B/perf.py" "$url" "$p1" --model "$cardid" --no-campaign --thinking "$TH" --repeat-rows "$rrows" --log "perf_$p1.jsonl" $([ "${p3:-}" = ctx ] && echo --decode-ctx 16000,124000 || echo ${p3:+--long}) | tail -1)
       done
       echo "{\"session_end\": \"$p1\"}" >> "$out/perf_$p1.jsonl"   # one serve session ends (strix_ab_compare.py: per-session medians)
       "$T" "$here/.github/scripts/ab_decode.py" "$url" "$cardid" --rounds 2 --think "$TH" --log "$out/tps_$p1.jsonl" | grep SUMMARY
       res[$s]=$("$T" -c "
 import json,statistics as st; r=[json.loads(l) for l in open('$out/perf_$p1.jsonl')]
-k='decode_tps_128k' if '${p3:-}' == 'ctx' else 'decode_tps_32k' if '${p3:-}' else 'decode_tps'
+k='decode_tps_124k' if '${p3:-}' == 'ctx' else 'decode_tps_32k' if '${p3:-}' else 'decode_tps'
 print('$p1', k, [x.get(k) for x in r if x.get(k)], 'median', round(st.median(v), 2) if (v := [x[k] for x in r if x.get(k)]) else 'n/a (no row served: beyond the served context)')");;
     profile|trace|observe)   # profile:V[:SCENARIOS] (comma list of probe,pf2k,pf8k,dec; default all but probe): V served alone per scenario with --print_device_statistics (the HAL's
                # per-function dispatch statistics, printed at shutdown); one session per scenario, so each table holds only that scenario's requests

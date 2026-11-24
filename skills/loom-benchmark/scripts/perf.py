@@ -173,7 +173,11 @@ if a.decode_ctx:
     out["nonce"] = nonce
     for n in (int(x) for x in a.decode_ctx.split(",") if x):
         k = f"decode_tps_{n // 1000}k"
-        content = f"[{nonce} dctx{n}] Read this documentation, then write a long essay about it.\n\n" + doc(n)
+        full, rest = divmod(n, 32000)   # beyond the stored 32k document: copies of it (and a byte-proportional prefix), each part numbered
+        d32 = doc(32000)
+        parts = [doc(n)] if n in (1000, 2000, 8000, 16000, 32000) else \
+            [f"[part {i + 1}]\n" + d32 for i in range(full)] + ([f"[part {full + 1}]\n" + d32[:len(d32) * rest // 32000]] if rest else [])
+        content = f"[{nonce} dctx{n}] Read this documentation, then write a long essay about it.\n\n" + "\n\n".join(parts)
         v = long_request(k, decode, k, content, 128)
         out[k] = round(v, 2) if v is not None else None
         print(k, out[k], flush=True)

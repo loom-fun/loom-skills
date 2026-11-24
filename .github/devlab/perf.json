@@ -9,7 +9,7 @@
  },
  "jobs": [
   {
-   "name": "joyai-decode2",
+   "name": "joyai-decode3",
    "variants": [
     {
      "name": "base",
@@ -19,21 +19,35 @@
     {
      "name": "dec2",
      "build": {}
+    },
+    {
+     "name": "u1",
+     "build": {
+      "MOE_DN_U": "1"
+     }
+    },
+    {
+     "name": "rf0",
+     "build": {
+      "MOE_ROUTE_FUSE": "0"
+     }
     }
    ],
    "steps": [
-    "ktest:dec2",
     "perf:base:1",
     "perf:dec2:1",
+    "perf:u1:1",
+    "perf:rf0:1",
+    "perf:rf0:1",
+    "perf:u1:1",
     "perf:dec2:1",
     "perf:base:1",
     "c4:dec2",
-    "c4:base",
-    "c4:base",
+    "c4:u1",
+    "c4:u1",
     "c4:dec2",
     "perf:dec2:1:ctx",
     "perf:base:1:ctx",
-    "profile:dec2:dec",
     "gates:dec2:dev"
    ]
   }
