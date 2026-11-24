@@ -1,0 +1,77 @@
+name: JoyAI exact staged native-context loopback
+on:
+  push:
+    branches: [codex/sdk030-joyai-loopback]
+    paths: [.github/workflows/sdk030-joyai-loopback.yml]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: [self-hosted, devlab-dispatch, strix-halo, Linux]
+    timeout-minutes: 27
+    env:
+      MODEL_REPO: loom-fun-staging/jdopensource-JoyAI-LLM-Flash-loom
+      MODEL_REVISION: 364e26fac2a4c45293c3e002bab80a4c1b42fc72
+      PROGRAMS_SHA256: ded93bd916d2b4aaad1731cb5c6bb1feb832a68323c5ebffa47e2af9d3869bde
+      NO_PROXY: 127.0.0.1,localhost
+      no_proxy: 127.0.0.1,localhost
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 53622d66eadc1759e665165d8550d2611cc91ef3
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Fetch the reviewed package by exact staging revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          work="$(dirname "$GITHUB_WORKSPACE")/sdk030-joyai-loopback-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          mkdir -p "$work/receipt"
+          printf 'WORK=%s\n' "$work" >> "$GITHUB_ENV"
+          setup=skills/loom-setup/scripts
+          sdk=$(LOOM_VERSION=0.3.0 bash "$setup/ensure_sdk.sh" "$work/loom" "" 2> "$work/receipt/install.log")
+          cp "$sdk/loom-install.json" "$work/receipt/sdk.json"
+          printf 'LOOM_ROOT=%s\n' "$sdk" >> "$GITHUB_ENV"
+          pinned=$(curl -fsSL --retry 3 "https://huggingface.co/api/models/$MODEL_REPO/revision/$MODEL_REVISION" | python3 -c 'import json,sys; print(json.load(sys.stdin)["sha"])')
+          test "$pinned" = "$MODEL_REVISION"
+          printf '%s@%s\n' "$MODEL_REPO" "$pinned" > "$work/receipt/card-revision.txt"
+          git rev-parse HEAD > "$work/receipt/loopback-source.txt"
+          HF_HOME="$work/hf-home" "$sdk/.venv/bin/loom-fetch" "https://huggingface.co/$MODEL_REPO/resolve/$pinned/model.json" --preset=chat --no-input --cache "$work/fetch-cache" --output="$work/pkg" > "$work/receipt/fetch.log" 2>&1
+          "$sdk/.tools/bin/python" -I -c 'import sys; sys.path.insert(0,sys.argv[1]); import card_lib; print(card_lib.programs_sha256(sys.argv[2]))' "$GITHUB_WORKSPACE/skills/loom-benchmark/scripts/card" "$work/pkg" > "$work/receipt/programs-sha256.txt"
+          test "$(cat "$work/receipt/programs-sha256.txt")" = "$PROGRAMS_SHA256"
+      - name: Admit and cancel one native-context request on the scoped loopback harness
+        shell: bash
+        run: |
+          set -euo pipefail
+          setup=skills/loom-setup/scripts
+          benchmark=skills/loom-benchmark/scripts
+          export LOOM_SERVE_STATE="$WORK/state" VENV="$LOOM_ROOT/.venv" LOOM_MEMNEED=47000000000
+          trap 'bash "$setup/stop.sh" joyai-loopback >/dev/null 2>&1 || true; if [ -f "$LOOM_SERVE_STATE/joyai-loopback.log" ]; then cp "$LOOM_SERVE_STATE/joyai-loopback.log" "$WORK/receipt/server.log"; fi' EXIT
+          bash "$setup/serve.sh" joyai-loopback 8160 amdgpu none "$WORK/pkg/model.json" -- --pool_backing=fixed > "$WORK/receipt/serve.log" 2>&1
+          "$LOOM_ROOT/.tools/bin/python" "$benchmark/wait_model.py" http://127.0.0.1:8160 --wait 300 | tee "$WORK/receipt/ready.log"
+          "$LOOM_ROOT/.tools/bin/python" "$benchmark/ctx_admit.py" "$WORK/pkg" http://127.0.0.1:8160 --preset chat --out "$WORK/receipt/context-admit.json" | tee "$WORK/receipt/loopback.log"
+          curl -fsS --max-time 10 http://127.0.0.1:8160/v1/status > "$WORK/receipt/status-after.json"
+          python3 - "$WORK/receipt" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          root = Path(sys.argv[1])
+          sdk = json.loads((root / "sdk.json").read_text())
+          assert sdk["hrx_loom"] == "0.3.0" and sdk["wheel_sha256"] == "6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f"
+          probe = json.loads((root / "context-admit.json").read_text())
+          status = json.loads((root / "status-after.json").read_text())["data"][0]["loom"]["status"]
+          print(json.dumps({"probe": probe, "active_requests_after": status["active_requests"]}, indent=2))
+          assert probe["admitted"] and probe["context"] == 131072
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always() && env.WORK != ''
+        with:
+          name: joyai-exact-staging-loopback
+          path: ${{ env.WORK }}/receipt
+          retention-days: 30
+      - name: Release job files
+        if: always() && env.WORK != ''
+        shell: bash
+        run: |
+          if [ "$WORK" = "$(dirname "$GITHUB_WORKSPACE")/sdk030-joyai-loopback-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" ]; then rm -rf -- "$WORK"; fi
