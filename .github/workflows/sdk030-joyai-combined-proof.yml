@@ -36,7 +36,20 @@ jobs:
           py="$LOOM_ROOT/.tools/bin/python"
           "$py" "$WORK/main/fleet/build_fleet.py" --tree "$WORK/main" --jobs 8 --out "$WORK/control" > "$WORK/receipt/fleet-control.log" 2>&1
           "$py" fleet/build_fleet.py --tree . --jobs 8 --out "$WORK/combined" > "$WORK/receipt/fleet-combined.log" 2>&1
-          "$py" fleet/diff_fleet.py "$WORK/control" "$WORK/combined" --json "$WORK/receipt/impact.json" --md "$WORK/receipt/impact.md"
+          "$py" - "$WORK" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          work = Path(sys.argv[1])
+          main = json.loads((work / "main/fleet/manifest.json").read_text())["models"]
+          combined = json.loads(Path("fleet/manifest.json").read_text())["models"]
+          assert set(combined) - set(main) == {"jdopensource-JoyAI-LLM-Flash-loom"} and set(main) <= set(combined)
+          for name, expected in (("control", main), ("combined", combined)):
+              summary = json.loads((work / name / "summary.json").read_text())
+              assert set(summary["models"]) == set(expected) and not summary["failures"] and not summary["skipped"], summary
+          PY
+          "$py" fleet/diff_fleet.py "$WORK/control" "$WORK/combined" --allow-partial --json "$WORK/receipt/impact.json" --md "$WORK/receipt/impact.md"
           "$py" - "$WORK/receipt/impact.json" <<'PY'
           import json
           import sys
