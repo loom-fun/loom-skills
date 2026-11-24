@@ -57,12 +57,11 @@ tracking issue loom-fun/loom-skills#1172). SKILL.md has the per-step detail for 
 - [ ] Upstream SDK bugs: write them up with source refs; file only with the owner's OK.
 
 ## 5. Promotion, in order (owner's go)
-1. [ ] Tag every `*-loom` production repo's head that still pins the outgoing SDK `v<old SDK>`:
-      `"${LOOM_SKILL_DIR}/scripts/tag_org.py" --org loom-fun --tag v<old>` (rule: `loom-fleet` reference/publish.md "Card tags").
-      The promoted cards get no tag now; they are tagged when they in turn move to a newer SDK.
+Before approval, freeze the eligible staging commits, production parents, outgoing tags and held repos. Prepare and verify the exact production package bytes on DevLab using [the reviewed bundle procedure](prepared-promotion.md).
+
+1. [ ] Verify or create the outgoing SDK tags at the exact production parents in the reviewed release tag plan. The `tag_org.py --only REPO...` dry run can check explicitly named text repos, including suffixed names. Use the release's exact tag plan for image packages, whose SDK evidence has no `llm_config.json`. The promoted cards get tags when they in turn move to a newer SDK.
 2. [ ] Merge `sdk<NNN>` -> `main`; tag the merge commit `sdk<new>-uN` (publish.md "Release tags").
-3. [ ] Promote: `skills/loom-benchmark/scripts/card/promote_staging.py --work DIR --all` (dry run, read its report), then the same
-      with `--execute`; verify every live card (programs hash, pin, Quick start).
+3. [ ] Replay the reviewed bundle against the pinned production parents. Archive the returned commit IDs and exact readback receipts.
 4. [ ] Publish the production HF org page.
 5. [ ] Merge the website PR; check the device pages.
 6. [ ] Merge the extension and weaver PRs; take the Lemonade PR out of draft; mark the Gufo PR ready if its maintainers agree.
