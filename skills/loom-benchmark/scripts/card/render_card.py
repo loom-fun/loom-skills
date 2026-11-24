@@ -803,10 +803,8 @@ def sdk_performance_comparison(info, directory, programs, *, summary=False):
     path = os.path.join(directory, "sdk-qualification.json")
     if not hold and os.path.isfile(path):
         qualification = load_json(path)
-        disposition = qualification.get("performance_disposition") or {}
-        if (disposition.get("decision") == "owner-accepted-performance-variation"
-                and qualification.get("programs_sha256") == programs):
-            hold = disposition.get("previous_hold")
+        if qualification.get("programs_sha256") == programs:
+            hold = qualification.get("sdk_performance_comparison")
     if not hold:
         return []
     labels = {"prefill_1k": "1k prefill", "prefill_2k": "2k prefill", "prefill_8k": "8k prefill",
