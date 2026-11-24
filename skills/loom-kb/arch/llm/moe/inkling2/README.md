@@ -15,6 +15,7 @@ Facets: looped, moe, sliding-window; drafted (DSpark) and vision (`inkling2v` pr
   throughput -0.19%. The full suites reproduced concurrent output divergence on the same two prompts and drafted
   versus undrafted equivalence on 3 of 13 requests per SDK. The native-context admission succeeded and cancellation
   exceeded 60 seconds. Production promotion is held. [Original card](https://huggingface.co/loom-fun/unsloth-Inkling-2-Mini-loom/tree/4e018e88a3aa9826286c71dfe2f6c905a491659b)
+  [SDK 0.3.0 staging](https://huggingface.co/loom-fun-staging/unsloth-Inkling-2-Mini-loom/tree/bd021e649b158e608b389eca9bfed60a0ec2d225)
   [Paired correctness](https://github.com/loom-fun/loom-skills/actions/runs/45267522252/job/138018261220)
   [Matched timing](https://github.com/loom-fun/loom-skills/actions/runs/45277848206/job/138054186652)
 - **Radeon R9700S**, frozen package `6213fd3c`, already pinned to SDK 0.3.0. `chat-r9700` uses undrafted Q4 with a
@@ -22,6 +23,7 @@ Facets: looped, moe, sliding-window; drafted (DSpark) and vision (`inkling2v` pr
   matched native chat and passed the compare and agent gates for both. Q8 passed all five full gates. Q4 passed four
   full gates and passed the corrected sampling check in a separate run. Q4 native-context cancellation exceeded 60
   seconds and remains a promotion hold. [Original card](https://huggingface.co/loom-fun/unsloth-Inkling-2-Mini-loom-r9700/tree/6213fd3ce3a15ea2bab98d4adf09ec783c5ad5dc)
+  [SDK 0.3.0 staging](https://huggingface.co/loom-fun-staging/unsloth-Inkling-2-Mini-loom-r9700/tree/90c125c8b0686030e33ee899c7a5098a83a25a46)
   [Fixed-reference gates](https://github.com/loom-fun/loom-skills/actions/runs/45285206955)
   [Sampling proof](https://github.com/loom-fun/loom-skills/actions/runs/45288818385/job/138091995682)
 

@@ -27,4 +27,3 @@ kernel into `scf.for` loops cut VGPRs (q4 192 -> 128, spills gone) and raised wa
 lost on every row: q1 -24 to -28 % at 40k-162k, q4 -3.5 to -63 %, DSpark -25 to -125 %. The 64-split KV-streaming kernels
 already run q1 at 202-218 GB/s; more concurrent waves thrash the caches and compete for outstanding loads, and fewer
 up-front loads (`pipe=2`) starve memory-level parallelism. What q4 pays over q1 is 4x the per-key math, not occupancy.
-
