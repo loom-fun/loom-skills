@@ -63,6 +63,15 @@ def records(pins):
         if row.get("delete_target_files"):
             require(re.fullmatch(r"v\d+\.\d+\.\d+", row.get("rollback_tag", "")),
                     f"{slug}: deleted files require a pinned outgoing rollback tag")
+        if "image_readme_refresh" in row:
+            refresh = row["image_readme_refresh"]
+            hashes = {"reference_readme_sha256", "target_readme_sha256", "staging_readme_sha256"}
+            require(slug == "xinntao-Real-ESRGAN-x4plus-loom" and isinstance(refresh, dict)
+                    and refresh.keys() == hashes | {"reference_revision"}
+                    and pinned_sha(refresh["reference_revision"])
+                    and refresh["reference_revision"] != row["target_revision"]
+                    and all(isinstance(refresh[name], str) and re.fullmatch(SHA256, refresh[name]) for name in hashes),
+                    f"{slug}: invalid image README refresh")
         yield slug, row
 
 
@@ -198,6 +207,15 @@ def check_image(path, component_hashes, slug, presets, old_revision):
                 f"{slug}: image programs differ from {version} qualification")
 
 
+def check_image_readme_refresh(slug, refresh, source, target, reference):
+    require(reference is not None and {n: sha for n, sha in target.items() if n != "README.md"}
+            == {n: sha for n, sha in reference.items() if n != "README.md"},
+            f"{slug}: reviewed image production changed outside README.md")
+    require((reference.get("README.md"), target.get("README.md"), source.get("README.md"))
+            == (refresh["reference_readme_sha256"], refresh["target_readme_sha256"], refresh["staging_readme_sha256"]),
+            f"{slug}: reviewed image README identities differ")
+
+
 def check_deleted_refs(name, data, deleted, slug):
     if deleted and name.endswith((".json", ".json.lock", ".loom")):
         for match in re.finditer(rb"[A-Za-z0-9_./-]+\.loom", data):
@@ -208,13 +226,15 @@ def check_deleted_refs(name, data, deleted, slug):
                         f"{slug}/{name}: references deleted target file {old}")
 
 
-def compose(slug, row, source, source_hashes, target, target_hashes, out):
+def compose(slug, row, source, source_hashes, target, target_hashes, out, reference_hashes=None):
     require({"README.md", "model.json", "model.json.lock"} <= source_hashes.keys(), f"{slug}: package missing")
     model = load(source / "model.json")
     readme, presets = rewrite_readme((source / "README.md").read_bytes(), slug, model)
     require(b'hrx-loom[hf]==0.3.0' in readme, f"{slug}: no exact release install pin")
     changed = {"README.md": readme}
+    refresh = row.get("image_readme_refresh")
     if "info.json" in source_hashes:
+        require(refresh is None, f"{slug}: image README refresh requires a bespoke image package")
         text = (source / "info.json").read_bytes().decode("utf-8")
         require(json.loads(text).get("repo") == f"{STAGING}/{slug}", f"{slug}: incorrect info.json repo")
         src = re.escape(f"{STAGING}/{slug}")
@@ -225,7 +245,12 @@ def compose(slug, row, source, source_hashes, target, target_hashes, out):
         require(all(service.get("kind") == "image" for service in model["services"].values()),
                 f"{slug}: missing generated card metadata on non-image package")
         require("sdk-qualification.json" in source_hashes, f"{slug}: image SDK qualification missing")
-        check_image(source, source_hashes, slug, presets, row["target_revision"])
+        reference = row["target_revision"]
+        if refresh is not None:
+            check_image_readme_refresh(slug, refresh, source_hashes, target_hashes, reference_hashes)
+            reference = refresh["reference_revision"]
+            row = {**row, "image_reference_hashes": reference_hashes}
+        check_image(source, source_hashes, slug, presets, reference)
     extras = {name: target_hashes[name] for name in sorted(target_hashes.keys() - source_hashes.keys())
               if name != HUB_ATTRIBUTES}
     retained = row.get("retain_target_files", {})
@@ -259,7 +284,10 @@ def prepare(api, pins, bundle):
         require_head(api, target_repo, row["target_revision"])
         source, source_hashes = snapshot(api, source_repo, row["staging_revision"])
         target, target_hashes = snapshot(api, target_repo, row["target_revision"])
-        release[slug] = compose(slug, row, source, source_hashes, target, target_hashes, bundle / "packages" / slug)
+        refresh = row.get("image_readme_refresh")
+        reference_hashes = snapshot(api, target_repo, refresh["reference_revision"])[1] if refresh else None
+        release[slug] = compose(slug, row, source, source_hashes, target, target_hashes,
+                                bundle / "packages" / slug, reference_hashes)
         print(f"Prepared {slug} ({len(source_hashes)} files)", flush=True)
     manifest = bundle / "manifest.json"
     manifest.write_bytes(canonical({"schema": 1, "packages": release}))
@@ -274,6 +302,8 @@ def inspect_bundle(bundle, manifest_sha):
     rows = list(records(document["packages"]))
     require({p.name for p in (bundle / "packages").iterdir()} == {s for s, _ in rows}, "bundle slug coverage differs")
     for slug, row in rows:
+        if (refresh := row.get("image_readme_refresh")) is not None:
+            check_image_readme_refresh(slug, refresh, row["source"], row["target"], row.get("image_reference_hashes"))
         root = bundle / "packages" / slug
         files = {p.relative_to(root).as_posix(): p for p in root.rglob("*") if p.is_file() or p.is_symlink()}
         require(files.keys() == row["output"].keys(), f"{slug}: bundle file coverage differs")
