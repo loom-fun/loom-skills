@@ -368,13 +368,11 @@
       "gen": "dec_step/gen_bench.py",
       "gen_variants": [
         "base",
-        "rt2",
-        "ropekb"
+        "dd4"
       ],
       "files": [
         "bench.loom",
-        "bench_rt2.loom",
-        "bench_ropekb.loom"
+        "bench_dd4.loom"
       ],
       "config": [],
       "args": [
