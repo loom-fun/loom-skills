@@ -8,8 +8,6 @@ import re
 import shutil
 from pathlib import Path, PurePosixPath
 
-from huggingface_hub import CommitOperationAdd, HfApi, snapshot_download
-
 STAGING = "loom-fun-staging"
 PRODUCTION = "loom-fun"
 ENDPOINT = "https://huggingface.co"
@@ -61,6 +59,8 @@ def records(pins):
 
 
 def snapshot(api, repo, revision):
+    from huggingface_hub import snapshot_download
+
     info = api.model_info(repo, revision=revision, files_metadata=True, token=False)
     require(info.sha == revision and info.siblings, f"{repo}: incorrect or empty revision {revision}")
     path = Path(snapshot_download(repo, revision=revision, token=False, endpoint=ENDPOINT))
@@ -259,6 +259,8 @@ def replay(api, bundle, manifest_sha, execute, receipt_path):
         for slug, row in rows:
             print(f"{PRODUCTION}/{slug}@{row['target_revision']}: {len(row['operations'])} change(s)", flush=True)
         return
+    from huggingface_hub import CommitOperationAdd
+
     with receipt_path.open("a", encoding="utf-8", buffering=1) as log:
         for slug, row in rows:
             repo = f"{PRODUCTION}/{slug}"
@@ -280,6 +282,8 @@ def replay(api, bundle, manifest_sha, execute, receipt_path):
 
 
 def main():
+    from huggingface_hub import HfApi
+
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
     prep = commands.add_parser("prepare")

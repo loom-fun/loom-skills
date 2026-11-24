@@ -3,9 +3,11 @@ import hashlib
 import importlib.util
 import json
 from pathlib import Path
+import sys
+from tempfile import TemporaryDirectory
 from types import SimpleNamespace
-
-import pytest
+import unittest
+from unittest.mock import patch
 
 SCRIPT = Path(__file__).resolve().parents[1] / "skills/loom-migrate/scripts/replay_promotion.py"
 SPEC = importlib.util.spec_from_file_location("replay_promotion", SCRIPT)
@@ -47,7 +49,7 @@ def bundle(tmp_path):
     return source, root, out, row, promotion.digest(manifest)
 
 
-def test_production_composition_preserves_bespoke_serving_and_receipts(tmp_path):
+def check_composition(case, tmp_path):
     source, root, out, row, sha = bundle(tmp_path)
     assert (out / "README.md").read_bytes() == (source / "README.md").read_bytes().replace(
         b"loom-fun-staging/", b"loom-fun/")
@@ -57,11 +59,11 @@ def test_production_composition_preserves_bespoke_serving_and_receipts(tmp_path)
         assert row["source"][name] == row["output"][name]
     assert promotion.inspect_bundle(root, sha) == [(SLUG, row)]
     (out / "REPORT.md").write_text("tampered")
-    with pytest.raises(ValueError, match="incorrect bundle file"):
+    with case.assertRaisesRegex(ValueError, "incorrect bundle file"):
         promotion.inspect_bundle(root, sha)
 
 
-def test_readonly_and_interrupted_replay(tmp_path, monkeypatch):
+def check_replay(case, tmp_path):
     _, root, _, row, sha = bundle(tmp_path)
     receipt = tmp_path / "receipts.jsonl"
     head = TARGET
@@ -82,25 +84,41 @@ def test_readonly_and_interrupted_replay(tmp_path, monkeypatch):
             head = COMMIT
             return SimpleNamespace(oid=COMMIT)
 
-    monkeypatch.setattr(promotion, "snapshot", lambda api, repo, revision:
-                        (root, row["target"] if revision == TARGET else row["output"]))
-    promotion.replay(Api(), root, sha, False, None)
-    assert not writes
-    monkeypatch.setenv("PROMOTE_CONFIRM", "loom-fun")
-    promotion.replay(Api(), root, sha, True, receipt)
-    assert len(writes) == 1
-    first = receipt.read_text().splitlines()[0]  # Simulate interruption before the verified receipt.
-    receipt.write_text(first + "\n")
-    promotion.replay(Api(), root, sha, True, receipt)
-    assert len(writes) == 1
-    head = "d" * 40
-    with pytest.raises(ValueError, match="main moved"):
+    def snapshot(api, repo, revision):
+        return root, row["target"] if revision == TARGET else row["output"]
+
+    hub = SimpleNamespace(CommitOperationAdd=lambda name, path: SimpleNamespace(path_in_repo=name))
+    with patch.object(promotion, "snapshot", snapshot), patch.dict(sys.modules, {"huggingface_hub": hub}), \
+            patch.dict("os.environ", {"PROMOTE_CONFIRM": "loom-fun"}):
+        promotion.replay(Api(), root, sha, False, None)
+        assert not writes
         promotion.replay(Api(), root, sha, True, receipt)
+        assert len(writes) == 1
+        first = receipt.read_text().splitlines()[0]  # Simulate interruption before the verified receipt.
+        receipt.write_text(first + "\n")
+        promotion.replay(Api(), root, sha, True, receipt)
+        assert len(writes) == 1
+        head = "d" * 40
+        with case.assertRaisesRegex(ValueError, "main moved"):
+            promotion.replay(Api(), root, sha, True, receipt)
 
 
-def test_provenance_accepts_only_immutable_document_references():
+def check_provenance(case):
     promotion.inspect_refs("README.md", f"https://huggingface.co/loom-fun-staging/{SLUG}/commit/{STAGE}".encode(), SLUG)
-    with pytest.raises(ValueError, match="unhandled staging reference"):
+    with case.assertRaisesRegex(ValueError, "unhandled staging reference"):
         promotion.inspect_refs("model.json", f"https://huggingface.co/loom-fun-staging/{SLUG}/resolve/{STAGE}/x".encode(), SLUG)
-    with pytest.raises(ValueError, match="unhandled staging reference"):
+    with case.assertRaisesRegex(ValueError, "unhandled staging reference"):
         promotion.inspect_refs("REPORT.md", f"https://huggingface.co/loom-fun-staging/{SLUG}/blob/main/REPORT.md".encode(), SLUG)
+
+
+class ReplayPromotionTests(unittest.TestCase):
+    def test_production_composition_preserves_bespoke_bytes(self):
+        with TemporaryDirectory() as directory:
+            check_composition(self, Path(directory))
+
+    def test_readonly_and_interrupted_replay(self):
+        with TemporaryDirectory() as directory:
+            check_replay(self, Path(directory))
+
+    def test_only_immutable_provenance_is_accepted(self):
+        check_provenance(self)
