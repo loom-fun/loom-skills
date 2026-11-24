@@ -220,6 +220,25 @@ if [ "$irc" = 0 ] && [ "$ref" != off ] && [ -s reference.json ] && [ -f cfg.json
     echo "the reference's chat block does not match this template (chat_verify.log)"
   fi
 fi
+# The deepseek2 example supplies JoyAI's call_lead and assistant_suffix when derivation cannot recover them.
+# Verify that reviewed block against this model's template before using it.
+if [ "$irc" = 0 ] && [ "${ex:-}" = deepseek2 ] && [ -f "$here/reference/$ex-example/cfg.json" ] && [ -f cfg.json ] \
+   && grep -q "^chat FAIL\|not derivable\|WARNING: no chat block" inspect.log && ! grep -q "Traceback$hd" inspect.log; then
+  cp cfg.json cfg.derived.json
+  "$T" - "$here/reference/$ex-example/cfg.json" <<'EOF'
+import json, sys
+c, e = json.load(open("cfg.json", encoding="utf-8")), json.load(open(sys.argv[1], encoding="utf-8"))
+if e.get("chat"):
+    c["chat"] = e["chat"]
+    json.dump(c, open("cfg.json", "w", encoding="utf-8"), indent=1, ensure_ascii=False)
+EOF
+  if "$T" -I "$K/chat_probe.py" "$gguf" --verify cfg.json > chat_verify.log 2>&1; then
+    echo "chat block from reference/$ex-example: verified against this template ($(grep -c '^OK' chat_verify.log) probes OK)"
+    sed -i 's/^chat FAIL/chat (replaced by the example) FAIL/; s/not derivable/not derivable (example block verified)/; s/WARNING: no chat block/no chat block (example block verified)/' inspect.log
+  else
+    echo "reference/$ex-example's chat block does not match this template (chat_verify.log)"; mv cfg.derived.json cfg.json
+  fi
+fi
 # ("not derivable automatically": the sed above marks a verified reference block between those words)
 if [ "$irc" != 0 ] || grep -q "^chat FAIL\|not derivable automatically\|WARNING: no chat block$hd\|WARNING: unsupported layout\|Traceback" inspect.log; then
   arch=$("$T" -c "import json;print(json.load(open('cfg.json')).get('arch',''))" 2>/dev/null)
@@ -275,6 +294,24 @@ if [ -n "${CONTEXT_LENGTH:-}" ] && [ -f cfg.json ]; then
 fi
 
 step "3/6 build"
+# Automatically select the measured JoyAI variant. For another port, preserve the existing slug or opt in with SLUG=.
+"$T" - "${SLUG:-}" "$repo" <<'PY'
+import json, os, sys
+c = json.load(open("cfg.json", encoding="utf-8"))
+previous = c.copy()
+if sys.argv[1]:
+    c["slug"] = sys.argv[1]
+elif (c.get("arch") == "deepseek2" and sys.argv[2].lower() == "jdopensource/joyai-llm-flash-gguf"
+      and os.path.basename(c.get("gguf") or "") == "JoyAI-LLM-Flash-IQ4_XS.gguf"):
+    if not c.get("slug"):
+        c["slug"] = "jdopensource-JoyAI-LLM-Flash-loom"
+    if c["slug"] == "jdopensource-JoyAI-LLM-Flash-loom":
+        c.setdefault("prefill_capacity", 8192)
+if c != previous:
+    json.dump(c, open("cfg.json", "w", encoding="utf-8"), indent=1, ensure_ascii=False)
+if c.get("slug"):
+    print(f"package slug: {c['slug']}")
+PY
 "$T" "$K/build.py" cfg.json pkg --tokenizer tok/tokenizer.json --model-id "$model_id" --memory-gib "$mem_gib" $([ -n "$catalog" ] && case "${SPEC:-on}" in off|OFF|0) echo --draft none;; esac) | tee build.log
 [ "${PIPESTATUS[0]}" = 0 ] || { echo "STOP: build.py failed (build.log)"; exit 4; }
 mem=$(grep -o -- "--memory_bytes=[0-9]*" build.log | cut -d= -f2)

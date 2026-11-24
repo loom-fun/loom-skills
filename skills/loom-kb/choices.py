@@ -198,7 +198,7 @@ _DA = dict(kernels=["g_attention_split", "g_attention_combine"], rows=ROWS_DECOD
 CHOICE("decode.attn.full_blocks", "bool", False, "ATTN_FULL_BLOCKS", per_target=True, devices=["rdna4"],
        kernels=["g_attention_split_rdna4"], rows=ROWS_DECODE + ROWS_STREAMS, from_pr="1145",
        doc="Ordinary paged hd64 decode: bypass per-key masks on fully visible blocks; unsigned edge predicates preserve arithmetic.")
-CHOICE("decode.attn.unroll", "int", 16, "ATTN_UNROLL", doc="Keys per decode-attention block.", **_DA)
+CHOICE("decode.attn.unroll", "int", 16, "ATTN_UNROLL", kit_legacy={"deepseek2": 4}, doc="Keys per decode-attention block.", **_DA)
 CHOICE("decode.attn.butterfly", "bool", True, "ATTN_BFLY", doc="A block's key scores in one butterfly all-reduce.", **_DA)
 CHOICE("decode.attn.paged", "bool", True, "ATTN_PAGED", doc="16-aligned key blocks, one page lookup each.", **_DA)
 CHOICE("decode.attn.ilp", "int", 1, "ATTN_ILP", doc="Independent softmax chains per block (2, 4: no gain on Qwen3.8-27B at 32k).", **_DA)
@@ -241,7 +241,7 @@ CHOICE("decode.mv.head_chunk", "int", 16, "MV_CHUNK", kernels=["g_head_mv*"], ro
 CHOICE("decode.head.butterfly_perm", "bool", True, "HEAD_BFLY_PERM", kernels=["g_head_mv*"], rows=ROWS_DECODE + ROWS_STREAMS,
        doc="Butterfly permutation in the head matvec.")
 CHOICE("decode.mv.adapt", "bool", True, "MV_ADAPT", doc="Halve R while a matvec grid is under-filled (False: R=16).", **_MV)
-CHOICE("decode.mv.wg1", "int", 4096, "MV_WG1", doc="Workgroup target of 1-token matvecs.", **_MV)
+CHOICE("decode.mv.wg1", "int", 4096, "MV_WG1", kit_legacy={"deepseek2": 256}, doc="Workgroup target of 1-token matvecs.", **_MV)
 CHOICE("decode.mv.wg4", "int", 128, "MV_WG4", doc="Workgroup target of 4-token matvecs. Setting it makes 1- and 4-token rounding "
        "differ (consistency.py fails): record it in the report.", **_MV)
 CHOICE("decode.mv.wg_long", "int", 640, "MV_WG_LONG", doc="Workgroup target of 1-token matvecs with K >= 8192.", **_MV)
@@ -518,6 +518,131 @@ CHOICE("moe.route.tokens_per_wg", "int", 0, "ROUTE_TR", doc="Router tokens per w
 CHOICE("moe.fold", "bool", True, "MOE_FOLD", doc="Fold the routing weights into the expert matvec.", **_MO)
 CHOICE("moe.prefill.skip_empty", "bool", True, "MOE_SKIP_EMPTY", doc="Waves of empty expert tiles exit early.", **_MO)
 CHOICE("moe.prefill.prefetch", "bool", True, "MOE_PREFETCH", doc="Stage prefetch in the grouped expert GEMMs.", **_MO)
+_DS2 = dict(kits=["deepseek2"], rows=ROWS_PREFILL, from_pr="joyai-pfgemm")   # deepseek2 example kit (JoyAI-LLM-Flash campaign, PR #1361)
+CHOICE("prefill.gemm.t64_g32", "bool", False, "GEMM_T64_G32", kernels=["g_gemm_iq4_*", "g_moe_g*_iq4_*"], **_DS2,
+       doc="The 64-row WMMA tile stages IQ4_XS / IQ4_NL a whole 32-group per thread (_g32_iq4, the iq4_f16lut values): grouped MoE "
+           "gate/up loop VALU 431 -> 284 per 16 WMMA; kbench joyai_moe (run 45229757827) ggu -7..-8 %, gdn -0..-23 % vs prefill.gemm.iq4_native alone.")
+CHOICE("moe.prefill.cw", "str", "0", "MOE_CW", kernels=["g_moe_ggu_iq4_xs_*", "g_moe_gdn_iq4_xs_*"], **_DS2,
+       doc="Column-wave grouped MoE GEMMs for IQ4_XS experts (gen_moe_cw.py; '1' both, or a list of swiglu,store): each wave owns "
+           "output columns and dequantizes them straight into WMMA B fragments, the activation rows are staged once per 128 K, and only "
+           "the tile's live 16-row fragments get MMAs. Bit-identical. kbench joyai_moe run 45232787685 (ms per layer, v2 -> cw): "
+           "down 1k 2.65 -> 1.81, 4k 6.55 -> 4.77; gate/up needs moe.prefill.cw_swap.")
+CHOICE("moe.prefill.cw_swap", "bool", False, "MOE_CW_SWAP", kernels=["g_moe_ggu_iq4_xs_*", "g_moe_gdn_iq4_xs_*"], **_DS2,
+       doc="moe.prefill.cw with the half-waves dequantizing half a 32-group each (lanes 0-15 the low nibbles, 16-31 the high) and an "
+           "xor-16 shuffle swapping them: half the dequant VALU (gate/up loop 1608 -> 977). Bit-identical. kbench run 45232787685 "
+           "(v2 -> cws): gate/up 1k 3.46 -> 2.79, 4k 9.47 -> 7.72; down 1k 1.70, 4k 4.00. DevLab perf (run 45251424551): prefill 1k "
+           "+9 % over v2.")
+CHOICE("moe.prefill.cw_f16o", "bool", False, "MOE_CW_F16O", kernels=["g_moe_ggu_iq4_xs_*", "g_moe_gdn_iq4_xs_*"], **_DS2,
+       doc="Numerics-moving: the column-wave gate/up writes f16 activations with row scale 1 for the down GEMM (no "
+           "g_row_scale_f16_tiles). Within noise end-to-end (run 45251424551: 1k 1597 vs 1580) and its kernel tests need the "
+           "old launch sequence: off.")
+CHOICE("moe.prefill.t128", "int", 0, "MOE_T128", kernels=["g_moe_g*128_*"], **_DS2,
+       doc="Epochs of >= N tokens bucket experts into 128-row tiles for the m128 grouped GEMMs. kbench run 45232787685: 2x slower "
+           "than the 64-row tiles (no live-fragment skip, 49k vs 35k rows at 4k): off.")
+CHOICE("mla.prefill.bmm2", "str", "0", "MLA_BMM2", kernels=["g_mla_kbm_*", "g_mla_vbm_*"], **_DS2,
+       doc="k_b / v_b prefill products with the activations staged once per workgroup as f16 in LDS (128-row workgroups); '1' both "
+           "or a list (kbm,vbm). Bit-identical. kbench joyai_mla run 45234212231: vbm 1k 1.00 -> 0.72, 4k 3.02 -> 2.64; kbm "
+           "0.64 -> 0.75 (worse), 4k tie: use vbm.")
+CHOICE("mla.prefill.bmm_live", "bool", False, "MLA_BMM_LIVE", kernels=["g_mla_kbm_*", "g_mla_vbm_*"], **_DS2,
+       doc="k_b / v_b prefill products take the epoch's info and skip 64-token blocks of padding (an epoch runs at its power-of-two "
+           "shape: 1151 tokens -> 2048). Live rows bit-identical. DevLab perf run 45261202924: prefill 1k 1557 -> 1642, 2k 1431 -> 1513.")
+_DS2P = dict(kits=["deepseek2"], rows=ROWS_PREFILL, from_pr="joyai-pf2")   # deepseek2 example kit (JoyAI pf2 lane, PR #1378)
+CHOICE("prefill.attn.list_live", "bool", False, "ATTN_LIST_LIVE", kernels=["g_attention_fallback_list"], **_DS2P,
+       doc="Padding tokens stay off the listed split-K attention fallback (they have no run, so every padding token of a padded "
+           "epoch was listed and g16_attention_combine_listed wrote a 74 KB zero row per padding token per layer: 9 % of a 2k "
+           "prefill). DevLab perf run 45299823018: prefill 1151 2072 -> 2250, 2207 2225 -> 2490, decode 88 -> 92 (decode epochs "
+           "are padded too). Gates dev PASS (runs 45304980060, 45315824142).")
+CHOICE("mla.prefill.x_tail", "bool", False, "MLA_X_TAIL", kernels=["g_mla_xlist"], **_DS2P,
+       doc="An expanded MLA segment also takes its run's tail block (< 16 live tokens after its last whole tile, rest of the window "
+           "padding): keys expanded to the tail's last position, one more xflash tile, the block leaves flash2_partial's list. "
+           "kbench mla_xpf case tC PASS (run 45304988214); DevLab perf run 45304980060: prefill 1151 +2.7 %, 2207 +3.3 %.")
+CHOICE("prefill.gemm.m128_n", "str", "", "GEMM_M128_N", kernels=["g_gemm_*_m128", "g_gemm_*_m256"], **_DS2P,
+       doc="Comma list of output widths that keep 128-row GEMM tiles at any token count. JoyAI shared expert gate/up (768): "
+           "the 256-row swiglu ran 108 workgroups at ~15 TFLOP/s; m128 0.0180 -> 0.0118 ms/token, prefill +1.2 % (run 45304980060).")
+CHOICE("moe.prefill.cw_dq", "bool", False, "MOE_CW_DQ", kernels=["g_moe_ggu_iq4_xs_*", "g_moe_gdn_iq4_xs_*"], **_DS2P,
+       doc="Column-wave IQ4_XS dequant with a per-lane nibble shift, the codebook byte interleaved with 0x64, one pk_add (-1152) "
+           "and one pk_mul by the f16 scale (no uitofp / pk_fma). Bit-identical. kbench joyai_moe run 45307119183 (with cw_zs): "
+           "gate/up 1k -4.9 %, 4k -6.1 %.")
+CHOICE("moe.prefill.cw_zs", "bool", False, "MOE_CW_ZS", kernels=["g_moe_ggu_iq4_xs_*", "g_moe_gdn_iq4_xs_*"], **_DS2P,
+       doc="Column-wave GEMMs stage padding rows as zeros once per pass (no per-chunk select). Bit-identical. With cw_dq: DevLab "
+           "perf run 45315824142 prefill 1151 +1.0 %, 2207 +1.4 %.")
+CHOICE("moe.prefill.ys16", "bool", False, "MOE_YS16", kernels=["g_moe_gdn_iq4_xs_*", "g_moe_combine_sorted16*"], **_DS2P,
+       doc="Numerics-moving: the column-wave down GEMM stores the expert rows as f16, g_moe_combine_sorted16 reads them (the "
+           "grouped GEMMs at 1k-2k are DRAM-bound: 144 MB less per layer at 2197 tokens). DevLab perf run 45315824142: prefill "
+           "1151 +3.3 %, 2207 +3.2 %; gates dev PASS (same run).")
+CHOICE("moe.route.prefill_tg", "bool", False, "MOE_ROUTE_TG", kernels=["g_moe_route_tg_live"], **_DS2P,
+       doc="Prefill router as a register-tiled f32 GEMM (32 tokens x 256 experts per workgroup). End to end a tie with "
+           "g_moe_route_tr_live (run 45299823018); kbench joyai_route (run 45315766301) +18 %: off.")
+CHOICE("moe.route.prefill_wm", "bool", False, "MOE_ROUTE_WM", kernels=["g_moe_route_wm_live"], **_DS2P,
+       doc="Numerics-moving: prefill router logits on WMMA with f16 hi/lo operand splits. kbench joyai_route (run 45315766301) "
+           "-49 % in isolation, but +56 % end to end (run 45309456312: 2.2 vs 1.4 ms per 2197-token layer): off.")
+CHOICE("mla.prefill.xq_rev", "bool", False, "MLA_XQ_REV", kernels=["g_mla_xlist"], **_DS2P,
+       doc="Expanded quad list latest-first. kbench mla_xpf run 45309654317: xflash 4k chunk +73 %: off.")
+
+# The reference kit's remaining generator settings retain their shipped defaults. Debug-only ablations belong below.
+_MLA_DECODE = dict(kits=["deepseek2"], rows=ROWS_DECODE + ROWS_STREAMS, kernels=["g_mla_dsplit", "g_mla_dcombine"])
+for _key, _type, _default, _env, _doc in (
+    ("kernel", "str", "wmma", "MLA_DEC", "Select the WMMA decode kernel or use listed attention."),
+    ("max_splits", "int", 32, "MLA_DEC_S", "Maximum score splits per token."),
+    ("min_blocks", "int", 2, "MLA_DEC_BMIN", "Minimum number of 16-key blocks per split."),
+    ("q_lds", "int", 0, "MLA_DEC_QL", "Keep query fragments in local data share."),
+    ("prefetch", "int", 0, "MLA_DEC_PF", "Decode prefetch depth and mode."),
+    ("prefetch_chunks", "int", 9, "MLA_DEC_PFN", "Number of next-block score chunks to prefetch."),
+    ("partials_layout", "int", 1, "MLA_DEC_PL", "Transpose partial output by head for contiguous stores."),
+    ("head_groups", "int", 1, "MLA_DEC_HG", "Split heads across workgroups."),
+    ("partial_f16", "int", 0, "MLA_DEC_PH", "Store normalized partial outputs in FP16."),
+    ("k_lds", "int", 0, "MLA_DEC_KLDS", "Double-buffer key blocks in local data share."),
+    ("qk_chains", "int", 0, "MLA_DEC_QK2", "Split the score accumulation into two chains."),
+    ("combine_unroll", "int", 4, "MLA_DEC_CU", "Issue combine loads for multiple splits together."),
+):
+    CHOICE(f"mla.decode.{_key}", _type, _default, _env, doc=_doc, **_MLA_DECODE)
+CHOICE("mla.decode.stage_v", "int", None, "MLA_DEC_STI", dynamic=True,
+       doc="Stage each value chunk immediately after its score computation; defaults on with two head groups.", **_MLA_DECODE)
+CHOICE("mla.decode.value_padding", "int", None, "MLA_DEC_VTPAD", dynamic=True,
+       doc="Pad staged value rows by two elements with LDS queries and eight otherwise.", **_MLA_DECODE)
+
+_MLA_PREFILL = dict(kits=["deepseek2"], rows=ROWS_PREFILL, kernels=["g_mla_x*", "g_attention_flash2*"])
+for _key, _type, _default, _env, _doc in (
+    ("flash", "bool", True, "MLA_FLASH", "Use flash attention for eligible prefill runs."),
+    ("expanded", "bool", True, "MLA_X", "Expand eligible long prefill segments before flash attention."),
+    ("expanded_capacity", "int", 131072, "MLA_XCAP", "Maximum expanded scratch positions in an epoch."),
+    ("expand_min_tiles", "int", 16, "MLA_X_MIN_TILES", "Minimum whole query tiles in an expanded segment."),
+    ("expand_min_keys", "int", 1024, "MLA_X_MIN_KEYS", "Minimum keys for an expanded segment."),
+    ("query_tiles", "int", 4, "MLA_XQ", "Query tiles assigned to an expanded flash workgroup."),
+    ("expand_lds", "int", 1, "MLA_XE_LDS", "Stage expanded key and value tiles in local data share."),
+    ("expand_token_tiles", "int", 4, "MLA_XE_NT", "Expanded token tiles per workgroup."),
+    ("expanded_flash", "str", "lds", "MLA_XF", "Select the expanded flash attention implementation."),
+    ("expanded_query_lds", "int", 0, "MLA_XF_QL", "Keep expanded flash query fragments in local data share."),
+    ("expanded_transforms", "str", "", "MLA_XF_T", "Enable listed expanded flash kernel scheduling transforms."),
+    ("expanded_source", "str", "", "MLA_XF_SRC", "Stage selected expanded flash input fragments by source."),
+    ("cap_partials", "bool", True, "PACC_CAP", "Allocate large split-K partials for live listed tokens."),
+):
+    CHOICE(f"mla.prefill.{_key}", _type, _default, _env, doc=_doc, **_MLA_PREFILL)
+CHOICE("mla.prefill.flash_head_groups", "int", None, "FLASH2_NG_MLA", dynamic=True,
+       doc="Query-head groups per MLA flash workgroup; defaults to a quarter of the attention group size.", **_MLA_PREFILL)
+
+_MLA_FRONT = dict(kits=["deepseek2"], rows=ROWS_DECODE + ROWS_PREFILL, kernels=["g_mla_*", "g_mv_*"])
+CHOICE("mla.projections.dual", "bool", True, "MLA_QA_DUAL", doc="Compute query and KV input projections in one launch.", **_MLA_FRONT)
+CHOICE("mla.projections.rms_q", "bool", True, "MLA_RMSQ_FUSE", doc="Fuse query rank normalization with its producer.", **_MLA_FRONT)
+CHOICE("mla.projections.rms_q_t4", "bool", False, "MLA_RMSQ_FUSE_T4", doc="Enable fused query rank normalization in four-token groups.", **_MLA_FRONT)
+CHOICE("mla.projections.rope_k", "bool", True, "MLA_ROPE_KB", doc="Fuse rotary embedding with the key projection.", **_MLA_FRONT)
+CHOICE("mla.projections.quantize_input", "bool", False, "MV_QIN", doc="Quantize matvec inputs in registers.", **_MLA_FRONT)
+CHOICE("mla.projections.matvec_rows", "str", "", "MV_R", doc="Override matvec rows for explicit K:N shapes.", **_MLA_FRONT)
+
+_DS2_MOE = dict(kits=["deepseek2"], rows=ROWS_DECODE + ROWS_PREFILL + ROWS_STREAMS, kernels=["g_moe_*"])
+for _key, _type, _default, _env, _doc in (
+    ("cw_pair", "bool", False, "MOE_CW_PAIR", "Pair column-wave expert tiles."),
+    ("cw_prefetch", "bool", False, "MOE_CW_PF2", "Prefetch column-wave expert inputs."),
+    ("cw_wave_split", "bool", False, "MOE_CW_WS", "Select the wave-split grouped expert kernel."),
+    ("deduplicate", "bool", False, "MOE_DEDUP", "Reuse duplicate expert paths in decode."),
+    ("down_unroll", "bool", True, "MOE_DN_U", "Unroll the expert down projection."),
+    ("route_fused", "bool", True, "MOE_ROUTE_FUSE", "Fuse router stages."),
+    ("route_split", "bool", True, "MOE_ROUTE_SPLIT", "Use the split router kernel where eligible."),
+    ("shared_slot", "bool", True, "MOE_SHSLOT", "Include the shared expert in a separate router slot."),
+):
+    CHOICE(f"mla.moe.{_key}", _type, _default, _env, doc=_doc, **_DS2_MOE)
+CHOICE("mla.moe.down_rows", "int", None, "MOE_R_DN", dynamic=True,
+       doc="Rows per workgroup for the shared-slot down projection; the generator defaults to four.", **_DS2_MOE)
 CHOICE("moe.prefill.n_fastest", "str", "swiglu,store", "MOE_N_FASTEST", kit_legacy={"lfm2moe": "1"},
        doc="Grouped-GEMM modes with output-column tiles fastest (Qwen3.6-35B-A3B prefill +74 % at 1k; lfm2moe +24-30 %). The "
            "lfm2moe kit reads 1/0 and MOE_N_FASTEST_MODES.", **_MO)
@@ -673,6 +798,7 @@ NOT("credential of the Hugging Face range reads (inspect_safetensors.py), never 
 NOT("catalog build switch: hand-written catalog packages are exempt from resolution (build.py hands over before it)", "VISION")
 NOT("provenance of a snapshot build (the stamp records it), not a model choice", "LOOM_SKILLS_COMMIT")
 NOT("profiling ablation or debug switch, never part of a published build", "FLASH2_ABL", "DBG_NO_FLASH", "DBG_NO_GEMM")
+NOT("deepseek2 kernel benchmarks that omit computation or write debug data", "MLA_DEC_ABL", "MLA_XE_DBG", "MLA_XF_ABL", "MOE_CW_NODQ", "MOE_ROUTE_NOTOPK")
 
 
 def registered_env():

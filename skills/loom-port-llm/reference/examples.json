@@ -5,5 +5,6 @@
  "glimmer": {"arch": "muse-glimmer", "card": "loom-fun/ggml-org-Muse-Glimmer-30B-loom", "revision": "cf3314ab519a64428bc80ab46a48a7491023d363"},
  "lfm2moe": {"arch": "lfm2moe", "archs": ["lfm3"], "card": null},
  "qwen4exp": {"arch": "qwen4exp", "card": null},
- "gpt-oss": {"arch": "gpt-oss", "card": "loom-fun/unsloth-gpt-oss-20b-loom", "revision": "0d94a308db12d9a7553a9e158c5106477eba0390"}
+ "gpt-oss": {"arch": "gpt-oss", "card": "loom-fun/unsloth-gpt-oss-20b-loom", "revision": "0d94a308db12d9a7553a9e158c5106477eba0390"},
+ "deepseek2": {"arch": "deepseek2", "card": null}
 }
