@@ -1,32 +1,29 @@
 {
- "_comment": "JoyAI lc lane round 1 (experiment only): prefill chunk 8192 (c8) and the capped split-K partials alone (c4) vs the combined build (base = deepseek2-joyai 61575896); short + long ABBA, pf8k profile, fullctx both.",
+ "_comment": "JoyAI lc lane round 2 (experiment only): dev gates on the 8192-chunk build (c8, capped partials).",
  "card": "loom-fun/jdopensource-JoyAI-LLM-Flash-loom@58159cc30c1b9a18fb883f75188b35d03bfea4ed",
  "memory_bytes": 47000000000,
  "kit": "deepseek2",
  "llamacpp": "b1386",
- "env": {"LLAMACPP_EXTRA_ARGS": "--skip-chat-parsing"},
+ "env": {
+  "LLAMACPP_EXTRA_ARGS": "--skip-chat-parsing"
+ },
  "jobs": [
   {
-   "name": "lc-r1-perf",
+   "name": "lc-r2-gates",
    "variants": [
-    {"name": "base", "build": {}, "ref": "6157589605d206b5e15d57da8f03fe8a39c8c135"},
-    {"name": "c8", "build": {}, "build_args": ["--prefill", "8192"], "ref": "fff496faed377fb950d2dfb98bd0347dd2fcfca7"},
-    {"name": "c4", "build": {}, "ref": "fff496faed377fb950d2dfb98bd0347dd2fcfca7"}
+    {
+     "name": "c8",
+     "build": {},
+     "build_args": [
+      "--prefill",
+      "8192"
+     ],
+     "ref": "b65157cd36e91c57aa52a72d3cec473671d9d2ba"
+    }
    ],
    "steps": [
-    "ktest:c8",
-    "perf:base:1", "perf:c8:1", "perf:c4:1", "perf:c4:1", "perf:c8:1", "perf:base:1",
-    "perf:base:1:long", "perf:c8:1:long", "perf:c4:1:long", "perf:c4:1:long", "perf:c8:1:long", "perf:base:1:long",
-    "profile:c8:pf8k"
+    "gates:c8:dev"
    ]
-  },
-  {
-   "name": "lc-r1-fullctx",
-   "variants": [
-    {"name": "base", "build": {}, "ref": "6157589605d206b5e15d57da8f03fe8a39c8c135"},
-    {"name": "c8", "build": {}, "build_args": ["--prefill", "8192"], "ref": "fff496faed377fb950d2dfb98bd0347dd2fcfca7"}
-   ],
-   "steps": ["fullctx:c8", "fullctx:base"]
   }
  ]
 }
