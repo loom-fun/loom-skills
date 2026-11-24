@@ -148,8 +148,7 @@ def check_image(path, component_hashes, slug, presets, old_revision):
 
 
 def compose(slug, row, source, source_hashes, target, target_hashes, out):
-    require({"README.md", "model.json", "model.json.lock", "sdk-qualification.json"} <= source_hashes.keys(),
-            f"{slug}: package or qualification missing")
+    require({"README.md", "model.json", "model.json.lock"} <= source_hashes.keys(), f"{slug}: package missing")
     model = load(source / "model.json")
     readme, presets = rewrite_readme((source / "README.md").read_bytes(), slug, model)
     require(b'hrx-loom[hf]==0.3.0' in readme, f"{slug}: no exact release install pin")
@@ -164,6 +163,7 @@ def compose(slug, row, source, source_hashes, target, target_hashes, out):
     else:
         require(all(service.get("kind") == "image" for service in model["services"].values()),
                 f"{slug}: missing generated card metadata on non-image package")
+        require("sdk-qualification.json" in source_hashes, f"{slug}: image SDK qualification missing")
         check_image(source, source_hashes, slug, presets, row["target_revision"])
     retained = {name: target_hashes[name] for name in sorted(target_hashes.keys() - source_hashes.keys())}
     require(retained == row.get("retain_target_files", {}),
