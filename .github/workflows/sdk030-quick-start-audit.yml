@@ -38,6 +38,7 @@ jobs:
           export HF_HUB_CACHE="$AUDIT_WORK/hub-cache"
           "$AUDIT_WORK/sdk/.venv/bin/python" .github/scripts/sdk030_quick_start_audit.py \
             "$AUDIT_WORK/evidence/heads.json" --fetch "$AUDIT_WORK/sdk/.venv/bin/loom-fetch" \
+            --require-default-materialization \
             --report "$AUDIT_WORK/evidence/quick-start.json" | tee "$AUDIT_WORK/evidence/audit.log"
       - name: Upload audit evidence
         if: always() && env.AUDIT_WORK != ''

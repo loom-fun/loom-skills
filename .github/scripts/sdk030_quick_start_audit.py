@@ -17,6 +17,7 @@ from huggingface_hub.hf_api import RepoFile
 
 REFERENCE = re.compile(r"huggingface:(loom-fun-staging/[\w.-]+)(?::([\w.-]+))?(?:@([a-f0-9]{40}))?\Z")
 REVISION = re.compile(r"[a-f0-9]{40}\Z")
+STALE_COPY_NOTE = re.compile(r"--materialize(?:\s*=\s*|\s+)[\"']?copy\b|copies of the fetched package files", re.I)
 
 
 def option(argv, name):
@@ -89,7 +90,7 @@ def check_sources(api, sources):
     return missing
 
 
-def audit(fetch, repo, revision):
+def audit(fetch, repo, revision, require_default_materialization):
     result = {"repo": repo, "revision": revision, "recipes": []}
     try:
         api = HfApi()
@@ -97,13 +98,21 @@ def audit(fetch, repo, revision):
         if card.id != repo or card.sha != revision:
             raise ValueError("Hub did not resolve the exact staging revision")
         readme = Path(hf_hub_download(repo, "README.md", revision=revision)).read_text(encoding="utf-8-sig")
+        if require_default_materialization and STALE_COPY_NOTE.search(readme):
+            raise ValueError("README still contains the explicit copy flag or its obsolete explanation")
         commands = recipes(readme, repo, revision)
         sources = {}
         with tempfile.TemporaryDirectory(prefix="loom-quick-start-") as tmp:
             for command in commands:
                 outcome = {key: command[key] for key in ("fetch", "serve", "preset")}
+                materialize = option(command["argv"], "--materialize")
+                # The verified SDK 0.3.0 CLI defaults to auto. Leave the printed arguments unchanged.
+                outcome["materialize"] = materialize or "auto"
+                outcome["materialize_explicit"] = materialize is not None
                 result["recipes"].append(outcome)
                 try:
+                    if require_default_materialization and materialize is not None:
+                        raise ValueError("Quick start should let SDK 0.3.0 select its default materialization mode")
                     proc = subprocess.run(
                         [fetch, *command["argv"][1:], "--json", "--no-input", "--dry-run"],
                         cwd=tmp, capture_output=True, text=True, timeout=90,
@@ -138,13 +147,15 @@ def main():
     parser.add_argument("manifest", type=Path)
     parser.add_argument("--fetch", required=True, type=Path)
     parser.add_argument("--report", required=True, type=Path)
+    parser.add_argument("--require-default-materialization", action="store_true")
     args = parser.parse_args()
     heads = json.loads(args.manifest.read_text(encoding="utf-8-sig"))
     if not heads or any(not REFERENCE.fullmatch(f"huggingface:{repo}") or not REVISION.fullmatch(rev)
                         for repo, rev in heads.items()):
         parser.error("manifest must map staging repositories to full immutable commits")
     with ThreadPoolExecutor(max_workers=4) as pool:
-        jobs = [pool.submit(audit, str(args.fetch.resolve()), repo, rev) for repo, rev in sorted(heads.items())]
+        fetch = str(args.fetch.resolve())
+        jobs = [pool.submit(audit, fetch, repo, rev, args.require_default_materialization) for repo, rev in sorted(heads.items())]
         results = [job.result() for job in jobs]
     args.report.write_text(json.dumps(results, indent=2) + "\n", encoding="utf-8")
     for row in results:
