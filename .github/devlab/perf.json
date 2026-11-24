@@ -6,7 +6,7 @@
   "llama_spec": "matched",
   "jobs": [
     {
-      "name": "qwen35-gen35-strix-chunk-screen",
+      "name": "qwen35-gen35-strix-recurrence-screen",
       "runner": "strix",
       "served_context": 262144,
       "repeat_rows": 3,
@@ -15,19 +15,39 @@
           "name": "staged"
         },
         {
+          "name": "regen",
+          "build": {}
+        },
+        {
+          "name": "cn16",
+          "build": {
+            "GDN_CHUNK11_CN": "16",
+            "GDN_CHUNK11": "1"
+          }
+        },
+        {
+          "name": "combined",
           "execution": {
             "prefill_capacity": 8192
           },
-          "name": "chunk8k"
+          "build": {
+            "GDN_CHUNK11": "1",
+            "GDN_CHUNK11_CN": "16"
+          }
         }
       ],
       "steps": [
+        "ktest:cn16",
+        "perf:regen:1:long",
         "perf:staged:1:long",
-        "perf:chunk8k:1:long",
-        "perf:chunk8k:1:long",
+        "perf:cn16:1:long",
+        "perf:combined:1:long",
+        "perf:combined:1:long",
+        "perf:cn16:1:long",
         "perf:staged:1:long",
         "perf:staged:1",
-        "perf:chunk8k:1"
+        "perf:combined:1",
+        "profile:combined:pf32k"
       ]
     }
   ]
