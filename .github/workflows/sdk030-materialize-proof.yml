@@ -1,0 +1,34 @@
+name: SDK 0.3 default fetch materialization proof
+on:
+  push:
+    branches: [codex/sdk030-materialize-proof]
+    paths: [.github/workflows/sdk030-materialize-proof.yml, .github/scripts/sdk030_materialize_proof.py]
+permissions:
+  contents: read
+jobs:
+  fetch:
+    name: ${{ matrix.platform }} fetch and serve
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux
+            labels: '["Linux","strix-halo","devlab-dispatch"]'
+          - platform: windows
+            labels: '["Windows","strix-halo","devlab-dispatch"]'
+    runs-on: ${{ fromJSON(matrix.labels) }}
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Compare the official SDK wheel's two fetch modes
+        run: python .github/scripts/sdk030_materialize_proof.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: materialize-${{ matrix.platform }}
+          path: materialize-proof
