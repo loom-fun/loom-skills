@@ -1,5 +1,5 @@
 {
- "_comment": "JoyAI pf2 lane (experiment only), round 3: w (LIST_LIVE + MLA_X_TAIL + M128_N=768) vs wm (+ MOE_ROUTE_WM WMMA router); ktest wm, ABBA short+long, profile pf2k wm; gates:wm:dev.",
+ "_comment": "JoyAI pf2 lane (experiment only), round 4: w (LIST_LIVE + MLA_X_TAIL + M128_N=768) vs w2 (+ MOE_CW_DQ + MOE_CW_ZS, bit-identical) vs y (+ MOE_YS16 f16 expert rows); ktest y, ABBA, profile pf2k y; gates:y:dev.",
  "card": "loom-fun/jdopensource-JoyAI-LLM-Flash-loom@58159cc30c1b9a18fb883f75188b35d03bfea4ed",
  "memory_bytes": 47000000000,
  "kit": "deepseek2",
@@ -9,7 +9,7 @@
  },
  "jobs": [
   {
-   "name": "pf2-r3",
+   "name": "pf2-r4",
    "variants": [
     {
      "name": "w",
@@ -20,41 +20,55 @@
      }
     },
     {
-     "name": "wm",
+     "name": "w2",
      "build": {
       "ATTN_LIST_LIVE": "1",
       "MLA_X_TAIL": "1",
       "GEMM_M128_N": "768",
-      "MOE_ROUTE_WM": "1"
+      "MOE_CW_DQ": "1",
+      "MOE_CW_ZS": "1"
+     }
+    },
+    {
+     "name": "y",
+     "build": {
+      "ATTN_LIST_LIVE": "1",
+      "MLA_X_TAIL": "1",
+      "GEMM_M128_N": "768",
+      "MOE_CW_DQ": "1",
+      "MOE_CW_ZS": "1",
+      "MOE_YS16": "1"
      }
     }
    ],
    "steps": [
-    "ktest:wm",
+    "ktest:y",
     "perf:w:1",
-    "perf:wm:1",
-    "perf:wm:1",
+    "perf:w2:1",
+    "perf:y:1",
+    "perf:y:1",
+    "perf:w2:1",
     "perf:w:1",
-    "perf:w:1:long",
-    "perf:wm:1:long",
-    "profile:wm:pf2k"
+    "profile:y:pf2k"
    ]
   },
   {
-   "name": "pf2-r3-gates",
+   "name": "pf2-r4-gates",
    "variants": [
     {
-     "name": "wm",
+     "name": "y",
      "build": {
       "ATTN_LIST_LIVE": "1",
       "MLA_X_TAIL": "1",
       "GEMM_M128_N": "768",
-      "MOE_ROUTE_WM": "1"
+      "MOE_CW_DQ": "1",
+      "MOE_CW_ZS": "1",
+      "MOE_YS16": "1"
      }
     }
    ],
    "steps": [
-    "gates:wm:dev"
+    "gates:y:dev"
    ]
   }
  ]
