@@ -20,7 +20,7 @@ jobs:
           ref: 629d8f8aab61f53c4713b89fd21d26efe83f9e45
           fetch-depth: 0
           persist-credentials: false
-      - name: Preserve the proved normalization and GDN boundaries in the FP8 candidate
+      - name: Reserve FP8 for full-sized bulk prefill epochs
         shell: bash
         run: |
           set -euo pipefail
@@ -28,10 +28,12 @@ jobs:
           echo "WORK=$work" >> "$GITHUB_ENV"
           export WORK="$work"
           mkdir -p "$work/receipt"
-          git show fb2ef6d931182381465ce6e1012c90a6c40e842e:.github/scripts/sdk030_quark_a4_prototype.py > "$work/receipt/quark_a4_prefill_prototype.py"
-          test "$(git hash-object "$work/receipt/quark_a4_prefill_prototype.py")" = 21acaa6f0336859cc9c3d65ee6c3f163ba7c3119
-          git show "$GITHUB_SHA":.github/scripts/sdk030_quark_a4_fp8_prototype.py > "$work/receipt/quark_a4_fp8_prototype.py"
           git rev-parse "$GITHUB_SHA" > "$work/receipt/diagnostic-source.txt"
+          curl -fsSL -H "Authorization: Bearer $GH_TOKEN" \
+            'https://api.github.com/repos/loom-fun/loom-skills/actions/artifacts/14953497525/zip' -o "$work/source.zip"
+          echo "e5968d4e110792a51a700ac9bbe31b6b163489114a1fa38ce07c8fabae7f9385  $work/source.zip" | sha256sum -c -
+          unzip -p "$work/source.zip" fp8-after.loom > "$work/split-fp8.loom"
+          echo "b8d9f2f31e9bc4f04857548d9c7c18c2f8f2adc91cf35d4de28252d6b21f6c8f  $work/split-fp8.loom" | sha256sum -c -
           curl -fsSL -H "Authorization: Bearer $GH_TOKEN" \
             'https://api.github.com/repos/loom-fun/loom-skills/actions/artifacts/14944250839/zip' -o "$work/original.zip"
           echo "875d7b88ad5247e4dcbbf816d8f058ab462d946c7d1ba8b6412c3f0c5e8e9bf7  $work/original.zip" | sha256sum -c -
@@ -66,19 +68,22 @@ jobs:
           assert source.count(hook) == 1
           source = source.replace(hook, '''  if [ "$v" = repairfp8 ]; then
               sha256sum "$pkg/program/llm.loom" > "$WORK/receipt/source-before-fp8.txt"
-              "$T" - "$WORK/receipt" "$pkg" <<'PATCH_GEN' || exit 1
-          import json
+              "$T" - "$WORK/split-fp8.loom" "$pkg/program/llm.loom" <<'PATCH_GEN' || exit 1
           from pathlib import Path
+          import re
           import sys
-          sys.path.insert(0, sys.argv[1])
-          from quark_a4_fp8_prototype import apply
 
-          package = Path(sys.argv[2])
-          path = package / "program/llm.loom"
-          original = path.read_bytes()
-          repair = apply(original.decode(), json.loads((package / "llm_config.json").read_text()), split_gdn=True)
-          assert "func.call @g_quark_a4_codes(" in repair
-          path.write_text(repair)
+          source = Path(sys.argv[1]).read_text()
+          header = re.search(r"^command\.def public target\(@device\) @llm_advance\(", source, re.M)
+          assert header
+          start = header.start()
+          end = source.index("\n}\n", start)
+          command = source[start:end]
+          marker = "  %t_ge256 = index.cmp uge, %t, %c256_rows : index\n"
+          assert command.count(marker) == 1
+          command = command.replace(marker, "  %quark_fp8_min = index.constant 1024 : index\n"
+                                   "  %t_ge256 = index.cmp uge, %t, %quark_fp8_min : index\n")
+          Path(sys.argv[2]).write_text(source[:start] + command + source[end:])
           PATCH_GEN
               cp "$pkg/program/llm.loom" "$WORK/receipt/fp8-after.loom"
             fi
@@ -99,7 +104,7 @@ jobs:
           vision.write_text(source)
           PY
           bash -n .github/scripts/devlab_perf.sh
-      - name: Measure the unchanged chart gate and paired FP8 performance with split GDN
+      - name: Measure the unchanged chart gate and paired full-sized FP8 performance
         shell: bash
         run: bash .github/scripts/devlab_perf.sh "$WORK/receipt/experiment.json" quark-a4-fp8
       - name: Archive exact sources and qualification logs
