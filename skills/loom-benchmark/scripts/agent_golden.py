@@ -59,6 +59,16 @@ def post(url, body, path="/v1/chat/completions"):
     return requests.post(url + path, data=data, timeout=1800, headers={"Content-Type": "application/json"}).json()
 
 
+def capture_key(pkg, model, inputs):
+    """Bind deferred requests to the runner identity plus the locked package and tokenizer bytes."""
+    root = Path(pkg)
+    programs = sorted(path for path in root.rglob("*") if path.suffix in (".loom", ".vmfb") and path.is_file())
+    files = [root / "model.json.lock", root / "tokenizer.json", *programs]
+    manifest = [(str(path.relative_to(root)), sha256(path.read_bytes()).hexdigest() if path.is_file() else None)
+                for path in files]
+    return loom_runs_key(pkg, model, [inputs, manifest])
+
+
 def near_at(ids, tops, loom_id, k, llama=None, prompt=(), pkg=None):
     """The compare rule (bench_common.near_tie) at divergence k (Loom's token there: loom_id); past the
     aligned top-5 lists (a byte-split token) it counts as a near-tie, as in compare.py. With llama and the
@@ -219,10 +229,10 @@ def main():
     thinking = None if a.thinking == "default" else a.thinking == "on"
     extra = {} if thinking is None else {"chat_template_kwargs": {"enable_thinking": thinking}}
     msgs = [{"role": "system", "content": "You are a helpful assistant. Use the tools when they help."}]
-    deferred = os.environ.get("LLAMA_DEFER")
+    deferred = os.environ.get("LLAMA_DEFER") if a.llama else None
     pending = Path(deferred) if deferred else None
     state = Path(deferred + ".loom.json") if deferred else None
-    key = loom_runs_key(a.pkg, P.model_id, [msgs, TASKS, TOOLS, WEATHER, a.thinking, a.max_tokens]) if state else None
+    key = capture_key(a.pkg, P.model_id, [msgs, TASKS, TOOLS, WEATHER, a.thinking, a.max_tokens]) if state else None
     saved = kept_runs(state, key) if state else None
     captures = saved["captures"] if saved else []
     capture_error = False
