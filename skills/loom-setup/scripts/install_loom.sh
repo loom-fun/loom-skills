@@ -103,9 +103,10 @@ PY
       curl -fsSL --retry 3 -o wheel-$rel/$asset.part "$url/$asset" && mv -f wheel-$rel/$asset.part wheel-$rel/$asset
     fi
     curl -fsSL --retry 3 -o wheel-$rel/SHA256SUMS "$url/SHA256SUMS"
-    want=$(awk -v n="$asset" '{f=$2; sub(/^\*/,"",f); if (f==n) print $1}' wheel-$rel/SHA256SUMS)
+    want=$(awk -v n="$asset" '{f=$2; sub(/^\*/,"",f); sub(/\r$/,"",f); if (f==n) print $1}' wheel-$rel/SHA256SUMS)
     [ -n "$want" ] || { echo "$asset is not listed in the release's SHA256SUMS"; exit 1; }
     got=$($venv/$bin/python -c 'import hashlib,sys;print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest())' wheel-$rel/$asset)
+    got=${got%$'\r'}
     [ "$got" = "$want" ] || { rm -f wheel-$rel/$asset; echo "sha256 mismatch for $asset: SHA256SUMS $want, downloaded $got"; exit 1; }
     # The tag's commit (an annotated tag peels with ^{}); plain git, no gh.
     sha=$(git ls-remote https://github.com/ROCm/hrx-system "refs/tags/v$rel^{}" "refs/tags/v$rel" | awk '{print $1}' | head -1)
@@ -117,22 +118,27 @@ PY
     whl=$(ls wheel-pypi/hrx_loom-*.whl | head -1);;
 esac
 wheel_sha=$($venv/$bin/python -c 'import hashlib,sys;print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest())' "$whl")
+wheel_sha=${wheel_sha%$'\r'}
 if [ "$source" != ci ]; then
   verified_sha=$($venv/$bin/python "$here/sdk_pin.py" verify-release-wheel "$(basename "$whl")" "$wheel_sha")
+  verified_sha=${verified_sha%$'\r'}
   if [ -n "$verified_sha" ]; then
     sha=$verified_sha; branch=v$(basename "$whl" | cut -d- -f2)
   fi
 fi
 $venv/$bin/pip install -q --force-reinstall --no-deps "$whl" && $venv/$bin/pip install -q "$whl[hf]"
 version=$($venv/$bin/python -c 'import importlib.metadata as m;print(m.version("hrx-loom"))')
+version=${version%$'\r'}
 if [ $source = pypi ] && [ -z "$sha" ] && command -v gh >/dev/null; then
   # The PyPI wheel is the hrx-system release asset with the same sha256: record the release tag's commit.
   q=".assets[] | select(.name == \"$(basename "$whl")\") | .digest"
   digest=$(gh api "repos/ROCm/hrx-system/releases/tags/v$version" -q "$q" 2>/dev/null || true)
+  digest=${digest%$'\r'}
   if [ "$digest" = "sha256:$wheel_sha" ]; then
     branch=v$version; sha=$(gh api "repos/ROCm/hrx-system/commits/v$version" -q .sha 2>/dev/null || true)
   fi
 fi
+sha=${sha%$'\r'}
 $venv/$bin/python -c '
 import json, sys
 v, src, sha, art, branch, wsha = sys.argv[1:]
@@ -148,6 +154,7 @@ for d in site.getsitepackages():
         print(json.load(open(f)).get("catalog", "").rpartition("@")[2]); raise SystemExit
 EOF
 )
+catalog=${catalog%$'\r'}
 [ -d library/.git ] || git clone -q https://github.com/ROCm/hrx-loom-library library
 if [ -n "$catalog" ]; then
   if [[ $catalog =~ ^[0-9a-f]{40}$ ]]; then
@@ -163,4 +170,4 @@ fi
 # Tools venv for ports/benchmarks/UI (kept separate from the SDK venv).
 [ -d .tools ] || $py -m venv .tools
 .tools/$bin/pip install -q gguf numpy tokenizers requests jinja2 fastapi uvicorn httpx pillow
-$venv/$bin/loom-serve --help >/dev/null && echo "OK: hrx-loom $($venv/$bin/python -c 'import importlib.metadata as m;print(m.version("hrx-loom"))') in $root/$venv/$bin; tools venv $root/.tools"
+$venv/$bin/loom-serve --help >/dev/null && echo "OK: hrx-loom $version in $root/$venv/$bin; tools venv $root/.tools"
