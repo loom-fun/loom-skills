@@ -35,9 +35,12 @@ def staged_kernel(generation):
     assert hashlib.sha256(program).hexdigest() == digest, generation
     text = program.decode()
     kernel = re.search(rf'kernel.def target\(@rdna3\) export\("{KERNEL}"\).*?kernel.return\n\}}', text, re.S)
-    metadata = re.search(r"func.def inline @g_k_metadata\(.*?\n\}", text, re.S)
+    helpers = [
+        re.search(rf"func.def inline @{name}\(.*?\n\}}", text, re.S)[0]
+        for name in ("g_k_scale_minimum", "g_k_metadata")
+    ]
     target = re.search(r"(?m)^amdgpu.target<gfx11-generic> @rdna3\b[^\n]*", text)
-    return kernel[0].replace(" target(@rdna3)", "", 1), metadata[0], target[0].replace(" @rdna3", " @expert_strix")
+    return kernel[0].replace(" target(@rdna3)", "", 1), "\n".join(helpers), target[0].replace(" @rdna3", " @expert_strix")
 
 
 def g32_kernel(gemm, moe):
@@ -91,7 +94,9 @@ def weight_data(rng, out):
 
 def case_data(rng, tokens):
     if tokens < 1024:
-        tile_info = np.asarray([[253, 64], [1, 17], [127, 1], [-1, 0]], dtype=np.int32)
+        rows = [[253, 64], [253, 17], [127, 1], [-1, 0]] if tokens == 63 else [
+            [253, 64], [127, 17], [127, 1], [-1, 0]]
+        tile_info = np.asarray(rows, dtype=np.int32)
         row_map = np.full(256, -1, dtype=np.int32)
         for tile, (_, active) in enumerate(tile_info):
             row_map[64 * tile : 64 * tile + active] = rng.choice(tokens * U, active, replace=False)
@@ -116,9 +121,9 @@ def case_data(rng, tokens):
     return {"tile_info": tile_info, "row_map": row_map, "x": x, "scales": scales}
 
 
-def render_case(out, data, name, arm, full_name, negative=False):
-    operators = {"base": [("base", "base")], "g32": [("g32", "new")],
-                 "ab": [("base", "base"), ("g32", "new")]}
+def render_case(out, data, name, arm, full_name, alternative, negative=False):
+    operators = {"base": [("base", "base")], alternative: [(alternative, "new")],
+                 "ab": [("base", "base"), (alternative, "new")]}
     rows, tokens = data["row_map"].size, data["x"].shape[0]
     tensor = f"tensor<{rows}x{F}xf32>"
     weights = f"tensor<{E * F * H // 256 * 144}xi8>"
@@ -153,7 +158,7 @@ def name_kernel(text, name):
                         f'kernel.def target(@expert_strix) export("k_{name}") @k_{name}(')
 
 
-def main(root, out, generation):
+def main(root, out, generation, alternative="g32"):
     sys.path.insert(0, str(root / "skills/loom-port-llm/starter"))
     import gen_gemm
     import gen_moe
@@ -163,24 +168,31 @@ def main(root, out, generation):
     old = gen_moe.grouped_gemm("q4_k", "swiglu", F, H, E, U, gen_gemm.gemm)
     assert old.strip() == exact.strip(), f"{generation}: kit baseline differs from deployed Strix expert kernel"
     base = name_kernel(exact, "base")
-    g32 = name_kernel(g32_kernel(gen_gemm, gen_moe), "g32")
+    if alternative == "g32":
+        variant = g32_kernel(gen_gemm, gen_moe)
+    else:
+        assert alternative == "paired"
+        from paired_rows import generate
+        variant = generate(gen_gemm, gen_moe, F, H, E, U)
+    candidate = name_kernel(variant, alternative)
     pre = target + "\n" + helper + "\n"
     weight_data(np.random.default_rng(12), out)
     fixtures = {f"t{tokens}": case_data(np.random.default_rng(tokens), tokens) for tokens in (63, 65, 1024, 4096)}
-    for arm, kernel in (("base", base), ("g32", g32)):
-        body = "".join(render_case(out, data, name, arm, name) for name, data in fixtures.items() if name in ("t1024", "t4096"))
+    for arm, kernel in (("base", base), (alternative, candidate)):
+        body = "".join(render_case(out, data, name, arm, name, alternative)
+                       for name, data in fixtures.items() if name in ("t1024", "t4096"))
         benches = "".join(f"check.benchmark<@{name}> @k_case_{name}\n" for name in ("t1024", "t4096"))
         (out / f"bench_{arm}.loom").write_text(pre + kernel + "\n" + body + benches, encoding="utf-8")
-    (out / "test.loom").write_text(pre + base + "\n" + g32 + "\n" + "".join(
-        render_case(out, data, name, "ab", name) for name, data in fixtures.items()), encoding="utf-8")
-    (out / "negative.loom").write_text(pre + g32 + "\n" + render_case(
-        out, fixtures["t65"], "t65", "g32", "negative_nonzero", negative=True), encoding="utf-8")
+    (out / "test.loom").write_text(pre + base + "\n" + candidate + "\n" + "".join(
+        render_case(out, data, name, "ab", name, alternative) for name, data in fixtures.items()), encoding="utf-8")
+    (out / "negative.loom").write_text(pre + candidate + "\n" + render_case(
+        out, fixtures["t65"], "t65", alternative, "negative_nonzero", alternative, negative=True), encoding="utf-8")
     (out / "geometry.json").write_text(json.dumps({
-        "generation": generation, "pinned_source": PINS[generation], "rows": {
+        "generation": generation, "alternative": alternative, "pinned_source": PINS[generation], "rows": {
             name: data["row_map"].size for name, data in fixtures.items()
         }, "gpu": "gfx1151", "hidden": H, "expert_ffn": F, "experts": E, "used": U,
     }, indent=2) + "\n", encoding="utf-8")
 
 
 if __name__ == "__main__":
-    main(Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3])
+    main(Path(sys.argv[1]), Path(sys.argv[2]), *sys.argv[3:])

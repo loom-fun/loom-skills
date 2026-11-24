@@ -1,0 +1,68 @@
+{
+  "sdk": "release:0.3.0",
+  "repeats": 3,
+  "suites": [
+    {
+      "suite": "qwen35_expert_pair_gen35",
+      "runner": "strix",
+      "dir": "qwen35_expert_g32",
+      "gen": "qwen35_expert_g32/gen_bench.py",
+      "gen_variants": [
+        "gen35",
+        "paired"
+      ],
+      "files": [
+        "bench_base.loom",
+        "bench_paired.loom"
+      ],
+      "tests": [
+        "test.loom"
+      ],
+      "negative_tests": [
+        {
+          "file": "negative.loom",
+          "xfail": [
+            "@negative_nonzero=EXPECT/006"
+          ]
+        }
+      ],
+      "case_timing": true,
+      "args": [
+        "--measure=dispatch_complete",
+        "--batch-size=4",
+        "--profile-final-batch=true"
+      ]
+    },
+    {
+      "suite": "qwen35_expert_pair_gen36",
+      "runner": "strix",
+      "dir": "qwen35_expert_g32",
+      "gen": "qwen35_expert_g32/gen_bench.py",
+      "gen_variants": [
+        "gen36",
+        "paired"
+      ],
+      "files": [
+        "bench_base.loom",
+        "bench_paired.loom"
+      ],
+      "tests": [
+        "test.loom"
+      ],
+      "negative_tests": [
+        {
+          "file": "negative.loom",
+          "xfail": [
+            "@negative_nonzero=EXPECT/006"
+          ]
+        }
+      ],
+      "case_timing": true,
+      "args": [
+        "--measure=dispatch_complete",
+        "--batch-size=4",
+        "--profile-final-batch=true"
+      ]
+    }
+  ]
+}
