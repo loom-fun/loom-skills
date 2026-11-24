@@ -123,7 +123,45 @@ def _kernel(name, operand):
     return f'kernel.def export("{name}") @{name}' + geometry + operand + "  }\n  kernel.return\n}\n"
 
 
-def apply(text, config):
+def _round_linear_results(command):
+    """Match the BF16 result boundary of the reference Quark linear."""
+    gemm = re.compile(r"^([ ]*)template\.apply<@sel\d+_g_gemm_mxfp4s_store(?:_m128)?>\(([^)]*)\) : [^\n]+$", re.M)
+    skinny = re.compile(r"^([ ]*)kernel\.launch @g_mv_mxfp4s_k5120_t16_q8\[%nHV, %t\]\([^\n]*(%galpha|%gbeta)\) : [^\n]+$", re.M)
+
+    def append_round(match, rows, width, output):
+        indent = match.group(1)
+        return (f"{match[0]}\n{indent}kernel.launch @g_quark_round_bf16[{rows}, {width}]"
+                f"({rows}, {width}, {output}) : [index, index](index, index, buffer)")
+
+    def round_gemm(match):
+        operands = match[2].split(", ")
+        assert len(operands) == 10, operands
+        return append_round(match, operands[2], operands[4], operands[9])
+
+    command, gemms = gemm.subn(round_gemm, command)
+    command, skinny_calls = skinny.subn(lambda m: append_round(m, "%t", "%nHV", m[2]), command)
+    assert gemms > 500 and skinny_calls == 96, (gemms, skinny_calls)
+    print(f"Quark prototype rounded {gemms} GEMM branches and {skinny_calls} GDN outputs to BF16")
+    return command
+
+
+def _round_bf16_kernel():
+    geometry = GEOMETRY.replace("%input: buffer, %output: buffer, %scales: buffer", "%output: buffer")
+    geometry = geometry.replace("thirtytwo", "sixteen").replace("constant 32 ", "constant 16 ")
+    geometry = geometry.replace(" 32, 65536", " 16, 65536").replace("multiple_of(%width_arg, 32)", "multiple_of(%width_arg, 16)")
+    return 'kernel.def export("g_quark_round_bf16") @g_quark_round_bf16' + geometry + """
+    %output_view = buffer.view %output[%zero] : buffer -> view<[%rows]x[%groups]x16xf32>
+    %values = vector.load %output_view[%row, %group, %begin] : view<[%rows]x[%groups]x16xf32> -> vector<16xf32>
+    %narrow = vector.fptrunc %values : vector<16xf32> to vector<16xbf16>
+    %rounded = vector.extf %narrow : vector<16xbf16> to vector<16xf32>
+    vector.store %rounded, %output_view[%row, %group, %begin] : vector<16xf32>, view<[%rows]x[%groups]x16xf32>
+  }
+  kernel.return
+}
+"""
+
+
+def apply(text, config, *, round_outputs=False):
     """Evaluate A4 only in the initial prefill source, keeping the qualification gate unchanged."""
     spec = config["quark"]["global_quant_config"]["input_tensors"]
     assert (spec["dtype"], spec["group_size"], spec["scale_calculation_mode"]) == ("fp4", 32, "even")
@@ -157,4 +195,7 @@ def apply(text, config):
     assert skinny_count == len(config["recurrent_layers"]), skinny_count
     print(f"Quark prototype rewrote {f16_count} prefill A operands and {skinny_count} GDN input packs")
     library = activation_codes() + _kernel("g_quark_a4_f16", OPERAND_F16) + _kernel("g_quark_a4_i8", OPERAND_I8)
+    if round_outputs:
+        command = _round_linear_results(command)
+        library += _round_bf16_kernel()
     return text[:start] + library + command + text[end:]
