@@ -24,7 +24,9 @@ jobs:
           export WORK="$work"
           echo "WORK=$WORK" >> "$GITHUB_ENV"
           mkdir -p "$WORK/receipt"
-          python3 .github/scripts/ab_jobs.py --device "$SDK_GPU_KEY" --gates full --sdk-ab --old-sdk card --new-sdk 0.3.0 --old-rev 9a06cc9ba5ca93e2de3a5fa40b2ad4e415d191fe "$SLUG" > "$WORK/receipt/experiment.json"
+          revision=9a06cc9ba5ca93e2de3a5fa40b2ad4e415d191fe
+          python3 .github/scripts/ab_jobs.py --device "$SDK_GPU_KEY" --gates full --sdk-ab --old-sdk card --new-sdk 0.3.0 \
+            --old-org loom-fun --old-rev "$revision" --new-org loom-fun --new-rev "$revision" "$SLUG" > "$WORK/receipt/experiment.json"
           python3 - <<'PY' >> "$GITHUB_ENV"
           import json
           import os
@@ -32,8 +34,8 @@ jobs:
           path = Path(os.environ['WORK']) / 'receipt/experiment.json'
           plan = json.loads(path.read_text())
           job, = plan['jobs']
-          assert job['card'].endswith('@9a06cc9ba5ca93e2de3a5fa40b2ad4e415d191fe')
-          assert job['llamacpp'] == 'b1375'
+          assert job['card'] == 'loom-fun/ggml-org-Qwen3.6-35B-A3B-loom@9a06cc9ba5ca93e2de3a5fa40b2ad4e415d191fe', job['card']
+          assert job['llamacpp'] == 'b1375', job['llamacpp']
           job['variants'] = [variant for variant in job['variants'] if variant['name'] in ('fun', 'staging')]
           job['llama_kv_rocm'] = 35000
           job['steps'] = ['qwen36capture:fun', 'qwen36capture:staging', 'qwen36reference@rocm.np1.nodraft']
