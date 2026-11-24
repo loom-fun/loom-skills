@@ -1786,7 +1786,7 @@
    %minus_one = scalar.constant -1 : i32
    %cEm1 = scalar.constant {E - 1} : i32
    %cE = index.constant {E} : index
-@@ -1130,6 +1700,11 @@
+@@ -1130,6 +1700,14 @@
      fused (swiglu): one gate_up tensor as both weights (expert_mv's layout).
      bias / act: as expert_mv (per-expert output biases, the gate/up activation)."""
      import gen_gemm
@@ -1794,11 +1794,14 @@
 +    if (cw not in ("", "0") and (cw == "1" or mode in cw.split(",")) and fmt == "iq4_xs" and not (fused or bias or act not in (None, "silu"))
 +            and K % 256 == 0 and N % (128 if mode == "swiglu" else 256) == 0):
 +        import gen_moe_cw   # choice moe.prefill.cw: column-wave grouped GEMMs (live 16-row fragments only, weights straight to B)
++        if os.environ.get("MOE_CW_WS", "0") not in ("", "0"):
++            import gen_moe_ws   # MOE_CW_WS: weight-stationary pair tiles (one dequant per column group for up to 128 rows of an expert)
++            return gen_moe_ws.grouped_gemm_ws(fmt, mode, N, K, E, KU)
 +        return gen_moe_cw.grouped_gemm_cw(fmt, mode, N, K, E, KU)
      fmt, _, fmt2 = fmt.partition("+")
      rb = N and (K // SB[fmt] * FMT[fmt])
      eb = rb * N
-@@ -1228,6 +1803,78 @@
+@@ -1228,6 +1806,78 @@
      return text + "\n" + gen_gemm_rdna4.twin(text) if gen_gemm_rdna4.enabled() else text   # the gfx12 twin K_rdna4 beside K
  
  
