@@ -14,10 +14,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - slug: nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom
+          - slug: unsloth-Qwen3.5-4B-loom
             device: radeon-r9700
             labels: '["self-hosted","devlab-dispatch","radeon-r9700"]'
-            correctness: '{"run":45275710722,"job":138046833568,"artifact":14877263375,"digest":"sha256:ccf23f4b9d65dcea49329d8785835808620bd1a371125e5b3cc7430445ad1893","production":"loom-fun/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom@3f36ed722f6c8bdb51d90526bc05e03a05f24dbf","generator":"3adfe7b7b6e68f753042e9f89b318e29a6088579"}'
+            pinned_programs: '6a47f53f1466bb7cad142b6b2874ccf9c5ee8b96aa77490155252e5d8d7c8f62'
     runs-on: ${{ fromJSON(matrix.labels) }}
     timeout-minutes: 240
     env:
@@ -27,6 +27,7 @@ jobs:
       INITIAL_CORRECTNESS: ${{ matrix.correctness }}
       DISPATCH_HEAD: ${{ github.event.pull_request.head.sha }}
       ABBA_REPS: ${{ matrix.reps }}
+      PINNED_PROGRAMS: ${{ matrix.pinned_programs }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -60,6 +61,14 @@ jobs:
           variants={v['name']:v for v in job['variants']}
           assert variants['fun']['sdk']=='card' and variants['fun']['card']==job['card']
           assert variants['staging']['sdk']=='0.3.0' and 'card' not in variants['staging']
+          if os.environ['PINNED_PROGRAMS']:
+              for name in ('staging','stagingnd'):
+                  variant=variants[name]
+                  assert variant['sdk']=='0.3.0'
+                  variant.pop('build')
+                  variant.pop('build_args',None)
+                  variant['card']=job['card']
+              (work/'receipt/experiment.json').write_text(json.dumps(plan))
           print('JOB='+job['name'])
           PY
       - name: Verify eligibility for reusing original correctness
@@ -118,6 +127,10 @@ jobs:
           for step in common + correctness:
               if step not in results:
                   failures[step]='missing required result'
+          if digest:=os.environ['PINNED_PROGRAMS']:
+              for variant in ('fun','funnd','staging','stagingnd'):
+                  if (out/f'programs_sha256_{variant}.txt').read_text().strip()!=digest:
+                      failures[variant]='different programs from the frozen package'
           if not results or failures:raise SystemExit(str(failures or 'no results'))
           PY
       - uses: actions/upload-artifact@v4
