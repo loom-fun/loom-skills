@@ -2,26 +2,26 @@
   "include": [
     {
       "gpu": "radeon-r9700",
-      "slug": "rippertnt-HyperCLOVAX-SEED-Text-Instruct-1.5B-loom",
-      "repo": "loom-fun-staging/rippertnt-HyperCLOVAX-SEED-Text-Instruct-1.5B-loom",
-      "revision": "b81c05d4348b3fd1fc3a7f17c1ace06c9da84470",
+      "slug": "amd-Qwen3.8-27B-Quark-AWQ-MXFP4-loom",
+      "repo": "loom-fun-staging/amd-Qwen3.8-27B-Quark-AWQ-MXFP4-loom",
+      "revision": "27804b8f0e129b25bed5b9f5c0bb605fb3bea31b",
       "device": "amdgpu://?completion_spin_ns=4294967295",
       "args": [
         "--pool_backing=fixed"
       ],
-      "model_id": "naver-hyperclovax/HyperCLOVAX-SEED-Text-Instruct-1.5B",
+      "model_id": "qwen3.8-27b-mxfp4",
       "features": {
         "api": "yes",
         "audio": "unknown",
         "concurrency": "yes",
         "context": "yes",
-        "image_input": "unknown",
+        "image_input": "yes",
         "max_output_tokens": "yes",
-        "reasoning_effort": "n/a",
+        "reasoning_effort": "yes",
         "sampling": "yes",
-        "speculative_decoding": "n/a",
-        "thinking": "n/a",
-        "tool_calling": "n/a"
+        "speculative_decoding": "yes",
+        "thinking": "yes",
+        "tool_calling": "yes"
       },
       "sdk": {
         "hrx_loom": "0.3.0",
@@ -30,10 +30,10 @@
         "wheel_sha256": "6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f"
       },
       "files": {
-        "info.json": "e3a55c17c08393e56063924757b911054aae557c97a0ddf98d91a2cf354e3e03",
-        "model.json": "5428f5f85d175f399571bb814cf26bb99c320a20f21da58fe1cd54f27548a49b",
-        "model.json.lock": "301f72804848cf14e68f8921fb66e7f3a8d245ddbe767b32aa35e6ea0a68583e",
-        "llm_config.json": "164237c070bb6ff4c03120df095ec392e419b26b3a8e53013bd8ca98556eb1f6"
+        "info.json": "5c79ecb368cc47212d0bce63bf8f46ebd971b490fa0456e91723dcbfdcf01a29",
+        "model.json": "b4713897a02d371113f3ab110039a526eb1502440bb1eb1aa676f8314f0628a3",
+        "model.json.lock": "e726e19dd817f01136c9af2a91f06d93645cddc5b983b67802111e3f83cb8a58",
+        "llm_config.json": "d324291f40b05c5b2b0dbd5825e12ddb8edab65bf53abc9d931d774bc8aff734"
       },
       "package_serve": null,
       "published_rows": [
@@ -48,7 +48,18 @@
         "streams4"
       ],
       "preset": "chat-r9700",
-      "context_tokens": 131072
+      "context_tokens": 110592,
+      "selected_programs": {
+        "program/control.loom": "61c70a6e9f77da5916043b9786f640958738bd7ee88c6d9503281264e4d99c45",
+        "program/llm.loom": "5c2c4ef5bee2f8b745646adbd169462ec33d75d9a8cb2970e6e8dd4f62273fe4",
+        "program/prepare.loom": "624cc71fa9845be028df6375c0097cd9b8b0b03f560c11d9e34411897a8fe81f",
+        "program/service.loom": "5dcd083b26d98f39b3215f9f47b9acfaa08e62df406718cdb92aa0684323f7db",
+        "program/storage.loom": "188ac650704dcace496b1dd28c3a4edc5d30a7871bf29ec9ea7b1a7bc3d142a2",
+        "program/vision_control.loom": "b99b3f89d46fdf1ae4174120cee9f3ec8d8a4480cb5c7b2973aeb2695416f9c9",
+        "program/vision_encoder.loom": "bbf909f9c386c6ff8da6ce1dfb8ec8217f058d2d9c3df13144deee13a4d66dfe",
+        "program/vision_prepare.loom": "0d71c99323585382b000731feda258fc6a9c756e41b0ce871b7ee24bdf74812e",
+        "program/vision_stages.loom": "0aa463123aa20128c17c6659f1a4b4539727cca472addaa61825597b2fae7004"
+      }
     }
   ]
 }

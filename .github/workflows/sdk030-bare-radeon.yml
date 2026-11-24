@@ -59,6 +59,12 @@ jobs:
               jq -e --slurpfile installed "$work/out/sdk.json" '.sdk | to_entries | all(.[] | select(.value != null); .key as $key | .value == $installed[0][$key])' "$work/out/plan.json"
               HF_HOME="$work/hf-home" "$sdk/.venv/bin/loom-fetch" "$ref/model.json" --preset="$preset" --materialize=copy --no-input --cache "$work/fetch-cache" --output="$work/model" 2>&1 | tee "$work/out/fetch.log"
               cp "$work/out/llm_config.json" "$work/model/"
+              if jq -e 'has("selected_programs")' "$work/out/plan.json" >/dev/null; then
+                jq -r '.selected_programs | to_entries[] | "\(.value)  \(.key)"' "$work/out/plan.json" > "$work/out/selected-programs.sha256"
+                (cd "$work/model" && sha256sum --check "$work/out/selected-programs.sha256")
+                (cd "$work/model" && find program -type f -printf '%p\n' | sort) > "$work/out/program-inventory.txt"
+                jq -r '.selected_programs | keys[]' "$work/out/plan.json" | sort | diff - "$work/out/program-inventory.txt"
+              fi
             }
       - name: Compare both effective launches with fixed prompts
         shell: bash

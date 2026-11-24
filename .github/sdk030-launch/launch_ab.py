@@ -237,6 +237,17 @@ def measure(work, sdk, bench, focus):
             cases = {}
             if features.get("image_input") == "yes":
                 cases["vision"] = {**image_requests(model_id)[0], "max_tokens": 96}
+                if plan["slug"] == "amd-Qwen3.8-27B-Quark-AWQ-MXFP4-loom":
+                    from vision_golden import builtin_images, data_url
+
+                    chart, question = builtin_images()["chart"]
+                    cases["vision_chart"] = {
+                        **cases["vision"], "max_tokens": 160,
+                        "messages": [{"role": "user", "content": [
+                            {"type": "image_url", "image_url": {"url": data_url(chart)}},
+                            {"type": "text", "text": question},
+                        ]}],
+                    }
             if features.get("tool_calling") == "yes":
                 cases["tools"] = {
                     "model": model_id, "tools": TOOLS,
@@ -251,6 +262,9 @@ def measure(work, sdk, bench, focus):
                 calls = [call["function"] for call in message.get("tool_calls") or []]
                 passed = any(call["name"] == "get_weather" and "paris" in call["arguments"].lower()
                              for call in calls) if name == "tools" else bool(message.get("content"))
+                if name == "vision_chart":
+                    answer = (message.get("content") or "").lower()
+                    passed = "tickets closed per day" in answer and bool(re.search(r"\bthu(?:rsday)?\b", answer))
                 results[name] = {"request": digest(body), "content": message.get("content"),
                                  "calls": calls, "finish": choice.get("finish_reason"), "passed": passed}
             write(directory / "capabilities.json", results)
