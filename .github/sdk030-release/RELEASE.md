@@ -1,12 +1,12 @@
 # Loom SDK 0.3.0 promotion handoff
 
-The approval scope is the exact package rows in `inputs/eligible.json`. Each row binds an exact staging commit to the reviewed production parent. The base scope is 58 packages. Quark Qwen3.8 27B and base Inkling 2 Mini require separately qualified corrections and may be added with exact reviewed staging receipts. The Radeon-specific Inkling package is out of scope for every write, including any outgoing tag. `inputs/held.json` records the current exclusions. A bundle with any missing or failed eligible row is a rehearsal receipt and cannot be applied.
+The approval scope is the exact package rows in `inputs/eligible.json`. Each row binds a staging commit to the reviewed production parent. `inputs/snapshot.json` records the eligible and excluded counts, and `inputs/held.json` records each exclusion and its disposition. The Radeon-specific Inkling package is out of scope for every write, including any outgoing tag. A bundle with any missing or failed eligible row cannot be applied.
 
 Use Python 3.11 or newer, `huggingface_hub==0.36.0`, and the GitHub CLI for the public entry points. Download the archive from the reviewed DevLab artifact, compare its SHA256 with the issue, and extract it. Set `manifest` and `tags` to the approved digests from the issue and compare them against `release-digests.json`. Run these commands in the extracted directory.
 
 ```sh
 sha256sum --check archive-files.sha256
-python promote-reviewed.py --manifest-sha256 "$manifest" --tag-plan-sha256 "$tags"
+python -B promote-reviewed.py --manifest-sha256 "$manifest" --tag-plan-sha256 "$tags"
 ```
 
 The default invocation checks the reviewed scope, current staging heads, outgoing tag identities, live production parents and bundle content. Compare its reported parent and tag state with the reviewed evidence. A changed staging head, production parent, tag or reviewed file stops the operation and needs a new review of the affected row.
@@ -14,7 +14,7 @@ The default invocation checks the reviewed scope, current staging heads, outgoin
 After the owner explicitly approves this exact manifest and tag plan, use an authorized Hugging Face account and run one guarded package command.
 
 ```sh
-PROMOTE_CONFIRM=loom-fun python promote-reviewed.py --manifest-sha256 "$manifest" --tag-plan-sha256 "$tags" --apply --receipt production-commits.jsonl
+PROMOTE_CONFIRM=loom-fun python -B promote-reviewed.py --manifest-sha256 "$manifest" --tag-plan-sha256 "$tags" --apply --receipt production-commits.jsonl
 ```
 
 The command rechecks all parents before the first write, creates only missing outgoing `v0.2.0` tags at named immutable parents, verifies tag readback, and publishes the reviewed changes with parent guards. Keep `production-commits.jsonl` outside any throwaway scratch directory. Use the same manifest, tag plan and receipt after an interruption. The replay only recovers a missing receipt when the live commit has the expected release marker, reviewed parent and exact byte inventory. Existing release tags are immutable. The production package archive contains no weight downloads.
