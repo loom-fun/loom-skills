@@ -1,0 +1,38 @@
+[
+  {
+    "gpu": "strix-halo",
+    "slug": "bartowski-Qwen2.5-0.5B-Instruct-loom",
+    "repo": "loom-fun-staging/bartowski-Qwen2.5-0.5B-Instruct-loom",
+    "revision": "ace0ba40598f49866455ed9d335cf59e5ae42813",
+    "preset": "chat",
+    "device": "amdgpu://?completion_spin_ns=4294967295",
+    "args": [
+      "--pool_backing=fixed"
+    ],
+    "model_id": "Qwen/Qwen2.5-0.5B-Instruct"
+  },
+  {
+    "gpu": "strix-halo",
+    "slug": "bartowski-Qwen3.8-27B-loom",
+    "repo": "loom-fun-staging/bartowski-Qwen3.8-27B-loom",
+    "revision": "cb48dd1f30ebcb36cd6b8eaa7fbeddabff3602ef",
+    "preset": "chat",
+    "device": "amdgpu://?completion_spin_ns=4294967295",
+    "args": [
+      "--pool_backing=fixed"
+    ],
+    "model_id": "qwen3.8-27b"
+  },
+  {
+    "gpu": "strix-halo",
+    "slug": "unsloth-Qwen3.8-Flash-Next-loom",
+    "repo": "loom-fun-staging/unsloth-Qwen3.8-Flash-Next-loom",
+    "revision": "473e5815cedcf3117fcac905c27ed3434f9fe836",
+    "preset": "vision-mtp",
+    "device": "amdgpu://?completion_spin_ns=4294967295",
+    "args": [
+      "--workers=8"
+    ],
+    "model_id": "unsloth-Qwen3.8-Flash-Next-loom"
+  }
+]
