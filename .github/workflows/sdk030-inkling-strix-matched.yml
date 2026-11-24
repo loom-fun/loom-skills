@@ -25,7 +25,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: 16261e288ef75481d93ebb1a32bf5332f1a35751
+          ref: 2b78eebf5c93b8b1d92d86d0fbe20275c674cde2
           fetch-depth: 0
           persist-credentials: false
       - name: Plan from the accepted production revision
@@ -73,6 +73,20 @@ jobs:
           h.write_text(source.replace(anchor,'    rsync -a --exclude=/parameter --exclude=/.git "$vcard/" "$pkg/"\n'+anchor))
           print('JOB=special')
           PY
+      - name: Verify deferred spec references fail closed and all get queued
+        shell: bash
+        run: |
+          set -euo pipefail
+          script=skills/loom-benchmark/scripts/spec_check.py
+          python3 -m unittest discover -s tests -p test_spec_check.py -v |& tee "$WORK/receipt/spec-fixtures-fixed.log"
+          cp "$script" "$WORK/spec-check-fixed.py"
+          git show 16261e288ef75481d93ebb1a32bf5332f1a35751:"$script" > "$script"
+          rc=0
+          python3 -m unittest discover -s tests -p test_spec_check.py -v > "$WORK/receipt/spec-fixtures-original.log" 2>&1 || rc=$?
+          cp "$WORK/spec-check-fixed.py" "$script"
+          test "$rc" = 1
+          grep -q 'IndexError: list index out of range' "$WORK/receipt/spec-fixtures-original.log"
+          sha256sum "$script" tests/test_spec_check.py skills/loom-benchmark/scripts/ctx_admit.py > "$WORK/receipt/benchmark-source.sha256"
       - name: Fetch and verify the publisher's compatible reference at the same checkpoint revision
         shell: bash
         run: |
