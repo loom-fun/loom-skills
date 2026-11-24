@@ -64,8 +64,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          slug=$(jq -r .slug "$WORK/out/plan.json")
+          focus=$(jq -r --arg slug "$slug" '.[$slug] // "all"' .github/sdk030-bare/recovery-scope.json)
           "$SDK_ROOT/.tools/bin/python" -u "$GITHUB_WORKSPACE/.github/sdk030-launch/launch_ab.py" \
-            "$WORK" "$SDK_ROOT" "$GITHUB_WORKSPACE/skills/loom-benchmark/scripts"
+            "$WORK" "$SDK_ROOT" "$GITHUB_WORKSPACE/skills/loom-benchmark/scripts" --focus "$focus"
       - uses: actions/upload-artifact@v4
         if: always() && env.WORK != ''
         with:

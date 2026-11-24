@@ -2,20 +2,20 @@
   "include": [
     {
       "gpu": "radeon-r9700",
-      "slug": "ggml-org-Muse-Glimmer-30B-loom",
-      "repo": "loom-fun-staging/ggml-org-Muse-Glimmer-30B-loom",
-      "revision": "1685274f1331c4972d98b333a0e63bb40efe6aa2",
+      "slug": "ggml-org-Flint-loom",
+      "repo": "loom-fun-staging/ggml-org-Flint-loom",
+      "revision": "d9f8f69c9923dd1e343f73a837a29311ed1738be",
       "device": "amdgpu://?completion_spin_ns=4294967295",
       "args": [
         "--pool_backing=fixed"
       ],
-      "model_id": "meta-models/Muse-Glimmer-30B",
+      "model_id": "flint",
       "features": {
         "api": "yes",
         "audio": "unknown",
         "concurrency": "yes",
         "context": "yes",
-        "image_input": "yes",
+        "image_input": "unknown",
         "max_output_tokens": "yes",
         "reasoning_effort": "n/a",
         "sampling": "yes",
@@ -30,10 +30,10 @@
         "wheel_sha256": "6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f"
       },
       "files": {
-        "info.json": "78de8f845d1811690998118ca08af67579d710b5e2c05be0b12b3eca942bb6da",
-        "model.json": "0e3ed29f69bb9bca1d6b352389be41c247877f9d18852434cc79275c88c6de3b",
-        "model.json.lock": "c532d64c2c4f48ef34af8fb2c6ef8b8f59ce74145ceb32dfd0ba2d1dc6f03454",
-        "llm_config.json": "e287d23aa87fe45603afa5dfc49b9c29abb891140f37477b3a97e4045353711c"
+        "info.json": "750cbbd27125f4a7746c5306778877c22ce87d53240ae14ef62e246557df7efa",
+        "model.json": "8ea0ab75cfc5c522377454e393ae2c90e067dc97c108f29d9c34e6dca7bf74b7",
+        "model.json.lock": "fdf52625d05116b3b8b6a7d106f39e1400d63e16e6a5d399b9293d1f5adc97da",
+        "llm_config.json": "f7cd28e2db2a771e4c4fe2b5f55d6478603274fd47945ce03be81e831d791f63"
       },
       "package_serve": null,
       "published_rows": [
@@ -48,7 +48,57 @@
         "streams4"
       ],
       "preset": "chat-r9700",
-      "context_tokens": 32768
+      "context_tokens": 36864
+    },
+    {
+      "gpu": "radeon-r9700",
+      "slug": "rippertnt-HyperCLOVAX-SEED-Text-Instruct-1.5B-loom",
+      "repo": "loom-fun-staging/rippertnt-HyperCLOVAX-SEED-Text-Instruct-1.5B-loom",
+      "revision": "b81c05d4348b3fd1fc3a7f17c1ace06c9da84470",
+      "device": "amdgpu://?completion_spin_ns=4294967295",
+      "args": [
+        "--pool_backing=fixed"
+      ],
+      "model_id": "naver-hyperclovax/HyperCLOVAX-SEED-Text-Instruct-1.5B",
+      "features": {
+        "api": "yes",
+        "audio": "unknown",
+        "concurrency": "yes",
+        "context": "yes",
+        "image_input": "unknown",
+        "max_output_tokens": "yes",
+        "reasoning_effort": "n/a",
+        "sampling": "yes",
+        "speculative_decoding": "n/a",
+        "thinking": "n/a",
+        "tool_calling": "n/a"
+      },
+      "sdk": {
+        "hrx_loom": "0.3.0",
+        "source": "pypi",
+        "hrx_system_sha": "e2c41a720363911c04606ce0f4417e2d55630352",
+        "wheel_sha256": "6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f"
+      },
+      "files": {
+        "info.json": "e3a55c17c08393e56063924757b911054aae557c97a0ddf98d91a2cf354e3e03",
+        "model.json": "5428f5f85d175f399571bb814cf26bb99c320a20f21da58fe1cd54f27548a49b",
+        "model.json.lock": "301f72804848cf14e68f8921fb66e7f3a8d245ddbe767b32aa35e6ea0a68583e",
+        "llm_config.json": "164237c070bb6ff4c03120df095ec392e419b26b3a8e53013bd8ca98556eb1f6"
+      },
+      "package_serve": null,
+      "published_rows": [
+        "decode",
+        "decode_2k",
+        "decode_32k",
+        "prefill_16k",
+        "prefill_1k",
+        "prefill_2k",
+        "prefill_32k",
+        "prefill_8k",
+        "streams4"
+      ],
+      "preset": "chat-r9700",
+      "context_tokens": 131072
     }
   ]
 }

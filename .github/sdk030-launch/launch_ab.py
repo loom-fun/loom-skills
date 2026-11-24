@@ -86,7 +86,7 @@ def deterministic_benchmark(bench, name, seed, target, argv):
         write(target, journal)
 
 
-def measure(work, sdk, bench):
+def measure(work, sdk, bench, focus):
     model = work / "model"
     out = work / "out"
     plan = read(out / "plan.json")
@@ -292,14 +292,17 @@ def measure(work, sdk, bench):
             try:
                 if phase("cold_launch", lambda: ready(server)):
                     report["functional_exact"] = phase("functional", functional)
-                    report["capabilities"] = phase("capabilities", capabilities)
-                    phase("short", lambda: perf("short", []))
-                    phase("long", lambda: perf("long", ["--long"]))
-                    if rows >= 2:
-                        phase("concurrency", concurrent)
-                    report["admission"] = phase("native_admission", admission)
-                    if report["admission"] and not report["admission"].get("admitted"):
-                        report["errors"]["native_admission"] = "native context refused"
+                    if focus == "decode_32k":
+                        phase("long", lambda: perf("long", ["--long", "--only-decode-32k"]))
+                    if focus == "all":
+                        report["capabilities"] = phase("capabilities", capabilities)
+                        phase("short", lambda: perf("short", []))
+                        phase("long", lambda: perf("long", ["--long"]))
+                        if rows >= 2:
+                            phase("concurrency", concurrent)
+                        report["admission"] = phase("native_admission", admission)
+                        if report["admission"] and not report["admission"].get("admitted"):
+                            report["errors"]["native_admission"] = "native context refused"
             finally:
                 if server.poll() is None:
                     server.terminate()
@@ -341,7 +344,7 @@ def measure(work, sdk, bench):
                       and read(a / "answers.json") == read(b / "answers.json")})
     medians = {metric: round(statistics.median(pair["bare_delta_pct"][metric] for pair in pairs), 2)
                for metric in pairs[0]["bare_delta_pct"].keys() & pairs[1]["bare_delta_pct"].keys()}
-    write(out / "comparison.json", {"plan": plan, "launch_args": modes, "package_serve": package_args,
+    write(out / "comparison.json", {"plan": plan, "focus": focus, "launch_args": modes, "package_serve": package_args,
                                      "median_paired_bare_delta_pct": medians, "pairs": pairs, "sessions": reports})
     if any(report["errors"] for report in reports) or any(
         not pair["functional_match"] or not pair["capabilities_match"] for pair in pairs
@@ -358,5 +361,6 @@ if __name__ == "__main__":
         parser.add_argument("work", type=Path)
         parser.add_argument("sdk", type=Path)
         parser.add_argument("bench", type=Path)
+        parser.add_argument("--focus", choices=("all", "functional", "decode_32k"), default="all")
         args = parser.parse_args()
-        measure(args.work, args.sdk, args.bench)
+        measure(args.work, args.sdk, args.bench, args.focus)

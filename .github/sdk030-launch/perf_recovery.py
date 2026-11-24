@@ -61,6 +61,7 @@ ap.add_argument("--kind", default="loom", choices=["loom", "llama", "vllm", "guf
                      "no drafted-token counters read per request)")
 ap.add_argument("--model", default=None, help="Loom model id (model.json model.id), or the vLLM server's served model name")
 ap.add_argument("--long", action="store_true")
+ap.add_argument("--only-decode-32k", action="store_true", help="Run the prespecified 32k completion recovery only")
 ap.add_argument("--log", default="perf_log.jsonl")
 ap.add_argument("--reverted", action="store_true", help="this build is not kept (still logged: its time counts)")
 ap.add_argument("--no-campaign", action="store_true",
@@ -173,7 +174,7 @@ def repeats(key, metric, make, f):
 
 if a.long:
     out["prefill_long"], out["nonce"] = [], nonce
-    for n in (8000, 16000, 32000):
+    for n in (() if a.only_decode_32k else (8000, 16000, 32000)):
         k = f"prefill_{n}"
         tag = lambda i: nonce if i == 0 else f"{nonce}.{i}"
         reps = a.repeat_rows if n == 8000 else 1
@@ -190,9 +191,16 @@ if a.long:
             if reps > 1:
                 out.setdefault("samples", {})["prefill_8k"] = [round(x, 1) for x in tps]
             print(out["prefill_long"][-1], flush=True)
+    def decode_prompt(index):
+        tag = nonce if index == 0 else f"{nonce}.{index}"
+        if a.only_decode_32k:
+            return (f"[{tag} ctx] Read the documentation below. After the documentation, list 20 distinct "
+                    "implementation ideas in numbered order and explain each idea in two complete sentences."
+                    f"\n\n{doc(32000)}\n\nBegin the numbered list of twenty explained ideas now.\n\n1.")
+        return long_prompt("decode_tps_32k", tag)
+
     out["decode_tps_32k"] = long_request("decode_tps_32k", repeats, "decode_tps_32k", "decode_32k",
-                                         lambda i: long_prompt("decode_tps_32k", nonce if i == 0 else f"{nonce}.{i}"),
-                                         lambda c: decode("decode_tps_32k", c, 128))
+                                         decode_prompt, lambda c: decode("decode_tps_32k", c, 128))
     if out["decode_tps_32k"] is not None:
         out["decode_tps_32k"] = round(out["decode_tps_32k"], 2)
 else:
