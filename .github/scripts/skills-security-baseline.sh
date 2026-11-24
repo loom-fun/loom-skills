@@ -13,7 +13,7 @@ npx skills --version | tee "$evidence/skills-version.txt"
 grep -Fxq '1.9.0' "$evidence/skills-version.txt"
 
 terminal="$evidence/public-terminal.log"
-printf -v command 'npx skills add %q --skill %q' "$source" '*'
+printf -v command 'stty rows 60 cols 160; npx skills add %q --skill %q' "$source" '*'
 coproc PUBLIC_INSTALL {
   script -qefc "$command" "$terminal" >/dev/null
 }

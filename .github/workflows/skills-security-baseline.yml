@@ -22,7 +22,7 @@ jobs:
         shell: bash
         env:
           NODE_IMAGE: docker.io/library/node@sha256:6b33b0be1647d1a577f9cebb6c8fc2587cc02c98c9956af8d0289df1791a3d10
-          CANDIDATE: 62a9911643f308428a85a8060dafe5d684bdf0a2
+          CANDIDATE: cc0645a2ff5068291181d60d7293dc6937026b11
         run: |
           set -euo pipefail
           command -v docker
@@ -57,7 +57,7 @@ jobs:
     runs-on: [self-hosted, devlab-dispatch, Linux, strix-halo]
     timeout-minutes: 15
     env:
-      CANDIDATE: 62a9911643f308428a85a8060dafe5d684bdf0a2
+      CANDIDATE: cc0645a2ff5068291181d60d7293dc6937026b11
       CATALOG: 279afe368b82e0d7acfe38c4f47e8e7e5cfb7bc8
     steps:
       - uses: actions/checkout@v4
