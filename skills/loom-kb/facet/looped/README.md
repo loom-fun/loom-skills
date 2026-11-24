@@ -6,8 +6,8 @@ looped 3 times: 48 logical layers). Matched when a family's `scope.json` lists `
 
 ## Count logical layers, not physical blocks
 
-- Every per-layer quantity scales with the logical count: weight bytes and FLOPs per token, kernel launches, KV planes,
-  recurrent state per row, and the layer indices a drafter taps. Only the weights on disk count physical blocks.
+- Count computation and potential weight traffic per logical visit. Size KV planes and recurrent state for each visit
+  that allocates them. Weight storage counts each physical tensor once.
 - Passes are sequential (a pass reads the previous pass's output), so the shared weights cannot be batched across passes:
   each pass is its own matvec in decode and its own GEMM over the chunk in prefill.
 - The static `@llm_advance` program is emitted per logical layer, with a (logical layer -> physical block, pass) map

@@ -15,10 +15,21 @@
 
 ## Reference for golden and compare
 
-- llama.cpp ROCm b1383 (= ggml b12600) predates `inkling2_loop`: the reference GGUF was the original-layout file remapped to the
-  `inkling2_loop` schema with bit-exact tensor bytes, plus 48 x 512-byte `.scale` copies for `blk.24..47` (the loader read
-  `.scale` after the loop-layer copy). Mainline >= b12611 loads Unsloth's root file directly.
-- Without `LOOM_KIT` pointing at the kit, `compare.py` cannot render this chat format and every prompt reads "0/64 BAD".
+- ROCm b1383 uses upstream build 12600 (`29b52d398`). It includes `inkling2_loop`, but copies the shared layers before
+  installing their per-expert NVFP4 scales. The historical Strix experiment worked around this with an explicit GGUF
+  remap and 48 copies of 512-byte scale tensors for the extra visits. Use the pinned `Mainline_Support/` asset with
+  ROCm b1384 (`44c20b1c0`) for stock reference runs. b1384 contains the upstream fix and matched native chat on the
+  R9700S at both quantizations. [Upstream loop-scale fix](https://github.com/ggml-org/llama.cpp/pull/32704)
+  [Stock ROCm b1384](https://github.com/lemonade-sdk/llamacpp-rocm/releases/tag/b1384)
+  [Reference proof](https://github.com/loom-fun/loom-skills/actions/runs/45285206955)
+- Point `LOOM_KIT` at the package's chat renderer for compare and agent. Select the renderer for its layout and chat
+  policy. The Radeon kit ships `dev/kit/chat_probe.py`. Send `reasoning_effort` inside llama.cpp's
+  `chat_template_kwargs` and confirm prompt counts. The Radeon Loom policy requires the tool message's `name` as well
+  as `tool_call_id`. Use explicit temperature zero for the greedy check and fixed seeds separately for the service
+  defaults. [Sampling proof](https://github.com/loom-fun/loom-skills/actions/runs/45288818385/job/138091995682)
+- The frozen Radeon package reports six `STRUCTURE/034` purity-contract diagnostics if the expert modules are parsed
+  in isolation on either SDK. Use the linked source package to validate runtime behaviour. Both pinned quantizations
+  served on the R9700S. [Offline sweep](https://github.com/loom-fun/loom-skills/actions/runs/45252435739)
 
 ## Memory and context
 

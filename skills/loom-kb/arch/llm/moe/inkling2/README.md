@@ -1,15 +1,29 @@
 # Family: inkling2
 
-GGUF arch `inkling2` (llama.cpp PR #32695 schema; the layout of unsloth/Inkling-2-Mini-GGUF up to revision `ea0c79b2`, now
-`Old_Support/`) and `inkling2_loop` (mainline llama.cpp >= b12611, #32704; Unsloth's root file since 2026-11-23). Model:
-thinkingmachines/Inkling-2-Mini (17.6 GB UD-Q4_K_XL). Published package: `loom-fun/unsloth-Inkling-2-Mini-loom` (pinned
-`ea0c79b2`, gfx1151). The port uses its own kit beside the starter (kernels `gen_inkling2.py`, prefill attention
+GGUF arch `inkling2` (the compact layout used by the Strix package at checkpoint revision `ea0c79b2`) and `inkling2_loop`
+(the upstream layout used by that revision's `Mainline_Support/` assets). Model: thinkingmachines/Inkling-2-Mini
+(17.6 GB UD-Q4_K_XL). The port uses its own kit beside the starter (kernels `gen_inkling2.py`, prefill attention
 `gen_ink_flash2.py`, drafter `draft/gen_dspark.py`, channel chat template); it is not in `loom-port-llm/starter/` yet.
 Facets: looped, moe, sliding-window; drafted (DSpark) and vision (`inkling2v` projector) when the package has them.
 
-Published card (2026-11-23, Strix Halo, DSpark, f16 KV cache, 256k context) vs llama.cpp ROCm b1383: decode short / 2k / 32k
-48.5 / 45.2 / 39.1 vs 15.7 / 14.9 / 10.7 tok/s; prefill 1k-32k 1,589-1,857 vs 158-293 tok/s; 4 streams 95.8 vs 39.4.
-Mainline llama.cpp HIP builds are faster than b1383 on this model (24.3 tok/s tg128, 383 pp2048 reported in gufo PR #1340).
+## Packages and SDK 0.3.0 qualification
+
+- **Strix Halo `chat`**, frozen package `4e018e88`. The original SDK 0.2.0 card recorded greedy DSpark decode at
+  48.5 / 45.2 / 39.1 tok/s for short / 2k / 32k prompts, with f16 KV and a 262,144-token context. Its b1383 reference
+  predates the upstream loop-scale fix. The SDK 0.3.0 migration kept the measured programs. On a single Strix runner,
+  matched SDK 0.2.0 / 0.3.0 timing changed short decode -0.67%, 8k prefill -0.10%, 32k decode +0.28%, and four-stream
+  throughput -0.19%. The full suites reproduced concurrent output divergence on the same two prompts and drafted
+  versus undrafted equivalence on 3 of 13 requests per SDK. The native-context admission succeeded and cancellation
+  exceeded 60 seconds. Production promotion is held. [Original card](https://huggingface.co/loom-fun/unsloth-Inkling-2-Mini-loom/tree/4e018e88a3aa9826286c71dfe2f6c905a491659b)
+  [Paired correctness](https://github.com/loom-fun/loom-skills/actions/runs/45267522252/job/138018261220)
+  [Matched timing](https://github.com/loom-fun/loom-skills/actions/runs/45277848206/job/138054186652)
+- **Radeon R9700S**, frozen package `6213fd3c`, already pinned to SDK 0.3.0. `chat-r9700` uses undrafted Q4 with a
+  131,072-token preset. `chat-q8-r9700` uses undrafted Q8 with a 32,768-token preset. The fixed b1384 reference
+  matched native chat and passed the compare and agent gates for both. Q8 passed all five full gates. Q4 passed four
+  full gates and passed the corrected sampling check in a separate run. Q4 native-context cancellation exceeded 60
+  seconds and remains a promotion hold. [Original card](https://huggingface.co/loom-fun/unsloth-Inkling-2-Mini-loom-r9700/tree/6213fd3ce3a15ea2bab98d4adf09ec783c5ad5dc)
+  [Fixed-reference gates](https://github.com/loom-fun/loom-skills/actions/runs/45285206955)
+  [Sampling proof](https://github.com/loom-fun/loom-skills/actions/runs/45288818385/job/138091995682)
 
 ## Graph (verified against llama.cpp's trace)
 
@@ -43,11 +57,12 @@ tensors, ~160 MB; checked at build). An exact load-time bf16 copy (weights.loom 
 bit-identical outputs: -1.7 % per decode step, 4 streams +5-10 %. Also bf16-exact: `attn_rel_bias`, conv weights, norms,
 the q/rel clips. Not exact: `*_res_query`, `exp_probs_b`, `*_exps.scale`.
 
-## Two GGUF layouts (same weight bytes)
+## Two GGUF layouts
 
 `inkling2_loop` renames metadata (`inkling2.*` -> `inkling2_loop.*`, `num_loops` -> `loop.count`, `loop.core_start/end`
 -> `loop.start/end`) and loop tensors (`loop_{attn,k,v,mlp}_{down,forget,gain}` -> `loop_{q,k,v,ffn}_ctrl_*`), and re-slices
-the two packed `loop_res_query` / `loop_kv_res_query` (2304x24) into 12 per-layer `loop_msg_query` (2304x4). The other 588
-tensors are byte-equal (header diff plus 15 random 64 KB samples, 2026-11-23). The new root drafter is the mainline DSpark
+the two packed `loop_res_query` / `loop_kv_res_query` (2304x24) into 12 per-layer `loop_msg_query` (2304x4). The header
+comparison identified 588 tensors outside that re-slicing. Fifteen random 64 KB payload samples matched on 2026-11-23.
+The new root drafter is the mainline DSpark
 format (unpadded `markov_w1` [256, 200058], explicit `markov_w2`, softmax-normalised `ctx_mix`); the old one is
-`*_Q8_0_Old.gguf`. The mmproj files are unchanged. A kit written for one layout needs a name map for the other.
+`*_Q8_0_Old.gguf`. A kit written for one layout needs a name map for the other.
