@@ -470,6 +470,37 @@ kernel.def export("g_moe_route_tr") @g_moe_route_tr(%tokens: index) {{
 """
 
 
+def _route_expert_reuse(source, hidden, experts_total, tokens, experts):
+    """Calculate independent expert logits together, sharing each activation load across them."""
+    # EXP independent expert scores are accumulated in the original K order. One LDS load feeds all EXP.
+    lines = [f"  %ru = index.constant {experts} : index", "  scf.for %j = [%c0 to %cEPW step %ru] {"]
+    for e in range(experts):
+        lines += [f"    %sj{e} = index.constant {e} : index", f"    %raw{e}_v = index.add %e0, %j : index",
+                  f"    %raw{e} = index.add %raw{e}_v, %sj{e} : index",
+                  f"    %expert{e} = index.assume %raw{e} [range(%raw{e}, 0, {experts_total-1})] : index"]
+    indices = [f"{e}_{r}" for e in range(experts) for r in range(tokens)]
+    types = ", ".join(["f32"]*len(indices))
+    init = ", ".join(f"%acc{i} = %zero_f : f32" for i in indices)
+    lines += ["    "+", ".join(f"%sum{i}" for i in indices)+f" = scf.for %bq = [%c0 to %cHB step %c1]({init}) -> ({types}) {{",
+              f"      %bb = index.assume %bq [range(%bq, 0, {hidden//128-1})] : index"]
+    for r in range(tokens):
+        lines += [f"      %frag{r} = vector.load %xs4_view[{r}, %bb, %lane, %c0] : view<{tokens}x{hidden//128}x32x4xf32> -> vector<4xf32>"]
+    for e in range(experts):
+        lines += [f"      %weights{e} = vector.load %w4_view[%expert{e}, %bb, %lane, %c0] : view<{experts_total}x{hidden//128}x32x4xf32> -> vector<4xf32>"]
+        for r in range(tokens):
+            lines += [f"      %dot{e}_{r} = vector.dotf<reassoc|contract> %weights{e}, %frag{r}, %zero_f : vector<4xf32>, vector<4xf32>, f32",
+                      f"      %v{e}_{r} = scalar.addf %acc{e}_{r}, %dot{e}_{r} : f32"]
+    lines += ["      scf.yield "+", ".join(f"%v{i}" for i in indices)+f" : {types}","    }"]
+    for e in range(experts):
+        for r in range(tokens):
+            lines += [f"    %result{e}_{r} = kernel.subgroup.reduce<addf> %sum{e}_{r} : f32",
+                      "    scf.if %first {",f"      view.store %result{e}_{r}, %lg_view[{r}, %expert{e}] : f32, view<{tokens}x{experts_total}xf32>","    }"]
+    lines += ["  }"]
+    begin = source.index("  scf.for %j = [%c0 to %cEPW")
+    end = source.index("  kernel.barrier<workgroup>",begin)
+    return source[:begin]+"\n".join(lines)+"\n"+source[end:]
+
+
 def route_prefill_live(H, E, KU, gating, norm, bias, wty="f32", scale=1.0):
     """g_moe_route_tr_live: g_moe_route_tr given the epoch's %info; a workgroup whose tokens are all padding (info
     word 2 = 0; a 1026-token prompt at chunk 4096 runs as a 2048-row epoch) does nothing. g_moe_bucket takes live
@@ -497,6 +528,9 @@ def route_prefill_live(H, E, KU, gating, norm, bias, wty="f32", scale=1.0):
     live.append(f"  scf.if %gl_any{TR - 1} {{\n")
     rep("  %token0 = index.mul %group_id, %cTR : index\n", "  %token0 = index.mul %group_id, %cTR : index\n" + "".join(live))
     rep("  kernel.return\n}\n", "  }\n  kernel.return\n}\n")
+    reuse = int(__import__("os").environ.get("MOE_ROUTE_EP", "1"))
+    if reuse in (2, 4) and wty == "f32" and H % 128 == 0 and E % (8 * reuse) == 0:
+        text = _route_expert_reuse(text, H, E, TR, reuse)
     return "\n" + text
 
 

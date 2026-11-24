@@ -45,6 +45,7 @@ different texts (a reasoning trace vs the answer) and drafting accepted very dif
 nothing (each engine's default: the behaviour before this flag). The setting is recorded in every log row.
 """
 import argparse
+import hashlib
 import json
 import random
 import time
@@ -72,6 +73,7 @@ ap.add_argument("--repeat-rows", type=int, default=1,
                      "row's value, every repeat is logged in out['samples']")
 ap.add_argument("--thinking", default="off", choices=["off", "on", "template"],
                 help="chat_template_kwargs.enable_thinking sent to BOTH engines (template: send nothing)")
+ap.add_argument("--paired-nonce", help="fresh-session comparison identity shared by the benchmark arms")
 a = ap.parse_args()
 TH = thinking_extra(a.thinking)
 U, M = a.url, a.model
@@ -100,6 +102,11 @@ def run(content, max_tokens):
     if status != 200:
         raise RuntimeError(f"HTTP {status}: {error}")
     if a.kind in CLIENT_TIMED:
+        if a.paired_nonce:
+            out.setdefault("request_work", []).append({
+                "prompt_sha256": hashlib.sha256(content.encode()).hexdigest(), "budget": max_tokens,
+                "input": s["prompt_tokens"], "output": s["tokens"], "finish": s["finish"],
+                "text_sha256": hashlib.sha256(s["text"].encode()).hexdigest()})
         return s["prompt_tokens"], s["prompt_tokens"] / s["ttft"], s["decode_tps"], s["tokens"]
     d = r.json()
     t = d["timings"]
@@ -108,7 +115,10 @@ def run(content, max_tokens):
 
 ESSAY = "Write a detailed 300-word essay about the history of the printing press."
 out = {"label": a.label, "kind": a.kind, "time": time.strftime("%Y-%m-%d %H:%M:%S"), "thinking": a.thinking}
-nonce = str(time.time())
+nonce = a.paired_nonce or str(time.time())
+if a.paired_nonce:
+    random.seed(nonce)
+    out["paired_nonce"] = nonce
 # warm-up (untimed): the first timed request's own shape, another nonce (no prefix-cache hit on the timed prompt)
 out["warmup_decode_tps"] = round(run(f"[warm-up {nonce}] " + ESSAY, 300)[2], 2)
 
@@ -118,10 +128,12 @@ def decode(key, content, max_tokens):
     (the second time with another nonce); out["completion_tokens"][key]: the tokens of each attempt;
     out["acceptance"][key]: the drafted-token acceptance of the request that counted (Loom)."""
     for attempt in range(2):
-        prompt = content if attempt == 0 else f"[retry {time.time()}] " + content
+        prompt = content if attempt == 0 else f"[retry {nonce if a.paired_nonce else time.time()}] " + content
         before = server_draft_counters(U) if a.kind == "loom" else {}
         _, _, dtps, n = run(prompt, max_tokens)
         after = server_draft_counters(U) if before else {}
+        if a.paired_nonce and before:
+            out["request_work"][-1]["draft_counters"] = {k: after[k]-before[k] for k in before.keys() & after.keys()}
         out.setdefault("completion_tokens", {}).setdefault(key, []).append(n)
         print(f"{key}: {n}/{max_tokens} completion tokens, {dtps if dtps is None else round(dtps, 2)} tok/s", flush=True)
         if dtps and n >= max_tokens // 2:
