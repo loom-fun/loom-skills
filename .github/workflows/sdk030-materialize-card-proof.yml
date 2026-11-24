@@ -15,5 +15,5 @@ jobs:
           persist-credentials: false
       - name: Verify all exact card goldens and SDK 0.3 Quick starts
         run: |
-          python3 -m py_compile skills/loom-benchmark/scripts/card/render_card.py
+          python3 -m py_compile skills/loom-benchmark/scripts/card/render_card.py .github/scripts/loom_factory.py
           bash skills/loom-benchmark/scripts/card/test/check.sh
