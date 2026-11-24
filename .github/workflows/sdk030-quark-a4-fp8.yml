@@ -20,7 +20,7 @@ jobs:
           ref: 629d8f8aab61f53c4713b89fd21d26efe83f9e45
           fetch-depth: 0
           persist-credentials: false
-      - name: Prepare the original FP8 control and optimized Quark precision path
+      - name: Preserve the proved normalization and GDN boundaries in the FP8 candidate
         shell: bash
         run: |
           set -euo pipefail
@@ -47,11 +47,16 @@ jobs:
           frozen = "loom-fun/amd-Qwen3.8-27B-Quark-AWQ-MXFP4-loom@a999be30c6539c77a030e961748416892b06ac73"
           shared = {"card": frozen, "sdk": "0.3.0", "context": 32768,
                     "execution": {"context_capacity": 32768, "prefill_capacity": 1024, "rows": 4, "draft_depth": 0}}
+          baseline = dict(shared, name="baseline")
+          build = dict.fromkeys(("POST_ADD_ROW_SCALE", "GDN_NORM_RS", "SILU_MUL_RS", "GDN_AB_F8"), "0")
+          build["GEMM_MXFP4S_F8"] = "1"
+          repair = dict(shared, name="repairfp8", ref="4c28b772a8f22f121b3925788dae14b26c58511b",
+                        build=build, build_args=["--memory-gib", "4096"], require_preset_r9700=False)
           paired = ("baseline", "repairfp8", "repairfp8", "baseline")
           experiment = {"name": "quark-a4-fp8", "card": frozen, "runner": "r9700", "sdk": "0.3.0",
                         "memory_bytes": 34000000000, "memory_bytes_r9700": 34000000000,
                         "require_preset_r9700": True, "reference_cache": ".github/sdk030-quark-refs.tgz",
-                        "variants": [dict(shared, name=arm) for arm in ("baseline", "repairfp8")],
+                        "variants": [baseline, repair],
                         "steps": ["gates:baseline:quick", "gates:repairfp8:quick"] + [f"perf:{arm}:1" for arm in paired]}
           (work / "receipt/experiment.json").write_text(json.dumps({"jobs": [experiment]}, indent=2) + "\n")
 
@@ -62,7 +67,6 @@ jobs:
           source = source.replace(hook, '''  if [ "$v" = repairfp8 ]; then
               sha256sum "$pkg/program/llm.loom" > "$WORK/receipt/source-before-fp8.txt"
               "$T" - "$WORK/receipt" "$pkg" <<'PATCH_GEN' || exit 1
-          import hashlib
           import json
           from pathlib import Path
           import sys
@@ -72,8 +76,7 @@ jobs:
           package = Path(sys.argv[2])
           path = package / "program/llm.loom"
           original = path.read_bytes()
-          assert hashlib.sha256(original).hexdigest() == "5df0cab4e88b260e8de20a7b02b1b3d866a9c84aee6c61c0e1f76d0d864eed5f"
-          repair = apply(original.decode(), json.loads((package / "llm_config.json").read_text()))
+          repair = apply(original.decode(), json.loads((package / "llm_config.json").read_text()), split_gdn=True)
           assert "func.call @g_quark_a4_codes(" in repair
           path.write_text(repair)
           PATCH_GEN
@@ -96,7 +99,7 @@ jobs:
           vision.write_text(source)
           PY
           bash -n .github/scripts/devlab_perf.sh
-      - name: Measure the unchanged chart gate and paired FP8 performance with the GDN fallback
+      - name: Measure the unchanged chart gate and paired FP8 performance with split GDN
         shell: bash
         run: bash .github/scripts/devlab_perf.sh "$WORK/receipt/experiment.json" quark-a4-fp8
       - name: Archive exact sources and qualification logs
@@ -110,6 +113,7 @@ jobs:
             grep '^VISION_RESULT ' "$WORK/receipt/out/gates_$variant/gates_vision.log"
           done
           test "$(cut -d' ' -f1 "$WORK/receipt/llm-source-digests.txt" | sort -u | wc -l)" = 2
+          grep -q '^5df0cab4e88b260e8de20a7b02b1b3d866a9c84aee6c61c0e1f76d0d864eed5f ' "$WORK/receipt/llm-source-digests.txt"
       - uses: actions/upload-artifact@v4
         if: always() && env.WORK != ''
         with:
