@@ -17,6 +17,7 @@ root, evidence, docs = (Path(path).resolve() for path in sys.argv[1:4])
 mode = sys.argv[4] if len(sys.argv) == 5 else 'runtime'
 shipping = mode == 'shipping'
 waiting = mode == 'waiting'
+large_control = mode == '27b'
 # Keep the hub cache in the job scope and reuse exact checkpoint downloads across packages.
 os.environ['HF_HOME'] = str(root / 'hf-home')
 os.environ['HF_HUB_DISABLE_SYMLINKS_WARNING'] = '1'
@@ -32,6 +33,7 @@ packages = {
 }
 staged_flash = ('loom-fun-staging/unsloth-Qwen3.8-Flash-Next-loom',
                 '473e5815cedcf3117fcac905c27ed3434f9fe836', 'vision-mtp')
+qwen27 = ('loom-fun/unsloth-Qwen3.8-27B-UD-Q4_K_XL', '3e43d41d0bfae65f17a77794264f82a3b5f2c990', 'chat')
 flash_lock = '53a173df16767be788e32dcf4b219d07a1726b3384b3acb28660c8d0ca0b6c07'
 
 
@@ -61,7 +63,8 @@ def setup():
     if os.name != 'nt':
         raise RuntimeError('This workflow requires native Windows')
     write_json(evidence / 'pins.json', {'experiment': mode, 'releases': release_hashes, 'packages': packages,
-                                       'staged_flash': staged_flash if shipping else None})
+                                       'staged_flash': staged_flash if shipping else None,
+                                       'large_control': qwen27 if large_control else None})
     executables = {}
     for version in (('0.3.0',) if waiting else ('0.2.0', '0.3.0')):
         archive = download_sdk(version, f'loom-serve-{version}-win_amd64.zip')
@@ -210,7 +213,8 @@ def measure(label, card, preset, executable, release, session, document_set, arm
     if shipping:
         args += [f'--model={card.parent}', '--pool_backing=fixed' if release == '0.2.0' else '--workers=8']
     else:
-        args += ['--pool_backing=elastic', '--workers=8', f'--model={card}', f'--preset={preset}']
+        args += ['--pool_backing=fixed' if large_control else '--pool_backing=elastic',
+                 '--workers=8', f'--model={card}', f'--preset={preset}']
     write_json(evidence / f'{case}-args.json', args)
     with (evidence / f'{case}-serve.log').open('wb') as log:
         server = subprocess.Popen(args, cwd=root, stdout=log, stderr=subprocess.STDOUT)
@@ -218,7 +222,7 @@ def measure(label, card, preset, executable, release, session, document_set, arm
             status = wait_ready(url, server)
             write_json(evidence / f'{case}-status.json', status)
             model = status['data'][0]['id']
-            thinking = False if label == 'flash-next' else None
+            thinking = False if label in ('flash-next', 'qwen3.8-27b') else None
             request(url, model, f'[{case} warmup] Write a detailed essay about wind patterns.', 16, thinking)
             identifiers = {'model': label, 'release': release, 'arm': arm or release, 'session': session}
             for sample in range(3):
@@ -251,14 +255,19 @@ def summarize(label, arms=('0.2.0', '0.3.0')):
     results = {}
     for name in dict.fromkeys(key[0] for key in old):
         pairs = [(old[key], new[key]) for key in old if key[0] == name]
+        matching, count = 0, 0
         for before, after in pairs:
             pre = before.get('requests', [before])
             post = after.get('requests', [after])
+            if len(pre) != len(post):
+                raise ValueError(f'Unequal request counts for {label}, {name}')
             for a, b in zip(pre, post):
-                if any(a[key] != b[key] for key in ('prompt_tokens', 'completion_tokens', 'reply_sha256')):
-                    raise ValueError(f'Greedy result or token counts differ in matched case for {label}, {name}')
+                if any(a[key] != b[key] for key in ('prompt_tokens', 'completion_tokens', 'cached_tokens')):
+                    raise ValueError(f'Token counts differ in matched case for {label}, {name}')
+                matching += a['reply_sha256'] == b['reply_sha256']
+                count += 1
         metrics = ('aggregate_tps',) if name == 'c4' else ('prefill_effective_tps', 'decode_tps', 'ttft_s')
-        results[name] = {}
+        results[name] = {'exact_outputs': matching, 'total_outputs': count, 'matched_output_bytes': count == matching}
         for metric in metrics:
             a = [old_row[metric] for old_row, _ in pairs]
             b = [new_row[metric] for _, new_row in pairs]
@@ -282,6 +291,14 @@ if waiting:
         print(f'Qwen3 0.6B SDK 0.3 {arm} period {session}', flush=True)
         measure(label, card, 'chat', executables['0.3.0'], '0.3.0', session, {'2k': documents['2k']}, arm)
     summarize(label, ('bare', 'active-wait'))
+    sys.exit(0)
+if large_control:
+    label = 'qwen3.8-27b'
+    card = fetch(fetchers['0.2.0'], label, *qwen27)
+    for release, session in sequence:
+        print(f'Qwen3.8 27B SDK {release} period {session}', flush=True)
+        measure(label, card, 'chat', executables[release], release, session, documents)
+    summarize(label)
     sys.exit(0)
 if shipping:
     # Present both immutable packages on the same machine, using their respective README launch arguments.
