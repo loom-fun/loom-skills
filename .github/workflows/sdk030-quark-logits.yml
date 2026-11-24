@@ -14,7 +14,8 @@ jobs:
       CARD: huggingface:loom-fun/amd-Qwen3.8-27B-Quark-AWQ-MXFP4-loom:chat-r9700@a999be30c6539c77a030e961748416892b06ac73
       KIT_REVISION: 629d8f8aab61f53c4713b89fd21d26efe83f9e45
       GUFO_REVISION: bccf173b2664432d03d068413a91639bdd6242f7
-      RUN_REFERENCE: '0'
+      RUN_NATIVE: '0'
+      RUN_REFERENCE: '1'
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
@@ -55,6 +56,7 @@ jobs:
           "$work/sdk/bin/python" -m pip install "$wheel[hf]" numpy pillow gguf requests tokenizers jinja2
           "$work/sdk/bin/loom-fetch" "$CARD" --output="$work/package" --no-input
       - name: Capture Loom’s active first-token logits and image token layout
+        if: env.RUN_NATIVE == '1'
         shell: bash
         run: |
           set -euo pipefail
@@ -110,6 +112,7 @@ jobs:
           set -euo pipefail
           export VLLM_STATE="$WORK/vllm-state" VLLM_VENV="$WORK/vllm" VLLM_VERSION=0.18.0 VLLM_ROCM_VARIANT=rocm700
           export VLLM_ROCM_USE_AITER=0 VLLM_WORKER_MULTIPROC_METHOD=spawn
+          export VLLM_ENABLE_V1_MULTIPROCESSING=0
           server="$WORK/toolkit/skills/loom-benchmark/scripts/vllm_server.sh"
           "$server" --install
           eval "$("$server" --env)"
