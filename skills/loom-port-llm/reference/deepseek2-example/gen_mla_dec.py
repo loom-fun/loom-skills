@@ -43,7 +43,8 @@ PH = int(os.environ.get("MLA_DEC_PH", "0"))
 # KLDS=1 (PF 0): K blocks staged in workgroup memory, double-buffered: the next block's global loads are issued before
 # this block's QK / softmax / PV and stored to the other buffer after it (one barrier per block); V^T fragments are read
 # straight from the staged K block (no separate V^T tile). Rows past the token's position are stored as zeros.
-KLDS = int(os.environ.get("MLA_DEC_KLDS", "0"))   # 1 (PL 1, CU > 1): partial O normalized by its own l and stored as f16 (half the partial traffic)
+KLDS = int(os.environ.get("MLA_DEC_KLDS", "0"))
+QK2 = int(os.environ.get("MLA_DEC_QK2", "0"))   # 1: the score MMA chain split into two accumulators (even / odd chunks), summed at the end   # 1 (PL 1, CU > 1): partial O normalized by its own l and stored as f16 (half the partial traffic)
 STI = int(os.environ.get("MLA_DEC_STI", "1" if HG == 2 else "0"))   # V^T staging of each chunk right after its score MMA   # 2: the 32 heads split over 2 workgroups (twice the workgroups, half the serial chain each)
 CU = int(os.environ.get("MLA_DEC_CU", "4"))   # g_mla_dcombine (PL 1): splits whose loads are issued together
 ABL = set(x for x in os.environ.get("MLA_DEC_ABL", "").split(",") if x)
@@ -329,6 +330,7 @@ kernel.def export("g_mla_dsplit") @g_mla_dsplit(%tokens: index) {{
 {chr(10).join(st)}
       }}""")
     prev = "%init"
+    prev2 = ["%init", "%init"]
     for j in range(NJ):
         pre = PF == 2 and j < NPF
         a((f"""      %kr{j} = vector.load %kv[%lane_col, %qd{j}] : view<16x{D}xf16> -> vector<16xf16>
@@ -336,13 +338,16 @@ kernel.def export("g_mla_dsplit") @g_mla_dsplit(%tokens: index) {{
       %kf{j} = vector.fragment<lhs> %kh{j} shape [%c16, %c16] : vector<16xf16>
 """ + (f"""      %qv{j} = vector.load %ql_view[%wave, %cqj{j}, %lane_col, %c0] : view<8x{NJ}x16x16xf16> -> vector<16xf16>
       %qf{j} = vector.fragment<rhs> %qv{j} shape [%c16, %c16] : vector<16xf16>
-""" if QL else "") + (f"""      %s{j} = vector.mma %kf{j}, %qf{j}, {prev} : vector<16xf16>, vector<16xf16>, vector<8xf32>""" if "noqk" not in ABL else f"""      %s{j} = vector.addf {prev}, {prev} : vector<8xf32>"""))
+""" if QL else "") + (f"""      %{"sq" if QK2 else "s"}{j} = vector.mma %kf{j}, %qf{j}, {(prev2[j % 2] if QK2 else prev)} : vector<16xf16>, vector<16xf16>, vector<8xf32>""" if "noqk" not in ABL else f"""      %s{j} = vector.addf {prev}, {prev} : vector<8xf32>"""))
         prev = f"%s{j}"
+        prev2[j % 2] = f"%sq{j}"
         if STI and not KLDS:
             stage(j)
     if not STI and not KLDS:
         for j in range(NJ):
             stage(j)
+    if QK2 and "noqk" not in ABL:
+        a(f"""      %s{NJ - 1} = vector.addf {prev2[0]}, {prev2[1]} : vector<8xf32>""")
     if PF == 2:
         a(f"""      %phb = scalar.assume %ph [range(%ph, 0, 134217727)] : i32
       %phys = index.cast %phb : i32 to index

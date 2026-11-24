@@ -395,21 +395,15 @@
       "gen": "mla_dec/gen_bench.py",
       "gen_variants": [
         "wmma",
-        "xempty",
-        "xnostv",
-        "xnosx",
-        "xnopv",
-        "xnoqk",
-        "xnostv+xnosx"
+        "qk2+sti",
+        "qk2",
+        "sti"
       ],
       "files": [
         "bench_wmma.loom",
-        "bench_xempty.loom",
-        "bench_xnostv.loom",
-        "bench_xnosx.loom",
-        "bench_xnopv.loom",
-        "bench_xnoqk.loom",
-        "bench_xnostv+xnosx.loom"
+        "bench_qk2+sti.loom",
+        "bench_qk2.loom",
+        "bench_sti.loom"
       ],
       "tests": [
         "test.loom"
