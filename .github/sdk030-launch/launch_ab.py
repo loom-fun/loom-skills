@@ -31,6 +31,16 @@ def digest(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True).encode()).hexdigest()
 
 
+def match_journal(old, new):
+    common = old.keys() & new.keys()
+    return {
+        "request_counts": [len(old), len(new)],
+        "matched_requests": sum(old[key]["request"] == new[key]["request"] for key in common),
+        "matched_outputs": sum(old[key] == new[key] for key in common),
+        "mismatched_keys": sorted(key for key in common if old[key] != new[key]),
+    }
+
+
 def deterministic_benchmark(bench, name, seed, target, argv):
     sys.path.insert(0, str(bench))
     import bench_common
@@ -40,10 +50,10 @@ def deterministic_benchmark(bench, name, seed, target, argv):
     ordinals = {}
     lock = threading.Lock()
 
-    def stream(url, model, messages, max_tokens, extra=None, timeout=None, on_token=None):
+    def stream(url, model, messages, max_tokens, extra=None, timeout=None, on_token=None, metric=None):
         prompt = messages[0]["content"]
         match = re.match(r"^\[\d+\.\d+ (\d+)\]", prompt)
-        lane = match[1] if name == "c4_steady.py" and match else "serial"
+        lane = metric or (match[1] if name == "c4_steady.py" and match else "serial")
         with lock:
             ordinal = ordinals.get(lane, 0)
             ordinals[lane] = ordinal + 1
@@ -53,16 +63,23 @@ def deterministic_benchmark(bench, name, seed, target, argv):
             if prompt.startswith(f"[benchmark {seed} {key}] ["):
                 prompt = re.sub(r"\] \[[^\]]*\]", "]", prompt, count=1)
         messages = [{**messages[0], "content": prompt}, *messages[1:]]
+        before = bench_common.server_draft_counters(url) if metric else {}
         result = original(url, model, messages, max_tokens, extra, timeout or 180, on_token)
+        after = bench_common.server_draft_counters(url) if metric else {}
         journal[key] = {
             "request": digest([model, messages, max_tokens, extra]),
             **{key: result.get(key) for key in ("status", "prompt_tokens", "tokens", "finish")},
             "output": digest(result.get("text")),
+            "visible_timing": result.get("ttft") is not None,
+            "metric": metric,
+            "draft_work": {key: after[key] - before[key] for key in before.keys() & after.keys()},
+            "draft_seen": bool(before) and bool(after),
         }
         return result
 
     bench_common.stream = stream
-    sys.argv = [str(bench / name), *argv]
+    script = Path(__file__).with_name("perf_recovery.py") if name == "perf.py" else bench / name
+    sys.argv = [str(script), *argv]
     try:
         runpy.run_path(sys.argv[0], run_name="__main__")
     finally:
@@ -76,8 +93,11 @@ def measure(work, sdk, bench):
     selected = read(model / "model.json")
     preset = plan["preset"]
     execution = selected["presets"][preset].get("execution", {})
-    rows = int(execution.get("rows", plan.get("published_rows") or 1))
+    rows = int(execution.get("rows", plan.get("execution_rows", 1)))
     model_id = selected["model"]["id"]
+    card_features = read(out / "info.json").get("card", {}).get("features", {})
+    thinking = card_features.get("thinking", {}).get("value") or {}
+    forced_reasoning = isinstance(thinking, dict) and thinking.get("mode") == "always"
     expected = plan.get("model_id")
     if expected and expected != model_id:
         raise ValueError(f"Expected {expected}, fetched {model_id}")
@@ -186,18 +206,51 @@ def measure(work, sdk, bench):
             ):
                 response = requests.post(url + "/v1/chat/completions", timeout=90, json={
                     "model": model_id, "messages": [{"role": "user", "content": prompt}],
-                    "temperature": 0, "max_tokens": 32, "chat_template_kwargs": {"enable_thinking": False},
+                    "temperature": 0, "max_tokens": 512 if forced_reasoning else 32,
+                    "chat_template_kwargs": {"enable_thinking": forced_reasoning},
                 })
                 response.raise_for_status()
-                choice = response.json()["choices"][0]
+                body = response.json()
+                choice = body["choices"][0]
                 answer = choice["message"].get("content") or ""
+                reasoning = choice["message"].get("reasoning_content") or ""
                 results.append({"prompt": prompt, "expected": expected, "answer": answer,
+                                "reasoning_only": bool(reasoning and not answer.strip()),
+                                "reasoning_sha256": digest(reasoning) if reasoning else None,
+                                "completion_tokens": body.get("usage", {}).get("completion_tokens"),
                                 "finish": choice.get("finish_reason"),
                                 "exact": answer.strip().lower().rstrip(".") == expected})
             write(directory / "answers.json", results)
-            if any(not row["answer"].strip() or not row["finish"] for row in results):
+            if any(not row["finish"] or not row["answer"].strip() for row in results):
                 raise RuntimeError("empty answer or missing finish reason")
             return sum(result["exact"] for result in results)
+
+        def capabilities():
+            from spec_check import image_requests, TOOLS
+
+            features = plan.get("features", {})
+            results = {}
+            cases = {}
+            if features.get("image_input") == "yes":
+                cases["vision"] = {**image_requests(model_id)[0], "max_tokens": 96}
+            if features.get("tool_calling") == "yes":
+                cases["tools"] = {
+                    "model": model_id, "tools": TOOLS,
+                    "messages": [{"role": "user", "content": "Use the get_weather tool for Paris."}],
+                    "temperature": 0, "max_tokens": 128, "chat_template_kwargs": {"enable_thinking": False},
+                }
+            for name, body in cases.items():
+                response = requests.post(url + "/v1/chat/completions", json=body, timeout=180)
+                response.raise_for_status()
+                choice = response.json()["choices"][0]
+                message = choice["message"]
+                calls = [call["function"] for call in message.get("tool_calls") or []]
+                passed = any(call["name"] == "get_weather" and "paris" in call["arguments"].lower()
+                             for call in calls) if name == "tools" else bool(message.get("content"))
+                results[name] = {"request": digest(body), "content": message.get("content"),
+                                 "calls": calls, "finish": choice.get("finish_reason"), "passed": passed}
+            write(directory / "capabilities.json", results)
+            return results
 
         def perf(label, args):
             common = [url, arm, "--model", model_id, "--no-campaign", "--thinking", "off",
@@ -206,15 +259,17 @@ def measure(work, sdk, bench):
             result = json.loads((directory / f"{label}.jsonl").read_text().splitlines()[-1])
             if label == "short":
                 report["metrics"].update({key: result.get(key) for key in ("decode_tps", "decode_tps_2k")})
-                report["metrics"].update({f"prefill_{index}k": row["prefill_tps"]
+                report["metrics"].update({f"prefill_{row.get('size', index * 1000) // 1000}k": row["prefill_tps"]
                                           for index, row in enumerate(result["prefill"], 1)})
             else:
                 report["metrics"]["decode_tps_32k"] = result.get("decode_tps_32k")
                 lengths = [length for length in (8, 16, 32)
                            if f"prefill_{length * 1000}" not in result.get("over_context", [])]
-                report["metrics"].update({f"prefill_{length}k": row["prefill_tps"]
+                report["metrics"].update({f"prefill_{row.get('size', length * 1000) // 1000}k": row["prefill_tps"]
                                           for length, row in zip(lengths, result["prefill_long"])})
                 report["over_context"] = result.get("over_context", [])
+            if result.get("prefill_untimed"):
+                report.setdefault("prefill_untimed", {})[label] = result["prefill_untimed"]
             return True
 
         def concurrent():
@@ -237,6 +292,7 @@ def measure(work, sdk, bench):
             try:
                 if phase("cold_launch", lambda: ready(server)):
                     report["functional_exact"] = phase("functional", functional)
+                    report["capabilities"] = phase("capabilities", capabilities)
                     phase("short", lambda: perf("short", []))
                     phase("long", lambda: perf("long", ["--long"]))
                     if rows >= 2:
@@ -265,26 +321,31 @@ def measure(work, sdk, bench):
         a = out / f"{current['number']}-current"
         b = out / f"{bare['number']}-bare"
         journals = {}
+        metric_journals = {}
         for filename in sorted({p.name for side in (a, b) for p in side.glob("*.requests.json")}):
             old, new = [read(side / filename) if (side / filename).exists() else {} for side in (a, b)]
-            common = old.keys() & new.keys()
-            journals[filename] = {
-                "request_counts": [len(old), len(new)], "matched_requests": sum(
-                    old[key]["request"] == new[key]["request"] for key in common),
-                "matched_outputs": sum(old[key] == new[key] for key in common),
-                "mismatched_keys": sorted(key for key in common if old[key] != new[key]),
-            }
+            journals[filename] = match_journal(old, new)
+            metrics = {row["metric"] for side in (old, new) for row in side.values()} - {None, "warmup"}
+            for metric in sorted(metrics):
+                first, second = [{key: row for key, row in side.items() if row["metric"] == metric}
+                                 for side in (old, new)]
+                metric_journals[metric] = dict(match_journal(first, second),
+                    valid_timing=all(row["visible_timing"] for side in (first, second) for row in side.values()),
+                    draft_seen=all(row["draft_seen"] for side in (first, second) for row in side.values()))
         delta = {metric: round(100 * (bare["metrics"][metric] / value - 1), 2)
                  for metric, value in current["metrics"].items() if value and bare["metrics"].get(metric)}
-        pairs.append({"pair": pair, "bare_delta_pct": delta, "journals": journals,
+        pairs.append({"pair": pair, "bare_delta_pct": delta, "journals": journals, "metric_journals": metric_journals,
                       "draft_work_match": current.get("draft_work") == bare.get("draft_work"),
+                      "capabilities_match": current.get("capabilities") == bare.get("capabilities"),
                       "functional_match": (a / "answers.json").exists() and (b / "answers.json").exists()
                       and read(a / "answers.json") == read(b / "answers.json")})
     medians = {metric: round(statistics.median(pair["bare_delta_pct"][metric] for pair in pairs), 2)
                for metric in pairs[0]["bare_delta_pct"].keys() & pairs[1]["bare_delta_pct"].keys()}
     write(out / "comparison.json", {"plan": plan, "launch_args": modes, "package_serve": package_args,
                                      "median_paired_bare_delta_pct": medians, "pairs": pairs, "sessions": reports})
-    if any(report["errors"] for report in reports) or any(not pair["functional_match"] for pair in pairs):
+    if any(report["errors"] for report in reports) or any(
+        not pair["functional_match"] or not pair["capabilities_match"] for pair in pairs
+    ):
         raise SystemExit(1)
 
 
