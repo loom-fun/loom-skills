@@ -69,7 +69,7 @@ jobs:
 
           ```loom-scope
           kind: architecture
-          scopes: [model/bartowski-Ornith-1.5-122B-loom]
+          scopes: [arch/llm/moe/qwen35moe]
           kernels: []
           ```
 
