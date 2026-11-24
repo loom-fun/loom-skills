@@ -6,7 +6,7 @@ on:
 permissions:
   contents: read
 env:
-  LEMONADE_REVISION: c183d72227b88bb7e32745c58b5a78178064ad34
+  LEMONADE_REVISION: 85ea993d3b838c18a7b09e0f17017d2c326cc1e6
 jobs:
   native:
     runs-on: [Linux, strix-halo, devlab-dispatch, self-hosted]
@@ -18,7 +18,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - name: Verify the exact draft and serve the registered staged alias
+      - name: Verify the exact draft and serve the staged card with its recorded worker count
         shell: bash
         run: |
           set -euo pipefail
