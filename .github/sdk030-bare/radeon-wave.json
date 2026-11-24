@@ -1,0 +1,150 @@
+{
+  "include": [
+    {
+      "gpu": "radeon-r9700",
+      "slug": "bartowski-Qwen2.5-0.5B-Instruct-loom",
+      "repo": "loom-fun-staging/bartowski-Qwen2.5-0.5B-Instruct-loom",
+      "revision": "ace0ba40598f49866455ed9d335cf59e5ae42813",
+      "device": "amdgpu://?completion_spin_ns=4294967295",
+      "args": [
+        "--pool_backing=fixed"
+      ],
+      "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+      "features": {
+        "api": "yes",
+        "audio": "unknown",
+        "concurrency": "yes",
+        "context": "yes",
+        "image_input": "unknown",
+        "max_output_tokens": "yes",
+        "reasoning_effort": "n/a",
+        "sampling": "yes",
+        "speculative_decoding": "n/a",
+        "thinking": "n/a",
+        "tool_calling": "yes"
+      },
+      "sdk": {
+        "hrx_loom": "0.3.0",
+        "source": "pypi",
+        "hrx_system_sha": "e2c41a720363911c04606ce0f4417e2d55630352",
+        "wheel_sha256": "6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f"
+      },
+      "files": {
+        "info.json": "4a7d0b0397bac7834eb622d40f1c3f9d4a923c80e1460852636d287dfbbea8f9",
+        "model.json": "696003e7839a4aa4b13b4f16692a898758dfb1d6bc43ed5808add767f5d3d1a2",
+        "model.json.lock": "f4a79e7132f83d287ce3060b6bd14ae644eb68dbcc33a12d2546cdbc60c79b9d",
+        "llm_config.json": "fdfa8f3018c58a78950650c0412edcf22ab19a6ebd0e652af8bab94e1e8060af"
+      },
+      "package_serve": null,
+      "published_rows": [
+        "decode",
+        "decode_2k",
+        "decode_32k",
+        "prefill_16k",
+        "prefill_1k",
+        "prefill_2k",
+        "prefill_32k",
+        "prefill_8k",
+        "streams4"
+      ],
+      "preset": "chat-r9700",
+      "context_tokens": 32768
+    },
+    {
+      "gpu": "radeon-r9700",
+      "slug": "unsloth-Qwen3-VL-4B-Instruct-loom",
+      "repo": "loom-fun-staging/unsloth-Qwen3-VL-4B-Instruct-loom",
+      "revision": "0bb0f1eec73b15b8da3829c4b35e9125d438e699",
+      "device": "amdgpu://?completion_spin_ns=4294967295",
+      "args": [
+        "--pool_backing=fixed"
+      ],
+      "model_id": "Qwen/Qwen3-VL-4B-Instruct",
+      "features": {
+        "api": "yes",
+        "audio": "unknown",
+        "concurrency": "yes",
+        "context": "yes",
+        "image_input": "yes",
+        "max_output_tokens": "yes",
+        "reasoning_effort": "n/a",
+        "sampling": "yes",
+        "speculative_decoding": "n/a",
+        "thinking": "n/a",
+        "tool_calling": "yes"
+      },
+      "sdk": {
+        "hrx_loom": "0.3.0",
+        "source": "pypi",
+        "hrx_system_sha": "e2c41a720363911c04606ce0f4417e2d55630352",
+        "wheel_sha256": "6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f"
+      },
+      "files": {
+        "info.json": "ff86941e366effb0a9010e1b910729b9de242e1aed1f8a12dfd4d4d5a08d3c01",
+        "model.json": "6881aa1eea661a421fd573ffc9b78854e6ce6f18113d36052a4cdaabb4b308fb",
+        "model.json.lock": "c47a591cf0b2cb947889e517c579a180bfb73283782fc9c9c6c13db8906d924f",
+        "llm_config.json": "4f0a6a903e8ce4f918c2601aef738826b0798b0fcc24a437db8cb0ee6a59d6bb"
+      },
+      "package_serve": null,
+      "published_rows": [
+        "decode",
+        "decode_2k",
+        "decode_32k",
+        "prefill_16k",
+        "prefill_1k",
+        "prefill_2k",
+        "prefill_32k",
+        "prefill_8k",
+        "streams4"
+      ],
+      "preset": "chat-r9700",
+      "context_tokens": 187392
+    },
+    {
+      "gpu": "radeon-r9700",
+      "slug": "unsloth-gemma-4-31B-it-loom",
+      "repo": "loom-fun-staging/unsloth-gemma-4-31B-it-loom",
+      "revision": "d1012c2abe26c4f204585f500c1fa923bb6db067",
+      "device": "amdgpu://?completion_spin_ns=4294967295",
+      "args": [
+        "--pool_backing=fixed"
+      ],
+      "model_id": "google/gemma-4-31B-it",
+      "features": {
+        "api": "yes",
+        "audio": "unknown",
+        "concurrency": "yes",
+        "context": "yes",
+        "image_input": "unknown",
+        "max_output_tokens": "yes",
+        "reasoning_effort": "n/a",
+        "sampling": "yes",
+        "speculative_decoding": "yes",
+        "thinking": "yes",
+        "tool_calling": "yes"
+      },
+      "sdk": {
+        "hrx_loom": "0.3.0",
+        "source": "pypi",
+        "hrx_system_sha": "e2c41a720363911c04606ce0f4417e2d55630352",
+        "wheel_sha256": "6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f"
+      },
+      "files": {
+        "info.json": "3690350728d0c481b41bef7bb094b96129c80f3df7351ec3373c9ef8b6be14dc",
+        "model.json": "356628fe39bddfc7f33dfa7ba2d0c435ae065f4b92101268615ef7045bb37cf8",
+        "model.json.lock": "44696c76316059cf4c866a9087ed010462a31394863069858d5503e4006fb8f5",
+        "llm_config.json": "e68f44d98cacce91dc2a60b5dcf1d449f3b43bfdba143be16bc0c53d2014169f"
+      },
+      "package_serve": null,
+      "published_rows": [
+        "decode",
+        "decode_2k",
+        "prefill_1k",
+        "prefill_2k",
+        "streams4"
+      ],
+      "preset": "chat-r9700",
+      "context_tokens": 8192
+    }
+  ]
+}

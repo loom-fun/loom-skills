@@ -1,0 +1,82 @@
+name: SDK 0.3 Radeon bare-launch matrix
+on:
+  push:
+    branches: [codex/sdk030-bare-radeon]
+    paths: [.github/sdk030-bare/radeon-wave.json]
+
+permissions:
+  contents: read
+
+jobs:
+  matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      rows: ${{ steps.rows.outputs.value }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - id: rows
+        run: echo "value=$(jq -Mc '{include}' .github/sdk030-bare/radeon-wave.json)" >> "$GITHUB_OUTPUT"
+  compare:
+    name: ${{ matrix.slug }} / ${{ matrix.preset }}
+    needs: matrix
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.matrix.outputs.rows) }}
+    runs-on: [self-hosted, devlab-dispatch, radeon-r9700]
+    timeout-minutes: 160
+    env:
+      ROW_JSON: ${{ toJSON(matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Fetch the exact staged package and card SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          work=$(mktemp -d "$(dirname "$GITHUB_WORKSPACE")/sdk030-bare-radeon.XXXXXX")
+          echo "WORK=$work" >> "$GITHUB_ENV"
+          mkdir -p "$work/out"
+          printf '%s\n' "$ROW_JSON" > "$work/out/plan.json"
+          hostname > "$work/out/runner.txt"
+          uname -a > "$work/out/uname.txt"
+          jq -r '[.repo, .revision, .preset] | @tsv' "$work/out/plan.json" |
+            { IFS=$'\t' read -r repo revision preset
+              [[ "$repo" =~ ^loom-fun-staging/[a-zA-Z0-9._-]+$ && "$revision" =~ ^[0-9a-f]{40}$ && "$preset" =~ ^[a-zA-Z0-9._-]+$ ]]
+              ref="https://huggingface.co/$repo/resolve/$revision"
+              printf '%s\n' "$ref" > "$work/out/card-url.txt"
+              for file in info.json model.json model.json.lock llm_config.json; do
+                curl -fsSL --retry 3 "$ref/$file" -o "$work/out/$file"
+                expected=$(jq -r --arg file "$file" '.files[$file]' "$work/out/plan.json")
+                [[ "$expected" =~ ^[0-9a-f]{64}$ ]]
+                (cd "$work/out" && printf '%s  %s\n' "$expected" "$file" | sha256sum -c -)
+              done
+              sdk=$(bash "$GITHUB_WORKSPACE/skills/loom-setup/scripts/ensure_sdk.sh" "$work/loom" "$work/out/llm_config.json")
+              echo "SDK_ROOT=$sdk" >> "$GITHUB_ENV"
+              cp "$sdk/loom-install.json" "$work/out/sdk.json"
+              jq -e --slurpfile installed "$work/out/sdk.json" '.sdk | to_entries | all(.[] | select(.value != null); .key as $key | .value == $installed[0][$key])' "$work/out/plan.json"
+              HF_HOME="$work/hf-home" "$sdk/.venv/bin/loom-fetch" "$ref/model.json" --preset="$preset" --materialize=copy --no-input --cache "$work/fetch-cache" --output="$work/model" 2>&1 | tee "$work/out/fetch.log"
+              cp "$work/out/llm_config.json" "$work/model/"
+            }
+      - name: Compare both effective launches with fixed prompts
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$SDK_ROOT/.tools/bin/python" -u "$GITHUB_WORKSPACE/.github/sdk030-launch/launch_ab.py" \
+            "$WORK" "$SDK_ROOT" "$GITHUB_WORKSPACE/skills/loom-benchmark/scripts"
+      - uses: actions/upload-artifact@v4
+        if: always() && env.WORK != ''
+        with:
+          name: radeon-bare-${{ matrix.slug }}-${{ matrix.preset }}
+          path: ${{ env.WORK }}/out
+          retention-days: 30
+      - name: Release job workspace
+        if: always() && env.WORK != ''
+        shell: bash
+        run: |
+          case "$WORK" in
+            "$(dirname "$GITHUB_WORKSPACE")"/sdk030-bare-radeon.*) rm -rf -- "$WORK" ;;
+            *) exit 1 ;;
+          esac
