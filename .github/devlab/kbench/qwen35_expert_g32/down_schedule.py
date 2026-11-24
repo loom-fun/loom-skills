@@ -60,13 +60,13 @@ def main(out, gen):
             name = "negative_nonzero" if negative else f"t{t}"
             lines = [f"check.case public @{name} {{"] + header
             for arm in arms:
-                lines += [f"  %{arm} = check.generate.fill value(42.0) : {output}",
-                          f"  kernel.launch @k_{arm}[%rows, %h](%rows, %f, %h, %rows, %tile_info, %row_map, %x, %scales, %w, %{arm}) : [index, index](index, index, index, index, {', '.join(types)}, {wt}, {output})"]
+                lines += [f"  %result_{arm} = check.generate.fill value(42.0) : {output}",
+                          f"  kernel.launch @k_{arm}[%rows, %h](%rows, %f, %h, %rows, %tile_info, %row_map, %x, %scales, %w, %result_{arm}) : [index, index](index, index, index, index, {', '.join(types)}, {wt}, {output})"]
                 if check and arm != "base":
-                    lines.append(f"  check.expect.equal actual(%{arm}) expected(%base) : {output}")
+                    lines.append(f"  check.expect.equal actual(%result_{arm}) expected(%result_base) : {output}")
             if negative:
                 lines += [f"  %fill = check.generate.fill value(42.0) : {output}",
-                          f"  check.expect.approximate actual(%pairs) expected(%fill) atol(0.0) rtol(0.0) nan(different) : {output}, {output}"]
+                          f"  check.expect.approximate actual(%result_pairs) expected(%fill) atol(0.0) rtol(0.0) nan(different) : {output}, {output}"]
             return "\n".join(lines + ["  check.return", "}"]) + "\n"
         fixtures[t] = {arm: case([arm]) for arm in kernels}
         fixtures[t]["test"] = case(list(kernels), check=True)
