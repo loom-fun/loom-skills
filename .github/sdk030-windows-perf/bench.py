@@ -15,7 +15,7 @@ import zipfile
 
 root, evidence, docs = (Path(path).resolve() for path in sys.argv[1:4])
 mode = sys.argv[4] if len(sys.argv) == 5 else 'runtime'
-shipping = mode == 'shipping'
+shipping = mode in ('shipping', 'shipping-recovery')
 waiting = mode == 'waiting'
 large_control = mode == '27b'
 # Keep the hub cache in the job scope and reuse exact checkpoint downloads across packages.
@@ -128,7 +128,7 @@ def get_json(url, timeout=4):
         return json.load(response)
 
 
-def wait_ready(base_url, server):
+def wait_ready(base_url, server, case):
     deadline = time.monotonic() + 600
     while time.monotonic() < deadline:
         if server.poll() is not None:
@@ -141,6 +141,7 @@ def wait_ready(base_url, server):
         models = status.get('data', [])
         registrations = [model.get('loom', {}).get('registration') for model in models]
         if 'failed' in registrations:
+            write_json(evidence / f'{case}-failed-status.json', status)
             raise RuntimeError(f'Model registration failed: {status}')
         if registrations and all(item == 'ready' for item in registrations):
             return status
@@ -219,7 +220,7 @@ def measure(label, card, preset, executable, release, session, document_set, arm
     with (evidence / f'{case}-serve.log').open('wb') as log:
         server = subprocess.Popen(args, cwd=root, stdout=log, stderr=subprocess.STDOUT)
         try:
-            status = wait_ready(url, server)
+            status = wait_ready(url, server, case)
             write_json(evidence / f'{case}-status.json', status)
             model = status['data'][0]['id']
             thinking = False if label in ('flash-next', 'qwen3.8-27b') else None
@@ -244,6 +245,9 @@ def measure(label, card, preset, executable, release, session, document_set, arm
             if server.poll() is None:
                 server.terminate()
                 server.wait(timeout=15)
+            else:
+                (evidence / f'{case}-process-exit.txt').write_text(
+                    f'0x{server.returncode & 0xffffffff:08x}\n', encoding='utf-8')
 
 
 def summarize(label, arms=('0.2.0', '0.3.0')):
@@ -302,11 +306,22 @@ if large_control:
     sys.exit(0)
 if shipping:
     # Present both immutable packages on the same machine, using their respective README launch arguments.
-    cards = {'0.2.0': fetch(fetchers['0.2.0'], 'flash-production', *packages['flash-next']),
-             '0.3.0': fetch(fetchers['0.3.0'], 'flash-staged', *staged_flash, expected_abi=2)}
-    for release, session in sequence:
+    cards = {'0.3.0': fetch(fetchers['0.3.0'], 'flash-staged', *staged_flash, expected_abi=2),
+             '0.2.0': fetch(fetchers['0.2.0'], 'flash-production', *packages['flash-next'])}
+    recovered_order = (('0.3.0', 0), ('0.2.0', 0), ('0.2.0', 1), ('0.3.0', 1))
+    unusable = {}
+    for release, session in (recovered_order if mode == 'shipping-recovery' else sequence):
+        if release in unusable:
+            continue
         print(f'Flash published/staged {release} period {session}', flush=True)
-        measure('flash-next', cards[release], 'vision-mtp', executables[release], release, session, documents)
+        try:
+            measure('flash-next', cards[release], 'vision-mtp', executables[release], release, session, documents)
+        except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
+            unusable[release] = str(error)
+            print(f'Flash release {release} failed: {error}', flush=True)
+    if unusable:
+        write_json(evidence / 'flash-launch-failures.json', unusable)
+        sys.exit(f'Flash pair is incomplete: {", ".join(unusable)}')
     summarize('flash-next')
     sys.exit(0)
 failed = []

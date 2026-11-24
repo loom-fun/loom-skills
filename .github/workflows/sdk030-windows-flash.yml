@@ -16,7 +16,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - name: Compare published and staged Flash Next on the same Windows GPU
+      - name: Compare published and staged Flash Next on the same Windows GPU with staged first
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
@@ -34,7 +34,7 @@ jobs:
             system = Get-CimInstance Win32_ComputerSystem | Select-Object Model,TotalPhysicalMemory
             power = powercfg /GetActiveScheme
           } | ConvertTo-Json -Depth 4 | Set-Content (Join-Path $out 'machine.json') -Encoding UTF8
-          python .github/sdk030-windows-perf/bench.py "$scratch" "$out" "$env:GITHUB_WORKSPACE/skills/loom-benchmark/data" shipping
+          python .github/sdk030-windows-perf/bench.py "$scratch" "$out" "$env:GITHUB_WORKSPACE/skills/loom-benchmark/data" shipping-recovery
           if ($LASTEXITCODE -ne 0) { throw 'Windows benchmark did not pass all cases' }
       - uses: actions/upload-artifact@v4
         if: always()
