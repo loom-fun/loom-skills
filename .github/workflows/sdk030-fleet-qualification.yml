@@ -14,9 +14,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - slug: bartowski-Ornith-1.5-9B-loom
-            device: radeon-r9700
-            labels: '["self-hosted","devlab-dispatch","radeon-r9700"]'
+          - slug: unsloth-Qwen3-VL-4B-Instruct-loom
+            device: strix-halo
+            labels: '["self-hosted","devlab-dispatch","strix-halo","Linux"]'
     runs-on: ${{ fromJSON(matrix.labels) }}
     timeout-minutes: 240
     env:
