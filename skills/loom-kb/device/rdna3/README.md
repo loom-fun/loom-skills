@@ -6,3 +6,17 @@ Devices: `strix-halo` (gfx1151), `radeon-rx7900xtx` (gfx1100, spec values), `gfx
 runner, fit table), no new kernels.
 
 Data: `family.json` (read by `registry.families()`, `dual_target.py`).
+
+## Getting started on desktop Radeon
+
+On Linux with ROCm tools installed, run `rocminfo` and match the GPU agent's `Name` and `Marketing Name` to your card. AMD lists the Radeon RX 7800 XT as RDNA3 with target `gfx1101`. [Using rocminfo](https://rocm.docs.amd.com/projects/rocminfo/en/latest/how-to/use-rocminfo.html) · [AMD GPU specifications](https://rocm.docs.amd.com/en/docs-7.2.3/reference/gpu-arch-specs.html)
+
+If your GPU has no device entry in this knowledge base, use `rdna3` to find the family guidance for a local Loom package. From the loom-skills checkout, replace the example path with that package's `llm_config.json`.
+
+```sh
+python3 skills/loom-kb/kb.py route --config /path/to/llm_config.json --device rdna3 --topic sdk
+```
+
+For installation and fetching, follow [Loom setup](../../../loom-setup/SKILL.md) and the package's Quick start.
+
+Thanks to [soulafein83](https://github.com/soulafein83) for suggesting a starting point for RX 7800 XT owners.
