@@ -1,6 +1,6 @@
 {
- "_comment": "JoyAI combined (experiment only): every lane's kept wins in one build (pfgemm v6 choices via the model scope, pfattn expanded MLA prefill, decode lane defaults) vs the published card; llama.cpp rows with the matched drafting (none: the package does not draft).",
- "card": "loom-fun/jdopensource-JoyAI-LLM-Flash-loom@58159cc30c1b9a18fb883f75188b35d03bfea4ed",
+ "_comment": "decode lane round 5 on joyai-combined: base (origin/joyai-combined) vs dec2 (this branch)",
+ "card": "loom-fun/jdopensource-JoyAI-LLM-Flash-loom@cb7861a81dbb586782044145ebb11f8cd48d8c8e",
  "memory_bytes": 47000000000,
  "kit": "deepseek2",
  "llamacpp": "b1386",
@@ -9,48 +9,32 @@
  },
  "jobs": [
   {
-   "name": "combined-perf",
-   "llama_spec": "",
+   "name": "joyai-decode2",
    "variants": [
-    {"name": "card"},
-    {"name": "combined", "build": {}}
+    {
+     "name": "base",
+     "build": {},
+     "ref": "origin/joyai-combined"
+    },
+    {
+     "name": "dec2",
+     "build": {}
+    }
    ],
    "steps": [
-    "ktest:combined",
-    "perf:card:1",
-    "perf:combined:1",
-    "perf:combined:1",
-    "perf:card:1",
-    "perf:card:1:long",
-    "perf:combined:1:long",
-    "perf:combined:1:long",
-    "perf:card:1:long",
-    "c4:combined",
-    "c4:card",
-    "c4:card",
-    "c4:combined",
-    "profile:combined:pf2k,pf8k,dec",
-    "llama:2",
-    "llama:1:long",
-    "llamac4"
-   ]
-  },
-  {
-   "name": "combined-fullctx",
-   "variants": [
-    {"name": "combined", "build": {}}
-   ],
-   "steps": [
-    "fullctx:combined:131072"
-   ]
-  },
-  {
-   "name": "combined-gates",
-   "variants": [
-    {"name": "combined", "build": {}}
-   ],
-   "steps": [
-    "gates:combined:dev"
+    "ktest:dec2",
+    "perf:base:1",
+    "perf:dec2:1",
+    "perf:dec2:1",
+    "perf:base:1",
+    "c4:dec2",
+    "c4:base",
+    "c4:base",
+    "c4:dec2",
+    "perf:dec2:1:ctx",
+    "perf:base:1:ctx",
+    "profile:dec2:dec",
+    "gates:dec2:dev"
    ]
   }
  ]

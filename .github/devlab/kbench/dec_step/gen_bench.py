@@ -26,7 +26,7 @@ VARIANTS = {"split": {"MLA_DEC": "split"}, "pl1": {"MLA_DEC_PL": "1"}, "s32": {"
             "dnr1": {"MOE_R_DN": "1"}, "dnr4": {"MOE_R_DN": "4"}, "dnr8": {"MOE_R_DN": "8"}, "dnu2": {"MOE_DN_U": "2"}, "dnu4": {"MOE_DN_U": "4"},
             "old": {"MLA_DEC": "split", "MOE_ROUTE_SPLIT": "0", "MOE_SHSLOT": "0", "MLA_QA_DUAL": "0", "MLA_RMSQ_FUSE": "0", "MV_WG1": "4096"}}
 CTXS = [("short", 300, 1), ("2k", 2048, 1), ("8k", 8192, 1), ("c4", 1024, 4)]   # (tag, context, tokens = streams)
-ROLE_CTX = "c4"   # role_<kernel> cases (host wall of that role's 39-40 launches alone) at this context
+ROLE_CTX = "none"   # role_<kernel> cases (host wall of that role's 39-40 launches alone) at this context
 OUT = None
 
 
@@ -287,7 +287,7 @@ def route_test(lib):
     """test.loom: the split decode router (g_moe_route_lg + g_moe_route_tk) against g_moe_route, ids and weights equal,
     4 tokens of random h, random router and bias (random npy written by main)."""
     ks = []
-    for k in ("g_moe_route", "g_moe_route_lg", "g_moe_route_tk"):
+    for k in ("g_moe_route", "g_moe_route_lg", "g_moe_route_tk", "g_moe_route_lgk", "g_moe_cnt_zero"):
         m = re.search(rf'^kernel\.def export\("{k}"\) @{k}\((?:.|\n)*?^\}}\n', lib, re.M)
         assert m, k
         ks.append(m.group(0))
@@ -307,7 +307,15 @@ def route_test(lib):
   kernel.launch @g_moe_route_tk[%t](%t, %lg, %b, %ids_b, %wts_b) : [index](index, tensor<{T}x256xf32>, tensor<256xf32>, tensor<{T}x8xi32>, tensor<{T}x8xf32>)
   check.expect.equal actual(%ids_b) expected(%ids_a) : tensor<{T}x8xi32>
   check.expect.equal actual(%wts_b) expected(%wts_a) : tensor<{T}x8xf32>
-  check.return
+  %cnt = check.generate.fill value(7) : tensor<{T}xi32>
+  kernel.launch @g_moe_cnt_zero[%t](%t, %cnt) : [index](index, tensor<{T}xi32>)
+""" + "".join(f"""  %ids_c{r} = check.generate.fill value(0) : tensor<{T}x8xi32>
+  %wts_c{r} = check.generate.fill value(0.0) : tensor<{T}x8xf32>
+  %lg{r} = check.generate.fill value(0.0) : tensor<{T}x256xf32>
+  kernel.launch @g_moe_route_lgk[%t](%t, %h, %w, %lg{r}, %cnt, %b, %ids_c{r}, %wts_c{r}) : [index](index, tensor<{T}x2048xf32>, tensor<{256 * 2048}xf32>, tensor<{T}x256xf32>, tensor<{T}xi32>, tensor<256xf32>, tensor<{T}x8xi32>, tensor<{T}x8xf32>)
+  check.expect.equal actual(%ids_c{r}) expected(%ids_a) : tensor<{T}x8xi32>
+  check.expect.equal actual(%wts_c{r}) expected(%wts_a) : tensor<{T}x8xf32>
+""" for r in range(3)) + f"""  check.return
 }}
 """
     return HEAD + strip_kernels(lib) + "\n".join(ks) + case
