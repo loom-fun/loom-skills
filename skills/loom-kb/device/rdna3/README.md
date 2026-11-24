@@ -18,5 +18,3 @@ python3 skills/loom-kb/kb.py route --config /path/to/llm_config.json --device rd
 ```
 
 For installation and fetching, follow [Loom setup](../../../loom-setup/SKILL.md) and the package's Quick start.
-
-[@soulafein83](https://github.com/soulafein83) authored the original RX 7800 XT KB device entry that supplied the device identification above. The setup and routing instructions were written independently. [Original KB submission #1283](https://github.com/loom-fun/loom-skills/pull/1283)
