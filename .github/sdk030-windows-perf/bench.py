@@ -14,7 +14,9 @@ import zipfile
 
 
 root, evidence, docs = (Path(path).resolve() for path in sys.argv[1:4])
-shipping = len(sys.argv) == 5 and sys.argv[4] == 'shipping'
+mode = sys.argv[4] if len(sys.argv) == 5 else 'runtime'
+shipping = mode == 'shipping'
+waiting = mode == 'waiting'
 # Keep the hub cache in the job scope and reuse exact checkpoint downloads across packages.
 os.environ['HF_HOME'] = str(root / 'hf-home')
 os.environ['HF_HUB_DISABLE_SYMLINKS_WARNING'] = '1'
@@ -58,10 +60,10 @@ def download_sdk(version, name):
 def setup():
     if os.name != 'nt':
         raise RuntimeError('This workflow requires native Windows')
-    write_json(evidence / 'pins.json', {'releases': release_hashes, 'packages': packages,
+    write_json(evidence / 'pins.json', {'experiment': mode, 'releases': release_hashes, 'packages': packages,
                                        'staged_flash': staged_flash if shipping else None})
     executables = {}
-    for version in ('0.2.0', '0.3.0'):
+    for version in (('0.3.0',) if waiting else ('0.2.0', '0.3.0')):
         archive = download_sdk(version, f'loom-serve-{version}-win_amd64.zip')
         install = root / version
         install.mkdir()
@@ -73,7 +75,8 @@ def setup():
         version_print = subprocess.check_output([executable, '--version'], timeout=30, stderr=subprocess.STDOUT)
         (evidence / f'sdk-{version}.txt').write_bytes(version_print)
     fetchers = {}
-    for version in (('0.2.0', '0.3.0') if shipping else ('0.2.0',)):
+    fetch_versions = ('0.2.0', '0.3.0') if shipping else (('0.3.0',) if waiting else ('0.2.0',))
+    for version in fetch_versions:
         wheel = download_sdk(version, f'hrx_loom-{version}-py3-none-win_amd64.whl')
         venv = root / f'fetch-venv-{version}'
         subprocess.run([sys.executable, '-m', 'venv', str(venv)], check=True)
@@ -196,14 +199,14 @@ def append_sample(row):
     print(json.dumps(row), flush=True)
 
 
-def measure(label, card, preset, executable, release, session, document_set):
-    case = f'{label}-{release}-{session}'
+def measure(label, card, preset, executable, release, session, document_set, arm=None):
+    case = f'{label}-{arm or release}-{session}'
     with socket.socket() as sock:
         sock.bind(('127.0.0.1', 0))
         port = sock.getsockname()[1]
     url = f'http://127.0.0.1:{port}'
-    args = [str(executable), '--device=amdgpu://?completion_spin_ns=4294967295',
-            f'--listen=127.0.0.1:{port}']
+    device = 'amdgpu' if arm == 'bare' else 'amdgpu://?completion_spin_ns=4294967295'
+    args = [str(executable), f'--device={device}', f'--listen=127.0.0.1:{port}']
     if shipping:
         args += [f'--model={card.parent}', '--pool_backing=fixed' if release == '0.2.0' else '--workers=8']
     else:
@@ -217,7 +220,7 @@ def measure(label, card, preset, executable, release, session, document_set):
             model = status['data'][0]['id']
             thinking = False if label == 'flash-next' else None
             request(url, model, f'[{case} warmup] Write a detailed essay about wind patterns.', 16, thinking)
-            identifiers = {'model': label, 'release': release, 'session': session}
+            identifiers = {'model': label, 'release': release, 'arm': arm or release, 'session': session}
             for sample in range(3):
                 for name, document in document_set.items():
                     tag = f'{label}.paired.{session}.{sample}.{name}'
@@ -239,14 +242,14 @@ def measure(label, card, preset, executable, release, session, document_set):
                 server.wait(timeout=15)
 
 
-def summarize(label):
+def summarize(label, arms=('0.2.0', '0.3.0')):
     rows = [json.loads(line) for line in (evidence / 'samples.jsonl').read_text(encoding='utf-8').splitlines()]
     old, new = ({(r['workload'], r['session'], r['sample']): r for r in rows
-                 if r['release'] == release and r['model'] == label} for release in ('0.2.0', '0.3.0'))
+                 if r['arm'] == arm and r['model'] == label} for arm in arms)
     if not old or old.keys() != new.keys():
         raise ValueError(f'Incomplete paired samples for {label}')
     results = {}
-    for name in ('2k', '32k', 'c4'):
+    for name in dict.fromkeys(key[0] for key in old):
         pairs = [(old[key], new[key]) for key in old if key[0] == name]
         for before, after in pairs:
             pre = before.get('requests', [before])
@@ -260,11 +263,11 @@ def summarize(label):
             a = [old_row[metric] for old_row, _ in pairs]
             b = [new_row[metric] for _, new_row in pairs]
             results[name][metric] = {
-                'samples_0.2': a, 'samples_0.3': b,
-                'median_0.2': statistics.median(a), 'median_0.3': statistics.median(b),
+                'samples_before': a, 'samples_after': b,
+                'median_before': statistics.median(a), 'median_after': statistics.median(b),
                 'paired_change_percent': statistics.median(100 * (right / left - 1) for left, right in zip(a, b)),
             }
-    write_json(evidence / f'{label}-summary.json', results)
+    write_json(evidence / f'{label}-summary.json', {'arms': arms, 'workloads': results})
     print(json.dumps({label: results}), flush=True)
 
 
@@ -272,6 +275,14 @@ executables, fetchers = setup()
 documents = {name: (docs / f'doc_{count}.txt').read_text(encoding='utf-8')
              for name, count in (('2k', 2000), ('32k', 32000))}
 sequence = (('0.2.0', 0), ('0.3.0', 0), ('0.3.0', 1), ('0.2.0', 1))
+if waiting:
+    label = 'qwen3-0.6b'
+    card = fetch(fetchers['0.3.0'], label, *packages[label])
+    for arm, session in (('bare', 0), ('active-wait', 0), ('active-wait', 1), ('bare', 1)):
+        print(f'Qwen3 0.6B SDK 0.3 {arm} period {session}', flush=True)
+        measure(label, card, 'chat', executables['0.3.0'], '0.3.0', session, {'2k': documents['2k']}, arm)
+    summarize(label, ('bare', 'active-wait'))
+    sys.exit(0)
 if shipping:
     # Present both immutable packages on the same machine, using their respective README launch arguments.
     cards = {'0.2.0': fetch(fetchers['0.2.0'], 'flash-production', *packages['flash-next']),
