@@ -1,0 +1,126 @@
+name: DevLab Quark chart logit and activation isolation
+on:
+  push:
+    branches: [codex/sdk030-quark-r9700-diagnostic]
+    paths: [.github/workflows/sdk030-quark-logits.yml]
+permissions:
+  contents: read
+  actions: read
+jobs:
+  logits:
+    runs-on: [self-hosted, devlab-dispatch, Linux, radeon-r9700]
+    timeout-minutes: 60
+    env:
+      CARD: huggingface:loom-fun/amd-Qwen3.8-27B-Quark-AWQ-MXFP4-loom:chat-r9700@a999be30c6539c77a030e961748416892b06ac73
+      KIT_REVISION: 629d8f8aab61f53c4713b89fd21d26efe83f9e45
+      GUFO_REVISION: bccf173b2664432d03d068413a91639bdd6242f7
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify exact Loom embed library, SDK wheel and model
+        shell: bash
+        run: |
+          set -euo pipefail
+          work=$(mktemp -d "$(dirname "$GITHUB_WORKSPACE")/sdk030-quark-logits.XXXXXX")
+          echo "WORK=$work" >> "$GITHUB_ENV"
+          echo "HF_HOME=$work/hf" >> "$GITHUB_ENV"
+          export HF_HOME="$work/hf"
+          mkdir -p "$work/out" "$work/toolkit" "$work/include"
+          git archive "$KIT_REVISION" skills | tar -xf - -C "$work/toolkit"
+          git rev-parse HEAD > "$work/out/workflow-head.txt"
+          gh api repos/loom-fun/loom-skills/actions/artifacts/14888387655/zip > "$work/bundle.zip"
+          echo "e49f5fe2e69d09a5f79fb36f6928bd68236f1c4132557d1e348b65b5be8b1764  $work/bundle.zip" | sha256sum -c -
+          unzip -q "$work/bundle.zip" 'embed/gufo/*' -d "$work"
+          lib="$work/embed/gufo/lib"
+          chmod +x "$lib/ld-linux-x86-64.so.2"
+          echo "e61e489514807022bb689d96261b1dff83daec5d7209b99370fe3e1a333bf706  $lib/libloom_text_embed.so" | sha256sum -c - | tee "$work/out/embed-library.txt"
+          curl -fsSL "https://raw.githubusercontent.com/loom-fun/gufo/$GUFO_REVISION/src/models/loom/embed/loom_text_embed.h" -o "$work/include/loom_text_embed.h"
+          gcc -std=c17 -Wall -Wextra -Werror -I "$work/include" .github/scripts/sdk030_quark_chart_logits.c -Wl,--allow-shlib-undefined -L "$lib" -lloom_text_embed -o "$work/chart-logits"
+          python -m venv "$work/sdk"
+          wheel="$work/hrx_loom-0.3.0-py3-none-manylinux_2_39_x86_64.whl"
+          "$work/sdk/bin/python" -m pip download --no-deps --dest "$work" hrx-loom==0.3.0
+          echo "6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f  $wheel" | sha256sum -c - | tee "$work/out/sdk-wheel.txt"
+          "$work/sdk/bin/python" -m pip install "$wheel[hf]" numpy pillow gguf requests tokenizers
+          "$work/sdk/bin/loom-fetch" "$CARD" --output="$work/package" --no-input
+      - name: Capture Loom’s active first-token logits and image token layout
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PYTHONPATH="$WORK/toolkit/skills/loom-benchmark/scripts"
+          "$WORK/sdk/bin/python" - <<'PY'
+          import json
+          import os
+          import subprocess
+          from pathlib import Path
+
+          import numpy as np
+          from PIL import Image
+          from bench_common import Package
+          from vision_golden import builtin_images, data_url
+
+          work = Path(os.environ["WORK"])
+          out = work / "out"
+          lib = work / "embed/gufo/lib"
+          loader = lib / "ld-linux-x86-64.so.2"
+          pkg = Package(str(work / "package"))
+          fixtures = builtin_images()
+          chart, question = fixtures["chart"]
+          inputs = {"chart": (chart, question),
+                    "chart_pre": (chart.resize((800, 512), Image.Resampling.BICUBIC), question),
+                    "wide": fixtures["wide"]}
+          rows = {}
+          for name, (image, question) in inputs.items():
+              request = work / f"{name}.json"
+              raw = out / f"{name}.f32"
+              request.write_text(json.dumps({"messages": [{"role": "user", "content": [
+                  {"type": "image_url", "image_url": {"url": data_url(image)}},
+                  {"type": "text", "text": question},
+              ]}], "temperature": 0, "max_tokens": 1, "enable_thinking": False, "logits": True}))
+              identity = subprocess.check_output([loader, "--library-path", lib, work / "chart-logits",
+                                                  work / "package/model.json", "chat-r9700", request, raw], text=True)
+              row = json.loads(identity.splitlines()[-1])
+              values = np.fromfile(raw, dtype=np.float32).astype(np.float64)
+              assert len(values) == row["vocabulary"] and not np.isnan(values).any(), name
+              valid = np.isfinite(values) & (values > -1e38)
+              normalizer = np.logaddexp.reduce(values[valid])
+              top = np.argsort(values)[-12:][::-1]
+              row["top"] = [{"id": int(i), "text": pkg.tok.decode([int(i)]),
+                             "logit": float(values[i]), "logprob": float(values[i] - normalizer)} for i in top]
+              rows[name] = row
+              assert values[row["device_token"]] == values[top[0]], (name, row["device_token"], row["top"])
+          (out / "loom-first-token.json").write_text(json.dumps(rows, indent=2) + "\n")
+          print({name: row["top"][:3] for name, row in rows.items()})
+          PY
+      - name: Isolate vLLM Quark activation QDQ with the pinned checkpoint
+        shell: bash
+        run: |
+          set -euo pipefail
+          export VLLM_STATE="$WORK/vllm-state" VLLM_VENV="$WORK/vllm" VLLM_VERSION=0.18.0 VLLM_ROCM_VARIANT=rocm700
+          export VLLM_ROCM_USE_AITER=0 VLLM_WORKER_MULTIPROC_METHOD=spawn
+          server="$WORK/toolkit/skills/loom-benchmark/scripts/vllm_server.sh"
+          "$server" --install
+          eval "$("$server" --env)"
+          export PATH="$HOME/.local/bin:$PATH"
+          uv pip install --python "$VLLM_VENV/bin/python" tokenizers requests
+          "$VLLM_VENV/bin/python" .github/scripts/sdk030_quark_activation_control.py "$WORK/toolkit" "$WORK/package" "$WORK/out/vllm-a4-control.json" 2>&1 | tee "$WORK/out/vllm-a4-control.log"
+      - uses: actions/upload-artifact@v4
+        if: always() && env.WORK != ''
+        with:
+          name: sdk030-quark-chart-logits
+          path: ${{ env.WORK }}/out
+          if-no-files-found: error
+          retention-days: 30
+      - name: Release job disk
+        if: always() && env.WORK != ''
+        shell: bash
+        run: |
+          case "$WORK" in
+            "$(dirname "$GITHUB_WORKSPACE")"/sdk030-quark-logits.*) rm -rf -- "$WORK" ;;
+            *) exit 1 ;;
+          esac
