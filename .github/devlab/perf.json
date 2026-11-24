@@ -1,22 +1,81 @@
 {
- "_comment": "JoyAI pf2 lane (experiment only), round 1: base (lane-pf2 build, switches off = deepseek2-joyai programs) vs v1 (ATTN_LIST_LIVE) vs v2 (+ MOE_ROUTE_TG). ktest v2, perf ABBA short, profile pf2k.",
+ "_comment": "JoyAI pf2 lane (experiment only), round 2: base / v1 ATTN_LIST_LIVE / v3 + MLA_X_TAIL / v4 + MOE_ROUTE_TG (router rows in LDS) / v5 + GEMM_M128_N=768; ktest v5, ABBA short, profile pf2k v5; gates:dev on v5 (job pf2-r2-gates).",
  "card": "loom-fun/jdopensource-JoyAI-LLM-Flash-loom@58159cc30c1b9a18fb883f75188b35d03bfea4ed",
  "memory_bytes": 47000000000,
  "kit": "deepseek2",
  "llamacpp": "b1386",
- "env": {"LLAMACPP_EXTRA_ARGS": "--skip-chat-parsing"},
+ "env": {
+  "LLAMACPP_EXTRA_ARGS": "--skip-chat-parsing"
+ },
  "jobs": [
   {
-   "name": "pf2-r1",
+   "name": "pf2-r2",
    "variants": [
-    {"name": "base", "build": {}},
-    {"name": "v1", "build": {"ATTN_LIST_LIVE": "1"}},
-    {"name": "v2", "build": {"ATTN_LIST_LIVE": "1", "MOE_ROUTE_TG": "1"}}
+    {
+     "name": "base",
+     "build": {}
+    },
+    {
+     "name": "v1",
+     "build": {
+      "ATTN_LIST_LIVE": "1"
+     }
+    },
+    {
+     "name": "v3",
+     "build": {
+      "ATTN_LIST_LIVE": "1",
+      "MLA_X_TAIL": "1"
+     }
+    },
+    {
+     "name": "v4",
+     "build": {
+      "ATTN_LIST_LIVE": "1",
+      "MLA_X_TAIL": "1",
+      "MOE_ROUTE_TG": "1"
+     }
+    },
+    {
+     "name": "v5",
+     "build": {
+      "ATTN_LIST_LIVE": "1",
+      "MLA_X_TAIL": "1",
+      "MOE_ROUTE_TG": "1",
+      "GEMM_M128_N": "768"
+     }
+    }
    ],
    "steps": [
-    "ktest:v2",
-    "perf:base:1", "perf:v1:1", "perf:v2:1", "perf:v2:1", "perf:v1:1", "perf:base:1",
-    "profile:v2:pf2k"
+    "ktest:v5",
+    "perf:base:1",
+    "perf:v1:1",
+    "perf:v3:1",
+    "perf:v4:1",
+    "perf:v5:1",
+    "perf:v5:1",
+    "perf:v4:1",
+    "perf:v3:1",
+    "perf:v1:1",
+    "perf:base:1",
+    "profile:v5:pf2k,pf8k"
+   ]
+  },
+  {
+   "name": "pf2-r2-gates",
+   "variants": [
+    {
+     "name": "v5",
+     "build": {
+      "ATTN_LIST_LIVE": "1",
+      "MLA_X_TAIL": "1",
+      "MOE_ROUTE_TG": "1",
+      "GEMM_M128_N": "768"
+     }
+    }
+   ],
+   "steps": [
+    "gates:v5:dev"
    ]
   }
  ]
