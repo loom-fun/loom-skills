@@ -85,5 +85,6 @@
   "v_dims": 128,
   "kq_dims": 192,
   "scale": 0.07216878364870323
- }
+ },
+ "prefill_capacity": 8192
 }
