@@ -34,9 +34,13 @@ jobs:
           mkdir -p "$work/out" "$work/toolkit" "$work/include"
           git archive "$KIT_REVISION" skills | tar -xf - -C "$work/toolkit"
           git rev-parse HEAD > "$work/out/workflow-head.txt"
-          gh api repos/loom-fun/loom-skills/actions/artifacts/14888387655/zip > "$work/bundle.zip"
+          artifact_url=https://api.github.com/repos/loom-fun/loom-skills/actions/artifacts
+          curl -fsSL -H "Authorization: Bearer $GH_TOKEN" "$artifact_url/14888387655/zip" -o "$work/bundle.zip"
           echo "e49f5fe2e69d09a5f79fb36f6928bd68236f1c4132557d1e348b65b5be8b1764  $work/bundle.zip" | sha256sum -c -
           unzip -q "$work/bundle.zip" 'embed/gufo/*' -d "$work"
+          curl -fsSL -H "Authorization: Bearer $GH_TOKEN" "$artifact_url/14942273463/zip" -o "$work/projector.zip"
+          echo "f842b6cff93fd85a976cfe6f35eee3f984f07131c91850caf51dea390aa41813  $work/projector.zip" | sha256sum -c -
+          unzip -q "$work/projector.zip" 'chart-loom-projection.npy' 'chart-torch.bfloat16_identical_loom_pixels.npy' -d "$work/projector"
           lib="$work/embed/gufo/lib"
           chmod +x "$lib/ld-linux-x86-64.so.2"
           echo "e61e489514807022bb689d96261b1dff83daec5d7209b99370fe3e1a333bf706  $lib/libloom_text_embed.so" | sha256sum -c - | tee "$work/out/embed-library.txt"
@@ -108,7 +112,7 @@ jobs:
           eval "$("$server" --env)"
           export PATH="$HOME/.local/bin:$PATH"
           uv pip install --python "$VLLM_VENV/bin/python" tokenizers requests
-          "$VLLM_VENV/bin/python" .github/scripts/sdk030_quark_activation_control.py "$WORK/toolkit" "$WORK/package" "$WORK/out/vllm-a4-control.json" 2>&1 | tee "$WORK/out/vllm-a4-control.log"
+          "$VLLM_VENV/bin/python" .github/scripts/sdk030_quark_activation_control.py "$WORK/toolkit" "$WORK/package" "$WORK/projector" "$WORK/out/vllm-a4-control.json" 2>&1 | tee "$WORK/out/vllm-a4-control.log"
       - uses: actions/upload-artifact@v4
         if: always() && env.WORK != ''
         with:
