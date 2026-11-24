@@ -105,20 +105,26 @@ jobs:
           (out / "loom-first-token.json").write_text(json.dumps(rows, indent=2) + "\n")
           print({name: row["top"][:3] for name, row in rows.items()})
           PY
-      - name: Isolate vLLM Quark activation QDQ with the pinned checkpoint
+      - name: Compare normal compiled and eager vLLM with identical features
         if: always() && steps.prepare.outcome == 'success' && env.RUN_REFERENCE == '1'
         shell: bash
         run: |
           set -euo pipefail
           export VLLM_STATE="$WORK/vllm-state" VLLM_VENV="$WORK/vllm" VLLM_VERSION=0.18.0 VLLM_ROCM_VARIANT=rocm700
           export VLLM_ROCM_USE_AITER=0 VLLM_WORKER_MULTIPROC_METHOD=spawn
-          export VLLM_ENABLE_V1_MULTIPROCESSING=0
           server="$WORK/toolkit/skills/loom-benchmark/scripts/vllm_server.sh"
           "$server" --install
           eval "$("$server" --env)"
           export PATH="$HOME/.local/bin:$PATH"
           uv pip install --python "$VLLM_VENV/bin/python" tokenizers requests jinja2
-          "$VLLM_VENV/bin/python" .github/scripts/sdk030_quark_activation_control.py "$WORK/toolkit" "$WORK/package" "$WORK/projector" "$WORK/out/vllm-a4-control.json" 2>&1 | tee "$WORK/out/vllm-a4-control.log"
+          probe=.github/scripts/sdk030_quark_activation_control.py
+          compiled_status=0
+          VLLM_ENABLE_V1_MULTIPROCESSING=1 "$VLLM_VENV/bin/python" "$probe" --compiled-reference \
+            "$WORK/toolkit" "$WORK/package" "$WORK/projector" "$WORK/out/vllm-compiled-control.json" 2>&1 | tee "$WORK/out/vllm-compiled-control.log" || compiled_status=$?
+          eager_status=0
+          VLLM_ENABLE_V1_MULTIPROCESSING=0 "$VLLM_VENV/bin/python" "$probe" \
+            "$WORK/toolkit" "$WORK/package" "$WORK/projector" "$WORK/out/vllm-eager-matched.json" 2>&1 | tee "$WORK/out/vllm-eager-matched.log" || eager_status=$?
+          (( compiled_status == 0 && eager_status == 0 ))
       - uses: actions/upload-artifact@v4
         if: always() && env.WORK != ''
         with:
