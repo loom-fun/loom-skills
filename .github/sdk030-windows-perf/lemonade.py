@@ -105,6 +105,20 @@ def prepare():
             os.link(source.resolve(), dest)
         for name in ('model.json', 'model.json.lock', 'info.json'):
             assert sha(snap / name) == sha(target / name), name
+        if label == 'flash':
+            source = snap / 'program/shared/program/text/qwen3_8/publish.cxx'
+            header = snap / 'program/shared/program/text/publication.h'
+            assert sha(source) == 'c34431565f494a901676fb45c354fa28009054aefdd790358d9d50f6e3161bb9'
+            assert sha(header) == 'b0daed695a786b992e66c2a06b24bc17cada14d342ca217dc368e3cc6b20870f'
+            candidate = source.parent / '../../../program/text/publication.h'
+            assert candidate.is_file() and sha(candidate) == sha(header)
+            write('flash-cxx-path.json', {'source': str(source), 'header': str(header),
+                                          'lexical_include': str(candidate),
+                                          'lexical_include_length': len(str(candidate)),
+                                          'canonical_include_length': len(str(candidate.resolve())),
+                                          'header_sha256': sha(header)})
+            if windows:
+                assert len(str(candidate)) < 260, str(candidate)
         ref.parent.mkdir(exist_ok=True)
         ref.write_text(revision + '\n', encoding='utf-8')
         records[label] = {'alias': alias, 'repo': repo, 'revision': revision, 'controller_abi': abi,
