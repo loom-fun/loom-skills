@@ -25,7 +25,17 @@ VARIANTS = {"x": {}, "xg": {"MLA_XF": "global"},   # x: LDS-staged flash (defaul
             "xe8": {"MLA_XE_NT": "8"}, "xel": {"MLA_XE_LDS": "1"}, "x8": {"MLA_XQ": "8"}, "x2q": {"MLA_XQ": "2"}, "xg8": {"MLA_XF": "global", "MLA_XQ": "8"},   # 8 query tiles (waves) per workgroup
             "xt": {"MLA_X_TAIL": "1"}, "xr": {"MLA_XQ_REV": "1"},   # xr: quad list latest-first   # x + the run's tail block on the expanded path (case tC)
             "t": {"MLA_XCAP": "4096"}, "tg": {"MLA_XCAP": "4096", "MLA_XF": "global"},
-            **{f"e{d}": {"MLA_XCAP": "4096", "MLA_XE_DBG": str(d)} for d in (1, 2, 3, 4, 8, 12, 15)}}   # g_mla_xexp fault bisection   # small-scratch twins for the staged tests
+            **{f"e{d}": {"MLA_XCAP": "4096", "MLA_XE_DBG": str(d)} for d in (1, 2, 3, 4, 8, 12, 15)},
+            # lc lane: xflash trims (gen_mla_x MLA_XF_T / MLA_XF_QL) and timing-only ablations (MLA_XF_ABL, wrong results)
+            "xf": {"MLA_XF_T": "fma"}, "xq4": {"MLA_XF_QL": "4"}, "xq4f": {"MLA_XF_QL": "4", "MLA_XF_T": "fma"},
+            "xdf": {"MLA_XF_QL": "4", "MLA_XF_T": "diag,fma"}, "xd": {"MLA_XF_T": "diag"},
+            "anox": {"MLA_XF_ABL": "nox"}, "anosm": {"MLA_XF_ABL": "nosm"}, "anoxsm": {"MLA_XF_ABL": "nox,nosm"},
+            "sv": {"MLA_XF_SRC": "vg"}, "sp": {"MLA_XF_SRC": "pg"}, "sk": {"MLA_XF_SRC": "kg"}, "spv": {"MLA_XF_SRC": "pg,vg"},
+            "skp": {"MLA_XF_SRC": "kg,pg"}, "anobar": {"MLA_XF_ABL": "nobar"}, "anofrag": {"MLA_XF_ABL": "nofrag"},
+            "aboth": {"MLA_XF_ABL": "nofrag,nobar"}, "s4": {"MLA_XF_T": "s4"}, "s4f": {"MLA_XF_T": "s4,fma"},
+            "aw": {"MLA_XF_ABL": "nofrag,nobar,nox,nosm"}, "x16": {"MLA_XQ": "16"}, "x8sf": {"MLA_XQ": "8", "MLA_XF_T": "s4,fma"},
+            "x16sf": {"MLA_XQ": "16", "MLA_XF_T": "s4,fma"}}
+TIMING_ONLY = {"anox", "anosm", "anoxsm", "anobar", "anofrag", "aboth", "aw"}   # g_mla_xexp fault bisection   # small-scratch twins for the staged tests
 
 
 TAIL = False
@@ -405,7 +415,7 @@ def tests(variants, kbd, vbd):
         expanded = np.zeros(t, bool)
         for tok, nt, _, _ in xq:
             expanded[tok:tok + 16 * nt] = True
-        for v in variants:
+        for v in [v for v in variants if v not in TIMING_ONLY]:
             if name == "tC" and v == "base":
                 continue
             set_xcap(v)
