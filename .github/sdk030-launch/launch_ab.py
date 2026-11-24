@@ -58,6 +58,7 @@ def deterministic_benchmark(bench, name, seed, target, argv):
             "request": digest([model, messages, max_tokens, extra]),
             **{key: result.get(key) for key in ("status", "prompt_tokens", "tokens", "finish")},
             "output": digest(result.get("text")),
+            "visible_timing": result.get("ttft") is not None,
         }
         return result
 
@@ -73,11 +74,15 @@ def measure(work, sdk, bench):
     model = work / "model"
     out = work / "out"
     plan = read(out / "plan.json")
+    focus = plan.get("focus")
     selected = read(model / "model.json")
     preset = plan["preset"]
     execution = selected["presets"][preset].get("execution", {})
     rows = int(execution.get("rows", plan.get("execution_rows", 1)))
     model_id = selected["model"]["id"]
+    card_features = read(out / "info.json").get("card", {}).get("features", {})
+    thinking = card_features.get("thinking", {}).get("value") or {}
+    forced_reasoning = isinstance(thinking, dict) and thinking.get("mode") == "always"
     expected = plan.get("model_id")
     if expected and expected != model_id:
         raise ValueError(f"Expected {expected}, fetched {model_id}")
@@ -186,16 +191,22 @@ def measure(work, sdk, bench):
             ):
                 response = requests.post(url + "/v1/chat/completions", timeout=90, json={
                     "model": model_id, "messages": [{"role": "user", "content": prompt}],
-                    "temperature": 0, "max_tokens": 32, "chat_template_kwargs": {"enable_thinking": False},
+                    "temperature": 0, "max_tokens": 512 if forced_reasoning else 32,
+                    "chat_template_kwargs": {"enable_thinking": forced_reasoning},
                 })
                 response.raise_for_status()
-                choice = response.json()["choices"][0]
+                body = response.json()
+                choice = body["choices"][0]
                 answer = choice["message"].get("content") or ""
+                reasoning = choice["message"].get("reasoning_content") or ""
                 results.append({"prompt": prompt, "expected": expected, "answer": answer,
+                                "reasoning_only": bool(reasoning and not answer.strip()),
+                                "reasoning_sha256": digest(reasoning) if reasoning else None,
+                                "completion_tokens": body.get("usage", {}).get("completion_tokens"),
                                 "finish": choice.get("finish_reason"),
                                 "exact": answer.strip().lower().rstrip(".") == expected})
             write(directory / "answers.json", results)
-            if any(not row["answer"].strip() or not row["finish"] for row in results):
+            if any(not row["finish"] or not row["answer"].strip() for row in results):
                 raise RuntimeError("empty answer or missing finish reason")
             return sum(result["exact"] for result in results)
 
@@ -233,15 +244,17 @@ def measure(work, sdk, bench):
             result = json.loads((directory / f"{label}.jsonl").read_text().splitlines()[-1])
             if label == "short":
                 report["metrics"].update({key: result.get(key) for key in ("decode_tps", "decode_tps_2k")})
-                report["metrics"].update({f"prefill_{index}k": row["prefill_tps"]
+                report["metrics"].update({f"prefill_{row.get('size', index * 1000) // 1000}k": row["prefill_tps"]
                                           for index, row in enumerate(result["prefill"], 1)})
             else:
                 report["metrics"]["decode_tps_32k"] = result.get("decode_tps_32k")
                 lengths = [length for length in (8, 16, 32)
                            if f"prefill_{length * 1000}" not in result.get("over_context", [])]
-                report["metrics"].update({f"prefill_{length}k": row["prefill_tps"]
+                report["metrics"].update({f"prefill_{row.get('size', length * 1000) // 1000}k": row["prefill_tps"]
                                           for length, row in zip(lengths, result["prefill_long"])})
                 report["over_context"] = result.get("over_context", [])
+            if result.get("prefill_untimed"):
+                report.setdefault("prefill_untimed", {})[label] = result["prefill_untimed"]
             return True
 
         def concurrent():
@@ -263,15 +276,20 @@ def measure(work, sdk, bench):
             server = subprocess.Popen(argv, cwd=work, env=env, stdout=log, stderr=subprocess.STDOUT)
             try:
                 if phase("cold_launch", lambda: ready(server)):
-                    report["functional_exact"] = phase("functional", functional)
-                    report["capabilities"] = phase("capabilities", capabilities)
-                    phase("short", lambda: perf("short", []))
-                    phase("long", lambda: perf("long", ["--long"]))
-                    if rows >= 2:
+                    if focus is None or "functional" in focus:
+                        report["functional_exact"] = phase("functional", functional)
+                    if focus is None or "capabilities" in focus:
+                        report["capabilities"] = phase("capabilities", capabilities)
+                    if focus is None or "short" in focus:
+                        phase("short", lambda: perf("short", []))
+                    if focus is None or "long" in focus:
+                        phase("long", lambda: perf("long", ["--long"]))
+                    if rows >= 2 and (focus is None or "concurrency" in focus):
                         phase("concurrency", concurrent)
-                    report["admission"] = phase("native_admission", admission)
-                    if report["admission"] and not report["admission"].get("admitted"):
-                        report["errors"]["native_admission"] = "native context refused"
+                    if focus is None or "native_admission" in focus:
+                        report["admission"] = phase("native_admission", admission)
+                        if report["admission"] and not report["admission"].get("admitted"):
+                            report["errors"]["native_admission"] = "native context refused"
             finally:
                 if server.poll() is None:
                     server.terminate()
@@ -314,7 +332,8 @@ def measure(work, sdk, bench):
     write(out / "comparison.json", {"plan": plan, "launch_args": modes, "package_serve": package_args,
                                      "median_paired_bare_delta_pct": medians, "pairs": pairs, "sessions": reports})
     if any(report["errors"] for report in reports) or any(
-        not pair["functional_match"] or not pair["capabilities_match"] for pair in pairs
+        ((focus is None or "functional" in focus) and not pair["functional_match"])
+        or not pair["capabilities_match"] for pair in pairs
     ):
         raise SystemExit(1)
 

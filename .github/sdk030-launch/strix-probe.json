@@ -1,0 +1,56 @@
+[
+  {
+    "gpu": "strix-halo",
+    "slug": "ggml-org-Flint-loom",
+    "repo": "loom-fun-staging/ggml-org-Flint-loom",
+    "revision": "d9f8f69c9923dd1e343f73a837a29311ed1738be",
+    "device": "amdgpu://?completion_spin_ns=4294967295",
+    "args": [
+      "--pool_backing=fixed"
+    ],
+    "model_id": "flint",
+    "features": {
+      "api": "yes",
+      "audio": "unknown",
+      "concurrency": "yes",
+      "context": "yes",
+      "image_input": "unknown",
+      "max_output_tokens": "yes",
+      "reasoning_effort": "n/a",
+      "sampling": "yes",
+      "speculative_decoding": "yes",
+      "thinking": "yes",
+      "tool_calling": "yes"
+    },
+    "sdk": {
+      "hrx_loom": "0.3.0",
+      "source": "pypi",
+      "hrx_system_sha": "e2c41a720363911c04606ce0f4417e2d55630352",
+      "wheel_sha256": "6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f"
+    },
+    "files": {
+      "info.json": "750cbbd27125f4a7746c5306778877c22ce87d53240ae14ef62e246557df7efa",
+      "model.json": "8ea0ab75cfc5c522377454e393ae2c90e067dc97c108f29d9c34e6dca7bf74b7",
+      "model.json.lock": "fdf52625d05116b3b8b6a7d106f39e1400d63e16e6a5d399b9293d1f5adc97da",
+      "llm_config.json": "f7cd28e2db2a771e4c4fe2b5f55d6478603274fd47945ce03be81e831d791f63"
+    },
+    "package_serve": null,
+    "published_rows": [
+      "decode",
+      "decode_2k",
+      "decode_32k",
+      "prefill_16k",
+      "prefill_1k",
+      "prefill_2k",
+      "prefill_32k",
+      "prefill_8k",
+      "streams4"
+    ],
+    "preset": "chat",
+    "context_tokens": 262144,
+    "execution_rows": 4,
+    "focus": [
+      "functional"
+    ]
+  }
+]
