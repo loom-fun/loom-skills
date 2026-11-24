@@ -122,8 +122,8 @@ def sdk_plan(fetch, root, slug, row, output):
     commands = []
     deleted = row.get("delete_target_files", {})
     model = load(package / "model.json")
-    presets = model["presets"] if deleted else dict.fromkeys(row["presets"])
-    for preset in presets:
+    advertised = set(row["presets"])
+    for preset in model["presets"]:
         dry = subprocess.run([str(fetch), str(package / "model.json"), "--preset", preset, "--output",
                               str(output / slug / preset), "--json", "--no-input", "--dry-run"],
                              capture_output=True, text=True, timeout=120, check=False)
@@ -134,7 +134,8 @@ def sdk_plan(fetch, root, slug, row, output):
         closure = json.dumps(plan["files"], sort_keys=True)
         require(not any(path.removeprefix("program/") in closure for path in deleted),
                 f"{slug}:{preset} still references an explicitly deleted path")
-        commands.append({"preset": preset, "service": plan["service"], "programs": plan["programs"], "files": len(plan["files"]),
+        commands.append({"preset": preset, "advertised": preset in advertised,
+                         "service": plan["service"], "programs": plan["programs"], "files": len(plan["files"]),
                          "model_sha256": digest(package / "model.json"), "lock_sha256": digest(package / "model.json.lock"),
                          "deleted_paths_absent": sorted(deleted)})
     require(commands, f"{slug}: no listed presets")
@@ -230,7 +231,9 @@ def main():
                        f"{row.get('tag', {}).get('action', 'unverified')} | {result} |")
     for slug, row in eligible.items():
         if row.get("qualification_note"):
-            summary.extend(("", f"**{slug}** — {row['qualification_note']} [Qualification]({row['qualification_url']})"))
+            link = f"[Qualification]({row['qualification_url']})" if row.get("qualification_url") else (
+                f"[Staging receipt]({row['staging_receipt_url']})")
+            summary.extend(("", f"**{slug}** — {row['qualification_note']} {link}"))
     (evidence / "review.md").write_text("\n".join(summary) + "\n")
     require(len(manifests) == len(pins), "one or more packages require a targeted repair")
 

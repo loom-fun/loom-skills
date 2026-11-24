@@ -11,6 +11,10 @@
     "staging_revision": "60236ca25f04a2357122f503d98896a03775a380",
     "target_revision": "b2e87e163ac1e1db1912ea4aaed57bc3816b78a5"
   },
+  "amd-Qwen3.8-27B-Quark-AWQ-MXFP4-loom": {
+    "staging_revision": "27804b8f0e129b25bed5b9f5c0bb605fb3bea31b",
+    "target_revision": "a999be30c6539c77a030e961748416892b06ac73"
+  },
   "bartowski-LFM3-1.7B-loom": {
     "staging_revision": "08725e51be2730081c7ac587fabddfe038437762",
     "target_revision": "b2554fcb467b22105aff94eb4b63e2017bc76e4c"
@@ -239,7 +243,13 @@
     "target_revision": "caf72ae4ed037eeaeb9d818b7d3e358ba464c16a"
   },
   "xinntao-Real-ESRGAN-x4plus-loom": {
-    "staging_revision": "97adb72ecc9da1e0a48042f9d421ef5f63e1d0fc",
-    "target_revision": "d7126ceb45f03476c8f6608ba77959dd48fe4515"
+    "image_readme_refresh": {
+      "reference_readme_sha256": "666acb4b8234bb87b95bf2291cddb4abacf0e75b585822f5325c74cfa05a5ce9",
+      "reference_revision": "d7126ceb45f03476c8f6608ba77959dd48fe4515",
+      "staging_readme_sha256": "611ba0a5ae26497c047f6f70516240e3f61dd8075a090cd121e6530b195426d5",
+      "target_readme_sha256": "af3747eb9534e758931121d559aa088e4c10e9f2c4ac664d4e1f8f2e8b9eb360"
+    },
+    "staging_revision": "e60fcf4bae1a9f4f1cdf4d7257f0544c07729733",
+    "target_revision": "28f0b3d9e036b367e52845b422e30ed6b029b503"
   }
 }
