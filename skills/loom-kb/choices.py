@@ -518,6 +518,34 @@ CHOICE("moe.route.tokens_per_wg", "int", 0, "ROUTE_TR", doc="Router tokens per w
 CHOICE("moe.fold", "bool", True, "MOE_FOLD", doc="Fold the routing weights into the expert matvec.", **_MO)
 CHOICE("moe.prefill.skip_empty", "bool", True, "MOE_SKIP_EMPTY", doc="Waves of empty expert tiles exit early.", **_MO)
 CHOICE("moe.prefill.prefetch", "bool", True, "MOE_PREFETCH", doc="Stage prefetch in the grouped expert GEMMs.", **_MO)
+_DS2 = dict(kits=["deepseek2"], rows=ROWS_PREFILL, from_pr="joyai-pfgemm")   # deepseek2 example kit (JoyAI-LLM-Flash campaign, PR #1361)
+CHOICE("prefill.gemm.t64_g32", "bool", False, "GEMM_T64_G32", kernels=["g_gemm_iq4_*", "g_moe_g*_iq4_*"], **_DS2,
+       doc="The 64-row WMMA tile stages IQ4_XS / IQ4_NL a whole 32-group per thread (_g32_iq4, the iq4_f16lut values): grouped MoE "
+           "gate/up loop VALU 431 -> 284 per 16 WMMA; kbench joyai_moe (run 45229757827) ggu -7..-8 %, gdn -0..-23 % vs prefill.gemm.iq4_native alone.")
+CHOICE("moe.prefill.cw", "str", "0", "MOE_CW", kernels=["g_moe_ggu_iq4_xs_*", "g_moe_gdn_iq4_xs_*"], **_DS2,
+       doc="Column-wave grouped MoE GEMMs for IQ4_XS experts (gen_moe_cw.py; '1' both, or a list of swiglu,store): each wave owns "
+           "output columns and dequantizes them straight into WMMA B fragments, the activation rows are staged once per 128 K, and only "
+           "the tile's live 16-row fragments get MMAs. Bit-identical. kbench joyai_moe run 45232787685 (ms per layer, v2 -> cw): "
+           "down 1k 2.65 -> 1.81, 4k 6.55 -> 4.77; gate/up needs moe.prefill.cw_swap.")
+CHOICE("moe.prefill.cw_swap", "bool", False, "MOE_CW_SWAP", kernels=["g_moe_ggu_iq4_xs_*", "g_moe_gdn_iq4_xs_*"], **_DS2,
+       doc="moe.prefill.cw with the half-waves dequantizing half a 32-group each (lanes 0-15 the low nibbles, 16-31 the high) and an "
+           "xor-16 shuffle swapping them: half the dequant VALU (gate/up loop 1608 -> 977). Bit-identical. kbench run 45232787685 "
+           "(v2 -> cws): gate/up 1k 3.46 -> 2.79, 4k 9.47 -> 7.72; down 1k 1.70, 4k 4.00. DevLab perf (run 45251424551): prefill 1k "
+           "+9 % over v2.")
+CHOICE("moe.prefill.cw_f16o", "bool", False, "MOE_CW_F16O", kernels=["g_moe_ggu_iq4_xs_*", "g_moe_gdn_iq4_xs_*"], **_DS2,
+       doc="Numerics-moving: the column-wave gate/up writes f16 activations with row scale 1 for the down GEMM (no "
+           "g_row_scale_f16_tiles). Within noise end-to-end (run 45251424551: 1k 1597 vs 1580) and its kernel tests need the "
+           "old launch sequence: off.")
+CHOICE("moe.prefill.t128", "int", 0, "MOE_T128", kernels=["g_moe_g*128_*"], **_DS2,
+       doc="Epochs of >= N tokens bucket experts into 128-row tiles for the m128 grouped GEMMs. kbench run 45232787685: 2x slower "
+           "than the 64-row tiles (no live-fragment skip, 49k vs 35k rows at 4k): off.")
+CHOICE("mla.prefill.bmm2", "str", "0", "MLA_BMM2", kernels=["g_mla_kbm_*", "g_mla_vbm_*"], **_DS2,
+       doc="k_b / v_b prefill products with the activations staged once per workgroup as f16 in LDS (128-row workgroups); '1' both "
+           "or a list (kbm,vbm). Bit-identical. kbench joyai_mla run 45234212231: vbm 1k 1.00 -> 0.72, 4k 3.02 -> 2.64; kbm "
+           "0.64 -> 0.75 (worse), 4k tie: use vbm.")
+CHOICE("mla.prefill.bmm_live", "bool", False, "MLA_BMM_LIVE", kernels=["g_mla_kbm_*", "g_mla_vbm_*"], **_DS2,
+       doc="k_b / v_b prefill products take the epoch's info and skip 64-token blocks of padding (an epoch runs at its power-of-two "
+           "shape: 1151 tokens -> 2048). Live rows bit-identical. DevLab perf run 45261202924: prefill 1k 1557 -> 1642, 2k 1431 -> 1513.")
 CHOICE("moe.prefill.n_fastest", "str", "swiglu,store", "MOE_N_FASTEST", kit_legacy={"lfm2moe": "1"},
        doc="Grouped-GEMM modes with output-column tiles fastest (Qwen3.6-35B-A3B prefill +74 % at 1k; lfm2moe +24-30 %). The "
            "lfm2moe kit reads 1/0 and MOE_N_FASTEST_MODES.", **_MO)
