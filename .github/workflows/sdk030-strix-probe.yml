@@ -13,7 +13,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        row: ${{ fromJSON('[{"slug":"ggml-org-Muse-Glimmer-30B-loom","preset":"chat"}]') }}
+        row: ${{ fromJSON('[{"slug":"unsloth-gpt-oss-20b-loom","preset":"chat"}]') }}
     runs-on: [self-hosted, devlab-dispatch, strix-halo, Linux]
     timeout-minutes: 60
     env:
