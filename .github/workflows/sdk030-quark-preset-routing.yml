@@ -49,6 +49,9 @@ jobs:
             mv -- "$work/$name.loom" "$work/portable/program/$name.loom"
           done
           git show "$GITHUB_SHA":.github/sdk030-quark-portable-model.json > "$work/portable/model.json"
+          curl -fsSL 'https://huggingface.co/loom-fun-staging/amd-Qwen3.8-27B-Quark-AWQ-MXFP4-loom/resolve/c1eaa0960244132a038235fece80087aac9284a0/model.json.lock' -o "$work/model.json.lock"
+          echo "e726e19dd817f01136c9af2a91f06d93645cddc5b983b67802111e3f83cb8a58  $work/model.json.lock" | sha256sum -c -
+          mv -- "$work/model.json.lock" "$work/portable/model.json.lock"
           echo "b4713897a02d371113f3ab110039a526eb1502440bb1eb1aa676f8314f0628a3  $work/portable/model.json" | sha256sum -c -
           cp "$work/portable/model.json" "$work/receipt/portable-model.json"
           git rev-parse "$GITHUB_SHA" > "$work/receipt/workflow-head.txt"
@@ -65,19 +68,31 @@ jobs:
 
           work = Path(os.environ["WORK"])
           expected = {
-              "chat": ("source-original", 262144, "program/original/llm.loom", "5df0cab4e88b260e8de20a7b02b1b3d866a9c84aee6c61c0e1f76d0d864eed5f"),
-              "chat-r9700": ("source", 110592, "program/llm.loom", "5c2c4ef5bee2f8b745646adbd169462ec33d75d9a8cb2970e6e8dd4f62273fe4"),
+              "chat": ("source-original", 262144, "program/original", "program", {
+                  "llm": "5df0cab4e88b260e8de20a7b02b1b3d866a9c84aee6c61c0e1f76d0d864eed5f",
+                  "control": "9a95d0488efad06c4f30461127c9512d7c33b2d25e6569d6131382ae9beaec70",
+                  "prepare": "6c3ef7256bab11094e13621ab23977561cd2f3cb52353bc427b7aab774a205db",
+              }),
+              "chat-r9700": ("source", 110592, "program", "program/original", {
+                  "llm": "5c2c4ef5bee2f8b745646adbd169462ec33d75d9a8cb2970e6e8dd4f62273fe4",
+                  "control": "61c70a6e9f77da5916043b9786f640958738bd7ee88c6d9503281264e4d99c45",
+                  "prepare": "624cc71fa9845be028df6375c0097cd9b8b0b03f560c11d9e34411897a8fe81f",
+              }),
           }
           report = {}
-          for preset, (group, context, library, digest) in expected.items():
+          for preset, (group, context, folder, alternate, hashes) in expected.items():
               pkg = work / preset
               card = json.loads((pkg / "model.json").read_text())
               assert card["presets"][preset]["programs"] == group, card["presets"]
               assert card["presets"][preset]["execution"]["context_capacity"] == context
-              assert hashlib.sha256((pkg / library).read_bytes()).hexdigest() == digest
-              other = "program/llm.loom" if preset == "chat" else "program/original/llm.loom"
-              assert not (pkg / other).exists(), (preset, other)
-              report[preset] = {"program_set": group, "context": context, "llm_sha256": digest}
+              assert set(card["programs"]) == {group}
+              files = {}
+              for name, expected_digest in hashes.items():
+                  path = f"{folder}/{name}.loom"
+                  assert hashlib.sha256((pkg / path).read_bytes()).hexdigest() == expected_digest
+                  assert not (pkg / alternate / f"{name}.loom").exists(), (preset, alternate, name)
+                  files[path] = expected_digest
+              report[preset] = {"program_set": group, "context": context, "files": files}
           (work / "receipt/preset-routing.json").write_text(json.dumps(report, indent=2) + "\n")
           PY
       - name: Run one chart request through the materialized Radeon preset
