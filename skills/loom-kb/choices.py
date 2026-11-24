@@ -546,6 +546,38 @@ CHOICE("mla.prefill.bmm2", "str", "0", "MLA_BMM2", kernels=["g_mla_kbm_*", "g_ml
 CHOICE("mla.prefill.bmm_live", "bool", False, "MLA_BMM_LIVE", kernels=["g_mla_kbm_*", "g_mla_vbm_*"], **_DS2,
        doc="k_b / v_b prefill products take the epoch's info and skip 64-token blocks of padding (an epoch runs at its power-of-two "
            "shape: 1151 tokens -> 2048). Live rows bit-identical. DevLab perf run 45261202924: prefill 1k 1557 -> 1642, 2k 1431 -> 1513.")
+_DS2P = dict(kits=["deepseek2"], rows=ROWS_PREFILL, from_pr="joyai-pf2")   # deepseek2 example kit (JoyAI pf2 lane, PR #1378)
+CHOICE("prefill.attn.list_live", "bool", False, "ATTN_LIST_LIVE", kernels=["g_attention_fallback_list"], **_DS2P,
+       doc="Padding tokens stay off the listed split-K attention fallback (they have no run, so every padding token of a padded "
+           "epoch was listed and g16_attention_combine_listed wrote a 74 KB zero row per padding token per layer: 9 % of a 2k "
+           "prefill). DevLab perf run 45299823018: prefill 1151 2072 -> 2250, 2207 2225 -> 2490, decode 88 -> 92 (decode epochs "
+           "are padded too). Gates dev PASS (runs 45304980060, 45315824142).")
+CHOICE("mla.prefill.x_tail", "bool", False, "MLA_X_TAIL", kernels=["g_mla_xlist"], **_DS2P,
+       doc="An expanded MLA segment also takes its run's tail block (< 16 live tokens after its last whole tile, rest of the window "
+           "padding): keys expanded to the tail's last position, one more xflash tile, the block leaves flash2_partial's list. "
+           "kbench mla_xpf case tC PASS (run 45304988214); DevLab perf run 45304980060: prefill 1151 +2.7 %, 2207 +3.3 %.")
+CHOICE("prefill.gemm.m128_n", "str", "", "GEMM_M128_N", kernels=["g_gemm_*_m128", "g_gemm_*_m256"], **_DS2P,
+       doc="Comma list of output widths that keep 128-row GEMM tiles at any token count. JoyAI shared expert gate/up (768): "
+           "the 256-row swiglu ran 108 workgroups at ~15 TFLOP/s; m128 0.0180 -> 0.0118 ms/token, prefill +1.2 % (run 45304980060).")
+CHOICE("moe.prefill.cw_dq", "bool", False, "MOE_CW_DQ", kernels=["g_moe_ggu_iq4_xs_*", "g_moe_gdn_iq4_xs_*"], **_DS2P,
+       doc="Column-wave IQ4_XS dequant with a per-lane nibble shift, the codebook byte interleaved with 0x64, one pk_add (-1152) "
+           "and one pk_mul by the f16 scale (no uitofp / pk_fma). Bit-identical. kbench joyai_moe run 45307119183 (with cw_zs): "
+           "gate/up 1k -4.9 %, 4k -6.1 %.")
+CHOICE("moe.prefill.cw_zs", "bool", False, "MOE_CW_ZS", kernels=["g_moe_ggu_iq4_xs_*", "g_moe_gdn_iq4_xs_*"], **_DS2P,
+       doc="Column-wave GEMMs stage padding rows as zeros once per pass (no per-chunk select). Bit-identical. With cw_dq: DevLab "
+           "perf run 45315824142 prefill 1151 +1.0 %, 2207 +1.4 %.")
+CHOICE("moe.prefill.ys16", "bool", False, "MOE_YS16", kernels=["g_moe_gdn_iq4_xs_*", "g_moe_combine_sorted16*"], **_DS2P,
+       doc="Numerics-moving: the column-wave down GEMM stores the expert rows as f16, g_moe_combine_sorted16 reads them (the "
+           "grouped GEMMs at 1k-2k are DRAM-bound: 144 MB less per layer at 2197 tokens). DevLab perf run 45315824142: prefill "
+           "1151 +3.3 %, 2207 +3.2 %; gates dev PASS (same run).")
+CHOICE("moe.route.prefill_tg", "bool", False, "MOE_ROUTE_TG", kernels=["g_moe_route_tg_live"], **_DS2P,
+       doc="Prefill router as a register-tiled f32 GEMM (32 tokens x 256 experts per workgroup). End to end a tie with "
+           "g_moe_route_tr_live (run 45299823018); kbench joyai_route (run 45315766301) +18 %: off.")
+CHOICE("moe.route.prefill_wm", "bool", False, "MOE_ROUTE_WM", kernels=["g_moe_route_wm_live"], **_DS2P,
+       doc="Numerics-moving: prefill router logits on WMMA with f16 hi/lo operand splits. kbench joyai_route (run 45315766301) "
+           "-49 % in isolation, but +56 % end to end (run 45309456312: 2.2 vs 1.4 ms per 2197-token layer): off.")
+CHOICE("mla.prefill.xq_rev", "bool", False, "MLA_XQ_REV", kernels=["g_mla_xlist"], **_DS2P,
+       doc="Expanded quad list latest-first. kbench mla_xpf run 45309654317: xflash 4k chunk +73 %: off.")
 CHOICE("moe.prefill.n_fastest", "str", "swiglu,store", "MOE_N_FASTEST", kit_legacy={"lfm2moe": "1"},
        doc="Grouped-GEMM modes with output-column tiles fastest (Qwen3.6-35B-A3B prefill +74 % at 1k; lfm2moe +24-30 %). The "
            "lfm2moe kit reads 1/0 and MOE_N_FASTEST_MODES.", **_MO)

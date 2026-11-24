@@ -34,7 +34,31 @@ XCAP = int(os.environ.get("MLA_XCAP", "131072"))         # scratch positions (su
 MIN_TILES = int(os.environ.get("MLA_X_MIN_TILES", "16"))  # whole 16-token tiles a segment needs to be expanded
 MIN_KEYS = int(os.environ.get("MLA_X_MIN_KEYS", "1024"))  # and keys (kbench mla_xpf: with the LDS expansion a 1k prompt is already faster expanded)
 XB_MAX = XCAP // 64
-QW = int(os.environ.get("MLA_XQ", "4"))   # 16-query tiles per g_mla_xflash workgroup (one wave each; a quad entry of xq)
+# MLA_X_TAIL=1: an expanded segment also takes its run's tail block (the < 16 live tokens after its last whole tile) when
+# the rest of that 16-token window is padding: one more tile in its last quad (xflash writes the window's dead rows, never
+# read), keys expanded up to the tail's last position (nk), and the block leaves flash2_partial's list.
+TAIL = os.environ.get("MLA_X_TAIL", "0") == "1"
+QW = int(os.environ.get("MLA_XQ", "4"))
+
+# MLA_XQ_REV=1: the quad list in reverse (latest positions first): g_mla_xflash's longest workgroups are dispatched first,
+# so the launch does not end on a few long causal rows (longest-first scheduling)
+REV = os.environ.get("MLA_XQ_REV", "0") == "1"
+REV_TEXT = """    %rv_h = index.div %f_nq, %c2 : index
+    %rv_l = index.sub %f_nq, %c1 : index
+    scf.for %rv = [%c0 to %rv_h step %c1] {
+      %rv_a = index.assume %rv [range(%rv, 0, 511)] : index
+      %rv_bv = index.sub %rv_l, %rv : index
+      %rv_b = index.assume %rv_bv [range(%rv_bv, 0, 511)] : index
+      %rv_x = vector.load %xq_view[%rv_a, %c0] : view<512x4xi32> -> vector<4xi32>
+      %rv_y = vector.load %xq_view[%rv_b, %c0] : view<512x4xi32> -> vector<4xi32>
+      vector.store %rv_y, %xq_view[%rv_a, %c0] : vector<4xi32>, view<512x4xi32>
+      vector.store %rv_x, %xq_view[%rv_b, %c0] : vector<4xi32>, view<512x4xi32>
+    }
+""" if REV else ""
+
+TAIL_DETECT = "        // tail block of the run right after the segment's last whole tile (MLA_X_TAIL): tokens pt + 16 .. of the same row at\n        // positions pp + 16 .., then padding up to the 16-token window's end\n        %pp16t = index.add %pp, %c16 : index\n        %tt = index.add %pt, %c16 : index\n        %c15t = index.constant 15 : index\n        %c16t = index.constant 16 : index\n        %f_t = scalar.constant false : i1\n        %t_t = scalar.constant true : i1\n        %ta_f, %tcnt, %tok_f = scf.for %j = [%c0 to %c16t step %c1](%ra = %t_t : i1, %rc = %c0 : index, %rok = %t_t : i1) -> (i1, index, i1) {\n          %tj_v = index.add %tt, %j : index\n          %tj_in = index.cmp ult, %tj_v, %tokens : index\n          %tj_c = scf.select %tj_in, %tj_v, %c0 : index\n          %tj = index.assume %tj_c [lt(%tj_c, %tokens)] : index\n          %tj_row32 = view.load %info_view[%tj, 0] : view<[%tokens]x4xi32> -> i32\n          %tj_pos32 = view.load %info_view[%tj, 1] : view<[%tokens]x4xi32> -> i32\n          %tj_live32 = view.load %info_view[%tj, 2] : view<[%tokens]x4xi32> -> i32\n          %tj_row_b = scalar.assume %tj_row32 [range(%tj_row32, 0, 2147483646)] : i32\n          %tj_row = index.cast %tj_row_b : i32 to index\n          %tj_pos_b = scalar.assume %tj_pos32 [range(%tj_pos32, 0, 262143)] : i32\n          %tj_pos = index.cast %tj_pos_b : i32 to index\n          %tj_want = index.add %pp16t, %j : index\n          %tj_live = scalar.cmpi ne, %tj_live32, %c0_i32 : i32\n          %tj_dead = scalar.cmpi eq, %tj_live32, %c0_i32 : i32\n          %tj_r = index.cmp eq, %tj_row, %row : index\n          %tj_p = index.cmp eq, %tj_pos, %tj_want : index\n          %tj_a = scalar.andi %tj_r, %tj_p : i1\n          %tj_b = scalar.andi %tj_a, %tj_live : i1\n          %tj_run = scalar.andi %tj_b, %tj_in : i1\n          %ra_n = scalar.andi %ra, %tj_run : i1\n          %rc_1 = index.add %rc, %c1 : index\n          %rc_n = scf.select %ra_n, %rc_1, %rc : index\n          %tj_d = scalar.andi %tj_dead, %tj_in : i1\n          %tj_ok = scalar.ori %ra_n, %tj_d : i1\n          %rok_n = scalar.andi %rok, %tj_ok : i1\n          scf.yield %ra_n, %rc_n, %rok_n : i1, index, i1\n        }\n        %t_some = index.cmp ne, %tcnt, %c0 : index\n        %t_short = index.cmp ule, %tcnt, %c15t : index\n        %t_a = scalar.andi %t_some, %t_short : i1\n        %tail = scalar.andi %t_a, %tok_f : i1\n        %tcnt_b = index.assume %tcnt [range(%tcnt, 0, 16)] : index\n        %tail_n = scf.select %tail, %tcnt_b, %c0 : index\n        %tail_t = scf.select %tail, %c1, %c0 : index\n" if TAIL else '        %pp16t = index.add %pp, %c16 : index\n        %tail_n = index.add %c0, %c0 : index\n        %tail_t = index.add %c0, %c0 : index\n'
+TAIL_DROP = "          // the tail block leaves flash2_partial's list (tiles[tokens / 2] = count, entries after it): last entry into its slot\n          scf.if %tail {\n            %ph = index.div %tokens, %c2 : index\n            %ph_b = index.assume %ph [lt(%ph, %tokens)] : index\n            %pc32 = view.load %tiles_view[%ph_b] : view<[%tokens]xi32> -> i32\n            %pc_b = scalar.assume %pc32 [range(%pc32, 0, 4096)] : i32\n            %pc = index.cast %pc_b : i32 to index\n            %tt32 = index.cast %tt : index to i32\n            %pf = scf.for %pj = [%c0 to %pc step %c1](%pfa = %pc : index) -> (index) {\n              %pe_v0 = index.add %ph, %pj : index\n              %pe_v = index.add %pe_v0, %c1 : index\n              %pe = index.assume %pe_v [lt(%pe_v, %tokens)] : index\n              %pv = view.load %tiles_view[%pe] : view<[%tokens]xi32> -> i32\n              %pm = scalar.cmpi eq, %pv, %tt32 : i32\n              %pfn = scf.select %pm, %pj, %pfa : index\n              scf.yield %pfn : index\n            }\n            %phas = index.cmp ult, %pf, %pc : index\n            scf.if %phas {\n              %pl_v = index.add %ph, %pc : index\n              %pl = index.assume %pl_v [lt(%pl_v, %tokens)] : index\n              %plv = view.load %tiles_view[%pl] : view<[%tokens]xi32> -> i32\n              %pd_v0 = index.add %ph, %pf : index\n              %pd_v = index.add %pd_v0, %c1 : index\n              %pd = index.assume %pd_v [lt(%pd_v, %tokens)] : index\n              view.store %plv, %tiles_view[%pd] : i32, view<[%tokens]xi32>\n              %pc_m = index.sub %pc, %c1 : index\n              %pc_m32 = index.cast %pc_m : index to i32\n              view.store %pc_m32, %tiles_view[%ph_b] : i32, view<[%tokens]xi32>\n            }\n          }\n" if TAIL else ""
+   # 16-query tiles per g_mla_xflash workgroup (one wave each; a quad entry of xq)
 
 
 def on():
@@ -47,8 +71,30 @@ def scratch_bytes(cfg):
     return QH * XCAP * 128 * 2, QH * XCAP * 128 * 2, XCAP * 64 * 2, QH * 256 * 512 * 2
 
 
+def _tail_off(text):
+    """MLA_X_TAIL off: the list text exactly as before the switch existed."""
+    if TAIL:
+        return text
+    for new, old in (("        %pp16t = index.add %pp, %c16 : index\n        %tail_n = index.add %c0, %c0 : index\n        %tail_t = index.add %c0, %c0 : index\n        %nk = index.add %pp16t, %tail_n : index\n",
+                      "        %nk = index.add %pp, %c16 : index\n"),
+                     ("          %ntq = index.add %ntl, %tail_t : index\n          %ntl3 = index.add %ntq, %cqwl : index\n", "          %ntl3 = index.add %ntl, %cqwl : index\n"),
+                     ("""            %qslot_v = index.add %s, %c1 : index
+            %qslot = index.assume %qslot_v [range(%qslot_v, 1, 512), lt(%qslot_v, %tokens)] : index
+            %qtok0 = view.load %tiles_view[%qslot] : view<[%tokens]xi32> -> i32
+            %q4t = index.mul %q4, %c16 : index
+            %q4t32 = index.cast %q4t : index to i32
+            %qtok = scalar.addi %qtok0, %q4t32 : i32
+            %left = index.sub %ntq, %q4 : index""", """            %qslot_v = index.add %qs, %c1 : index
+            %qslot = index.assume %qslot_v [range(%qslot_v, 1, 512), lt(%qslot_v, %tokens)] : index
+            %qtok = view.load %tiles_view[%qslot] : view<[%tokens]xi32> -> i32
+            %left = index.sub %ntl, %q4 : index""")):
+        assert text.count(new) == 1, new
+        text = text.replace(new, old)
+    return text
+
+
 def xlist():
-    return f"""
+    return _tail_off(f"""
 // Expanded-MLA work lists of the epoch (gen_mla_x.py): segments of the flash2 whole-tile list -> quads xq / expansion blocks
 // xb (expanded) or back into tiles[] (absorbed). One lane walks the list in order.
 kernel.def export("g_mla_xlist") @g_mla_xlist(%tokens: index) {{
@@ -121,7 +167,7 @@ kernel.def export("g_mla_xlist") @g_mla_xlist(%tokens: index) {{
       %not_cont = scalar.xori %cont, %true : i1
       %close = scalar.andi %not0, %not_cont : i1
       %base2, %nq2, %nb2, %nc2 = scf.if %close -> (index, index, index, index) {{
-        %nk = index.add %pp, %c16 : index
+{TAIL_DETECT}        %nk = index.add %pp16t, %tail_n : index
         %nk63 = index.add %nk, %c63 : index
         %nkb = index.div %nk63, %c64 : index
         %nk64 = index.mul %nkb, %c64 : index
@@ -137,7 +183,8 @@ kernel.def export("g_mla_xlist") @g_mla_xlist(%tokens: index) {{
         %r_base, %r_nq, %r_nb, %r_nc = scf.if %expand -> (index, index, index, index) {{
           %cqwl = index.constant {QW - 1} : index
           %cqw = index.constant {QW} : index
-          %ntl3 = index.add %ntl, %cqwl : index
+          %ntq = index.add %ntl, %tail_t : index
+          %ntl3 = index.add %ntq, %cqwl : index
           %nqa = index.div %ntl3, %cqw : index
           %row_w = index.cast %row : index to i32
           %base_w = index.cast %base : index to i32
@@ -145,10 +192,13 @@ kernel.def export("g_mla_xlist") @g_mla_xlist(%tokens: index) {{
           scf.for %qq = [%c0 to %nqa step %c1] {{
             %q4 = index.mul %qq, %cqw : index
             %qs = index.add %s, %q4 : index
-            %qslot_v = index.add %qs, %c1 : index
+            %qslot_v = index.add %s, %c1 : index
             %qslot = index.assume %qslot_v [range(%qslot_v, 1, 512), lt(%qslot_v, %tokens)] : index
-            %qtok = view.load %tiles_view[%qslot] : view<[%tokens]xi32> -> i32
-            %left = index.sub %ntl, %q4 : index
+            %qtok0 = view.load %tiles_view[%qslot] : view<[%tokens]xi32> -> i32
+            %q4t = index.mul %q4, %c16 : index
+            %q4t32 = index.cast %q4t : index to i32
+            %qtok = scalar.addi %qtok0, %q4t32 : i32
+            %left = index.sub %ntq, %q4 : index
             %qn = index.min %left, %cqw : index
             %qn_w = index.cast %qn : index to i32
             %qe_v = index.add %nq, %qq : index
@@ -170,7 +220,7 @@ kernel.def export("g_mla_xlist") @g_mla_xlist(%tokens: index) {{
             view.store %xp_w, %xb_view[%be, 2] : i32, view<{XB_MAX}x4xi32>
             view.store %nk_w, %xb_view[%be, 3] : i32, view<{XB_MAX}x4xi32>
           }}
-          %nq_n = index.add %nq, %nqa : index
+{TAIL_DROP}          %nq_n = index.add %nq, %nqa : index
           %nb_n = index.add %nb, %nkb : index
           scf.yield %end, %nq_n, %nb_n, %nc : index, index, index, index
         }} else {{
@@ -201,7 +251,7 @@ kernel.def export("g_mla_xlist") @g_mla_xlist(%tokens: index) {{
     view.store %nc32, %tiles_view[%c0] : i32, view<[%tokens]xi32>
     view.store %nq32, %cnt_view[0] : i32, view<4xi32>
     view.store %nb32, %cnt_view[1] : i32, view<4xi32>
-  }}
+{REV_TEXT}  }}
   // xskip[b] = 1 when tokens 64b .. 64b + 63 all lie in expanded tiles or are padding (not live): the absorbed k_b / v_b
   // GEMMs skip that block
   kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
@@ -257,7 +307,7 @@ kernel.def export("g_mla_xlist") @g_mla_xlist(%tokens: index) {{
   }}
   kernel.return
 }}
-"""
+""")
 
 
 def xdeq(QH, kb_fmt, vb_fmt, kb_row, vb_row, kb_block, vb_block):
