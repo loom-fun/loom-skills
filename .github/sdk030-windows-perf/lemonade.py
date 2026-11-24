@@ -1,0 +1,171 @@
+import hashlib
+import json
+import os
+from pathlib import Path
+import socket
+import subprocess
+import sys
+import time
+from urllib.error import HTTPError
+from urllib.request import Request, urlopen
+import zipfile
+
+
+phase, root_arg, evidence_arg = sys.argv[1:]
+root, evidence = (Path(value).resolve() for value in (root_arg, evidence_arg))
+wheel = 'hrx_loom-0.3.0-py3-none-win_amd64.whl'
+standalone = 'loom-serve-0.3.0-win_amd64.zip'
+release = 'https://github.com/ROCm/hrx-system/releases/download/v0.3.0/'
+pins = {
+    wheel: '06afbc88370fde741037ebd38dba91c2184cb4d2fbd5cee337720cd494a06752',
+    standalone: '2f0bb6b4ab6053941041659c1ae8a8bb8386b6d49d4c7731b61adacffd3e521a',
+}
+installed_exe = 'c3071350a0404291a43843524bb9a9b891c2a715a58b84c457d440bcac1f523a'
+cases = (
+    ('legacy', 'Qwen3-0.6B-Loom', 'loom-fun/unsloth-Qwen3-0.6B-loom',
+     '564d578f4e487c6fbabd84915439f873651b5953', 'chat', 1),
+    ('flash', 'Qwen3.8-Flash-Next-Loom', 'loom-fun-staging/unsloth-Qwen3.8-Flash-Next-loom',
+     '473e5815cedcf3117fcac905c27ed3434f9fe836', 'vision-mtp', 2),
+)
+
+
+def sha(path):
+    with path.open('rb') as stream:
+        return hashlib.file_digest(stream, 'sha256').hexdigest()
+
+
+def write(name, data):
+    (evidence / name).write_text(json.dumps(data, indent=2) + '\n', encoding='utf-8')
+
+
+def download(url, path, timeout=100):
+    subprocess.run(['curl.exe', '--fail', '--silent', '--show-error', '--location', '--retry', '3',
+                    url, '--output', str(path)], check=True, timeout=timeout)
+
+
+def snapshot(repo, revision):
+    logical = repo.replace('loom-fun-staging/', 'loom-fun/')
+    location = root / 'lemon-hf' / ('models--' + logical.replace('/', '--'))
+    return location / 'snapshots' / revision, location / 'refs/main'
+
+
+def prepare():
+    os.environ['HF_HOME'] = str(root / 'weights-hf')
+    os.environ['HF_HUB_CACHE'] = str(root / 'weights-hf/hub')
+    for name, expected in pins.items():
+        download(release + name, root / name)
+        assert sha(root / name) == expected, name
+    venv = root / 'fetch-env'
+    subprocess.run([sys.executable, '-m', 'venv', str(venv)], check=True)
+    subprocess.run([venv / 'Scripts/python.exe', '-m', 'pip', 'install', '--disable-pip-version-check',
+                    f'{root / wheel}[hf]'], check=True, timeout=250)
+    records = {}
+    for label, alias, repo, revision, preset, abi in cases:
+        target = root / ('package-' + label)
+        with (evidence / f'{label}-fetch.log').open('wb') as log:
+            print(f'Preparing {repo}@{revision}', flush=True)
+            subprocess.run([venv / 'Scripts/loom-fetch.exe', f'huggingface:{repo}:{preset}@{revision}',
+                            f'--output={target}', '--materialize=share', '--no-input'],
+                           check=True, stdout=log, stderr=subprocess.STDOUT, timeout=2700)
+        base = f'https://huggingface.co/{repo}/resolve/{revision}'
+        download(base + '/info.json', target / 'info.json')
+        if not (target / 'model.json.lock').exists():
+            download(base + '/model.json.lock', target / 'model.json.lock')
+        card = json.loads((target / 'model.json').read_text(encoding='utf-8'))
+        service = card['presets'][preset]['service']
+        assert card['services'][service]['version'] == abi
+        if abi == 2:
+            tools = Path(os.environ['GITHUB_WORKSPACE']) / 'skills/loom-benchmark/scripts/card'
+            sys.path.insert(0, str(tools))
+            from card_lib import programs_sha256
+            assert programs_sha256(target) == 'c0cf0958949af15430bb8791eb167e8108a5a374f3f5aa3828eb55f0d88ac920'
+        snap, ref = snapshot(repo, revision)
+        snap.parent.mkdir(parents=True)
+        target.rename(snap)
+        ref.parent.mkdir()
+        ref.write_text(revision + '\n', encoding='utf-8')
+        records[label] = {'alias': alias, 'repo': repo, 'revision': revision, 'controller_abi': abi,
+                          'model_sha256': sha(snap / 'model.json')}
+    write('packages.json', records)
+
+
+def health(server, base):
+    for _ in range(120):
+        if server.poll() is not None:
+            raise RuntimeError(f'lemond exited 0x{server.returncode & 0xffffffff:08x}')
+        try:
+            with urlopen(base + '/api/v1/health', timeout=3) as result:
+                return json.load(result)
+        except (OSError, ValueError):
+            time.sleep(0.5)
+    raise TimeoutError('Lemonade did not become healthy')
+
+
+def chat(exe, cache, config, label, alias):
+    with socket.socket() as sock:
+        sock.bind(('127.0.0.1', 0))
+        port = sock.getsockname()[1]
+    base = f'http://127.0.0.1:{port}'
+    with (evidence / f'{label}-lemonade.log').open('wb') as log:
+        args = [exe, cache, config, '--port', str(port), '--host', '127.0.0.1']
+        server = subprocess.Popen(args, cwd=root, stdout=log, stderr=subprocess.STDOUT)
+        try:
+            write(f'{label}-health.json', health(server, base))
+            body = {'model': alias, 'messages': [{'role': 'user', 'content':
+                     'What is the capital of France? Answer with only the city name. /no_think'}],
+                    'temperature': 0, 'max_tokens': 48, 'chat_template_kwargs': {'enable_thinking': False}}
+            request = Request(base + '/api/v1/chat/completions', data=json.dumps(body).encode(),
+                              headers={'Content-Type': 'application/json'})
+            start = time.monotonic()
+            try:
+                with urlopen(request, timeout=600) as reply:
+                    result = json.load(reply)
+            except HTTPError as error:
+                (evidence / f'{label}-api-error.json').write_bytes(error.read())
+                raise
+            write(f'{label}-chat.json', result)
+            content = result['choices'][0]['message']['content'].strip().rstrip('.')
+            assert content == 'Paris', result
+            print(f'{label}: {content} through Lemonade in {time.monotonic() - start:.2f}s including model load', flush=True)
+        finally:
+            if server.poll() is None:
+                subprocess.run(['taskkill.exe', '/PID', str(server.pid), '/T', '/F'],
+                               capture_output=True, timeout=15, check=True)
+                server.wait(timeout=15)
+
+
+def run():
+    os.environ['HF_HUB_CACHE'] = str(root / 'lemon-hf')
+    os.environ['HF_HOME'] = str(root / 'weights-hf')
+    draft = root / 'draft'
+    assert (draft / 'draft-head.txt').read_text().strip() == os.environ['LEMONADE_REVISION']
+    archive, = draft.glob('lemonade-embeddable-*-windows-x64.zip')
+    assert sha(archive) == (draft / 'draft-build-sha256.txt').read_text().strip()
+    write('draft-build.json', {'revision': os.environ['LEMONADE_REVISION'], 'sha256': sha(archive)})
+    app = root / 'application'
+    with zipfile.ZipFile(archive) as bundle:
+        bundle.extractall(app)
+    executable, = app.rglob('lemond.exe')
+    cache, config = root / 'lc', root / 'cfg'
+    install = cache / 'bin/loom/hrx'
+    install.mkdir(parents=True)
+    config.mkdir()
+    backend = install / 'loom-serve.exe'
+    with zipfile.ZipFile(root / standalone) as bundle:
+        backend.write_bytes(bundle.read('loom-serve.exe'))
+    (install / 'version.txt').write_text('v0.3.0', encoding='utf-8')
+    assert sha(backend) == 'e2d926f1ad37efd6a340ad52ee674516fc2186a268637b53bc9412378fecbb46'
+    before = sha(backend)
+    label, alias, *_ = cases[0]
+    chat(executable, cache, config, label, alias)
+    assert sha(backend) == installed_exe
+    libraries = {name: sha(install / name) for name in ('iree.dll', 'loomc.dll')}
+    write('same-version-upgrade.json', {'version': (install / 'version.txt').read_text().strip(),
+                                      'before': before, 'after': installed_exe, 'dlls': libraries})
+    label, alias, *_ = cases[1]
+    chat(executable, cache, config, label, alias)
+    assert sha(backend) == installed_exe
+
+
+assert sys.platform == 'win32'
+{'prepare': prepare, 'run': run}[phase]()
