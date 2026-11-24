@@ -22,6 +22,7 @@ from replay_promotion import canonical, digest, inspect_bundle, model_info, prep
 
 ENDPOINT = "https://huggingface.co"
 TAG = "v0.2.0"
+ATTR = ".gitattributes"
 
 
 def load(path):
@@ -85,10 +86,44 @@ def check_live(pins):
             require(heads.get(f"{org}/{slug}") == row[key], f"{org}/{slug}: live head differs from exact release pin")
 
 
+def record_attributes(result, manifest):
+    source = manifest["source"].get(ATTR)
+    target = manifest["target"].get(ATTR)
+    require(manifest["output"].get(ATTR) == target and ATTR not in manifest["operations"],
+            f"{result['slug']}: release changes production Git attributes")
+    result["attributes"] = {"source_sha256": source, "target_sha256": target, "output_sha256": target}
+
+
+def restore_attributes(review, manifest, output, cache):
+    slug = review["slug"]
+    for kind, org, key in (("source", "loom-fun-staging", "staging_revision"), ("target", "loom-fun", "target_revision")):
+        attributes = review[kind].get(ATTR)
+        if not attributes or ATTR in manifest[kind]:
+            continue
+        require(attributes["kind"] == "git", f"{slug}: expected a Git blob for {ATTR}")
+        oid = attributes["oid"]
+        if oid not in cache:
+            data = read_hub(fetch_content, f"{org}/{slug}", review["pins"][key], ATTR)
+            git_blob = hashlib.sha1(f"blob {len(data)}\0".encode() + data).hexdigest()
+            require(git_blob == oid and len(data) == attributes["size"], f"{slug}: Git attribute identity differs")
+            cache[oid] = data
+        data = cache[oid]
+        value = hashlib.sha256(data).hexdigest()
+        manifest[kind][ATTR] = value
+        if kind == "target":
+            (output / ATTR).write_bytes(data)
+            manifest["output"][ATTR] = value
+    review["output"] = manifest["output"]
+    record_attributes(review, manifest)
+
+
 def sdk_plan(fetch, root, slug, row, output):
     package = root / "packages" / slug
     commands = []
-    for preset in dict.fromkeys(row["presets"]):
+    deleted = row.get("delete_target_files", {})
+    model = load(package / "model.json")
+    presets = model["presets"] if deleted else dict.fromkeys(row["presets"])
+    for preset in presets:
         dry = subprocess.run([str(fetch), str(package / "model.json"), "--preset", preset, "--output",
                               str(output / slug / preset), "--json", "--no-input", "--dry-run"],
                              capture_output=True, text=True, timeout=120, check=False)
@@ -96,8 +131,12 @@ def sdk_plan(fetch, root, slug, row, output):
         plan = json.loads(dry.stdout)
         require(plan["preset"] == preset and plan["service"] and plan["files"] and plan["lock"] == "verify"
                 and not plan["unverified_parameters"], f"unexpected SDK plan for {slug}:{preset}")
+        closure = json.dumps(plan["files"], sort_keys=True)
+        require(not any(path.removeprefix("program/") in closure for path in deleted),
+                f"{slug}:{preset} still references an explicitly deleted path")
         commands.append({"preset": preset, "service": plan["service"], "programs": plan["programs"], "files": len(plan["files"]),
-                         "model_sha256": digest(package / "model.json"), "lock_sha256": digest(package / "model.json.lock")})
+                         "model_sha256": digest(package / "model.json"), "lock_sha256": digest(package / "model.json.lock"),
+                         "deleted_paths_absent": sorted(deleted)})
     require(commands, f"{slug}: no listed presets")
     return commands
 
@@ -119,6 +158,7 @@ def review_one(task):
         result["sdk_dry_run"] = sdk_plan(fetch, bundle, slug, manifest, output / "sdk-scratch")
         require(not (output / "sdk-scratch").exists(), f"{slug}: SDK dry run wrote package files")
         result["output"] = manifest["output"]
+        record_attributes(result, manifest)
         result["change_paths"] = manifest["operations"]
         result["deleted_paths"] = sorted(result["target"].keys() - manifest["output"].keys() - {".gitattributes"})
         result["pass"] = True
@@ -145,13 +185,16 @@ def main():
         prior_bundle = prior / "release"
         prior_manifests = dict(inspect_bundle(prior_bundle, (prior / "manifest.sha256").read_text().split()[0]))
         prior_run = load(inputs / "reuse.json")["run"]
+        attribute_cache = {}
         for row in load(prior / "review.json"):
             slug = row["slug"]
             if not row["pass"] or row["pins"] != pins.get(slug):
                 continue
             require(row["output"] == prior_manifests[slug]["output"], f"{slug}: reused row hashes differ")
-            reusable[slug] = {**row, "reused_from": row.get("reused_from", prior_run), "deleted_paths": []}
+            reusable[slug] = {**row, "reused_from": row.get("reused_from", prior_run),
+                              "deleted_paths": row.get("deleted_paths", [])}
             shutil.copytree(prior_bundle / "packages" / slug, package_dir / slug)
+            restore_attributes(reusable[slug], prior_manifests[slug], package_dir / slug, attribute_cache)
             print(f"REUSE {slug}: exact source and production heads and artifacts rechecked", flush=True)
     with ThreadPoolExecutor(max_workers=2) as pool:
         rows = list(pool.map(review_one, ((slug, row, scratch, fetch) for slug, row in sorted(pins.items())
@@ -173,11 +216,18 @@ def main():
     (evidence / "manifest.sha256").write_text(f"{digest(release)}  release/manifest.json\n")
     summary = ["# Read-only production-form promotion rehearsal", "",
                f"{len(manifests)}/{len(pins)} exact rows passed production composition, hash replay and SDK dry run.", "",
-               "| Package | Staged | Production | Files changed | Outgoing tag | Result |", "|---|---|---|---:|---|---|"]
+               "SDK dry runs resolved each reviewed production-form manifest from the local archive. The live production Hub revisions remained read-only.", "",
+               "| Package | Staged | Production | Update paths | Deletes | Outgoing tag | Result |",
+               "|---|---|---|---:|---:|---|---|"]
     for row in rows:
         result = "Pass" if row["pass"] else row["error"].replace("|", "\\|").replace("\n", " ")
-        summary.append(f"| {row['slug']} | {row['pins']['staging_revision']} | {row['pins']['target_revision']} | "
-                       f"{len(row.get('change_paths', []))} | {row.get('tag', {}).get('action', 'unverified')} | {result} |")
+        slug = row["slug"]
+        stage = row["pins"]["staging_revision"]
+        prod = row["pins"]["target_revision"]
+        summary.append(f"| {slug} | [staged](https://huggingface.co/loom-fun-staging/{slug}/tree/{stage}) | "
+                       f"[parent](https://huggingface.co/loom-fun/{slug}/tree/{prod}) | "
+                       f"{len(row.get('change_paths', []))} | {len(row.get('deleted_paths', []))} | "
+                       f"{row.get('tag', {}).get('action', 'unverified')} | {result} |")
     (evidence / "review.md").write_text("\n".join(summary) + "\n")
     require(len(manifests) == len(pins), "one or more packages require a targeted repair")
 

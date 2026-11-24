@@ -977,6 +977,12 @@
     "verified_source_files": 23
   },
   "unsloth-Qwen3.8-Flash-Next-loom": {
+    "delete_target_files": {
+      "program/dispatch/ple_stage.loom": "ec2e5dbd06fed36ec680241ff8437fb4994832635c0cd2bf3abdd0b16aa6d05e",
+      "program/shared/kernel/sequence/qwen3_8/continuation.loom": "6efe4fc3c65638055d1004fd3a32426e0be8f198da394adfc63d9fb525955153",
+      "program/text_epoch.loom": "ea2721da8c36ba6686ba3544f6caeb2aa0fb6a4b498df4e02c8d21dfbde8c86e",
+      "program/text_storage.loom": "2f39af9e5b5dcd4868a3b555116b3bb1dd40e003fd96895def69dd87f4115b13"
+    },
     "device_keys": [
       "radeon-r9700",
       "strix-halo"
@@ -990,6 +996,7 @@
     },
     "production": "loom-fun/unsloth-Qwen3.8-Flash-Next-loom",
     "qualification_run": null,
+    "rollback_tag": "v0.2.0",
     "staging": "loom-fun-staging/unsloth-Qwen3.8-Flash-Next-loom",
     "staging_receipt_url": "https://huggingface.co/loom-fun-staging/unsloth-Qwen3.8-Flash-Next-loom/commit/7d27c03e6450de529a4bf7d76118a8170b2ac1aa",
     "staging_revision": "7d27c03e6450de529a4bf7d76118a8170b2ac1aa",

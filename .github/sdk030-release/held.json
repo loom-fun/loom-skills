@@ -1,6 +1,6 @@
 {
   "amd-Qwen3.8-27B-Quark-AWQ-MXFP4-loom": {
-    "current_disposition": "held",
+    "current_disposition": "pending qualified repair",
     "device_keys": [
       "radeon-r9700",
       "strix-halo"
@@ -14,7 +14,7 @@
     },
     "production": "loom-fun/amd-Qwen3.8-27B-Quark-AWQ-MXFP4-loom",
     "qualification_run": 45267277683,
-    "reason": "Open correctness and throughput qualification issues.",
+    "reason": "Awaiting a qualified correction for correctness and throughput.",
     "staging": "loom-fun-staging/amd-Qwen3.8-27B-Quark-AWQ-MXFP4-loom",
     "staging_receipt_url": "https://huggingface.co/loom-fun-staging/amd-Qwen3.8-27B-Quark-AWQ-MXFP4-loom/commit/c1eaa0960244132a038235fece80087aac9284a0",
     "staging_revision": "c1eaa0960244132a038235fece80087aac9284a0",
@@ -22,7 +22,7 @@
     "verified_source_files": 22
   },
   "unsloth-Inkling-2-Mini-loom": {
-    "current_disposition": "held",
+    "current_disposition": "pending qualified repair",
     "device_keys": [
       "strix-halo"
     ],
@@ -35,7 +35,7 @@
     },
     "production": "loom-fun/unsloth-Inkling-2-Mini-loom",
     "qualification_run": null,
-    "reason": "Open correctness qualification issues on Strix Halo.",
+    "reason": "Awaiting a qualified correctness correction on Strix Halo.",
     "staging": "loom-fun-staging/unsloth-Inkling-2-Mini-loom",
     "staging_receipt_url": "https://huggingface.co/loom-fun-staging/unsloth-Inkling-2-Mini-loom/commit/bd021e649b158e608b389eca9bfed60a0ec2d225",
     "staging_revision": "bd021e649b158e608b389eca9bfed60a0ec2d225",
@@ -43,25 +43,9 @@
     "verified_source_files": 16
   },
   "unsloth-Inkling-2-Mini-loom-r9700": {
-    "current_disposition": "held",
-    "device_keys": [
-      "radeon-r9700",
-      "strix-halo"
-    ],
-    "frozen_production_revision": "6213fd3ce3a15ea2bab98d4adf09ec783c5ad5dc",
-    "frozen_production_sdk": {
-      "hrx_loom": "0.3.0",
-      "hrx_system_sha": null,
-      "source": "pypi",
-      "wheel_sha256": "6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f"
-    },
+    "current_disposition": "out of scope",
     "production": "loom-fun/unsloth-Inkling-2-Mini-loom-r9700",
-    "qualification_run": null,
-    "reason": "Open native-context cancellation qualification issue.",
-    "staging": "loom-fun-staging/unsloth-Inkling-2-Mini-loom-r9700",
-    "staging_receipt_url": "https://huggingface.co/loom-fun-staging/unsloth-Inkling-2-Mini-loom-r9700/commit/90c125c8b0686030e33ee899c7a5098a83a25a46",
-    "staging_revision": "90c125c8b0686030e33ee899c7a5098a83a25a46",
-    "target_revision": "6213fd3ce3a15ea2bab98d4adf09ec783c5ad5dc",
-    "verified_source_files": 557
+    "reason": "The owner excluded the Radeon-specific package, including outgoing tag writes.",
+    "staging": "loom-fun-staging/unsloth-Inkling-2-Mini-loom-r9700"
   }
 }

@@ -9,6 +9,7 @@ import re
 import shutil
 import time
 from pathlib import Path, PurePosixPath
+import posixpath
 
 STAGING = "loom-fun-staging"
 PRODUCTION = "loom-fun"
@@ -16,6 +17,7 @@ ENDPOINT = "https://huggingface.co"
 REVISION = r"[0-9a-f]{40}"
 SHA256 = r"[0-9a-f]{64}"
 SLUG = r"[A-Za-z0-9][A-Za-z0-9._-]*"
+HUB_ATTRIBUTES = ".gitattributes"
 FETCH = re.compile(r"(?m)^([ \t]*loom-fetch[ \t]+)(?:([\x22\x27])([^\r\n]*?)\2|([^\s]+))")
 
 
@@ -54,9 +56,13 @@ def records(pins):
         require(re.fullmatch(SLUG, slug) and ".." not in slug, f"invalid slug {slug}")
         require(all(pinned_sha(row.get(field)) for field in ("staging_revision", "target_revision")),
                 f"{slug}: exact staging and target revisions required")
-        retained = row.get("retain_target_files", {})
-        require(isinstance(retained, dict) and all(safe_path(n) and re.fullmatch(SHA256, sha)
-                for n, sha in retained.items()), f"{slug}: invalid retained target file map")
+        for field in ("retain_target_files", "delete_target_files"):
+            paths = row.get(field, {})
+            require(isinstance(paths, dict) and all(n != HUB_ATTRIBUTES and safe_path(n) and re.fullmatch(SHA256, sha)
+                    for n, sha in paths.items()), f"{slug}: invalid {field} file map")
+        if row.get("delete_target_files"):
+            require(re.fullmatch(r"v\d+\.\d+\.\d+", row.get("rollback_tag", "")),
+                    f"{slug}: deleted files require a pinned outgoing rollback tag")
         yield slug, row
 
 
@@ -84,7 +90,7 @@ def snapshot(api, repo, revision):
 
     info = model_info(api, repo, revision=revision, files_metadata=True)
     require(info.id == repo and info.sha == revision and info.siblings, f"{repo}: incorrect or empty revision {revision}")
-    files = [file for file in info.siblings if file.rfilename != ".gitattributes"]
+    files = info.siblings
     require(files and all(safe_path(file.rfilename) for file in files), f"{repo}: empty package or unsafe path")
 
     def verify(file):
@@ -182,6 +188,16 @@ def check_image(path, component_hashes, slug, presets, old_revision):
                 f"{slug}: image programs differ from {version} qualification")
 
 
+def check_deleted_refs(name, data, deleted, slug):
+    if deleted and name.endswith((".json", ".json.lock", ".loom")):
+        for match in re.finditer(rb"[A-Za-z0-9_./-]+\.loom", data):
+            reference = match[0].decode()
+            resolved = posixpath.normpath(posixpath.join(posixpath.dirname(name), reference))
+            for old in deleted:
+                require(not (reference == old or resolved == old or old.endswith("/" + reference.lstrip("./"))),
+                        f"{slug}/{name}: references deleted target file {old}")
+
+
 def compose(slug, row, source, source_hashes, target, target_hashes, out):
     require({"README.md", "model.json", "model.json.lock"} <= source_hashes.keys(), f"{slug}: package missing")
     model = load(source / "model.json")
@@ -200,20 +216,27 @@ def compose(slug, row, source, source_hashes, target, target_hashes, out):
                 f"{slug}: missing generated card metadata on non-image package")
         require("sdk-qualification.json" in source_hashes, f"{slug}: image SDK qualification missing")
         check_image(source, source_hashes, slug, presets, row["target_revision"])
-    retained = {name: target_hashes[name] for name in sorted(target_hashes.keys() - source_hashes.keys())}
-    require(retained == row.get("retain_target_files", {}),
-            f"{slug}: target-only files require explicit hash-pinned retention: {retained}")
-    output_names = source_hashes.keys() | retained.keys()
+    extras = {name: target_hashes[name] for name in sorted(target_hashes.keys() - source_hashes.keys())
+              if name != HUB_ATTRIBUTES}
+    retained = row.get("retain_target_files", {})
+    deleted = row.get("delete_target_files", {})
+    require(not retained.keys() & deleted.keys() and extras == retained | deleted,
+            f"{slug}: target-only files require explicit retain or delete pins: {extras}")
+    output_names = (source_hashes.keys() | retained.keys()) - {HUB_ATTRIBUTES}
+    if HUB_ATTRIBUTES in target_hashes:
+        output_names.add(HUB_ATTRIBUTES)
     for name in sorted(output_names):
         dest = out / name
         dest.parent.mkdir(parents=True, exist_ok=True)
         if name in changed:
             dest.write_bytes(changed[name])
         else:
-            shutil.copyfile((target if name in retained else source) / name, dest)
-        inspect_refs(name, dest.read_bytes(), slug)
+            shutil.copyfile((target if name in retained or name == HUB_ATTRIBUTES else source) / name, dest)
+        data = dest.read_bytes()
+        inspect_refs(name, data, slug)
+        check_deleted_refs(name, data, deleted, slug)
     outputs = {name: digest(out / name) for name in sorted(output_names)}
-    return {**row, "source": source_hashes, "target": target_hashes, "output": outputs,
+    return {**row, "source": source_hashes, "target": target_hashes, "output": outputs, "deletions": sorted(deleted),
             "presets": presets, "operations": sorted(n for n, sha in outputs.items() if target_hashes.get(n) != sha)}
 
 
@@ -248,7 +271,10 @@ def inspect_bundle(bundle, manifest_sha):
         for name, path in files.items():
             require(safe_path(name) and digest(path) == row["output"][name], f"{slug}: incorrect bundle file {name}")
         expected_ops = sorted(n for n, sha in row["output"].items() if row["target"].get(n) != sha)
-        require(expected_ops == row["operations"] and not row["target"].keys() - row["output"].keys(),
+        deletions = {n: sha for n, sha in row["target"].items() if n not in row["output"]}
+        require(expected_ops == row["operations"] and deletions == row.get("delete_target_files", {})
+                and sorted(deletions) == row.get("deletions", [])
+                and row["output"].get(HUB_ATTRIBUTES) == row["target"].get(HUB_ATTRIBUTES),
                 f"{slug}: incorrect operation coverage")
     return rows
 
@@ -290,23 +316,29 @@ def replay(api, bundle, manifest_sha, execute, receipt_path):
             require_head(api, repo, row["target_revision"])
             _, content = snapshot(api, repo, row["target_revision"])
             require(content == row["target"], f"{repo}: target bytes differ from review")
+            if execute and row.get("deletions"):
+                tagged = model_info(api, repo, revision=row["rollback_tag"]).sha
+                require(tagged == row["target_revision"], f"{repo}: rollback tag must point to reviewed parent")
     if not execute:
         for slug, row in rows:
-            print(f"{PRODUCTION}/{slug}@{row['target_revision']}: {len(row['operations'])} change(s)", flush=True)
+            print(f"{PRODUCTION}/{slug}@{row['target_revision']}: {len(row['operations'])} update(s), "
+                  f"{len(row.get('deletions', []))} removal(s)", flush=True)
         return
-    from huggingface_hub import CommitOperationAdd
+    from huggingface_hub import CommitOperationAdd, CommitOperationDelete
 
     with receipt_path.open("a", encoding="utf-8", buffering=1) as log:
         for slug, row in rows:
             repo = f"{PRODUCTION}/{slug}"
-            if repo in prior or not row["operations"]:
+            deleted = row.get("deletions", [])
+            if repo in prior or not (row["operations"] or deleted):
                 print(f"{repo}: verified, no pending upload", flush=True)
                 continue
             commit = api.create_commit(
                 repo, repo_type="model", revision="main", parent_commit=row["target_revision"], token=True,
                 commit_message=f"Promote reviewed package from staging {row['staging_revision']}",
                 commit_description=f"Reviewed promotion manifest SHA256: {manifest_sha}",
-                operations=[CommitOperationAdd(name, bundle / "packages" / slug / name) for name in row["operations"]],
+                operations=[CommitOperationAdd(name, bundle / "packages" / slug / name) for name in row["operations"]]
+                + [CommitOperationDelete(name, is_folder=False) for name in deleted],
             )
             require(pinned_sha(commit.oid), f"{repo}: missing upload commit; reconcile before retry")
             event = {"repo": repo, "commit": commit.oid, "manifest_sha256": manifest_sha}

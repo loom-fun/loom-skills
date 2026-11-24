@@ -11,7 +11,7 @@ permissions:
 jobs:
   rehearse:
     name: Read-only exact production composition and SDK dry run
-    runs-on: [self-hosted, devlab-dispatch, Linux, strix-halo]
+    runs-on: [self-hosted, devlab-dispatch, Linux]
     timeout-minutes: 45
     env:
       HF_HUB_DISABLE_IMPLICIT_TOKEN: '1'
@@ -71,12 +71,15 @@ jobs:
           if [[ -f "$inputs/github-release-tag.json" ]]; then
             cp "$inputs/github-release-tag.json" "$evidence/"
           fi
-          if [[ "$(jq length "$evidence/tag-plan.json")" == 58 ]]; then
+          if [[ "$(jq length "$evidence/tag-plan.json")" -ge 58 ]]; then
             cd "$evidence"
-            sha256sum release/manifest.json tag-plan.json
+            manifest_sha="$(sha256sum release/manifest.json | cut -d' ' -f1)"
+            tag_sha="$(sha256sum tag-plan.json | cut -d' ' -f1)"
+            jq -n --arg manifest "$manifest_sha" --arg tags "$tag_sha" \
+              '{manifest_sha256: $manifest, tag_plan_sha256: $tags}' > release-digests.json
             "$REHEARSAL_WORK/verify/bin/python" promote-reviewed.py \
-              --manifest-sha256 "$(sha256sum release/manifest.json | cut -d' ' -f1)" \
-              --tag-plan-sha256 "$(sha256sum tag-plan.json | cut -d' ' -f1)" \
+              --manifest-sha256 "$manifest_sha" \
+              --tag-plan-sha256 "$tag_sha" \
               | tee owner-preflight.log
             find . -type f ! -name archive-files.sha256 -print0 | sort -z | xargs -0 sha256sum > archive-files.sha256
           fi
@@ -88,6 +91,7 @@ jobs:
           name: sdk030-production-rehearsal
           path: ${{ env.REHEARSAL_WORK }}/evidence
           retention-days: 90
+          include-hidden-files: true
       - name: Remove isolated rehearsal scratch
         if: always() && env.REHEARSAL_WORK != ''
         shell: bash

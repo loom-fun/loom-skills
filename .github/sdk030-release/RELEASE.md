@@ -1,13 +1,11 @@
 # Loom SDK 0.3.0 promotion handoff
 
-The approval scope is the 58 exact package rows in `inputs/eligible.json`. Each row binds an exact staging commit to the reviewed production parent. The three excluded packages and reasons are recorded in `inputs/held.json`. A bundle with any missing or failed row is a rehearsal receipt and cannot be applied.
+The approval scope is the exact package rows in `inputs/eligible.json`. Each row binds an exact staging commit to the reviewed production parent. The base scope is 58 packages. Quark Qwen3.8 27B and base Inkling 2 Mini require separately qualified corrections and may be added with exact reviewed staging receipts. The Radeon-specific Inkling package is out of scope for every write, including any outgoing tag. `inputs/held.json` records the current exclusions. A bundle with any missing or failed eligible row is a rehearsal receipt and cannot be applied.
 
-Use Python 3.11 or newer, `huggingface_hub==0.36.0`, and the GitHub CLI for the public entry points. Download the archive from the reviewed DevLab artifact, compare its SHA256 with the issue, extract it, and run these commands in the extracted directory.
+Use Python 3.11 or newer, `huggingface_hub==0.36.0`, and the GitHub CLI for the public entry points. Download the archive from the reviewed DevLab artifact, compare its SHA256 with the issue, and extract it. Set `manifest` and `tags` to the approved digests from the issue and compare them against `release-digests.json`. Run these commands in the extracted directory.
 
 ```sh
 sha256sum --check archive-files.sha256
-manifest="$(sha256sum release/manifest.json | cut -d' ' -f1)"
-tags="$(sha256sum tag-plan.json | cut -d' ' -f1)"
 python promote-reviewed.py --manifest-sha256 "$manifest" --tag-plan-sha256 "$tags"
 ```
 
@@ -25,4 +23,4 @@ Follow `github-release-tag.json` for the GitHub release tag. The expected `sdk0.
 
 When the approved production package reads and outgoing tags are complete, apply the reviewed public entry points using the instructions and checksums in `release-surfaces/RELEASE.md`. The entry points have their own parent guards and post-commit readbacks. Allow the summary and Pages jobs to finish before checking public links.
 
-Read `review.md` for the staging-lane rehearsal results and `review.json` for SHA256, path, Git blob and LFS identities. The reviewed run checked the SDK's actual fetch dry run for each printed preset after transforming the package to production form. It used exact staged payload bytes and changed production references only where required. Historical references with immutable revisions remain in provenance. The package run requires separate owner approval for all write steps.
+Read `review.md` for the staging-lane rehearsal results and `review.json` for SHA256, path, Git blob and LFS identities. The manifest records each staging and production `.gitattributes` hash and both original Git blob IDs. Production's exact attributes file is included in the expected archive tree and checked on readback. The command leaves it untouched. The reviewed run checked the SDK's actual fetch dry run for each printed preset after transforming the package to production form. It used exact staged payload bytes and changed production references only where required. Historical references with immutable revisions remain in provenance. The package run requires separate owner approval for all write steps.

@@ -10,11 +10,11 @@ from huggingface_hub import HfApi, get_token
 from replay_promotion import ENDPOINT, PRODUCTION, STAGING, digest, inspect_bundle, read_hub, replay, require
 
 ROOT = Path(__file__).resolve().parent
-HELD = {
+REPAIRS = {
     "amd-Qwen3.8-27B-Quark-AWQ-MXFP4-loom",
     "unsloth-Inkling-2-Mini-loom",
-    "unsloth-Inkling-2-Mini-loom-r9700",
 }
+OUT_OF_SCOPE = "unsloth-Inkling-2-Mini-loom-r9700"
 
 
 def load(path):
@@ -40,8 +40,13 @@ def main():
     scope = load(ROOT / "inputs/eligible.json")
     held = load(ROOT / "inputs/held.json")
     rows = dict(inspect_bundle(bundle, args.manifest_sha256))
-    require(len(rows) == 58 and rows.keys() == scope.keys() == tags.keys() and
-            held.keys() == HELD and not rows.keys() & HELD, "reviewed release scope differs")
+    repairs = rows.keys() & REPAIRS
+    require(len(rows) == 58 + len(repairs) and rows.keys() == scope.keys() == tags.keys()
+            and held.keys() == (REPAIRS - repairs) | {OUT_OF_SCOPE}
+            and not rows.keys() & held.keys()
+            and held[OUT_OF_SCOPE]["current_disposition"] == "out of scope"
+            and all(held[slug]["current_disposition"] == "pending qualified repair" for slug in REPAIRS - repairs),
+            "reviewed release scope differs")
     if args.apply:
         require(os.environ.get("PROMOTE_CONFIRM") == PRODUCTION and get_token(),
                 "apply requires an authenticated operator and PROMOTE_CONFIRM=loom-fun")
