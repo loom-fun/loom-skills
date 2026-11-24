@@ -66,7 +66,7 @@ jobs:
           source = harness.read_text()
           hook = '  # ablation: every kernel.launch in PROGRAM matching REGEX'
           assert source.count(hook) == 1
-          source = source.replace(hook, '''  if [ "$v" = repairfp8 ]; then
+          source = source.replace(hook, r'''  if [ "$v" = repairfp8 ]; then
               sha256sum "$pkg/program/llm.loom" > "$WORK/receipt/source-before-fp8.txt"
               "$T" - "$WORK/split-fp8.loom" "$pkg/program/llm.loom" <<'PATCH_GEN' || exit 1
           from pathlib import Path
