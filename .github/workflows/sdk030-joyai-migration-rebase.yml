@@ -1,0 +1,144 @@
+name: JoyAI reference patch on the combined SDK migration
+on:
+  push:
+    branches: [codex/sdk030-joyai-migration-rebase-proof]
+    paths: [.github/workflows/sdk030-joyai-migration-rebase.yml]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: [self-hosted, devlab-dispatch, Linux]
+    timeout-minutes: 40
+    env:
+      JOYAI: jdopensource-JoyAI-LLM-Flash-loom
+      QWEN: unsloth-Qwen3-0.6B-loom
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ea44a71c27f3a5809359c01d4a7eb28b56458c69
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Prepare exact checkout and SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          work="$(dirname "$GITHUB_WORKSPACE")/sdk030-joyai-rebase-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          mkdir -p "$work/receipt"
+          printf 'WORK=%s\n' "$work" >> "$GITHUB_ENV"
+          git rev-parse HEAD > "$work/receipt/source.txt"
+          git ls-tree HEAD skills/loom-port-llm/reference/deepseek2-example/starter.patch > "$work/receipt/source-blobs.txt"
+          git worktree add --detach "$work/base" c996e03b40a33e5fa0f8600810364fbfdd368988
+          sdk=$(LOOM_VERSION=0.3.0 bash skills/loom-setup/scripts/ensure_sdk.sh "$work/loom" "" 2> "$work/receipt/install.log")
+          cp "$sdk/loom-install.json" "$work/receipt/sdk.json"
+          printf 'LOOM_ROOT=%s\n' "$sdk" >> "$GITHUB_ENV"
+      - name: Run all normal example and targeted regression checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash skills/loom-port-llm/reference/check_examples.sh 2>&1 | tee "$WORK/receipt/examples.log"
+          python3 skills/loom-port-llm/starter/runtime_tokenizer.py 2>&1 | tee "$WORK/receipt/tokenizer.log"
+          for pattern in test_joyai_port.py test_moe_q4_0.py test_moe_grouped_q4_k.py test_choices.py; do
+            "$LOOM_ROOT/.tools/bin/python" -m unittest discover -s tests -p "$pattern" -v 2>&1 | tee -a "$WORK/receipt/unit.log"
+          done
+      - name: Build all packages and compare the 55 unaffected models
+        shell: bash
+        run: |
+          set -euo pipefail
+          py="$LOOM_ROOT/.tools/bin/python"
+          controls=$(python3 -c 'import json,os; print(",".join(s for s in json.load(open("fleet/manifest.json"))["models"] if s != os.environ["JOYAI"]))')
+          "$py" "$WORK/base/fleet/build_fleet.py" --tree "$WORK/base" --slugs "$controls" --jobs 8 --out "$WORK/base-fleet" > "$WORK/receipt/base-fleet.log" 2>&1
+          "$py" fleet/build_fleet.py --tree . --jobs 8 --out "$WORK/head-fleet" > "$WORK/receipt/head-fleet.log" 2>&1
+          "$py" fleet/diff_fleet.py "$WORK/base-fleet" "$WORK/head-fleet" --models "$controls" --raw-spelling --json "$WORK/receipt/impact.json" --md "$WORK/receipt/impact.md"
+          python3 - "$WORK" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+          work = Path(sys.argv[1])
+          report = json.loads((work / "receipt/impact.json").read_text())
+          assert not report["models"], report["models"]
+          baseline = json.loads((work / "base-fleet/summary.json").read_text())
+          candidate = json.loads((work / "head-fleet/summary.json").read_text())
+          assert len(baseline["models"]) == 55 and len(candidate["models"]) == 56
+          assert not any(x["failures"] or x["skipped"] for x in (baseline, candidate))
+          PY
+      - name: Compare exact JoyAI frozen inputs and ordinary Qwen port
+        shell: bash
+        run: |
+          set -euo pipefail
+          py="$LOOM_ROOT/.tools/bin/python"
+          "$py" fleet/build_fleet.py --tree . --keep-work --slugs "$JOYAI,$QWEN" --out "$WORK/fixtures" > "$WORK/receipt/fixtures.log" 2>&1
+          joy="$WORK/fixtures/_work/$JOYAI"
+          rev=b4787e7927e3863b612b50c13c69207efaa7806e
+          uri="https://huggingface.co/loom-fun/$JOYAI/resolve/$rev"
+          curl -fsSL --retry 3 "$uri/llm_config.json" -o "$joy/card.json"
+          curl -fsSL --retry 3 "$uri/tokenizer.json" -o "$joy/pinned-tokenizer.json"
+          echo "74cd4a4d32ea131ffd9216187a3a8b63bd7d25ee679f4c5d1deeb8701df1c7c3  $joy/pinned-tokenizer.json" | sha256sum -c -
+          "$py" - "$joy" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+          work = Path(sys.argv[1])
+          card = json.loads((work / "card.json").read_text())
+          header = json.loads((work / "fresh.json").read_text())
+          card["gguf"] = str(work / Path(card["gguf"]).name)
+          card["tensors"] = header["tensors"]
+          for key in ("model_id", "draft"):
+              card.pop(key, None)
+          (work / "exact-config.json").write_text(json.dumps(card, indent=1))
+          PY
+          pool=(); if grep -q -- '"--pool"' "$joy/kit/build.py"; then pool=(--pool 131072); fi
+          (cd "$joy/kit" && LOOM_KB_ROOT="$GITHUB_WORKSPACE/skills/loom-kb" "$py" build.py "$joy/exact-config.json" "$WORK/joy-exact" --slug "$JOYAI" --context 131072 "${pool[@]}" --prefill 8192 --memory-gib 4096 --tokenizer "$joy/pinned-tokenizer.json" --model-id jdopensource/JoyAI-LLM-Flash) > "$WORK/receipt/joy-exact.log" 2>&1
+          "$py" -I -c 'import sys; sys.path.insert(0,sys.argv[1]); import card_lib; print(card_lib.programs_sha256(sys.argv[2]))' "$GITHUB_WORKSPACE/skills/loom-benchmark/scripts/card" "$WORK/joy-exact" > "$WORK/receipt/joy-programs.txt"
+          test "$(cat "$WORK/receipt/joy-programs.txt")" = 'ded93bd916d2b4aaad1731cb5c6bb1feb832a68323c5ebffa47e2af9d3869bde'
+          "$py" - "$joy/kit" "$WORK/joy-exact/program/llm.loom" <<'PY' > "$WORK/receipt/joy-combine-case.json"
+          import json
+          import sys
+          from pathlib import Path
+          import numpy as np
+
+          sys.path.insert(0, sys.argv[1])
+          from ktest_more import _def, _view, moe_combine_case
+          kernel = _def(Path(sys.argv[2]).read_text(), "g_moe_combine")
+          assert kernel and "%y_old = view.load %y_view" in kernel and _view(kernel, "sg") is None
+          arrays = {}
+          case = moe_combine_case(arrays.__setitem__, np.random.default_rng(19), kernel)
+          assert "kernel.launch @g_moe_combine[%t](%t, %ys, %wts, %y)" in case
+          assert "moe_combine_sg" not in arrays and "%sg" not in case
+          routed = np.einsum("tkh,tk->th", arrays["moe_combine_ys"].astype(np.float64), arrays["moe_combine_wts"])
+          np.testing.assert_allclose(arrays["moe_combine_y_e"], routed + arrays["moe_combine_y"], rtol=1e-6, atol=1e-7)
+          print(json.dumps({"inputs": ["tokens", "ys", "wts", "y"], "gate_input": False, "has_shared_residual": True, "case": case}, indent=2))
+          PY
+          for label in base head; do
+            tree="$WORK/base"; [ "$label" = base ] || tree="$GITHUB_WORKSPACE"
+            inputs="$WORK/fixtures/_work/$QWEN"; dest="$WORK/qwen-$label"
+            mkdir -p "$dest/gguf" "$dest/tok"
+            for file in "$inputs"/*.gguf; do ln -s "$file" "$dest/gguf/$(basename "$file")"; done
+            cp "$inputs/tokenizer_min.json" "$dest/tok/tokenizer.json"
+            python3 - "$inputs/cfg.json" "$dest/cfg.json" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+          cfg = json.loads(Path(sys.argv[1]).read_text())
+          cfg["gguf"] = "gguf/" + Path(cfg["gguf"]).name
+          cfg.pop("slug", None)
+          Path(sys.argv[2]).write_text(json.dumps(cfg, indent=1))
+          PY
+            FROM=build STOP_AFTER=build KIT="$tree/skills/loom-port-llm/starter" bash "$tree/skills/loom-port-llm/port.sh" unsloth/Qwen3-0.6B-GGUF "$dest" 8160 4096 Qwen/Qwen3-0.6B > "$WORK/receipt/qwen-$label.log" 2>&1
+          done
+          diff -r "$WORK/qwen-base/pkg/program" "$WORK/qwen-head/pkg/program"
+          cmp "$WORK/qwen-base/pkg/model.json" "$WORK/qwen-head/pkg/model.json"
+          echo 'Qwen normal port outputs are byte-identical' > "$WORK/receipt/port-verdict.txt"
+      - uses: actions/upload-artifact@v4
+        if: always() && env.WORK != ''
+        with:
+          name: joyai-migration-rebase
+          path: ${{ env.WORK }}/receipt
+          retention-days: 30
+      - name: Release job paths
+        if: always() && env.WORK != ''
+        shell: bash
+        run: |
+          if [ "$WORK" = "$(dirname "$GITHUB_WORKSPACE")/sdk030-joyai-rebase-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" ]; then
+            git worktree remove --force "$WORK/base" || true
+            rm -rf -- "$WORK"
+          fi
