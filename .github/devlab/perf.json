@@ -1,47 +1,16 @@
 {
- "_comment": "R9700 per-model measurement (r9700_jobs.py): one job per model on one R9700 runner; loom-fun-staging card, llama.cpp ROCm b1375 + Vulkan b12211 with the matched drafting, reduced-context models served at served_context. Does not fit: none",
- "runner": "r9700",
- "memory_bytes": 34000000000,
+ "_comment": "JoyAI-LLM-Flash IQ4_XS card performance (Strix Halo): Loom card programs vs llama.cpp ROCm b1386 at the card's matched drafting (none), same runner",
+ "memory_bytes": 47000000000,
  "llama_spec": "matched",
+ "env": {"LLAMACPP_EXTRA_ARGS": "--skip-chat-parsing"},
  "jobs": [
   {
-   "name": "unsloth-qwen3-0-6b-loom",
-   "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
-   "kit": null,
-   "llamacpp": "b1375",
-   "llamacpp_vulkan": "b12211",
-   "memory_bytes_r9700": 17000000000,
-   "variants": [
-    {
-     "name": "card",
-     "build": {}
-    },
-    {
-     "name": "nodraft",
-     "build": {},
-     "execution": {
-      "draft_depth": 0
-     }
-    }
-   ],
-   "steps": [
-    "func:card",
-    "ktest:card",
-    "gates:card:dev",
-    "perf:card:3",
-    "perf:card:3:long",
-    "c4:nodraft",
-    "llama@rocm.np1:3",
-    "llama@rocm.np1:3:long",
-    "llamac4@rocm.nodraft",
-    "llama@vulkan.np1:3",
-    "llama@vulkan.np1:3:long",
-    "llamac4@vulkan.perslot.nodraft"
-   ]
+   "name": "joyai-llm-flash-iq4xs",
+   "card": "loom-fun/jdopensource-JoyAI-LLM-Flash-loom",
+   "kit": "deepseek2",
+   "llamacpp": "b1386",
+   "variants": [{"name": "card"}],
+   "steps": ["perf:card:3", "perf:card:3:long", "c4:card", "llama@rocm.np1:3", "llama@rocm.np1:3:long", "llamac4@rocm.nodraft"]
   }
- ],
- "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
- "kit": null,
- "llamacpp": "b1375",
- "llamacpp_vulkan": "b12211"
+ ]
 }
