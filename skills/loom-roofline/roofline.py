@@ -110,7 +110,15 @@ def geometry(meta, cfg):
     # qwen4exp (reference/qwen4exp-example): sparse indexed attention (an indexer scores the compressed keys, the top_k
     # positions are attended) and a per-layer-embedding table of which a token reads one row per hash head
     ratios = g("attention.compress_ratios") or []
-    return dict(arch=arch, L=L, hidden=hidden, heads=heads, kvh=kvh, kvh_l=kvh_l, hd=hd, hd_swa=hd_swa,
+    # MLA (deepseek2, absorbed): one cache row per token (kv_lora latent + rope dims) serves as K, and its first kv_lora
+    # values as V, so the cache is read once (not K + V) and attention's PV product is kv_lora wide. Prefill is cheaper
+    # expanded (as vLLM/SGLang/llama.cpp run it): kv_b turns each key's latent into per-head K nope + V, then attention is
+    # (nope + rope) wide for QK and v wide for PV; the expansion is 2 * kv_lora * heads * (nope + v) flops per key.
+    mcfg = cfg.get("mla") or {}
+    mla = mcfg.get("kv_lora") or int(g("attention.kv_lora_rank", 0) or 0)
+    mla_qk = int(mcfg.get("kq_dims") or g("attention.key_length_mla", 0) or 0)
+    mla_vd = int(mcfg.get("v_dims") or g("attention.value_length_mla", 0) or 0)
+    return dict(arch=arch, mla_v=int(mla), mla_qk=mla_qk, mla_vd=mla_vd, L=L, hidden=hidden, heads=heads, kvh=kvh, kvh_l=kvh_l, hd=hd, hd_swa=hd_swa,
                 window=window, sliding=sliding, kv_layers=kv_layers, n_exp=n_exp, n_used=n_used,
                 top_k=int(g("attention.indexer.top_k", 0) or 0), idx_heads=int(g("attention.indexer.head_count", 0) or 0),
                 idx_dim=int(g("attention.indexer.key_length", 0) or 0), ratios=list(ratios) if len(ratios) == L else [],
@@ -177,7 +185,7 @@ def kv_read_bytes(geo, ctx):
         if sparse_ratio(geo, i):
             tot += (ctx // geo["ratios"][i]) * geo["idx_dim"] * 2
             n = min(n, geo["top_k"])
-        tot += 2 * geo["kvh_l"][i] * hd * 2 * n
+        tot += (1 if geo.get("mla_v") else 2) * geo["kvh_l"][i] * hd * 2 * n
     return tot
 
 
@@ -191,7 +199,13 @@ def attn_flops_per_token(geo, P):
         if sparse_ratio(geo, i):   # the indexer scores every compressed key, attention covers the top_k only
             tot += 2 * geo["idx_heads"] * geo["idx_dim"] * (P / 2) / geo["ratios"][i]
             avg = min(avg, geo["top_k"])
-        tot += 2 * 2 * geo["heads"] * hd * avg
+        absorbed = 2 * geo["heads"] * (hd + (geo.get("mla_v") or hd)) * avg
+        if geo.get("mla_v") and geo.get("mla_qk") and geo.get("mla_vd"):
+            nope = geo["mla_qk"] - (hd - geo["mla_v"])
+            expanded = (2 * geo["heads"] * (geo["mla_qk"] + geo["mla_vd"]) * avg
+                        + 2 * geo["mla_v"] * geo["heads"] * (nope + geo["mla_vd"]))
+            absorbed = min(absorbed, expanded)
+        tot += absorbed
     return tot
 
 
