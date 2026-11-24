@@ -395,27 +395,19 @@
       "gen": "mla_dec/gen_bench.py",
       "gen_variants": [
         "wmma",
-        "wmma+xempty",
-        "ph1",
-        "ph1+xempty",
-        "b8",
-        "b8+xempty",
-        "b16",
-        "ph1+b8",
-        "s16+hg2",
-        "s16+hg2+xempty"
+        "kl1",
+        "kl1+b4",
+        "kl1+b8",
+        "kl1+xempty",
+        "kl1+ph1"
       ],
       "files": [
         "bench_wmma.loom",
-        "bench_wmma+xempty.loom",
-        "bench_ph1.loom",
-        "bench_ph1+xempty.loom",
-        "bench_b8.loom",
-        "bench_b8+xempty.loom",
-        "bench_b16.loom",
-        "bench_ph1+b8.loom",
-        "bench_s16+hg2.loom",
-        "bench_s16+hg2+xempty.loom"
+        "bench_kl1.loom",
+        "bench_kl1+b4.loom",
+        "bench_kl1+b8.loom",
+        "bench_kl1+xempty.loom",
+        "bench_kl1+ph1.loom"
       ],
       "tests": [
         "test.loom"
