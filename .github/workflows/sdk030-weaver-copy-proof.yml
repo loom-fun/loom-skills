@@ -11,7 +11,7 @@ jobs:
     timeout-minutes: 25
     env:
       WEAVER_REVISION: 3a8064093bd87096a2c5e00d4b30603afe0fa9b1
-      CARD: loom-fun-staging/unsloth-Qwen3-0.6B-loom@f3ffda86d7bd1fa98d615f4972a7d3f82345294c
+      CARD: loom-fun-staging/unsloth-Qwen3-0.6B-loom:chat@f3ffda86d7bd1fa98d615f4972a7d3f82345294c
     steps:
       - uses: actions/setup-python@v5
         with:
