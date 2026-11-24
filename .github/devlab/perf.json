@@ -1,5 +1,5 @@
 {
- "_comment": "JoyAI pf2 lane (experiment only), round 2: base / v1 ATTN_LIST_LIVE / v3 + MLA_X_TAIL / v4 + MOE_ROUTE_TG (router rows in LDS) / v5 + GEMM_M128_N=768; ktest v5, ABBA short, profile pf2k v5; gates:dev on v5 (job pf2-r2-gates).",
+ "_comment": "JoyAI pf2 lane (experiment only), round 3: w (LIST_LIVE + MLA_X_TAIL + M128_N=768) vs wm (+ MOE_ROUTE_WM WMMA router); ktest wm, ABBA short+long, profile pf2k wm; gates:wm:dev.",
  "card": "loom-fun/jdopensource-JoyAI-LLM-Flash-loom@58159cc30c1b9a18fb883f75188b35d03bfea4ed",
  "memory_bytes": 47000000000,
  "kit": "deepseek2",
@@ -9,73 +9,52 @@
  },
  "jobs": [
   {
-   "name": "pf2-r2",
+   "name": "pf2-r3",
    "variants": [
     {
-     "name": "base",
-     "build": {}
-    },
-    {
-     "name": "v1",
-     "build": {
-      "ATTN_LIST_LIVE": "1"
-     }
-    },
-    {
-     "name": "v3",
-     "build": {
-      "ATTN_LIST_LIVE": "1",
-      "MLA_X_TAIL": "1"
-     }
-    },
-    {
-     "name": "v4",
+     "name": "w",
      "build": {
       "ATTN_LIST_LIVE": "1",
       "MLA_X_TAIL": "1",
-      "MOE_ROUTE_TG": "1"
-     }
-    },
-    {
-     "name": "v5",
-     "build": {
-      "ATTN_LIST_LIVE": "1",
-      "MLA_X_TAIL": "1",
-      "MOE_ROUTE_TG": "1",
       "GEMM_M128_N": "768"
+     }
+    },
+    {
+     "name": "wm",
+     "build": {
+      "ATTN_LIST_LIVE": "1",
+      "MLA_X_TAIL": "1",
+      "GEMM_M128_N": "768",
+      "MOE_ROUTE_WM": "1"
      }
     }
    ],
    "steps": [
-    "ktest:v5",
-    "perf:base:1",
-    "perf:v1:1",
-    "perf:v3:1",
-    "perf:v4:1",
-    "perf:v5:1",
-    "perf:v5:1",
-    "perf:v4:1",
-    "perf:v3:1",
-    "perf:v1:1",
-    "perf:base:1",
-    "profile:v5:pf2k,pf8k"
+    "ktest:wm",
+    "perf:w:1",
+    "perf:wm:1",
+    "perf:wm:1",
+    "perf:w:1",
+    "perf:w:1:long",
+    "perf:wm:1:long",
+    "profile:wm:pf2k"
    ]
   },
   {
-   "name": "pf2-r2-gates",
+   "name": "pf2-r3-gates",
    "variants": [
     {
-     "name": "v5",
+     "name": "wm",
      "build": {
       "ATTN_LIST_LIVE": "1",
       "MLA_X_TAIL": "1",
-      "MOE_ROUTE_TG": "1",
-      "GEMM_M128_N": "768"
+      "GEMM_M128_N": "768",
+      "MOE_ROUTE_WM": "1"
      }
     }
    ],
    "steps": [
-    "gates:v5:dev"
+    "gates:wm:dev"
    ]
   }
  ]
