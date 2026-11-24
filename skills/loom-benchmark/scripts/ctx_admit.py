@@ -13,7 +13,7 @@ Prints "ADMITTED n tokens (...)" or "REFUSED n tokens: HTTP ...". Exit status 1 
 """
 import argparse
 from contextlib import suppress
-from http.client import HTTPConnection, HTTPSConnection
+from http.client import HTTPConnection
 import json
 import os
 import socket
@@ -49,28 +49,55 @@ def main():
     while len(ids) < n:
         ids = ids + ids
     prompt = P.tok.decode(ids[:n])
-    endpoint = urlsplit(a.url.rstrip("/") + "/v1/chat/completions")
-    connector = HTTPSConnection if endpoint.scheme == "https" else HTTPConnection
+    url = a.url.rstrip("/") + "/v1/chat/completions"
+    endpoint = urlsplit(url)
+    loopback = endpoint.hostname in ("127.0.0.1", "::1", "localhost")
+    proxy = requests.utils.select_proxy(url, requests.utils.get_environ_proxies(url))
+    local_http = endpoint.scheme == "http" and loopback and endpoint.username is None and proxy is None
+    stopped = threading.Event()
     got = {}
 
     def cancel():
+        stopped.set()
         transport = got.get("transport")
         if transport is not None:
             with suppress(OSError):
                 transport.shutdown(socket.SHUT_RDWR)
+        response = got.get("response")
+        if response is not None:
+            response.close()
 
     def post():
         try:
-            body = json.dumps({
+            body = {
                 "model": P.model_id, "messages": [{"role": "user", "content": prompt}], "max_tokens": 1,
-                "stream": True, **extra}).encode()
-            conn = connector(endpoint.hostname, endpoint.port, timeout=a.wait + 600)
+                "stream": True, **extra}
+            if stopped.is_set():
+                return
+            if not local_http:
+                # Requests retains its configured proxies, credentials and certificate trust for remote endpoints.
+                r = requests.post(url, stream=True, timeout=a.wait + 600, json=body)
+                got["response"] = r
+                if stopped.is_set():
+                    r.close()
+                    return
+                if r.status_code != 200:
+                    got["body"] = r.text[:200]
+                got["status"] = r.status_code
+                if r.status_code == 200 and a.complete is not None:
+                    got["text"] = "".join(line.decode("utf-8", "replace") for line in r.iter_lines() if line)
+                    got["finished"] = time.time()
+                return
+            conn = HTTPConnection(endpoint.hostname, endpoint.port, timeout=a.wait)
             try:
                 conn.connect()
                 # The service can register active prefill before sending any HTTP headers. Keep
                 # the transport so the probe can close it even while getresponse() is blocked.
                 got["transport"] = conn.sock
-                conn.request("POST", endpoint.path, body, {"Content-Type": "application/json"})
+                if stopped.is_set():
+                    return
+                conn.sock.settimeout(a.wait + 600)
+                conn.request("POST", endpoint.path, json.dumps(body).encode(), {"Content-Type": "application/json"})
                 with conn.getresponse() as reply:
                     if reply.status != 200:
                         got["body"] = reply.read(200).decode("utf-8", "replace")
@@ -89,8 +116,9 @@ def main():
     def active():
         return requests.get(a.url + "/v1/status", timeout=10).json()["data"][0]["loom"]["status"]["active_requests"]
 
-    threading.Thread(target=post, daemon=True).start()
     t0 = time.time()
+    sender = threading.Thread(target=post, daemon=True)
+    sender.start()
     running = False
     while time.time() - t0 < a.wait and "status" not in got and "error" not in got:
         time.sleep(0.5)
@@ -102,7 +130,7 @@ def main():
         while "finished" not in got and "error" not in got and time.time() - t0 < a.complete:
             time.sleep(2)
         ok = "finished" in got and '"finish_reason"' in got.get("text", "") and "error" not in got
-        if not ok:
+        if not ok and local_http:
             cancel()
         msg = (f"COMPLETED {n} tokens of a {context}-token context in {got['finished'] - t0:.0f}s" if ok else
                f"NOT COMPLETED {n} tokens of a {context}-token context after {time.time() - t0:.0f}s: {got.get('error') or got.get('text', '')[:200] or 'no answer'}")
@@ -113,6 +141,8 @@ def main():
     # Cancel: closing the connection makes the server drop the request; then it must go idle again (no long prefill).
     idle = True
     cancel()
+    if local_http:
+        sender.join(timeout=1)
     if admitted:
         t1 = time.time()
         while active() and time.time() - t1 < 60:

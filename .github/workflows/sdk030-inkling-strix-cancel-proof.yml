@@ -1,4 +1,4 @@
-name: Inkling Strix native cancellation regression
+name: Inkling Strix loopback admission and cancellation regression
 on:
   push:
     branches: [codex/inkling-strix-cancel-proof]
