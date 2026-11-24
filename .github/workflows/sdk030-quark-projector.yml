@@ -1,0 +1,78 @@
+name: DevLab Quark projector parity
+on:
+  push:
+    branches: [codex/sdk030-quark-r9700-diagnostic]
+    paths: [.github/workflows/sdk030-quark-projector.yml]
+permissions:
+  contents: read
+jobs:
+  vision:
+    runs-on: [self-hosted, devlab-dispatch, Linux, radeon-r9700]
+    timeout-minutes: 75
+    env:
+      CARD: huggingface:loom-fun/amd-Qwen3.8-27B-Quark-AWQ-MXFP4-loom:chat-r9700@a999be30c6539c77a030e961748416892b06ac73
+      KIT_REVISION: 4c28b772a8f22f121b3925788dae14b26c58511b
+      VISION_TEST_RDNA4: '1'
+      LOOM_RDNA4: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Fetch the frozen package with the pinned SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          work=$(mktemp -d "$(dirname "$GITHUB_WORKSPACE")/sdk030-quark-projector.XXXXXX")
+          echo "WORK=$work" >> "$GITHUB_ENV"
+          echo "HF_HOME=$work/hf" >> "$GITHUB_ENV"
+          export HF_HOME="$work/hf"
+          mkdir -p "$work/out" "$work/toolkit"
+          git archive "$KIT_REVISION" skills | tar -xf - -C "$work/toolkit"
+          git rev-parse HEAD > "$work/out/workflow-head.txt"
+          git ls-tree HEAD .github/scripts/sdk030_quark_vision_layers.py > "$work/out/probe-git-blob.txt"
+          python -m venv "$work/sdk"
+          wheel="$work/hrx_loom-0.3.0-py3-none-manylinux_2_39_x86_64.whl"
+          "$work/sdk/bin/python" -m pip download --no-deps --dest "$work" hrx-loom==0.3.0
+          echo "6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f  $wheel" | sha256sum -c - | tee "$work/out/sdk-wheel.txt"
+          "$work/sdk/bin/python" -m pip install "$wheel[hf]" numpy pillow gguf requests tokenizers
+          "$work/sdk/bin/loom-fetch" "$CARD" --output="$work/package" --no-input
+          test -f "$work/package/llm_config.json"
+          test -f "$work/package/parameter/model.safetensors"
+      - name: Capture the frozen device resize and projector layers
+        shell: bash
+        run: |
+          set -euo pipefail
+          VENV="$WORK/sdk" "$WORK/sdk/bin/python" .github/scripts/sdk030_quark_vision_layers.py loom "$WORK/out" "$WORK/toolkit" "$WORK/package" | tee "$WORK/out/loom-layers.log"
+      - name: Compare with the upstream checkpoint processor and vision tower
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m venv "$WORK/reference"
+          ref="$WORK/reference/bin/python"
+          "$ref" -m pip install --index-url https://download.pytorch.org/whl/cpu torch==2.9.1 torchvision==0.24.1
+          "$ref" -m pip install transformers==5.3.0 safetensors pillow numpy
+          "$ref" .github/scripts/sdk030_quark_vision_layers.py reference "$WORK/out" "$WORK/toolkit" "$WORK/package" | tee "$WORK/out/reference-layers.log"
+      - uses: actions/upload-artifact@v4
+        if: always() && env.WORK != ''
+        with:
+          name: sdk030-quark-projector
+          path: |
+            ${{ env.WORK }}/out/*.log
+            ${{ env.WORK }}/out/*.json
+            ${{ env.WORK }}/out/*.txt
+            ${{ env.WORK }}/out/*.png
+            ${{ env.WORK }}/out/*.npy
+          if-no-files-found: error
+          retention-days: 30
+      - name: Release job disk
+        if: always() && env.WORK != ''
+        shell: bash
+        run: |
+          case "$WORK" in
+            "$(dirname "$GITHUB_WORKSPACE")"/sdk030-quark-projector.*) rm -rf -- "$WORK" ;;
+            *) exit 1 ;;
+          esac
