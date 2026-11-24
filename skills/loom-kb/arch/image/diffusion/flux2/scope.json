@@ -1,0 +1,10 @@
+{
+  "scope": "arch/image/diffusion/flux2",
+  "match": {
+    "arch": [
+      "flux2"
+    ]
+  },
+  "owner": "kb",
+  "choices": []
+}

@@ -21,6 +21,7 @@ Domain knowledge is stored once, in the most specific node it applies to; the wo
 ```bash
 python3 "${LOOM_SKILL_DIR}/kb.py" route --config W/pkg/llm_config.json --device strix-halo --topic prefill,decode
 python3 "${LOOM_SKILL_DIR}/kb.py" route --arch gemma4 --facets drafted --device rdna4 --topic speculative
+python3 "${LOOM_SKILL_DIR}/kb.py" route --arch z-image --device strix-halo --topic image-porting
 python3 "${LOOM_SKILL_DIR}/kb.py" list        # valid devices, families, facets, topics
 ```
 
@@ -34,7 +35,7 @@ order, and nothing else from the knowledge base (an unknown arch, device or topi
 | `<node>/<topic>.md` | that node's facts for one task; printed only when the topic is requested |
 | `topic/<topic>.md` | the task's knowledge that applies to every model |
 
-Topics are tasks: `porting`, `kernels-ir` (write kernels), `ir-debug`, `program-abi`, `cfg-review`, `starter` to port; `prefill`, `decode`,
+Use `image-porting` for image pipelines. Other topics include `porting`, `kernels-ir` (write kernels), `ir-debug`, `program-abi`, `cfg-review`, `starter` to port, `prefill`, `decode`,
 `optimize-loop`, `long-context`, `concurrency`, `speculative`, `spec-tuning`, `roofline` to optimize; `sdk` (hrx-loom limits per SDK version, for kernel work); `benchmark`, `org`, `kb-authoring`.
 Name only the ones the work needs: the router prints a node's task file for each topic you name and nothing else.
 

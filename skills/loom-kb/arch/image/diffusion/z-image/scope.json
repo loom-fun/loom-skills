@@ -1,0 +1,11 @@
+{
+  "scope": "arch/image/diffusion/z-image",
+  "match": {
+    "arch": [
+      "z-image",
+      "zimage"
+    ]
+  },
+  "owner": "kb",
+  "choices": []
+}

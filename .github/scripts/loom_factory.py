@@ -11,6 +11,7 @@ import argparse
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -278,33 +279,24 @@ def cmd_publish(a):
         f.write("\n")
     subprocess.run([a.loom_fetch, card_path, "--update-lock", "--all-variants", "--no-input", "--quiet"],
                    check=True)
-    # Always name the preset (a preset added later must not break this command: loom-fetch refuses a multi-preset card without one).
-    # Shared materialization fails on Windows; copy works everywhere.
-    presets = list(model.get("presets", {}))
     install = model["model"]["id"].split("/")[-1]
-    fetch_args = [f"{HF}/{a.target}/resolve/main/model.json",
-                  f"--preset={presets[0]}", "--materialize=copy"]
-    # No --memory_bytes: the default elastic pool has no limit, and any fixed value is a guess per machine.
-    serve_args = ["'--device=amdgpu://?completion_spin_ns=4294967295'"]  # active wait keeps the fabric clocks up (loom-setup serve.sh)
-    fetch = " ".join(["loom-fetch", *fetch_args, f"--output={install}"])
-    serve = " ".join(["loom-serve", f"--model={install}/model.json", *serve_args])
-
     api.create_repo(a.target, repo_type="model", private=a.private, exist_ok=True)
     write_card(a, pkg, install, license_)
+    check = os.path.join(a.work, "fetch-check")
+    with open(os.path.join(pkg, "README.md"), encoding="utf-8") as readme:
+        fetch = quick_start_fetch(readme.read(), check)
     # REPORT.md (the run's narrative and methodology) is uploaded as its own file; the card links to it.
     api.upload_folder(repo_id=a.target, folder_path=pkg,
                       ignore_patterns=["parameter/*", "*.gguf", ".loom-fetch.lock", ".cache/*"],
                       delete_patterns=["bench/**"],
                       commit_message=f"Loom package for {a.source} ({a.quant})")
     print(f"published {HF}/{a.target}")
-    # Run the card's commands on the published copy, unmodified apart from paths and the port.
-    check = os.path.join(a.work, "fetch-check")
+    # Verify the generated fetch with a fresh destination, then check the factory's serving configuration.
     shutil.rmtree(check, ignore_errors=True)
     try:
-        subprocess.run([a.loom_fetch, *fetch_args, f"--output={check}", "--no-input", "--quiet"], check=True)
-        print(f"verified: {fetch}")
-        serve_check(a, os.path.join(check, "model.json"), serve_args)
-        print(f"verified: {serve}")
+        subprocess.run([a.loom_fetch, *fetch[1:], "--no-input", "--quiet"], check=True)
+        print(f"verified: {shlex.join(fetch)}")
+        serve_check(a, os.path.join(check, "model.json"), ["--device=amdgpu://?completion_spin_ns=4294967295"])
     finally:
         shutil.rmtree(check, ignore_errors=True)
 
@@ -381,6 +373,22 @@ def stamp_generator(pkg, skills_commit):
         json.dump(cfg, f, indent=1)
 
 
+def quick_start_fetch(readme, destination):
+    """Replay the generated first GPU's fetch command with an isolated output path."""
+    section = readme.partition("\n## Quick start\n")[2].split("\n## ", 1)[0]
+    for block in re.findall(r"^```bash\n(.*?)^```$", section, re.M | re.S):
+        command = next((line for line in block.splitlines() if line.startswith("loom-fetch ")), None)
+        if command is None:
+            continue
+        fetch = shlex.split(command)
+        output = next((i for i, flag in enumerate(fetch) if flag.startswith("--output=")), None)
+        if output is None:
+            raise ValueError("generated Quick start does not set the fetch output")
+        fetch[output] = f"--output={destination}"
+        return fetch
+    raise ValueError("generated card is missing a Quick start fetch command")
+
+
 def serve_check(a, card, serve_args):
     """Start loom-serve on the card, wait until it is ready, and require one chat completion."""
     import socket
@@ -447,5 +455,6 @@ p.add_argument("--quant", required=True)
 p.add_argument("--files", required=True, help="JSON list of the GGUF file paths in the source repo")
 p.add_argument("--private", action="store_true")
 p.add_argument("--loom-fetch", default="loom-fetch", help="loom-fetch executable that writes model.json.lock; loom-serve is taken from the same directory")
-a = ap.parse_args()
-{"select": cmd_select, "publish": cmd_publish}[a.cmd](a)
+if __name__ == "__main__":
+    a = ap.parse_args()
+    {"select": cmd_select, "publish": cmd_publish}[a.cmd](a)

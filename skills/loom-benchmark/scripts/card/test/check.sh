@@ -477,6 +477,28 @@ assert 'pre-release' not in r and 'releases/download' not in r and 'loom-fetch h
 assert \"loom-serve --model=Qwen3-0.6B '--device=amdgpu://?completion_spin_ns=4294967295' --memory_bytes=15000000000 --state_slab_bytes=4mib\" in r and '/model.json' not in r.split('## Performance')[0].split('loom-serve')[1]" "$tmp/gpus4_pypi" \
   && echo "OK   gpus4: a PyPI 0.2.0 pin installs hrx-loom[hf]==0.2.0 in every GPU's block, no pre-release note" \
   || { echo "FAIL gpus4: PyPI 0.2.0 Quick start"; bad=1; }
+# SDK 0.3.0 Quick starts use automatic materialization. The legacy output above retains the explicit copy.
+mkdir -p "$tmp/gpus4_pypi_030"; cp -r "$tmp/gpus4_pypi/." "$tmp/gpus4_pypi_030/"
+py -c "import json, sys; p = sys.argv[1] + '/llm_config.json'; c = json.load(open(p)); c['sdk']['hrx_loom'] = '0.3.0'; json.dump(c, open(p, 'w'), indent=1)" "$tmp/gpus4_pypi_030"
+py "$C/render_card.py" "$tmp/gpus4_pypi_030" 2>/dev/null
+py -c "import sys; r = open(sys.argv[1] + '/README.md', encoding='utf-8').read().split('## Quick start', 1)[1].split('## Send a request', 1)[0]
+expected = ['loom-fetch huggingface:loom-fun-staging/unsloth-Qwen3-0.6B-loom:' + p + ' --output=Qwen3-0.6B' for p in ('chat', 'chat-r9700', 'chat-16gb', 'chat-gfx1150')]
+assert [line for line in r.splitlines() if line.startswith('loom-fetch ')] == expected, r
+assert '--materialize' not in r and r.count('pipx install \"hrx-loom[hf]==0.3.0\"') == 4, r" "$tmp/gpus4_pypi_030" \
+  && echo "OK   gpus4: exact SDK 0.3.0 Quick starts omit the copy flag on every GPU" \
+  || { echo "FAIL gpus4: PyPI 0.3.0 Quick start"; bad=1; }
+py -c "from pathlib import Path; import sys; sys.path.insert(0, sys.argv[1]); from loom_factory import quick_start_fetch
+for directory, source, old_card, copy in (
+    (sys.argv[2], 'https://huggingface.co/loom-fun-staging/unsloth-Qwen3-0.6B-loom/resolve/main/model.json', True, True),
+    (sys.argv[3], 'huggingface:loom-fun-staging/unsloth-Qwen3-0.6B-loom:chat', False, True),
+    (sys.argv[4], 'huggingface:loom-fun-staging/unsloth-Qwen3-0.6B-loom:chat', False, False),
+):
+    text = (Path(directory) / 'README.md').read_text(encoding='utf-8')
+    fetch = quick_start_fetch(text, '/tmp/factory test')
+    assert fetch == ['loom-fetch', source] + (['--preset=chat'] if old_card else []) + (['--materialize=copy'] if copy else []) + ['--output=/tmp/factory test'], fetch" \
+  "$here/../../../../../.github/scripts" "$here/gpus4/expected" "$tmp/gpus4_pypi" "$tmp/gpus4_pypi_030" \
+  && echo "OK   Factory replays the generated 0.1, 0.2 and 0.3 fetch arguments" \
+  || { echo "FAIL Factory Quick start verification arguments"; bad=1; }
 # the data file is the only source of a device's data: rebuilding the card from itself (--from-info) with the same files doubles nothing
 mkdir -p "$tmp/gpus4b"; cp -r "$tmp/gpus4/." "$tmp/gpus4b/"
 py "$C/make_info.py" build "$tmp/gpus4b" --from-info "$tmp/gpus4/info.json" --generator-commit $GEN --device-results "$tmp/dev4" --report generated -o "$tmp/gpus4b/info.json" 2>/dev/null
@@ -702,10 +724,11 @@ assert len(consistency_checks(r, {}, None)) == 1
 assert len(consistency_checks(r, {r['repo']: dict(ok[r['repo']], memory_bytes=69000000000)}, None)) == 1
 assert len(consistency_checks(r, {r['repo']: dict(ok[r['repo']], llamacpp='b1368')}, None)) == 1
 r['generator'] = g('side')
-assert len(consistency_checks(r, ok, sys.argv[3], lambda c: [{'merged_at': None}])) == 1
-assert len(consistency_checks(r, ok, sys.argv[3], lambda c: [])) == 1
-assert consistency_checks(r, ok, sys.argv[3], lambda c: [{'merged_at': '2026-11-08T00:00:00Z'}]) == []   # squash-merged
-assert consistency_checks(r, ok, sys.argv[3], lambda c: None) == []   # unknown never flags
+unknown_changes = lambda c: None
+assert len(consistency_checks(r, ok, sys.argv[3], lambda c: [{'merged_at': None}], unknown_changes)) == 1
+assert len(consistency_checks(r, ok, sys.argv[3], lambda c: [], unknown_changes)) == 1
+assert consistency_checks(r, ok, sys.argv[3], lambda c: [{'merged_at': '2026-11-08T00:00:00Z'}], unknown_changes) == []   # squash-merged
+assert consistency_checks(r, ok, sys.argv[3], lambda c: None, unknown_changes) == []   # unknown never flags
 from org_status import merged_prs
 def fake(merged):   # GitHub: a refs/pull/N/merge commit is in no PR; its second parent (the PR head) is in the PR
     def get(path):

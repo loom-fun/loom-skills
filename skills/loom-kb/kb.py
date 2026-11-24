@@ -64,9 +64,9 @@ def load_scopes(root=HERE):
         if rel.startswith("facet/"):
             facets[rel.split("/", 1)[1]] = node
         else:
-            parts = rel.split("/")  # arch/llm/<topology>/<family>
-            if len(parts) == 4 and parts[1] == "llm":
-                node["topology"], node["name"] = parts[2], parts[3]
+            parts = rel.split("/")  # arch/<domain>/<topology>/<family>
+            if len(parts) == 4 and parts[1] in ("llm", "image"):
+                node["domain"], node["topology"], node["name"] = parts[1:]
                 families.append(node)
     return families, facets
 
@@ -326,7 +326,8 @@ def route(args, root=HERE):
         node(Path("device") / devs[d] / d)
     for q in quants:
         node(Path("quant") / q)
-    for directory in ("arch/llm", Path("arch/llm") / fam["topology"], fam["rel"]):
+    domain = Path("arch") / fam["domain"]
+    for directory in (domain, domain / fam["topology"], fam["rel"]):
         node(directory)
     for tag in facets:
         node(Path("facet") / tag)
@@ -349,7 +350,8 @@ def route(args, root=HERE):
             print((rel if args.relative else Path(root) / rel).as_posix())
     print(f"# arch {arch} -> {fam['rel']}; facets: {','.join(facets) or '-'}; "
           f"devices: {','.join(chosen_devices or fam_list) or '-'}; topics: {','.join(wanted_topics) or '-'}")
-    footer = resolve_footer(cfg, chosen_devices or fam_list, root, slug)
+    footer = (resolve_footer(cfg, chosen_devices or fam_list, root, slug)
+              if fam["domain"] == "llm" else "# Image architectures do not declare LLM generator choices")
     print("# resolved choices")
     print(footer)
     return 0
