@@ -1,0 +1,2694 @@
+[
+  {
+    "gpu": "strix-halo",
+    "slug": "InternScience-Sage-A1.5-loom",
+    "repo": "loom-fun-staging/InternScience-Sage-A1.5-loom",
+    "revision": "a55a2f5f0525dd8e96de52358cee6f8843c855af",
+    "device": "amdgpu://?completion_spin_ns=4294967295",
+    "args": [
+      "--pool_backing=fixed"
+    ],
+    "model_id": "InternScience/Sage-A1.5",
+    "features": {
+      "api": "yes",
+      "audio": "unknown",
+      "concurrency": "yes",
+      "context": "yes",
+      "image_input": "yes",
+      "max_output_tokens": "yes",
+      "reasoning_effort": "n/a",
+      "sampling": "yes",
+      "speculative_decoding": "yes",
+      "thinking": "yes",
+      "tool_calling": "yes"
+    },
+    "sdk": {
+      "hrx_loom": "0.3.0",
+      "source": "pypi",
+      "hrx_system_sha": "e2c41a720363911c04606ce0f4417e2d55630352",
+      "wheel_sha256": "6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f"
+    },
+    "files": {
+      "info.json": "2f67dc33e4e1b8ce0ad836fc43b11e07ef36cb9020a799862431ad168b6164be",
+      "model.json": "6cef1116a98008e28d7672f431e2f88306d19db5cfa71f267ae7afac899fcd5f",
+      "model.json.lock": "cdc2ae8603b848f7711db452ba62cc40b368904a96ef6471e8b947a877a46148",
+      "llm_config.json": "a64674fb47720f44fcf0102e0d5c53de983b783518b5909fd0b0d6df06ee5966"
+    },
+    "package_serve": null,
+    "published_rows": [
+      "decode",
+      "decode_2k",
+      "decode_32k",
+      "prefill_16k",
+      "prefill_1k",
+      "prefill_2k",
+      "prefill_32k",
+      "prefill_8k",
+      "streams4"
+    ],
+    "preset": "chat",
+    "context_tokens": 262144,
+    "execution_rows": 4
+  },
+  {
+    "gpu": "strix-halo",
+    "slug": "XHToken-Spark-X2.5-4B-loom",
+    "repo": "loom-fun-staging/XHToken-Spark-X2.5-4B-loom",
+    "revision": "fd3ba8af60e1884c6dd4a9fa25250f2a677f1408",
+    "device": "amdgpu://?completion_spin_ns=4294967295",
+    "args": [
+      "--pool_backing=fixed"
+    ],
+    "model_id": "XHToken/Spark-X2.5-4B",
+    "features": {
+      "api": "yes",
+      "audio": "unknown",
+      "concurrency": "yes",
+      "context": "yes",
+      "image_input": "unknown",
+      "max_output_tokens": "yes",
+      "reasoning_effort": "n/a",
+      "sampling": "yes",
+      "speculative_decoding": "n/a",
+      "thinking": "yes",
+      "tool_calling": "yes"
+    },
+    "sdk": {
+      "hrx_loom": "0.3.0",
+      "source": "pypi",
+      "hrx_system_sha": "e2c41a720363911c04606ce0f4417e2d55630352",
+      "wheel_sha256": "6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f"
+    },
+    "files": {
+      "info.json": "65c9a3b6f4bdfb551dd3da6d8cdadce3b68c23df06bfdefa23787e61198f820b",
+      "model.json": "c43c55fcd03446d064d50401648fd534348f17f5b61fd98d269acfccc2b4695f",
+      "model.json.lock": "b3ca9e0b0c06d05885d605d6dae46d2740aa5e9545645de566587335045a952a",
+      "llm_config.json": "86574cf4c2a9dee551456a7cf3f0c1ad886d9b6b9a69b22e7320b849a3883421"
+    },
+    "package_serve": null,
+    "published_rows": [
+      "decode",
+      "decode_2k",
+      "decode_32k",
+      "prefill_16k",
+      "prefill_1k",
+      "prefill_2k",
+      "prefill_32k",
+      "prefill_8k",
+      "streams4"
+    ],
+    "preset": "chat",
+    "context_tokens": 262144,
+    "execution_rows": 4
+  },
+  {
+    "gpu": "strix-halo",
+    "slug": "bartowski-LFM3-1.7B-loom",
+    "repo": "loom-fun-staging/bartowski-LFM3-1.7B-loom",
+    "revision": "599bf9d48c9f5908dbfc0ea1b771fdaf85c72304",
+    "device": "amdgpu://?completion_spin_ns=4294967295",
+    "args": [
+      "--pool_backing=fixed"
+    ],
+    "model_id": "LiquidAI/LFM3-1.7B",
+    "features": {
+      "api": "yes",
+      "audio": "unknown",
+      "concurrency": "yes",
+      "context": "yes",
+      "image_input": "unknown",
+      "max_output_tokens": "yes",
+      "reasoning_effort": "n/a",
+      "sampling": "yes",
+      "speculative_decoding": "n/a",
+      "thinking": "yes",
+      "tool_calling": "yes"
+    },
+    "sdk": {
+      "hrx_loom": "0.3.0",
+      "source": "pypi",
+      "hrx_system_sha": "e2c41a720363911c04606ce0f4417e2d55630352",
+      "wheel_sha256": "6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f"
+    },
+    "files": {
+      "info.json": "c87f113371e4efd520a89aba32d33fcf39a32959b02f65c2441617ef7e9fcb9f",
+      "model.json": "54bea582fbcb5f1c3bb72855cc659e9d9c7af62ee2d9dc321d6202040422bbbe",
+      "model.json.lock": "7abe7839991175658988a8e435544fd47b7ddf96854a1c4034e4e1198bf2f269",
+      "llm_config.json": "288a4ca7a1e3bea77dd14a060af18a1634797bdc9c95fb0fe2db136ac8e63a49"
+    },
+    "package_serve": null,
+    "published_rows": [
+      "decode",
+      "decode_2k",
+      "decode_32k",
+      "prefill_16k",
+      "prefill_1k",
+      "prefill_2k",
+      "prefill_32k",
+      "prefill_8k",
+      "streams4"
+    ],
+    "preset": "chat",
+    "context_tokens": 262144,
+    "execution_rows": 4
+  },
+  {
+    "gpu": "strix-halo",
+    "slug": "bartowski-Mellum2.1-12B-A2.5B-Thinking-loom",
+    "repo": "loom-fun-staging/bartowski-Mellum2.1-12B-A2.5B-Thinking-loom",
+    "revision": "d14e638abcc202d3188d8baf4a89bfaaab6520f2",
+    "device": "amdgpu://?completion_spin_ns=4294967295",
+    "args": [
+      "--pool_backing=fixed"
+    ],
+    "model_id": "JetBrains/Mellum2.1-12B-A2.5B-Thinking",
+    "features": {
+      "api": "yes",
+      "audio": "unknown",
+      "concurrency": "yes",
+      "context": "yes",
+      "image_input": "unknown",
+      "max_output_tokens": "yes",
+      "reasoning_effort": "n/a",
+      "sampling": "yes",
+      "speculative_decoding": "n/a",
+      "thinking": "yes",
+      "tool_calling": "yes"
+    },
+    "sdk": {
+      "hrx_loom": "0.3.0",
+      "source": "pypi",
+      "hrx_system_sha": "e2c41a720363911c04606ce0f4417e2d55630352",
+      "wheel_sha256": "6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f"
+    },
+    "files": {
+      "info.json": "bd724c8b32cc28454f331ebc55eca46717dcbfc58b49f716f8c21ee56cdc67c1",
+      "model.json": "45b39a13567c9c68c1f6f8b0ac851b9f0e9c6c1521a420085a7ef75de8c30b0c",
+      "model.json.lock": "3e7732278408e7887929b876f451bb4dd051a47cfba3a2402cc3a3cca51d8079",
+      "llm_config.json": "9826d6c2e3233df863650f6330ec84584eeda43d335282ca2c4191b5989cdefa"
+    },
+    "package_serve": null,
+    "published_rows": [
+      "decode",
+      "decode_2k",
+      "decode_32k",
+      "prefill_16k",
+      "prefill_1k",
+      "prefill_2k",
+      "prefill_32k",
+      "prefill_8k",
+      "streams4"
+    ],
+    "preset": "chat",
+    "context_tokens": 131072,
+    "execution_rows": 4
+  },
+  {
+    "gpu": "strix-halo",
+    "slug": "bartowski-MiniCPM-V-4.7-35B-A3B-loom",
+    "repo": "loom-fun-staging/bartowski-MiniCPM-V-4.7-35B-A3B-loom",
+    "revision": "31429b9b325da56bd828223cf74cd883fbea4390",
+    "device": "amdgpu://?completion_spin_ns=4294967295",
+    "args": [
+      "--pool_backing=fixed"
+    ],
+    "model_id": "openbmb/MiniCPM-V-4.7-35B-A3B",
+    "features": {
+      "api": "yes",
+      "audio": "unknown",
+      "concurrency": "yes",
+      "context": "yes",
+      "image_input": "unknown",
+      "max_output_tokens": "yes",
+      "reasoning_effort": "n/a",
+      "sampling": "yes",
+      "speculative_decoding": "n/a",
+      "thinking": "yes",
+      "tool_calling": "yes"
+    },
+    "sdk": {
+      "hrx_loom": "0.3.0",
+      "source": "pypi",
+      "hrx_system_sha": "e2c41a720363911c04606ce0f4417e2d55630352",
+      "wheel_sha256": "6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f"
+    },
+    "files": {
+      "info.json": "0aefc0eb03a5122ec7d309c6d7fed2f9cb7de88a3b8c9f1a7c7548b4d42f3d04",
+      "model.json": "16e5c7d3651d883fd81bbe986fa00ff6b3b18ee25c43b0ed42669f48cd08e1fd",
+      "model.json.lock": "8cbc787c8957a30e1fadc6cb9c51b9d70fe69b86369a011746475b1db673362e",
+      "llm_config.json": "75aa83ddcf0868cacf7d50aeff96930a46948666afef433e27353893c27e9143"
+    },
+    "package_serve": null,
+    "published_rows": [
+      "decode",
+      "decode_2k",
+      "decode_32k",
+      "prefill_16k",
+      "prefill_1k",
+      "prefill_2k",
+      "prefill_32k",
+      "prefill_8k",
+      "streams4"
+    ],
+    "preset": "chat",
+    "context_tokens": 262144,
+    "execution_rows": 4
+  },
+  {
+    "gpu": "strix-halo",
+    "slug": "bartowski-Nanbeige4.3-33B-loom",
+    "repo": "loom-fun-staging/bartowski-Nanbeige4.3-33B-loom",
+    "revision": "4f3a86c49a161d072afabf807e3962e27ee8ddc7",
+    "device": "amdgpu://?completion_spin_ns=4294967295",
+    "args": [
+      "--pool_backing=fixed"
+    ],
+    "model_id": "Nanbeige/Nanbeige4.3-33B",
+    "features": {
+      "api": "yes",
+      "audio": "unknown",
+      "concurrency": "yes",
+      "context": "yes",
+      "image_input": "unknown",
+      "max_output_tokens": "yes",
+      "reasoning_effort": "n/a",
+      "sampling": "yes",
+      "speculative_decoding": "n/a",
+      "thinking": "yes",
+      "tool_calling": "yes"
+    },
+    "sdk": {
+      "hrx_loom": "0.3.0",
+      "source": "pypi",
+      "hrx_system_sha": "e2c41a720363911c04606ce0f4417e2d55630352",
+      "wheel_sha256": "6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f"
+    },
+    "files": {
+      "info.json": "79758841d78b995b3901c8a325f54c426fed96391a30c8b277daa5fb8827d178",
+      "model.json": "6897ea2db3b43c388809f7ae028c0b442c432a505a071928f9bc16cd9702f363",
+      "model.json.lock": "e6a7e9574c72fdb21b136c533d4a23c8ec32614f187ccc9ded0e5212e8676cc1",
+      "llm_config.json": "16817a3ffadef44cc239cf4a4e802eec7656b543d0600723fe8e907a559cc56d"
+    },
+    "package_serve": null,
+    "published_rows": [
+      "decode",
+      "decode_2k",
+      "decode_32k",
+      "prefill_16k",
+      "prefill_1k",
+      "prefill_2k",
+      "prefill_32k",
+      "prefill_8k",
+      "streams4"
+    ],
+    "preset": "chat",
+    "context_tokens": 242688,
+    "execution_rows": 4
+  },
+  {
+    "gpu": "strix-halo",
+    "slug": "bartowski-Ornith-1.5-122B-loom",
+    "repo": "loom-fun-staging/bartowski-Ornith-1.5-122B-loom",
+    "revision": "5ee9e518d27a5a8b18ff3bc8436fdce996590faf",
+    "device": "amdgpu://?completion_spin_ns=4294967295",
+    "args": [
+      "--pool_backing=fixed"
+    ],
+    "model_id": "ornith-ai/Ornith-1.5-122B",
+    "features": {
+      "api": "yes",
+      "audio": "unknown",
+      "concurrency": "yes",
+      "context": "yes",
+      "image_input": "yes",
+      "max_output_tokens": "yes",
+      "reasoning_effort": "n/a",
+      "sampling": "yes",
+      "speculative_decoding": "yes",
+      "thinking": "yes",
+      "tool_calling": "yes"
+    },
+    "sdk": {
+      "hrx_loom": "0.3.0",
+      "source": "pypi",
+      "hrx_system_sha": "e2c41a720363911c04606ce0f4417e2d55630352",
+      "wheel_sha256": "6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f"
+    },
+    "files": {
+      "info.json": "7b61d43293a2c58906b56f4d525b3edfa827c02baf5d3dd07838d1486572c439",
+      "model.json": "9cb05bdcb40db32bc55d5a02563be98b76272511378276803576f6c3a701eb04",
+      "model.json.lock": "91525a39bf3e7ccb17decc2ead61736bcd7d646e4a3a77a8bd7bbefc44d46f4a",
+      "llm_config.json": "4daf627b879936660f0e7235af678d1b7d302eeaa69fed2cc1e0093f51899934"
+    },
+    "package_serve": null,
+    "published_rows": [
+      "decode",
+      "decode_2k",
+      "decode_32k",
+      "prefill_16k",
+      "prefill_1k",
+      "prefill_2k",
+      "prefill_32k",
+      "prefill_8k",
+      "streams4"
+    ],
+    "preset": "chat",
+    "context_tokens": 108544,
+    "execution_rows": 4
+  },
+  {
+    "gpu": "strix-halo",
+    "slug": "bartowski-Ornith-1.5-35B-A3B-loom",
+    "repo": "loom-fun-staging/bartowski-Ornith-1.5-35B-A3B-loom",
+    "revision": "54af356a04150303179c821859618c83da81c29f",
+    "device": "amdgpu://?completion_spin_ns=4294967295",
+    "args": [
+      "--pool_backing=fixed"
+    ],
+    "model_id": "ornith-ai/Ornith-1.5-35B-A3B",
+    "features": {
+      "api": "yes",
+      "audio": "unknown",
+      "concurrency": "yes",
+      "context": "yes",
+      "image_input": "yes",
+      "max_output_tokens": "yes",
+      "reasoning_effort": "n/a",
+      "sampling": "yes",
+      "speculative_decoding": "yes",
+      "thinking": "yes",
+      "tool_calling": "yes"
+    },
+    "sdk": {
+      "hrx_loom": "0.3.0",
+      "source": "pypi",
+      "hrx_system_sha": "e2c41a720363911c04606ce0f4417e2d55630352",
+      "wheel_sha256": "6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f"
+    },
+    "files": {
+      "info.json": "c2c729330cbc488a01aca80baa0e45fc87118454b8c03bfc21c509e0a2495513",
+      "model.json": "99698b10b4149b56375a532a2bd52233c0832d993e236c7ab754e9ed08b2f926",
+      "model.json.lock": "d1abab1fbf2ac7bfe90558b44fc0256adaad0ecfd4b62ec30abadd471962c1fa",
+      "llm_config.json": "33436537da17d37ead245d55030d8b07236f1ed6e6849cbc9e73c67b699030f4"
+    },
+    "package_serve": null,
+    "published_rows": [
+      "decode",
+      "decode_2k",
+      "decode_32k",
+      "prefill_16k",
+      "prefill_1k",
+      "prefill_2k",
+      "prefill_32k",
+      "prefill_8k",
+      "streams4"
+    ],
+    "preset": "chat",
+    "context_tokens": 262144,
+    "execution_rows": 4
+  },
+  {
+    "gpu": "strix-halo",
+    "slug": "bartowski-Ornith-1.5-9B-loom",
+    "repo": "loom-fun-staging/bartowski-Ornith-1.5-9B-loom",
+    "revision": "5c02b185a7d380203eefcbaaab881c728a0def8b",
+    "device": "amdgpu://?completion_spin_ns=4294967295",
+    "args": [
+      "--pool_backing=fixed"
+    ],
+    "model_id": "ornith-ai/Ornith-1.5-9B",
+    "features": {
+      "api": "yes",
+      "audio": "unknown",
+      "concurrency": "yes",
+      "context": "yes",
+      "image_input": "yes",
+      "max_output_tokens": "yes",
+      "reasoning_effort": "n/a",
+      "sampling": "yes",
+      "speculative_decoding": "yes",
+      "thinking": "yes",
+      "tool_calling": "yes"
+    },
+    "sdk": {
+      "hrx_loom": "0.3.0",
+      "source": "pypi",
+      "hrx_system_sha": "e2c41a720363911c04606ce0f4417e2d55630352",
+      "wheel_sha256": "6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f"
+    },
+    "files": {
+      "info.json": "c5504147d53d410b6996a141271ac448447d412d54b63ea40fcaeb89896fd65d",
+      "model.json": "9ca5395fb630ed3016f603841d01de0aa1c2f3fe883b78b5af502314241bfe8d",
+      "model.json.lock": "a9d5861cf057bf1d87b60b9ebd27b05dfcf41c00c15207f22570d8fd74371fe0",
+      "llm_config.json": "9e9a4794ff6c7157d1f312b08df1e932b1fd3d5a50d61da6d8ea4c5b6d6c2c2a"
+    },
+    "package_serve": null,
+    "published_rows": [
+      "decode",
+      "decode_2k",
+      "decode_32k",
+      "prefill_16k",
+      "prefill_1k",
+      "prefill_2k",
+      "prefill_32k",
+      "prefill_8k",
+      "streams4"
+    ],
+    "preset": "chat",
+    "context_tokens": 262144,
+    "execution_rows": 4
+  },
+  {
+    "gpu": "strix-halo",
+    "slug": "bartowski-Qwen2.5-1.5B-Instruct-loom",
+    "repo": "loom-fun-staging/bartowski-Qwen2.5-1.5B-Instruct-loom",
+    "revision": "4421111ec7c867e7ea7c5fe38bba8cf1b94fe03d",
+    "device": "amdgpu://?completion_spin_ns=4294967295",
+    "args": [
+      "--pool_backing=fixed"
+    ],
+    "model_id": "Qwen/Qwen2.5-1.5B-Instruct",
+    "features": {
+      "api": "yes",
+      "audio": "unknown",
+      "concurrency": "yes",
+      "context": "yes",
+      "image_input": "unknown",
+      "max_output_tokens": "yes",
+      "reasoning_effort": "n/a",
+      "sampling": "yes",
+      "speculative_decoding": "n/a",
+      "thinking": "n/a",
+      "tool_calling": "yes"
+    },
+    "sdk": {
+      "hrx_loom": "0.3.0",
+      "source": "pypi",
+      "hrx_system_sha": "e2c41a720363911c04606ce0f4417e2d55630352",
+      "wheel_sha256": "6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f"
+    },
+    "files": {
+      "info.json": "987902db94591b189a19bda185e13c7758f2e4f2abb774bdcdf10ec9a5312eff",
+      "model.json": "d1bb79ac8e47b8df7ee1d192fd965be5e527d577a869bfd2b18cc39c8a6de157",
+      "model.json.lock": "880b16a78c7ec8cf4784082f54a9bedd5c88a3240645791d2189f377a51d5315",
+      "llm_config.json": "a52c73b21f82e1438567ffb2da51f285ae20b39816d1e2e3a107209b824cfcf7"
+    },
+    "package_serve": null,
+    "published_rows": [
+      "decode",
+      "decode_2k",
+      "decode_32k",
+      "prefill_16k",
+      "prefill_1k",
+      "prefill_2k",
+      "prefill_32k",
+      "prefill_8k",
+      "streams4"
+    ],
+    "preset": "chat",
+    "context_tokens": 32768,
+    "execution_rows": 4
+  },
+  {
+    "gpu": "strix-halo",
+    "slug": "bartowski-Qwen2.5-32B-Instruct-loom",
+    "repo": "loom-fun-staging/bartowski-Qwen2.5-32B-Instruct-loom",
+    "revision": "8f36e110122778aafef4b54e1126c5e9ae85601c",
+    "device": "amdgpu://?completion_spin_ns=4294967295",
+    "args": [
+      "--pool_backing=fixed"
+    ],
+    "model_id": "Qwen/Qwen2.5-32B-Instruct",
+    "features": {
+      "api": "yes",
+      "audio": "unknown",
+      "concurrency": "yes",
+      "context": "yes",
+      "image_input": "unknown",
+      "max_output_tokens": "yes",
+      "reasoning_effort": "n/a",
+      "sampling": "yes",
+      "speculative_decoding": "n/a",
+      "thinking": "n/a",
+      "tool_calling": "yes"
+    },
+    "sdk": {
+      "hrx_loom": "0.3.0",
+      "source": "pypi",
+      "hrx_system_sha": "e2c41a720363911c04606ce0f4417e2d55630352",
+      "wheel_sha256": "6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f"
+    },
+    "files": {
+      "info.json": "42ff7d5da46823bb95b3e2a7df58179ebc852d070c5e68d99783cc2c4da69f9b",
+      "model.json": "80d474c3d5a85d3b7dd374f6a331041fbb9882f9645ac56fd987723d4a6c6da5",
+      "model.json.lock": "c8e96ba4e22f23000866c178b9034994911cd70d3c416ab3190cb2498f800477",
+      "llm_config.json": "6421f284a767160634a54d8d5d71e374902617970e1e7cd2b8a666db688db7d6"
+    },
+    "package_serve": null,
+    "published_rows": [
+      "decode",
+      "decode_2k",
+      "decode_32k",
+      "prefill_16k",
+      "prefill_1k",
+      "prefill_2k",
+      "prefill_32k",
+      "prefill_8k",
+      "streams4"
+    ],
+    "preset": "chat",
+    "context_tokens": 32768,
+    "execution_rows": 4
+  },
+  {
+    "gpu": "strix-halo",
+    "slug": "bartowski-Qwen2.5-7B-Instruct-loom",
+    "repo": "loom-fun-staging/bartowski-Qwen2.5-7B-Instruct-loom",
+    "revision": "8004642bef4b733ec9998f6d9024418d0948532e",
+    "device": "amdgpu://?completion_spin_ns=4294967295",
+    "args": [
+      "--pool_backing=fixed"
+    ],
+    "model_id": "Qwen/Qwen2.5-7B-Instruct",
+    "features": {
+      "api": "yes",
+      "audio": "unknown",
+      "concurrency": "yes",
+      "context": "yes",
+      "image_input": "unknown",
+      "max_output_tokens": "yes",
+      "reasoning_effort": "n/a",
+      "sampling": "yes",
+      "speculative_decoding": "n/a",
+      "thinking": "n/a",
+      "tool_calling": "yes"
+    },
+    "sdk": {
+      "hrx_loom": "0.3.0",
+      "source": "pypi",
+      "hrx_system_sha": "e2c41a720363911c04606ce0f4417e2d55630352",
+      "wheel_sha256": "6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f"
+    },
+    "files": {
+      "info.json": "2326a3f4e7f31a1791875b514daa74c3a0855cfc1156b724b57dad479c9c1a86",
+      "model.json": "c2510a544505980e98d8b57d6dd2c6b049a24d16d0bedeeadd59bd3e50a002e0",
+      "model.json.lock": "e6462539fa6d8c96546b7ffb616bcc6328926df11b0b30385a47e464b478d60c",
+      "llm_config.json": "5a213d7c38f4f986b709531937641f8f8a5cda609e06367c37c16e4b2f59e105"
+    },
+    "package_serve": null,
+    "published_rows": [
+      "decode",
+      "decode_2k",
+      "decode_32k",
+      "prefill_16k",
+      "prefill_1k",
+      "prefill_2k",
+      "prefill_32k",
+      "prefill_8k",
+      "streams4"
+    ],
+    "preset": "chat",
+    "context_tokens": 32768,
+    "execution_rows": 4
+  },
+  {
+    "gpu": "strix-halo",
+    "slug": "bartowski-Spark-X2.6-4B-loom",
+    "repo": "loom-fun-staging/bartowski-Spark-X2.6-4B-loom",
+    "revision": "a12e777b2211a80cda54973478be98a845804ab1",
+    "device": "amdgpu://?completion_spin_ns=4294967295",
+    "args": [
+      "--pool_backing=fixed"
+    ],
+    "model_id": "XHToken/Spark-X2.6-4B",
+    "features": {
+      "api": "yes",
+      "audio": "unknown",
+      "concurrency": "yes",
+      "context": "yes",
+      "image_input": "unknown",
+      "max_output_tokens": "yes",
+      "reasoning_effort": "yes",
+      "sampling": "yes",
+      "speculative_decoding": "n/a",
+      "thinking": "yes",
+      "tool_calling": "yes"
+    },
+    "sdk": {
+      "hrx_loom": "0.3.0",
+      "source": "pypi",
+      "hrx_system_sha": "e2c41a720363911c04606ce0f4417e2d55630352",
+      "wheel_sha256": "6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f"
+    },
+    "files": {
+      "info.json": "55ac6c0e1c79b8ae5a22fd763f689be3be7a1e689129663ebc689f2a11e5bc07",
+      "model.json": "d38f1d4ab9d4eb34797fcd9630a52298b253e7aaae0547feadd7593b6934487d",
+      "model.json.lock": "b95786647c455cdf2716cd4a67a317be96f2c4035a05a1038dcf7338144792a1",
+      "llm_config.json": "2fd85cd31b9418299fb0fdbc276c8285f9e94093d5d7c005d17160c02641ccf9"
+    },
+    "package_serve": null,
+    "published_rows": [
+      "decode",
+      "decode_2k",
+      "decode_32k",
+      "prefill_16k",
+      "prefill_1k",
+      "prefill_2k",
+      "prefill_32k",
+      "prefill_8k",
+      "streams4"
+    ],
+    "preset": "chat",
+    "context_tokens": 262144,
+    "execution_rows": 4
+  },
+  {
+    "gpu": "strix-halo",
+    "slug": "ggml-org-Flint-loom",
+    "repo": "loom-fun-staging/ggml-org-Flint-loom",
+    "revision": "d9f8f69c9923dd1e343f73a837a29311ed1738be",
+    "device": "amdgpu://?completion_spin_ns=4294967295",
+    "args": [
+      "--pool_backing=fixed"
+    ],
+    "model_id": "flint",
+    "features": {
+      "api": "yes",
+      "audio": "unknown",
+      "concurrency": "yes",
+      "context": "yes",
+      "image_input": "unknown",
+      "max_output_tokens": "yes",
+      "reasoning_effort": "n/a",
+      "sampling": "yes",
+      "speculative_decoding": "yes",
+      "thinking": "yes",
+      "tool_calling": "yes"
+    },
+    "sdk": {
+      "hrx_loom": "0.3.0",
+      "source": "pypi",
+      "hrx_system_sha": "e2c41a720363911c04606ce0f4417e2d55630352",
+      "wheel_sha256": "6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f"
+    },
+    "files": {
+      "info.json": "750cbbd27125f4a7746c5306778877c22ce87d53240ae14ef62e246557df7efa",
+      "model.json": "8ea0ab75cfc5c522377454e393ae2c90e067dc97c108f29d9c34e6dca7bf74b7",
+      "model.json.lock": "fdf52625d05116b3b8b6a7d106f39e1400d63e16e6a5d399b9293d1f5adc97da",
+      "llm_config.json": "f7cd28e2db2a771e4c4fe2b5f55d6478603274fd47945ce03be81e831d791f63"
+    },
+    "package_serve": null,
+    "published_rows": [
+      "decode",
+      "decode_2k",
+      "decode_32k",
+      "prefill_16k",
+      "prefill_1k",
+      "prefill_2k",
+      "prefill_32k",
+      "prefill_8k",
+      "streams4"
+    ],
+    "preset": "chat",
+    "context_tokens": 262144,
+    "execution_rows": 4
+  },
+  {
+    "gpu": "strix-halo",
+    "slug": "ggml-org-LFM2.5-24B-A2B-loom",
+    "repo": "loom-fun-staging/ggml-org-LFM2.5-24B-A2B-loom",
+    "revision": "6e159b12fd85ff025617b95bec99927608396672",
+    "device": "amdgpu://?completion_spin_ns=4294967295",
+    "args": [
+      "--pool_backing=fixed"
+    ],
+    "model_id": "LiquidAI/LFM2.5-24B-A2B",
+    "features": {
+      "api": "yes",
+      "audio": "unknown",
+      "concurrency": "yes",
+      "context": "yes",
+      "image_input": "unknown",
+      "max_output_tokens": "yes",
+      "reasoning_effort": "n/a",
+      "sampling": "yes",
+      "speculative_decoding": "n/a",
+      "thinking": "yes",
+      "tool_calling": "yes"
+    },
+    "sdk": {
+      "hrx_loom": "0.3.0",
+      "source": "pypi",
+      "hrx_system_sha": "e2c41a720363911c04606ce0f4417e2d55630352",
+      "wheel_sha256": "6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f"
+    },
+    "files": {
+      "info.json": "6d9c889752ecad6f1e72940dd9abe4154240346d6e68b92d35cdb6f966ba705e",
+      "model.json": "25ab1d6ae6c754513ac0554aabb95c526264209545f331e21cbf3943af1083eb",
+      "model.json.lock": "166b4b4797187808c2a0b1f205dd4a6588cb8287ad8fd35d18055ebb0c0db12b",
+      "llm_config.json": "b93960546facca6a14527af3629c65495ab90751c21f7536a0e2212b371c1f45"
+    },
+    "package_serve": null,
+    "published_rows": [
+      "decode",
+      "decode_2k",
+      "decode_32k",
+      "prefill_16k",
+      "prefill_1k",
+      "prefill_2k",
+      "prefill_32k",
+      "prefill_8k",
+      "streams4"
+    ],
+    "preset": "chat",
+    "context_tokens": 131072,
+    "execution_rows": 4
+  },
+  {
+    "gpu": "strix-halo",
+    "slug": "ggml-org-LFM3-Omni-2B-loom",
+    "repo": "loom-fun-staging/ggml-org-LFM3-Omni-2B-loom",
+    "revision": "924f78e52551f50a9a2a66f78c50df6076eab50d",
+    "device": "amdgpu://?completion_spin_ns=4294967295",
+    "args": [
+      "--pool_backing=fixed"
+    ],
+    "model_id": "LiquidAI/LFM3-Omni-2B",
+    "features": {
+      "api": "yes",
+      "audio": "unknown",
+      "concurrency": "yes",
+      "context": "yes",
+      "image_input": "unknown",
+      "max_output_tokens": "yes",
+      "reasoning_effort": "n/a",
+      "sampling": "yes",
+      "speculative_decoding": "n/a",
+      "thinking": "yes",
+      "tool_calling": "yes"
+    },
+    "sdk": {
+      "hrx_loom": "0.3.0",
+      "source": "pypi",
+      "hrx_system_sha": "e2c41a720363911c04606ce0f4417e2d55630352",
+      "wheel_sha256": "6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f"
+    },
+    "files": {
+      "info.json": "0984978de3524f5dfa4efb96258326050bb86a8e8e9ee4422ad02070a0572449",
+      "model.json": "ad2585e06e29ca2025a257eb81ca266ddce3d809c0e6941d3bac5c5951eaab41",
+      "model.json.lock": "714807bda9c6d4f39b31b2078593a1c0085585c4c17c14d06b846c37951c1e8d",
+      "llm_config.json": "18c25939f6e140c0a6397d92cc06842a8f505a9992232223cb5f06adc435e06d"
+    },
+    "package_serve": null,
+    "published_rows": [
+      "decode",
+      "decode_2k",
+      "decode_32k",
+      "prefill_16k",
+      "prefill_1k",
+      "prefill_2k",
+      "prefill_32k",
+      "prefill_8k",
+      "streams4"
+    ],
+    "preset": "chat",
+    "context_tokens": 128000,
+    "execution_rows": 4
+  },
+  {
+    "gpu": "strix-halo",
+    "slug": "ggml-org-Laguna-XS-2.1-loom",
+    "repo": "loom-fun-staging/ggml-org-Laguna-XS-2.1-loom",
+    "revision": "07e7c78f6ccd7a6839bbc96c433e1a1839664361",
+    "device": "amdgpu://?completion_spin_ns=4294967295",
+    "args": [
+      "--pool_backing=fixed"
+    ],
+    "model_id": "poolside/Laguna-XS-2.1",
+    "features": {
+      "api": "yes",
+      "audio": "unknown",
+      "concurrency": "yes",
+      "context": "yes",
+      "image_input": "unknown",
+      "max_output_tokens": "yes",
+      "reasoning_effort": "n/a",
+      "sampling": "yes",
+      "speculative_decoding": "yes",
+      "thinking": "yes",
+      "tool_calling": "yes"
+    },
+    "sdk": {
+      "hrx_loom": "0.3.0",
+      "source": "pypi",
+      "hrx_system_sha": "e2c41a720363911c04606ce0f4417e2d55630352",
+      "wheel_sha256": "6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f"
+    },
+    "files": {
+      "info.json": "2dbb11e0a428c867c178f46d22acab4655232db3287b8d0b47976c31b25dc7f3",
+      "model.json": "858d2634b9c74e1013beee789e5dc037c075fc4e0aa9c8aa8d552d53134300f6",
+      "model.json.lock": "bc17d0ebc1990e1a18688e2a04596abc650a8e7e84f6923a39eb95340d160bd4",
+      "llm_config.json": "6d1cf1410ae00997be23f24296c77b930e9c9b80fcec94970e3bb571b82030ba"
+    },
+    "package_serve": null,
+    "published_rows": [
+      "decode",
+      "decode_2k",
+      "decode_32k",
+      "prefill_16k",
+      "prefill_1k",
+      "prefill_2k",
+      "prefill_32k",
+      "prefill_8k",
+      "streams4"
+    ],
+    "preset": "chat",
+    "context_tokens": 262144,
+    "execution_rows": 4
+  },
+  {
+    "gpu": "strix-halo",
+    "slug": "ggml-org-Muse-Glimmer-30B-loom",
+    "repo": "loom-fun-staging/ggml-org-Muse-Glimmer-30B-loom",
+    "revision": "1685274f1331c4972d98b333a0e63bb40efe6aa2",
+    "device": "amdgpu://?completion_spin_ns=4294967295",
+    "args": [
+      "--pool_backing=fixed"
+    ],
+    "model_id": "meta-models/Muse-Glimmer-30B",
+    "features": {
+      "api": "yes",
+      "audio": "unknown",
+      "concurrency": "yes",
+      "context": "yes",
+      "image_input": "yes",
+      "max_output_tokens": "yes",
+      "reasoning_effort": "n/a",
+      "sampling": "yes",
+      "speculative_decoding": "yes",
+      "thinking": "yes",
+      "tool_calling": "yes"
+    },
+    "sdk": {
+      "hrx_loom": "0.3.0",
+      "source": "pypi",
+      "hrx_system_sha": "e2c41a720363911c04606ce0f4417e2d55630352",
+      "wheel_sha256": "6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f"
+    },
+    "files": {
+      "info.json": "78de8f845d1811690998118ca08af67579d710b5e2c05be0b12b3eca942bb6da",
+      "model.json": "0e3ed29f69bb9bca1d6b352389be41c247877f9d18852434cc79275c88c6de3b",
+      "model.json.lock": "c532d64c2c4f48ef34af8fb2c6ef8b8f59ce74145ceb32dfd0ba2d1dc6f03454",
+      "llm_config.json": "e287d23aa87fe45603afa5dfc49b9c29abb891140f37477b3a97e4045353711c"
+    },
+    "package_serve": null,
+    "published_rows": [
+      "decode",
+      "decode_2k",
+      "decode_32k",
+      "prefill_16k",
+      "prefill_1k",
+      "prefill_2k",
+      "prefill_32k",
+      "prefill_8k",
+      "streams4"
+    ],
+    "preset": "chat",
+    "context_tokens": 131072,
+    "execution_rows": 4
+  },
+  {
+    "gpu": "strix-halo",
+    "slug": "ggml-org-Qwen2.5-VL-7B-Instruct-loom",
+    "repo": "loom-fun-staging/ggml-org-Qwen2.5-VL-7B-Instruct-loom",
+    "revision": "5adb07c8265671378e26beb752d90b218724488d",
+    "device": "amdgpu://?completion_spin_ns=4294967295",
+    "args": [
+      "--pool_backing=fixed"
+    ],
+    "model_id": "Qwen/Qwen2.5-VL-7B-Instruct",
+    "features": {
+      "api": "yes",
+      "audio": "unknown",
+      "concurrency": "yes",
+      "context": "yes",
+      "image_input": "yes",
+      "max_output_tokens": "yes",
+      "reasoning_effort": "n/a",
+      "sampling": "yes",
+      "speculative_decoding": "n/a",
+      "thinking": "n/a",
+      "tool_calling": "n/a"
+    },
+    "sdk": {
+      "hrx_loom": "0.3.0",
+      "source": "pypi",
+      "hrx_system_sha": "e2c41a720363911c04606ce0f4417e2d55630352",
+      "wheel_sha256": "6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f"
+    },
+    "files": {
+      "info.json": "993d1e1b9f33ddcc93956475fd610a89968ffef08b5dbb16eb88421a0c99d7cf",
+      "model.json": "3c22fe078d35cfc6a4073f1f45955c0ad3d2a3d6d17fd4a26c944d176e409bbd",
+      "model.json.lock": "4372353cebf499311c2e345cffa3406a6a126b2b9d4cc57437fb2e109b3c7705",
+      "llm_config.json": "bb4b261b22545a9aa7bcdfd56f945f17690f3ea62c6ce023d884512c459d10ff"
+    },
+    "package_serve": null,
+    "published_rows": [
+      "decode",
+      "decode_2k",
+      "decode_32k",
+      "prefill_16k",
+      "prefill_1k",
+      "prefill_2k",
+      "prefill_32k",
+      "prefill_8k",
+      "streams4"
+    ],
+    "preset": "chat",
+    "context_tokens": 128000,
+    "execution_rows": 4
+  },
+  {
+    "gpu": "strix-halo",
+    "slug": "ggml-org-Qwen3-1.7B-loom",
+    "repo": "loom-fun-staging/ggml-org-Qwen3-1.7B-loom",
+    "revision": "80410051251711cf202407e474216aa9075ef846",
+    "device": "amdgpu://?completion_spin_ns=4294967295",
+    "args": [
+      "--pool_backing=fixed"
+    ],
+    "model_id": "Qwen/Qwen3-1.7B",
+    "features": {
+      "api": "yes",
+      "audio": "unknown",
+      "concurrency": "yes",
+      "context": "yes",
+      "image_input": "unknown",
+      "max_output_tokens": "yes",
+      "reasoning_effort": "n/a",
+      "sampling": "yes",
+      "speculative_decoding": "n/a",
+      "thinking": "yes",
+      "tool_calling": "yes"
+    },
+    "sdk": {
+      "hrx_loom": "0.3.0",
+      "source": "pypi",
+      "hrx_system_sha": "e2c41a720363911c04606ce0f4417e2d55630352",
+      "wheel_sha256": "6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f"
+    },
+    "files": {
+      "info.json": "da94095de6393542963dc408776b75de446469d4c38dae34bc361d4648d6a448",
+      "model.json": "b0f2a28b630dd4113791ffb33eff23c0ae656d39dfff80be8bb8a74e5f20c1d0",
+      "model.json.lock": "21da42b2df12fa3b2a01f78c0111587e5aa51ec9ad607ea847f9d62d816dcad0",
+      "llm_config.json": "a0c638069b0ed1b79bfcdcfc07288c848b9ca2061b1886a13f28c359b0592dfc"
+    },
+    "package_serve": null,
+    "published_rows": [
+      "decode",
+      "decode_2k",
+      "decode_32k",
+      "prefill_16k",
+      "prefill_1k",
+      "prefill_2k",
+      "prefill_32k",
+      "prefill_8k",
+      "streams4"
+    ],
+    "preset": "chat",
+    "context_tokens": 40960,
+    "execution_rows": 4
+  },
+  {
+    "gpu": "strix-halo",
+    "slug": "ggml-org-Qwen3-14B-loom",
+    "repo": "loom-fun-staging/ggml-org-Qwen3-14B-loom",
+    "revision": "be8abbc80fba32b3c0070b99be9396b5a47830bd",
+    "device": "amdgpu://?completion_spin_ns=4294967295",
+    "args": [
+      "--pool_backing=fixed"
+    ],
+    "model_id": "Qwen/Qwen3-14B",
+    "features": {
+      "api": "yes",
+      "audio": "unknown",
+      "concurrency": "yes",
+      "context": "yes",
+      "image_input": "unknown",
+      "max_output_tokens": "yes",
+      "reasoning_effort": "n/a",
+      "sampling": "yes",
+      "speculative_decoding": "n/a",
+      "thinking": "yes",
+      "tool_calling": "yes"
+    },
+    "sdk": {
+      "hrx_loom": "0.3.0",
+      "source": "pypi",
+      "hrx_system_sha": "e2c41a720363911c04606ce0f4417e2d55630352",
+      "wheel_sha256": "6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f"
+    },
+    "files": {
+      "info.json": "6160de7fc79c1147af78ef29de25c7caf10d72921f2dfb8ba5d4ed183e1f907c",
+      "model.json": "eb06c12d2772deca1dbce7183516b1e83bf7c8a153ef69f8eeae085158a34fdd",
+      "model.json.lock": "9361ef172958239693bbd7657754c8943d700c25f22ab1cfe34d1465831ba756",
+      "llm_config.json": "e1fc123f632084151a53504aafa6a7a5de65fb007fbf878b734b81197e8374dd"
+    },
+    "package_serve": null,
+    "published_rows": [
+      "decode",
+      "decode_2k",
+      "decode_32k",
+      "prefill_16k",
+      "prefill_1k",
+      "prefill_2k",
+      "prefill_32k",
+      "prefill_8k",
+      "streams4"
+    ],
+    "preset": "chat",
+    "context_tokens": 40960,
+    "execution_rows": 4
+  },
+  {
+    "gpu": "strix-halo",
+    "slug": "ggml-org-Qwen3-4B-loom",
+    "repo": "loom-fun-staging/ggml-org-Qwen3-4B-loom",
+    "revision": "56db9c8629c4f2fa91b6e397a98b5ecdc68e04b6",
+    "device": "amdgpu://?completion_spin_ns=4294967295",
+    "args": [
+      "--pool_backing=fixed"
+    ],
+    "model_id": "Qwen/Qwen3-4B",
+    "features": {
+      "api": "yes",
+      "audio": "unknown",
+      "concurrency": "yes",
+      "context": "yes",
+      "image_input": "unknown",
+      "max_output_tokens": "yes",
+      "reasoning_effort": "n/a",
+      "sampling": "yes",
+      "speculative_decoding": "yes",
+      "thinking": "yes",
+      "tool_calling": "yes"
+    },
+    "sdk": {
+      "hrx_loom": "0.3.0",
+      "source": "pypi",
+      "hrx_system_sha": "e2c41a720363911c04606ce0f4417e2d55630352",
+      "wheel_sha256": "6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f"
+    },
+    "files": {
+      "info.json": "436507c80824f406247beb718550eb3a33f9958e4d58d633ceb2f93f8433df99",
+      "model.json": "c7f425de2cbf5afe6c1074094afa565d5b508bfce8b2ae6c05f358c3f505c512",
+      "model.json.lock": "e6c74a83468d7d95a191cd1ec650b82f5f2a92a0faf1ce8645601fb55ecce381",
+      "llm_config.json": "7a019b7a81ecb10dc93a79a1faefc11bead877cb7d49f4c92cea384c4f821e42"
+    },
+    "package_serve": null,
+    "published_rows": [
+      "decode",
+      "decode_2k",
+      "decode_32k",
+      "prefill_16k",
+      "prefill_1k",
+      "prefill_2k",
+      "prefill_32k",
+      "prefill_8k",
+      "streams4"
+    ],
+    "preset": "chat",
+    "context_tokens": 40960,
+    "execution_rows": 4
+  },
+  {
+    "gpu": "strix-halo",
+    "slug": "ggml-org-Qwen3-Coder-30B-A3B-Instruct-loom",
+    "repo": "loom-fun-staging/ggml-org-Qwen3-Coder-30B-A3B-Instruct-loom",
+    "revision": "bcbd57a85f11b17007bf049e38b432a16a4bf908",
+    "device": "amdgpu://?completion_spin_ns=4294967295",
+    "args": [
+      "--pool_backing=fixed"
+    ],
+    "model_id": "Qwen/Qwen3-Coder-30B-A3B-Instruct",
+    "features": {
+      "api": "yes",
+      "audio": "unknown",
+      "concurrency": "yes",
+      "context": "yes",
+      "image_input": "unknown",
+      "max_output_tokens": "yes",
+      "reasoning_effort": "n/a",
+      "sampling": "yes",
+      "speculative_decoding": "yes",
+      "thinking": "n/a",
+      "tool_calling": "yes"
+    },
+    "sdk": {
+      "hrx_loom": "0.3.0",
+      "source": "pypi",
+      "hrx_system_sha": "e2c41a720363911c04606ce0f4417e2d55630352",
+      "wheel_sha256": "6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f"
+    },
+    "files": {
+      "info.json": "cf14dc81a4a9187ab00f4717a1df5c9ae4d8bdac362eb739e896d4ab6391b1da",
+      "model.json": "3512811f49210a91b6049abc3364494afc1875bc6dbbd5fb62a56fbf7a118cfd",
+      "model.json.lock": "644dfb093bf60e669cb2401655116a4eb70ee878fdc2ea74523614c7c9daa54c",
+      "llm_config.json": "87b09589fc6c4797be07ff2ffc636fa8a3e2171998a080cf2f89ec6cd3c48b96"
+    },
+    "package_serve": null,
+    "published_rows": [
+      "decode",
+      "decode_2k",
+      "decode_32k",
+      "prefill_16k",
+      "prefill_1k",
+      "prefill_2k",
+      "prefill_32k",
+      "prefill_8k",
+      "streams4"
+    ],
+    "preset": "chat",
+    "context_tokens": 262144,
+    "execution_rows": 4
+  },
+  {
+    "gpu": "strix-halo",
+    "slug": "ggml-org-Qwen3.6-27B-loom",
+    "repo": "loom-fun-staging/ggml-org-Qwen3.6-27B-loom",
+    "revision": "3461051f6617b0b1edbd11e234aa357ac51d7cd6",
+    "device": "amdgpu://?completion_spin_ns=4294967295",
+    "args": [
+      "--pool_backing=fixed"
+    ],
+    "model_id": "Qwen/Qwen3.6-27B",
+    "features": {
+      "api": "yes",
+      "audio": "unknown",
+      "concurrency": "yes",
+      "context": "yes",
+      "image_input": "yes",
+      "max_output_tokens": "yes",
+      "reasoning_effort": "n/a",
+      "sampling": "yes",
+      "speculative_decoding": "yes",
+      "thinking": "yes",
+      "tool_calling": "yes"
+    },
+    "sdk": {
+      "hrx_loom": "0.3.0",
+      "source": "pypi",
+      "hrx_system_sha": "e2c41a720363911c04606ce0f4417e2d55630352",
+      "wheel_sha256": "6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f"
+    },
+    "files": {
+      "info.json": "eb5dcb567c25df59c4307ae49fe943fce5c7b157e52af50785a10c9e4ecedf9c",
+      "model.json": "0ffa0da18e8dee2d24ae7a04a6c2d3149a3adccda30ae37b293af83173cb385a",
+      "model.json.lock": "47bf3e4413e3a74603ce1bec828ecdd94940042866e043a29b4edba765a93a1d",
+      "llm_config.json": "5fb2b187bd13bdb237ef3e73360fa3ee62ef482af4537dd8c21510a4a0e24512"
+    },
+    "package_serve": null,
+    "published_rows": [
+      "decode",
+      "decode_2k",
+      "decode_32k",
+      "prefill_16k",
+      "prefill_1k",
+      "prefill_2k",
+      "prefill_32k",
+      "prefill_8k",
+      "streams4"
+    ],
+    "preset": "chat",
+    "context_tokens": 262144,
+    "execution_rows": 4
+  },
+  {
+    "gpu": "strix-halo",
+    "slug": "ggml-org-Qwen3.6-35B-A3B-loom",
+    "repo": "loom-fun-staging/ggml-org-Qwen3.6-35B-A3B-loom",
+    "revision": "8539f05b682a737d11cbc1761fed49f7a2885114",
+    "device": "amdgpu://?completion_spin_ns=4294967295",
+    "args": [
+      "--pool_backing=fixed"
+    ],
+    "model_id": "Qwen/Qwen3.6-35B-A3B",
+    "features": {
+      "api": "yes",
+      "audio": "unknown",
+      "concurrency": "yes",
+      "context": "yes",
+      "image_input": "yes",
+      "max_output_tokens": "yes",
+      "reasoning_effort": "n/a",
+      "sampling": "yes",
+      "speculative_decoding": "yes",
+      "thinking": "yes",
+      "tool_calling": "yes"
+    },
+    "sdk": {
+      "hrx_loom": "0.3.0",
+      "source": "pypi",
+      "hrx_system_sha": "e2c41a720363911c04606ce0f4417e2d55630352",
+      "wheel_sha256": "6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f"
+    },
+    "files": {
+      "info.json": "6018759f4c9b2f215a65a199641ef986af03b5ae1e4a0c1941a9d475ecb8e78c",
+      "model.json": "d718a78c92ded24fa1e29d063f381b20ee99c4ec93e78473ad64c0f34d99cf77",
+      "model.json.lock": "a3ec2da7f9c0e210807de0c547937b250b045b46612d69f78fe36a108bd6116e",
+      "llm_config.json": "d345acf9fbdce74ff702bd0e3b17e3782443b1e6879bd049dd2e9360fb9a1192"
+    },
+    "package_serve": null,
+    "published_rows": [
+      "decode",
+      "decode_2k",
+      "decode_32k",
+      "prefill_16k",
+      "prefill_1k",
+      "prefill_2k",
+      "prefill_32k",
+      "prefill_8k",
+      "streams4"
+    ],
+    "preset": "chat",
+    "context_tokens": 262144,
+    "execution_rows": 4
+  },
+  {
+    "gpu": "strix-halo",
+    "slug": "ggml-org-gemma-3-1b-it-loom",
+    "repo": "loom-fun-staging/ggml-org-gemma-3-1b-it-loom",
+    "revision": "5a0632af0a345c60ee321f5b13cf58c3f8292709",
+    "device": "amdgpu://?completion_spin_ns=4294967295",
+    "args": [
+      "--pool_backing=fixed"
+    ],
+    "model_id": "google/gemma-3-1b-it",
+    "features": {
+      "api": "yes",
+      "audio": "unknown",
+      "concurrency": "yes",
+      "context": "yes",
+      "image_input": "unknown",
+      "max_output_tokens": "yes",
+      "reasoning_effort": "n/a",
+      "sampling": "yes",
+      "speculative_decoding": "n/a",
+      "thinking": "n/a",
+      "tool_calling": "n/a"
+    },
+    "sdk": {
+      "hrx_loom": "0.3.0",
+      "source": "pypi",
+      "hrx_system_sha": "e2c41a720363911c04606ce0f4417e2d55630352",
+      "wheel_sha256": "6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f"
+    },
+    "files": {
+      "info.json": "4c80cfa182173823e6b8f8f22bae9e2bb967cbe61ca6150c38fc52e11b4669bb",
+      "model.json": "cbb40a171188f0e93159f06487cac5e133b516ff583c362670de0692aaebe0d4",
+      "model.json.lock": "1a6be38f2c60e7bfb4cf75a5858084d482dfa5d1e4061664d05caadedbda0000",
+      "llm_config.json": "606dc42a9e4fffe510344a59aaded4855392b0881dcaa5963ba5fe574a0853ae"
+    },
+    "package_serve": null,
+    "published_rows": [
+      "decode",
+      "decode_2k",
+      "prefill_16k",
+      "prefill_1k",
+      "prefill_2k",
+      "prefill_8k",
+      "streams4"
+    ],
+    "preset": "chat",
+    "context_tokens": 32768,
+    "execution_rows": 4
+  },
+  {
+    "gpu": "strix-halo",
+    "slug": "jdopensource-JoyAI-LLM-Flash-loom",
+    "repo": "loom-fun-staging/jdopensource-JoyAI-LLM-Flash-loom",
+    "revision": "1c3c331fcfdb784eabe03231b9a4ee6ba44c11ff",
+    "device": "amdgpu://?completion_spin_ns=4294967295",
+    "args": [
+      "--pool_backing=fixed"
+    ],
+    "model_id": "jdopensource/JoyAI-LLM-Flash",
+    "features": {
+      "api": "yes",
+      "audio": "unknown",
+      "concurrency": "yes",
+      "context": "yes",
+      "image_input": "unknown",
+      "max_output_tokens": "yes",
+      "reasoning_effort": "n/a",
+      "sampling": "yes",
+      "speculative_decoding": "n/a",
+      "thinking": "n/a",
+      "tool_calling": "yes"
+    },
+    "sdk": {
+      "hrx_loom": "0.3.0",
+      "source": "pypi",
+      "hrx_system_sha": "e2c41a720363911c04606ce0f4417e2d55630352",
+      "wheel_sha256": "6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f"
+    },
+    "files": {
+      "info.json": "97daf35bbe2543ff270ecf3eb47d06f18613e505c97d02de5d4071d300f27c99",
+      "model.json": "19d8b6c0155efcb0f9d70931dffcdc13609764edb5280b41967eeeff60dabd71",
+      "model.json.lock": "706f40b63c8eac871b6e9126dd68676deb69dca5df0d8823f7f9bd25ac496ea3",
+      "llm_config.json": "27db20bdba181551ec9cdb35c8116da793f618b3cbcd07367881772b1609fce4"
+    },
+    "package_serve": null,
+    "published_rows": [
+      "decode",
+      "decode_2k",
+      "decode_32k",
+      "prefill_16k",
+      "prefill_1k",
+      "prefill_2k",
+      "prefill_32k",
+      "prefill_8k",
+      "streams4"
+    ],
+    "preset": "chat",
+    "context_tokens": 131072,
+    "execution_rows": 4
+  },
+  {
+    "gpu": "strix-halo",
+    "slug": "lmstudio-community-Ornith-1.0-35B-loom",
+    "repo": "loom-fun-staging/lmstudio-community-Ornith-1.0-35B-loom",
+    "revision": "ce94de7807369ecaa88fa7c3ef2a01e3f84501e0",
+    "device": "amdgpu://?completion_spin_ns=4294967295",
+    "args": [
+      "--pool_backing=fixed"
+    ],
+    "model_id": "ornith-ai/Ornith-1.0-35B",
+    "features": {
+      "api": "yes",
+      "audio": "unknown",
+      "concurrency": "yes",
+      "context": "yes",
+      "image_input": "yes",
+      "max_output_tokens": "yes",
+      "reasoning_effort": "n/a",
+      "sampling": "yes",
+      "speculative_decoding": "n/a",
+      "thinking": "yes",
+      "tool_calling": "yes"
+    },
+    "sdk": {
+      "hrx_loom": "0.3.0",
+      "source": "pypi",
+      "hrx_system_sha": "e2c41a720363911c04606ce0f4417e2d55630352",
+      "wheel_sha256": "6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f"
+    },
+    "files": {
+      "info.json": "8e2ac4ee685ef5c700c9cd5e000fc21675287ef417aded55fc1de24d2b64b7d6",
+      "model.json": "74a57b1492edb4f6f93aea2fa8a6d4f23206c45c66d9af41822b7da120090d9b",
+      "model.json.lock": "7d3d7771da67e9e9772c0ce3960371cc278cba81625471c18f4d9e6948db358e",
+      "llm_config.json": "fd37ac5ccd2abf7024e561359838835b57e3a81b1ad076a145fe026d989c93b4"
+    },
+    "package_serve": null,
+    "published_rows": [
+      "decode",
+      "decode_2k",
+      "decode_32k",
+      "prefill_16k",
+      "prefill_1k",
+      "prefill_2k",
+      "prefill_32k",
+      "prefill_8k",
+      "streams4"
+    ],
+    "preset": "chat",
+    "context_tokens": 262144,
+    "execution_rows": 4
+  },
+  {
+    "gpu": "strix-halo",
+    "slug": "lmstudio-community-gemma-4-26B-A4B-it-loom",
+    "repo": "loom-fun-staging/lmstudio-community-gemma-4-26B-A4B-it-loom",
+    "revision": "304c2bef6ed1993a4de801904eec8832528c1dc2",
+    "device": "amdgpu://?completion_spin_ns=4294967295",
+    "args": [
+      "--pool_backing=fixed"
+    ],
+    "model_id": "google/gemma-4-26B-A4B-it",
+    "features": {
+      "api": "yes",
+      "audio": "unknown",
+      "concurrency": "yes",
+      "context": "yes",
+      "image_input": "unknown",
+      "max_output_tokens": "yes",
+      "reasoning_effort": "n/a",
+      "sampling": "yes",
+      "speculative_decoding": "yes",
+      "thinking": "yes",
+      "tool_calling": "yes"
+    },
+    "sdk": {
+      "hrx_loom": "0.3.0",
+      "source": "pypi",
+      "hrx_system_sha": "e2c41a720363911c04606ce0f4417e2d55630352",
+      "wheel_sha256": "6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f"
+    },
+    "files": {
+      "info.json": "d02de4d3cb6900053009ff3b2ca76e141dc9314641dbd6821c51e5eead1c2867",
+      "model.json": "3a727e18dbafcd2bd62d72d99eb20ca216870de66ac5f52f849e459324a5eb7a",
+      "model.json.lock": "1fd65e7850cd28581179408fd156d44f0d9fa642d219308933c1de94600927b8",
+      "llm_config.json": "00de54d49e80a908ff4ade1b8a7f7214593ea54208e04dbec5baf41efff9fc93"
+    },
+    "package_serve": null,
+    "published_rows": [
+      "decode",
+      "decode_2k",
+      "decode_32k",
+      "prefill_16k",
+      "prefill_1k",
+      "prefill_2k",
+      "prefill_32k",
+      "prefill_8k",
+      "streams4"
+    ],
+    "preset": "chat",
+    "context_tokens": 201728,
+    "execution_rows": 4
+  },
+  {
+    "gpu": "strix-halo",
+    "slug": "nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom",
+    "repo": "loom-fun-staging/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom",
+    "revision": "16768be46bbce2df1ebb754956e2681261e664f8",
+    "device": "amdgpu://?completion_spin_ns=4294967295",
+    "args": [
+      "--pool_backing=fixed"
+    ],
+    "model_id": "nemotron-3.5-bolt-e4b",
+    "features": {
+      "api": "yes",
+      "audio": "unknown",
+      "concurrency": "yes",
+      "context": "yes",
+      "image_input": "yes",
+      "max_output_tokens": "yes",
+      "reasoning_effort": "n/a",
+      "sampling": "yes",
+      "speculative_decoding": "yes",
+      "thinking": "yes",
+      "tool_calling": "yes"
+    },
+    "sdk": {
+      "hrx_loom": "0.3.0",
+      "source": "pypi",
+      "hrx_system_sha": "e2c41a720363911c04606ce0f4417e2d55630352",
+      "wheel_sha256": "6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f"
+    },
+    "files": {
+      "info.json": "bf9e8bd2ce8670fb429467b6337b596bf6bc393a9cd5415b87beab1ae7e54b78",
+      "model.json": "85ed1130df7e0461d3bdd48c37fdee078bc10a74d984d36a3a32c41cb81597c2",
+      "model.json.lock": "fe9cc86af2a0a3fc5203aca37cbf76a126498437b449512eaecac03a2256dee4",
+      "llm_config.json": "a677903959ad8d58484980382c5b78dfab31d9e32d0417b8d8ee06ef7a65db04"
+    },
+    "package_serve": null,
+    "published_rows": [
+      "decode",
+      "decode_2k",
+      "decode_32k",
+      "prefill_16k",
+      "prefill_1k",
+      "prefill_2k",
+      "prefill_32k",
+      "prefill_8k",
+      "streams4"
+    ],
+    "preset": "chat",
+    "context_tokens": 131072,
+    "execution_rows": 4
+  },
+  {
+    "gpu": "strix-halo",
+    "slug": "rippertnt-HyperCLOVAX-SEED-Text-Instruct-1.5B-loom",
+    "repo": "loom-fun-staging/rippertnt-HyperCLOVAX-SEED-Text-Instruct-1.5B-loom",
+    "revision": "b81c05d4348b3fd1fc3a7f17c1ace06c9da84470",
+    "device": "amdgpu://?completion_spin_ns=4294967295",
+    "args": [
+      "--pool_backing=fixed"
+    ],
+    "model_id": "naver-hyperclovax/HyperCLOVAX-SEED-Text-Instruct-1.5B",
+    "features": {
+      "api": "yes",
+      "audio": "unknown",
+      "concurrency": "yes",
+      "context": "yes",
+      "image_input": "unknown",
+      "max_output_tokens": "yes",
+      "reasoning_effort": "n/a",
+      "sampling": "yes",
+      "speculative_decoding": "n/a",
+      "thinking": "n/a",
+      "tool_calling": "n/a"
+    },
+    "sdk": {
+      "hrx_loom": "0.3.0",
+      "source": "pypi",
+      "hrx_system_sha": "e2c41a720363911c04606ce0f4417e2d55630352",
+      "wheel_sha256": "6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f"
+    },
+    "files": {
+      "info.json": "e3a55c17c08393e56063924757b911054aae557c97a0ddf98d91a2cf354e3e03",
+      "model.json": "5428f5f85d175f399571bb814cf26bb99c320a20f21da58fe1cd54f27548a49b",
+      "model.json.lock": "301f72804848cf14e68f8921fb66e7f3a8d245ddbe767b32aa35e6ea0a68583e",
+      "llm_config.json": "164237c070bb6ff4c03120df095ec392e419b26b3a8e53013bd8ca98556eb1f6"
+    },
+    "package_serve": null,
+    "published_rows": [
+      "decode",
+      "decode_2k",
+      "decode_32k",
+      "prefill_16k",
+      "prefill_1k",
+      "prefill_2k",
+      "prefill_32k",
+      "prefill_8k",
+      "streams4"
+    ],
+    "preset": "chat",
+    "context_tokens": 131072,
+    "execution_rows": 4
+  },
+  {
+    "gpu": "strix-halo",
+    "slug": "unsloth-Inkling-2-Mini-loom",
+    "repo": "loom-fun-staging/unsloth-Inkling-2-Mini-loom",
+    "revision": "44d754c12601125e34b9d32685c5c01c0bf198cf",
+    "device": "amdgpu://?completion_spin_ns=4294967295",
+    "args": [
+      "--pool_backing=fixed"
+    ],
+    "model_id": "Inkling-2-Mini",
+    "features": {
+      "api": "yes",
+      "audio": "n/a",
+      "concurrency": "yes",
+      "context": "yes",
+      "image_input": "no",
+      "max_output_tokens": "yes",
+      "reasoning_effort": "yes",
+      "sampling": "no",
+      "speculative_decoding": "yes",
+      "thinking": "yes",
+      "tool_calling": "yes"
+    },
+    "sdk": {
+      "hrx_loom": "0.3.0",
+      "source": "pypi",
+      "hrx_system_sha": "e2c41a720363911c04606ce0f4417e2d55630352",
+      "wheel_sha256": "6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f"
+    },
+    "files": {
+      "info.json": "98b75cc73c3b2edcaf547b174238deb9fad665ab5cd28f07893b85c548852845",
+      "model.json": "384039ebd9a67ed5ec5e94bb895a1731d5ebbb78dbee864c370819a7a1b93f2e",
+      "model.json.lock": "79ed20d4ebcbb79a79228304bda0780e983d2fa6527f752a3c7614ff99fdf565",
+      "llm_config.json": "c9eab78173a39302934deadeb3615cf2738c4dfdb4b5de3b136fcbca456fe544"
+    },
+    "package_serve": null,
+    "published_rows": [
+      "decode",
+      "decode_2k",
+      "decode_32k",
+      "prefill_16k",
+      "prefill_1k",
+      "prefill_2k",
+      "prefill_32k",
+      "prefill_8k",
+      "streams4"
+    ],
+    "preset": "chat",
+    "context_tokens": 262144,
+    "execution_rows": 4
+  },
+  {
+    "gpu": "strix-halo",
+    "slug": "unsloth-Inkling-2-Mini-loom-r9700",
+    "repo": "loom-fun-staging/unsloth-Inkling-2-Mini-loom-r9700",
+    "revision": "072bdc02bfba879ea099b877c3acf29b044aad8f",
+    "device": "amdgpu://?completion_spin_ns=4294967295",
+    "args": [
+      "--pool_backing=fixed"
+    ],
+    "model_id": "thinkingmachines/Inkling-2-Mini",
+    "features": {
+      "api": "yes",
+      "audio": "n/a",
+      "concurrency": "yes",
+      "context": "yes",
+      "image_input": "no",
+      "max_output_tokens": "yes",
+      "reasoning_effort": "yes",
+      "sampling": "yes",
+      "speculative_decoding": "n/a",
+      "thinking": "yes",
+      "tool_calling": "yes"
+    },
+    "sdk": {
+      "hrx_loom": "0.3.0",
+      "source": "pypi",
+      "wheel_sha256": "6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f",
+      "hrx_system_sha": null
+    },
+    "files": {
+      "info.json": "c4cf8a3131347d63744600ef7f9af017c6eaeb90e290cd31d2989ebe9ee1211a",
+      "model.json": "5655805544626ab8c8a26218595baf0d2cf24a91fc3135a30a4f7d6f53ff065a",
+      "model.json.lock": "e3394e1ca7b12e84ed828223cc1a623075eeb35ac284ef41686d30cf394d26fc",
+      "llm_config.json": "39e55b112e04f7a1d2ec13ab48df961835e450ad227f50f44ddc3f4567dbca9a"
+    },
+    "package_serve": null,
+    "published_rows": [],
+    "preset": "chat",
+    "context_tokens": 131072,
+    "execution_rows": 4
+  },
+  {
+    "gpu": "strix-halo",
+    "slug": "unsloth-Llama-3.2-3B-Instruct-loom",
+    "repo": "loom-fun-staging/unsloth-Llama-3.2-3B-Instruct-loom",
+    "revision": "9094f01f44a454273b13519c3d54348d04fa5ccb",
+    "device": "amdgpu://?completion_spin_ns=4294967295",
+    "args": [
+      "--pool_backing=fixed"
+    ],
+    "model_id": "meta-llama/Llama-3.2-3B-Instruct",
+    "features": {
+      "api": "yes",
+      "audio": "unknown",
+      "concurrency": "yes",
+      "context": "yes",
+      "image_input": "unknown",
+      "max_output_tokens": "yes",
+      "reasoning_effort": "n/a",
+      "sampling": "yes",
+      "speculative_decoding": "n/a",
+      "thinking": "n/a",
+      "tool_calling": "yes"
+    },
+    "sdk": {
+      "hrx_loom": "0.3.0",
+      "source": "pypi",
+      "hrx_system_sha": "e2c41a720363911c04606ce0f4417e2d55630352",
+      "wheel_sha256": "6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f"
+    },
+    "files": {
+      "info.json": "eb808efb983ba887e640750bce507fd92514647c530f721a13244f6d77e17ebc",
+      "model.json": "d0d2ae4a85fed589a9d9e75e99e97772d43590ed3ca67446f262002e664ef5c9",
+      "model.json.lock": "8cc35caba71c137b6de5757ac06d0828163a5ca71b4558e40a40eee3aaf00e1c",
+      "llm_config.json": "f8371c148f85b9b1975a65f9bedab91bb07fcd0f4eeb368c4339d0cabd2bb6ac"
+    },
+    "package_serve": null,
+    "published_rows": [
+      "decode",
+      "decode_2k",
+      "decode_32k",
+      "prefill_16k",
+      "prefill_1k",
+      "prefill_2k",
+      "prefill_32k",
+      "prefill_8k",
+      "streams4"
+    ],
+    "preset": "chat",
+    "context_tokens": 131072,
+    "execution_rows": 4
+  },
+  {
+    "gpu": "strix-halo",
+    "slug": "unsloth-Ornith-1.0-9B-loom",
+    "repo": "loom-fun-staging/unsloth-Ornith-1.0-9B-loom",
+    "revision": "749adafe5130f526e1ffef9b42b48578647e7ce4",
+    "device": "amdgpu://?completion_spin_ns=4294967295",
+    "args": [
+      "--pool_backing=fixed"
+    ],
+    "model_id": "deepreinforce-ai/Ornith-1.0-9B",
+    "features": {
+      "api": "yes",
+      "audio": "unknown",
+      "concurrency": "yes",
+      "context": "yes",
+      "image_input": "yes",
+      "max_output_tokens": "yes",
+      "reasoning_effort": "n/a",
+      "sampling": "yes",
+      "speculative_decoding": "n/a",
+      "thinking": "yes",
+      "tool_calling": "yes"
+    },
+    "sdk": {
+      "hrx_loom": "0.3.0",
+      "source": "pypi",
+      "hrx_system_sha": "e2c41a720363911c04606ce0f4417e2d55630352",
+      "wheel_sha256": "6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f"
+    },
+    "files": {
+      "info.json": "bb9f8bca8f0c6600d4f833058ea1a615893308583304d3b4d7a2f92bd92df54e",
+      "model.json": "f8ba8223c6a4c19429d098907efdfebaf043fa51e5e75c18d9890681e58d215f",
+      "model.json.lock": "f6615809589c2098eb98767bf6390d27b10ebe437245a8d1c10fec7f5c476305",
+      "llm_config.json": "43a56fc9a3d8a726cfc18c28ebd996519eae79eea091b59a8ca552b387ad4bbb"
+    },
+    "package_serve": null,
+    "published_rows": [
+      "decode",
+      "decode_2k",
+      "decode_32k",
+      "prefill_16k",
+      "prefill_1k",
+      "prefill_2k",
+      "prefill_32k",
+      "prefill_8k",
+      "streams4"
+    ],
+    "preset": "chat",
+    "context_tokens": 262144,
+    "execution_rows": 4
+  },
+  {
+    "gpu": "strix-halo",
+    "slug": "unsloth-Qwen3-0.6B-loom",
+    "repo": "loom-fun-staging/unsloth-Qwen3-0.6B-loom",
+    "revision": "f3ffda86d7bd1fa98d615f4972a7d3f82345294c",
+    "device": "amdgpu://?completion_spin_ns=4294967295",
+    "args": [
+      "--pool_backing=fixed"
+    ],
+    "model_id": "Qwen/Qwen3-0.6B",
+    "features": {
+      "api": "yes",
+      "audio": "n/a",
+      "concurrency": "yes",
+      "context": "yes",
+      "image_input": "n/a",
+      "max_output_tokens": "yes",
+      "reasoning_effort": "n/a",
+      "sampling": "yes",
+      "speculative_decoding": "n/a",
+      "thinking": "yes",
+      "tool_calling": "yes"
+    },
+    "sdk": {
+      "branch": "v0.3.0",
+      "hrx_loom": "0.3.0",
+      "hrx_system_sha": "e2c41a720363911c04606ce0f4417e2d55630352",
+      "source": "pypi",
+      "wheel_sha256": "6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f"
+    },
+    "files": {
+      "info.json": "1e69d791039e6033327af153e2387d7b3fcd679a3e80b9bda6247e9209eb2647",
+      "model.json": "c411b99905c9498d2ee779c856c3a3b9c4e0a3587cb73759c73fa40388783d3e",
+      "model.json.lock": "73ef40ffd343d9c054b203c09f7a4afe1b1b4237c725a715c7b197c8d68e6209",
+      "llm_config.json": "6114f90483356c3488ad5af0d5d41c44a5e5b42ac0dfa408d823bc93df5ce3d5"
+    },
+    "package_serve": null,
+    "published_rows": [
+      "decode",
+      "decode_2k",
+      "decode_32k",
+      "prefill_16k",
+      "prefill_1k",
+      "prefill_2k",
+      "prefill_32k",
+      "prefill_8k",
+      "streams4"
+    ],
+    "preset": "chat",
+    "context_tokens": 40960,
+    "execution_rows": 4
+  },
+  {
+    "gpu": "strix-halo",
+    "slug": "unsloth-Qwen3-30B-A3B-Instruct-2507-loom",
+    "repo": "loom-fun-staging/unsloth-Qwen3-30B-A3B-Instruct-2507-loom",
+    "revision": "1137cca35ae187921520be465b50a85bcb7a4f2a",
+    "device": "amdgpu://?completion_spin_ns=4294967295",
+    "args": [
+      "--pool_backing=fixed"
+    ],
+    "model_id": "Qwen/Qwen3-30B-A3B-Instruct-2507",
+    "features": {
+      "api": "yes",
+      "audio": "unknown",
+      "concurrency": "yes",
+      "context": "yes",
+      "image_input": "unknown",
+      "max_output_tokens": "yes",
+      "reasoning_effort": "n/a",
+      "sampling": "yes",
+      "speculative_decoding": "yes",
+      "thinking": "n/a",
+      "tool_calling": "yes"
+    },
+    "sdk": {
+      "hrx_loom": "0.3.0",
+      "source": "pypi",
+      "hrx_system_sha": "e2c41a720363911c04606ce0f4417e2d55630352",
+      "wheel_sha256": "6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f"
+    },
+    "files": {
+      "info.json": "32782eb327638dce87384f3420368eb488a7a56d724053cfc9f4fa328ec9dc9e",
+      "model.json": "cc29d5e52616dd1e71eadadccc2a1db7136f2fe9e6e60400069cd666c5668cad",
+      "model.json.lock": "9ea3c7b89bb5633e9fd3f8ba078bb2115a66cc11c66c1a03dfe67cd0b1f32559",
+      "llm_config.json": "54e45635ccedf35c1f7d2a119ef1a2ab9ef62534d51650a949c91e6c9be2a394"
+    },
+    "package_serve": null,
+    "published_rows": [
+      "decode",
+      "decode_2k",
+      "decode_32k",
+      "prefill_16k",
+      "prefill_1k",
+      "prefill_2k",
+      "prefill_32k",
+      "prefill_8k",
+      "streams4"
+    ],
+    "preset": "chat",
+    "context_tokens": 262144,
+    "execution_rows": 4
+  },
+  {
+    "gpu": "strix-halo",
+    "slug": "unsloth-Qwen3-4B-Instruct-2507-loom",
+    "repo": "loom-fun-staging/unsloth-Qwen3-4B-Instruct-2507-loom",
+    "revision": "fcdfd0687ed1500a2ddfe7acd02f22392a9fd7c7",
+    "device": "amdgpu://?completion_spin_ns=4294967295",
+    "args": [
+      "--pool_backing=fixed"
+    ],
+    "model_id": "Qwen/Qwen3-4B-Instruct-2507",
+    "features": {
+      "api": "yes",
+      "audio": "unknown",
+      "concurrency": "yes",
+      "context": "yes",
+      "image_input": "unknown",
+      "max_output_tokens": "yes",
+      "reasoning_effort": "n/a",
+      "sampling": "yes",
+      "speculative_decoding": "yes",
+      "thinking": "n/a",
+      "tool_calling": "yes"
+    },
+    "sdk": {
+      "hrx_loom": "0.3.0",
+      "source": "pypi",
+      "hrx_system_sha": "e2c41a720363911c04606ce0f4417e2d55630352",
+      "wheel_sha256": "6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f"
+    },
+    "files": {
+      "info.json": "216228a6f4dbbdbee87450e10cf9e0576603cee9d3972db3c606dc108b9ca985",
+      "model.json": "3279f67532223d4c6381822d2cb618d98214fb88d5501b62a69e83971beebd37",
+      "model.json.lock": "6f392b0c75ad7eaabe4d41e1124379c3255dbbe758a349c428a6ade00ae66630",
+      "llm_config.json": "cc9b973680f223b53a9c51c607988fa264624206beb90e4841785135426988f1"
+    },
+    "package_serve": null,
+    "published_rows": [
+      "decode",
+      "decode_2k",
+      "decode_32k",
+      "prefill_16k",
+      "prefill_1k",
+      "prefill_2k",
+      "prefill_32k",
+      "prefill_8k",
+      "streams4"
+    ],
+    "preset": "chat",
+    "context_tokens": 262144,
+    "execution_rows": 4
+  },
+  {
+    "gpu": "strix-halo",
+    "slug": "unsloth-Qwen3-8B-loom",
+    "repo": "loom-fun-staging/unsloth-Qwen3-8B-loom",
+    "revision": "5e54f70c7a2394347fff91fcfdf4ca818ad76067",
+    "device": "amdgpu://?completion_spin_ns=4294967295",
+    "args": [
+      "--pool_backing=fixed"
+    ],
+    "model_id": "Qwen/Qwen3-8B",
+    "features": {
+      "api": "yes",
+      "audio": "unknown",
+      "concurrency": "yes",
+      "context": "yes",
+      "image_input": "unknown",
+      "max_output_tokens": "yes",
+      "reasoning_effort": "n/a",
+      "sampling": "yes",
+      "speculative_decoding": "yes",
+      "thinking": "yes",
+      "tool_calling": "yes"
+    },
+    "sdk": {
+      "hrx_loom": "0.3.0",
+      "source": "pypi",
+      "hrx_system_sha": "e2c41a720363911c04606ce0f4417e2d55630352",
+      "wheel_sha256": "6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f"
+    },
+    "files": {
+      "info.json": "2c261b0984aacd767d7d457962f5f13ad39fe4f7453306e2a5b8b4b925b337ea",
+      "model.json": "493d6b25d6360b8788d52e7cc23fcdf86a531a437b3657f988053daf35376a85",
+      "model.json.lock": "968cf127a64e1e9fc8bf78fa1e959bab37169b9c156cdc262ba2c474cf1e10f3",
+      "llm_config.json": "4dfadbb81fd3575c66126f042c68ec5ce20835704dda40295a1ee9f040e442b6"
+    },
+    "package_serve": null,
+    "published_rows": [
+      "decode",
+      "decode_2k",
+      "decode_32k",
+      "prefill_16k",
+      "prefill_1k",
+      "prefill_2k",
+      "prefill_32k",
+      "prefill_8k",
+      "streams4"
+    ],
+    "preset": "chat",
+    "context_tokens": 40960,
+    "execution_rows": 4
+  },
+  {
+    "gpu": "strix-halo",
+    "slug": "unsloth-Qwen3-VL-4B-Instruct-loom",
+    "repo": "loom-fun-staging/unsloth-Qwen3-VL-4B-Instruct-loom",
+    "revision": "0bb0f1eec73b15b8da3829c4b35e9125d438e699",
+    "device": "amdgpu://?completion_spin_ns=4294967295",
+    "args": [
+      "--pool_backing=fixed"
+    ],
+    "model_id": "Qwen/Qwen3-VL-4B-Instruct",
+    "features": {
+      "api": "yes",
+      "audio": "unknown",
+      "concurrency": "yes",
+      "context": "yes",
+      "image_input": "yes",
+      "max_output_tokens": "yes",
+      "reasoning_effort": "n/a",
+      "sampling": "yes",
+      "speculative_decoding": "n/a",
+      "thinking": "n/a",
+      "tool_calling": "yes"
+    },
+    "sdk": {
+      "hrx_loom": "0.3.0",
+      "source": "pypi",
+      "hrx_system_sha": "e2c41a720363911c04606ce0f4417e2d55630352",
+      "wheel_sha256": "6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f"
+    },
+    "files": {
+      "info.json": "ff86941e366effb0a9010e1b910729b9de242e1aed1f8a12dfd4d4d5a08d3c01",
+      "model.json": "6881aa1eea661a421fd573ffc9b78854e6ce6f18113d36052a4cdaabb4b308fb",
+      "model.json.lock": "c47a591cf0b2cb947889e517c579a180bfb73283782fc9c9c6c13db8906d924f",
+      "llm_config.json": "4f0a6a903e8ce4f918c2601aef738826b0798b0fcc24a437db8cb0ee6a59d6bb"
+    },
+    "package_serve": null,
+    "published_rows": [
+      "decode",
+      "decode_2k",
+      "decode_32k",
+      "prefill_16k",
+      "prefill_1k",
+      "prefill_2k",
+      "prefill_32k",
+      "prefill_8k",
+      "streams4"
+    ],
+    "preset": "chat",
+    "context_tokens": 262144,
+    "execution_rows": 4
+  },
+  {
+    "gpu": "strix-halo",
+    "slug": "unsloth-Qwen3-VL-8B-Instruct-loom",
+    "repo": "loom-fun-staging/unsloth-Qwen3-VL-8B-Instruct-loom",
+    "revision": "2dac6159c56a4b3ecaa7d861676b5f31df3a8c5a",
+    "device": "amdgpu://?completion_spin_ns=4294967295",
+    "args": [
+      "--pool_backing=fixed"
+    ],
+    "model_id": "Qwen/Qwen3-VL-8B-Instruct",
+    "features": {
+      "api": "yes",
+      "audio": "unknown",
+      "concurrency": "yes",
+      "context": "yes",
+      "image_input": "yes",
+      "max_output_tokens": "yes",
+      "reasoning_effort": "n/a",
+      "sampling": "yes",
+      "speculative_decoding": "n/a",
+      "thinking": "n/a",
+      "tool_calling": "yes"
+    },
+    "sdk": {
+      "hrx_loom": "0.3.0",
+      "source": "pypi",
+      "hrx_system_sha": "e2c41a720363911c04606ce0f4417e2d55630352",
+      "wheel_sha256": "6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f"
+    },
+    "files": {
+      "info.json": "8cb2169b110a7c807f1960028508e5653c099d0b755def58c3a65da7bf447993",
+      "model.json": "92bd14878c506256a6f42f6e1cb1cba20d8130e2022b4fc9ac8c8f90a2d385cb",
+      "model.json.lock": "37b95bbf4f59c054c92cd2bf3eabce6fec00d38e2632dc6305bab485643bd7bd",
+      "llm_config.json": "7818d0ed27ca48ec7968c47e51a4bf84fdfcf6a389a1289b8bd9c2eef7348861"
+    },
+    "package_serve": null,
+    "published_rows": [
+      "decode",
+      "decode_2k",
+      "decode_32k",
+      "prefill_16k",
+      "prefill_1k",
+      "prefill_2k",
+      "prefill_32k",
+      "prefill_8k",
+      "streams4"
+    ],
+    "preset": "chat",
+    "context_tokens": 262144,
+    "execution_rows": 4
+  },
+  {
+    "gpu": "strix-halo",
+    "slug": "unsloth-Qwen3.5-0.8B-loom",
+    "repo": "loom-fun-staging/unsloth-Qwen3.5-0.8B-loom",
+    "revision": "5203d6867891bcbeccb26f9b44f537d60d22cc25",
+    "device": "amdgpu://?completion_spin_ns=4294967295",
+    "args": [
+      "--pool_backing=fixed"
+    ],
+    "model_id": "Qwen/Qwen3.5-0.8B",
+    "features": {
+      "api": "yes",
+      "audio": "unknown",
+      "concurrency": "yes",
+      "context": "yes",
+      "image_input": "yes",
+      "max_output_tokens": "yes",
+      "reasoning_effort": "n/a",
+      "sampling": "yes",
+      "speculative_decoding": "n/a",
+      "thinking": "yes",
+      "tool_calling": "yes"
+    },
+    "sdk": {
+      "hrx_loom": "0.3.0",
+      "source": "pypi",
+      "hrx_system_sha": "e2c41a720363911c04606ce0f4417e2d55630352",
+      "wheel_sha256": "6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f"
+    },
+    "files": {
+      "info.json": "d6ef9ef391560f4460ad7fd713e7b12719df6ebac1f2e50a13ae23f2eb4c6ecc",
+      "model.json": "68ddb0d9b85a49b200184c1c10db93d1b0ed4cd759b5bef06d50f5b7a3fdd3f8",
+      "model.json.lock": "952832f9afad36a98b83827c96f759758c15784c4a8ef9bc9e27601a0c0ba50a",
+      "llm_config.json": "d8f8d3016b0fd83f37567b19137ac5b3454e7edac4e34c6ad802b0d37bdc4289"
+    },
+    "package_serve": null,
+    "published_rows": [
+      "decode",
+      "decode_2k",
+      "decode_32k",
+      "prefill_16k",
+      "prefill_1k",
+      "prefill_2k",
+      "prefill_32k",
+      "prefill_8k",
+      "streams4"
+    ],
+    "preset": "chat",
+    "context_tokens": 262144,
+    "execution_rows": 4
+  },
+  {
+    "gpu": "strix-halo",
+    "slug": "unsloth-Qwen3.5-2B-loom",
+    "repo": "loom-fun-staging/unsloth-Qwen3.5-2B-loom",
+    "revision": "c95c49626a16f34507ce69561f7ab516ed1a4ce4",
+    "device": "amdgpu://?completion_spin_ns=4294967295",
+    "args": [
+      "--pool_backing=fixed"
+    ],
+    "model_id": "Qwen/Qwen3.5-2B",
+    "features": {
+      "api": "yes",
+      "audio": "unknown",
+      "concurrency": "yes",
+      "context": "yes",
+      "image_input": "yes",
+      "max_output_tokens": "yes",
+      "reasoning_effort": "n/a",
+      "sampling": "yes",
+      "speculative_decoding": "n/a",
+      "thinking": "yes",
+      "tool_calling": "yes"
+    },
+    "sdk": {
+      "hrx_loom": "0.3.0",
+      "source": "pypi",
+      "hrx_system_sha": "e2c41a720363911c04606ce0f4417e2d55630352",
+      "wheel_sha256": "6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f"
+    },
+    "files": {
+      "info.json": "919e89bac0871047c72677b63931119c212fa19dd58a1a367ac811c6f3e51661",
+      "model.json": "778b98dacce5e239896eb65cd9813b4c91adc876f0327086fcbde906b2f89fc3",
+      "model.json.lock": "6ffbed87b6afb2f706e878a17a0806f92dd5e015240cebc752de29a404b74f70",
+      "llm_config.json": "49cde79e2d0eace9ea90029636edcb50b0fa1d9ff59785075a0dd97df1078807"
+    },
+    "package_serve": null,
+    "published_rows": [
+      "decode",
+      "decode_2k",
+      "decode_32k",
+      "prefill_16k",
+      "prefill_1k",
+      "prefill_2k",
+      "prefill_32k",
+      "prefill_8k",
+      "streams4"
+    ],
+    "preset": "chat",
+    "context_tokens": 262144,
+    "execution_rows": 4
+  },
+  {
+    "gpu": "strix-halo",
+    "slug": "unsloth-Qwen3.5-35B-A3B-loom",
+    "repo": "loom-fun-staging/unsloth-Qwen3.5-35B-A3B-loom",
+    "revision": "2ae3bceb65e09c3e65a5869155e5010d24f7d1fa",
+    "device": "amdgpu://?completion_spin_ns=4294967295",
+    "args": [
+      "--pool_backing=fixed"
+    ],
+    "model_id": "Qwen/Qwen3.5-35B-A3B",
+    "features": {
+      "api": "yes",
+      "audio": "unknown",
+      "concurrency": "yes",
+      "context": "yes",
+      "image_input": "yes",
+      "max_output_tokens": "yes",
+      "reasoning_effort": "n/a",
+      "sampling": "yes",
+      "speculative_decoding": "yes",
+      "thinking": "yes",
+      "tool_calling": "yes"
+    },
+    "sdk": {
+      "hrx_loom": "0.3.0",
+      "source": "pypi",
+      "hrx_system_sha": "e2c41a720363911c04606ce0f4417e2d55630352",
+      "wheel_sha256": "6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f"
+    },
+    "files": {
+      "info.json": "2401fbc5ca16e8e14d97687f354b6ee2da3e338fca6033d9200f7784f2a9e565",
+      "model.json": "f2a3f3ad18fdaaa1595f55d888ff0e92223b8fc534feb043086b43e3491d4a9e",
+      "model.json.lock": "2d65f9d20c3c03dae9024a9ca75f7234d041d47d9c0c1378759adff8d6adec25",
+      "llm_config.json": "b9329d51b60b178dbff65bbf36ef5c79da6fdbe894e6d7bce69c09e7cbfb74ca"
+    },
+    "package_serve": null,
+    "published_rows": [
+      "decode",
+      "decode_2k",
+      "decode_32k",
+      "prefill_16k",
+      "prefill_1k",
+      "prefill_2k",
+      "prefill_32k",
+      "prefill_8k",
+      "streams4"
+    ],
+    "preset": "chat",
+    "context_tokens": 262144,
+    "execution_rows": 4
+  },
+  {
+    "gpu": "strix-halo",
+    "slug": "unsloth-Qwen3.5-4B-loom",
+    "repo": "loom-fun-staging/unsloth-Qwen3.5-4B-loom",
+    "revision": "d2d1a9bdacc9d12107c048acaa92387390162a05",
+    "device": "amdgpu://?completion_spin_ns=4294967295",
+    "args": [
+      "--pool_backing=fixed"
+    ],
+    "model_id": "Qwen/Qwen3.5-4B",
+    "features": {
+      "api": "yes",
+      "audio": "unknown",
+      "concurrency": "yes",
+      "context": "yes",
+      "image_input": "yes",
+      "max_output_tokens": "yes",
+      "reasoning_effort": "n/a",
+      "sampling": "yes",
+      "speculative_decoding": "yes",
+      "thinking": "yes",
+      "tool_calling": "yes"
+    },
+    "sdk": {
+      "hrx_loom": "0.3.0",
+      "source": "pypi",
+      "hrx_system_sha": "e2c41a720363911c04606ce0f4417e2d55630352",
+      "wheel_sha256": "6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f"
+    },
+    "files": {
+      "info.json": "63ed585f438fbb4c8591aef21db443590aca0fc74d06978a0e72d9f061ba630b",
+      "model.json": "360f2b7b1ed21230f06263cad917d13291e0b1a8362b58b8c2d417a7614e4acd",
+      "model.json.lock": "2822f73c9fac214f66d3bb3c87e17c4205a745bf6110d9a87f5878a7b7633c53",
+      "llm_config.json": "df2490faf6367da16ab26f313fd1eea2de83676db6527f134bb7bbfd1920fb84"
+    },
+    "package_serve": null,
+    "published_rows": [
+      "decode",
+      "decode_2k",
+      "decode_32k",
+      "prefill_16k",
+      "prefill_1k",
+      "prefill_2k",
+      "prefill_32k",
+      "prefill_8k",
+      "streams4"
+    ],
+    "preset": "chat",
+    "context_tokens": 262144,
+    "execution_rows": 4
+  },
+  {
+    "gpu": "strix-halo",
+    "slug": "unsloth-Qwen3.5-9B-loom",
+    "repo": "loom-fun-staging/unsloth-Qwen3.5-9B-loom",
+    "revision": "7f94b9caa408fc92375967602adc9a02c12874db",
+    "device": "amdgpu://?completion_spin_ns=4294967295",
+    "args": [
+      "--pool_backing=fixed"
+    ],
+    "model_id": "Qwen/Qwen3.5-9B",
+    "features": {
+      "api": "yes",
+      "audio": "unknown",
+      "concurrency": "yes",
+      "context": "yes",
+      "image_input": "yes",
+      "max_output_tokens": "yes",
+      "reasoning_effort": "n/a",
+      "sampling": "yes",
+      "speculative_decoding": "yes",
+      "thinking": "yes",
+      "tool_calling": "yes"
+    },
+    "sdk": {
+      "hrx_loom": "0.3.0",
+      "source": "pypi",
+      "hrx_system_sha": "e2c41a720363911c04606ce0f4417e2d55630352",
+      "wheel_sha256": "6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f"
+    },
+    "files": {
+      "info.json": "99c4c0df73a3e41aad48ab2e535ca388b0a9ea446da8d68baea224e1a14a01d2",
+      "model.json": "690ff8b157c0578302eefb1ae78fa116de8bd91856c94c42620f6dad99b6f51b",
+      "model.json.lock": "8db8fe35ad223c485ff7d3c21c7af66b3dd900ed49fc32213dd937cf1db9d489",
+      "llm_config.json": "160a3f30036e4303fef88234fe85bdf83145c493500746382eaa034a20afb12e"
+    },
+    "package_serve": null,
+    "published_rows": [
+      "decode",
+      "decode_2k",
+      "decode_32k",
+      "prefill_16k",
+      "prefill_1k",
+      "prefill_2k",
+      "prefill_32k",
+      "prefill_8k",
+      "streams4"
+    ],
+    "preset": "chat",
+    "context_tokens": 262144,
+    "execution_rows": 4
+  },
+  {
+    "gpu": "strix-halo",
+    "slug": "unsloth-Qwen3.8-27B-UD-Q4_K_XL",
+    "repo": "loom-fun-staging/unsloth-Qwen3.8-27B-UD-Q4_K_XL",
+    "revision": "10a314e2f38a3551fa5b39e9b23b25b51c431850",
+    "device": "amdgpu://?completion_spin_ns=4294967295",
+    "args": [
+      "--pool_backing=fixed"
+    ],
+    "model_id": "qwen3.8-27b-ud-q4_k_xl",
+    "features": {
+      "api": "yes",
+      "audio": "unknown",
+      "concurrency": "yes",
+      "context": "yes",
+      "image_input": "yes",
+      "max_output_tokens": "yes",
+      "reasoning_effort": "yes",
+      "sampling": "yes",
+      "speculative_decoding": "yes",
+      "thinking": "yes",
+      "tool_calling": "yes"
+    },
+    "sdk": {
+      "hrx_loom": "0.3.0",
+      "source": "pypi",
+      "hrx_system_sha": "e2c41a720363911c04606ce0f4417e2d55630352",
+      "wheel_sha256": "6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f"
+    },
+    "files": {
+      "info.json": "d22f9ed691b4eca0d020f7096f2a2e641584b5339cb90b3b6049c3ced61a7f74",
+      "model.json": "ea38981426fcd8691f9a96d83c5b6729dda1f32e3fd6c18f291e05da591d0e8f",
+      "model.json.lock": "98698b7a885b8a5ffe1c34a054bf45dedba08049f0f439860ea84e66cf8e82de",
+      "llm_config.json": "452a102935b48be76fff6b4afe55696bd5bcb97dcbe94a17798e4af19304f1e5"
+    },
+    "package_serve": null,
+    "published_rows": [
+      "decode",
+      "decode_2k",
+      "decode_32k",
+      "prefill_16k",
+      "prefill_1k",
+      "prefill_2k",
+      "prefill_32k",
+      "prefill_8k",
+      "streams4"
+    ],
+    "preset": "chat",
+    "context_tokens": 262144,
+    "execution_rows": 4
+  },
+  {
+    "gpu": "strix-halo",
+    "slug": "unsloth-gemma-4-12B-it-loom",
+    "repo": "loom-fun-staging/unsloth-gemma-4-12B-it-loom",
+    "revision": "eac424bdd1101a795831e4d3f6f64dc9e9ea49c6",
+    "device": "amdgpu://?completion_spin_ns=4294967295",
+    "args": [
+      "--pool_backing=fixed"
+    ],
+    "model_id": "google/gemma-4-12B-it",
+    "features": {
+      "api": "yes",
+      "audio": "unknown",
+      "concurrency": "yes",
+      "context": "yes",
+      "image_input": "unknown",
+      "max_output_tokens": "yes",
+      "reasoning_effort": "n/a",
+      "sampling": "yes",
+      "speculative_decoding": "yes",
+      "thinking": "yes",
+      "tool_calling": "yes"
+    },
+    "sdk": {
+      "hrx_loom": "0.3.0",
+      "source": "pypi",
+      "hrx_system_sha": "e2c41a720363911c04606ce0f4417e2d55630352",
+      "wheel_sha256": "6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f"
+    },
+    "files": {
+      "info.json": "212e92fb79255eb51a7695e29b95bb95f9990c103d39e1302b272a085edc54c6",
+      "model.json": "091975e4ddb4ea86ae84a22eaa6e849aaaf7c857457c28f1ed52e8aa31a1a181",
+      "model.json.lock": "d705e72b6da7f12f097ea2757d6815443f310103b8d8d20d546367d000475ae7",
+      "llm_config.json": "5fdca0a9bda14ec314fafcffd6ceadc612b971693c1541c93973581880a72552"
+    },
+    "package_serve": null,
+    "published_rows": [
+      "decode",
+      "decode_2k",
+      "decode_32k",
+      "prefill_16k",
+      "prefill_1k",
+      "prefill_2k",
+      "prefill_32k",
+      "prefill_8k",
+      "streams4"
+    ],
+    "preset": "chat",
+    "context_tokens": 160768,
+    "execution_rows": 4
+  },
+  {
+    "gpu": "strix-halo",
+    "slug": "unsloth-gemma-4-26B-A4B-it-qat-loom",
+    "repo": "loom-fun-staging/unsloth-gemma-4-26B-A4B-it-qat-loom",
+    "revision": "7e28fcd1f34dd66655f23b387ee77a258c5b5863",
+    "device": "amdgpu://?completion_spin_ns=4294967295",
+    "args": [
+      "--pool_backing=fixed"
+    ],
+    "model_id": "google/gemma-4-26B-A4B-it-qat-q4_0-unquantized",
+    "features": {
+      "api": "yes",
+      "audio": "unknown",
+      "concurrency": "yes",
+      "context": "yes",
+      "image_input": "unknown",
+      "max_output_tokens": "yes",
+      "reasoning_effort": "n/a",
+      "sampling": "yes",
+      "speculative_decoding": "yes",
+      "thinking": "yes",
+      "tool_calling": "yes"
+    },
+    "sdk": {
+      "hrx_loom": "0.3.0",
+      "source": "pypi",
+      "hrx_system_sha": "e2c41a720363911c04606ce0f4417e2d55630352",
+      "wheel_sha256": "6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f"
+    },
+    "files": {
+      "info.json": "636b1c8d02e923faadf4b3201bb8a9778c5bb9f8dd7e41c45f164d64d3b0863b",
+      "model.json": "07228761c42b92508ee6b518e7419ecb8dcf4dcab216708b9164b43f76364824",
+      "model.json.lock": "14695c74ec4e9a9b37453bc39a790476d076afe777683439f109ae87ce723f69",
+      "llm_config.json": "e10c68bacd93647dfcde6ef17caff97b3bc24708160e30080542b317d12a895c"
+    },
+    "package_serve": null,
+    "published_rows": [
+      "decode",
+      "decode_2k",
+      "decode_32k",
+      "prefill_16k",
+      "prefill_1k",
+      "prefill_2k",
+      "prefill_32k",
+      "prefill_8k",
+      "streams4"
+    ],
+    "preset": "chat",
+    "context_tokens": 262144,
+    "execution_rows": 4
+  },
+  {
+    "gpu": "strix-halo",
+    "slug": "unsloth-gemma-4-31B-it-loom",
+    "repo": "loom-fun-staging/unsloth-gemma-4-31B-it-loom",
+    "revision": "d1012c2abe26c4f204585f500c1fa923bb6db067",
+    "device": "amdgpu://?completion_spin_ns=4294967295",
+    "args": [
+      "--pool_backing=fixed"
+    ],
+    "model_id": "google/gemma-4-31B-it",
+    "features": {
+      "api": "yes",
+      "audio": "unknown",
+      "concurrency": "yes",
+      "context": "yes",
+      "image_input": "unknown",
+      "max_output_tokens": "yes",
+      "reasoning_effort": "n/a",
+      "sampling": "yes",
+      "speculative_decoding": "yes",
+      "thinking": "yes",
+      "tool_calling": "yes"
+    },
+    "sdk": {
+      "hrx_loom": "0.3.0",
+      "source": "pypi",
+      "hrx_system_sha": "e2c41a720363911c04606ce0f4417e2d55630352",
+      "wheel_sha256": "6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f"
+    },
+    "files": {
+      "info.json": "3690350728d0c481b41bef7bb094b96129c80f3df7351ec3373c9ef8b6be14dc",
+      "model.json": "356628fe39bddfc7f33dfa7ba2d0c435ae065f4b92101268615ef7045bb37cf8",
+      "model.json.lock": "44696c76316059cf4c866a9087ed010462a31394863069858d5503e4006fb8f5",
+      "llm_config.json": "e68f44d98cacce91dc2a60b5dcf1d449f3b43bfdba143be16bc0c53d2014169f"
+    },
+    "package_serve": null,
+    "published_rows": [
+      "decode",
+      "decode_2k",
+      "decode_32k",
+      "prefill_16k",
+      "prefill_1k",
+      "prefill_2k",
+      "prefill_32k",
+      "prefill_8k",
+      "streams4"
+    ],
+    "preset": "chat",
+    "context_tokens": 53248,
+    "execution_rows": 4
+  },
+  {
+    "gpu": "strix-halo",
+    "slug": "unsloth-gemma-4-31B-it-qat-loom",
+    "repo": "loom-fun-staging/unsloth-gemma-4-31B-it-qat-loom",
+    "revision": "aa39ffd6c41703d84ff00da0e23b2948021a1876",
+    "device": "amdgpu://?completion_spin_ns=4294967295",
+    "args": [
+      "--pool_backing=fixed"
+    ],
+    "model_id": "google/gemma-4-31B-it-qat-q4_0-unquantized",
+    "features": {
+      "api": "yes",
+      "audio": "unknown",
+      "concurrency": "yes",
+      "context": "yes",
+      "image_input": "unknown",
+      "max_output_tokens": "yes",
+      "reasoning_effort": "n/a",
+      "sampling": "yes",
+      "speculative_decoding": "yes",
+      "thinking": "yes",
+      "tool_calling": "yes"
+    },
+    "sdk": {
+      "hrx_loom": "0.3.0",
+      "source": "pypi",
+      "hrx_system_sha": "e2c41a720363911c04606ce0f4417e2d55630352",
+      "wheel_sha256": "6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f"
+    },
+    "files": {
+      "info.json": "c985755b06b63e7170f46e03e8a58322a4c762f344099c24ade029eb00a8073a",
+      "model.json": "bf0f463ff3a49ab036c8018433a36cb3c059a358e8dd3708e258212358a70511",
+      "model.json.lock": "1788ac8b742d41a3d319f81d4bac1593e39284230d0fa71a9c70bfe7ef7dcd0c",
+      "llm_config.json": "8800db09314cfa198f6182fff85a9195c44dcc9af451215831f944081404c01a"
+    },
+    "package_serve": null,
+    "published_rows": [
+      "decode",
+      "decode_2k",
+      "decode_32k",
+      "prefill_16k",
+      "prefill_1k",
+      "prefill_2k",
+      "prefill_32k",
+      "prefill_8k",
+      "streams4"
+    ],
+    "preset": "chat",
+    "context_tokens": 81920,
+    "execution_rows": 4
+  },
+  {
+    "gpu": "strix-halo",
+    "slug": "unsloth-gemma-4-E4B-it-loom",
+    "repo": "loom-fun-staging/unsloth-gemma-4-E4B-it-loom",
+    "revision": "ddc8a49a074569cb79e37700996b6cfcdeb54d82",
+    "device": "amdgpu://?completion_spin_ns=4294967295",
+    "args": [
+      "--pool_backing=fixed"
+    ],
+    "model_id": "google/gemma-4-E4B-it",
+    "features": {
+      "api": "yes",
+      "audio": "unknown",
+      "concurrency": "yes",
+      "context": "yes",
+      "image_input": "yes",
+      "max_output_tokens": "yes",
+      "reasoning_effort": "n/a",
+      "sampling": "yes",
+      "speculative_decoding": "yes",
+      "thinking": "yes",
+      "tool_calling": "yes"
+    },
+    "sdk": {
+      "hrx_loom": "0.3.0",
+      "source": "pypi",
+      "hrx_system_sha": "e2c41a720363911c04606ce0f4417e2d55630352",
+      "wheel_sha256": "6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f"
+    },
+    "files": {
+      "info.json": "09da886c1b07530318b019b3bc6c6e2666d3c87b022237a48b3298bc37cd0c12",
+      "model.json": "8d03b0631d8e73a9f612fc430eca4ffe64571bb604083a4ea921bbf94e10dfb6",
+      "model.json.lock": "16fa7a4fdd39f2c5d6568c2b657272532dcd43aa33c36d1487d07607df0745a2",
+      "llm_config.json": "45a6e71c0da9edda9300aaba7ff98a7b720b1ddff58a221b02f7e83326e0756b"
+    },
+    "package_serve": null,
+    "published_rows": [
+      "decode",
+      "decode_2k",
+      "decode_32k",
+      "prefill_16k",
+      "prefill_1k",
+      "prefill_2k",
+      "prefill_32k",
+      "prefill_8k",
+      "streams4"
+    ],
+    "preset": "chat",
+    "context_tokens": 131072,
+    "execution_rows": 4
+  },
+  {
+    "gpu": "strix-halo",
+    "slug": "unsloth-gpt-oss-20b-loom",
+    "repo": "loom-fun-staging/unsloth-gpt-oss-20b-loom",
+    "revision": "b325f82c091ff5f8515af694815169538b74f959",
+    "device": "amdgpu://?completion_spin_ns=4294967295",
+    "args": [
+      "--pool_backing=fixed"
+    ],
+    "model_id": "openai/gpt-oss-20b",
+    "features": {
+      "api": "yes",
+      "audio": "unknown",
+      "concurrency": "yes",
+      "context": "yes",
+      "image_input": "unknown",
+      "max_output_tokens": "yes",
+      "reasoning_effort": "yes",
+      "sampling": "yes",
+      "speculative_decoding": "n/a",
+      "thinking": "yes",
+      "tool_calling": "yes"
+    },
+    "sdk": {
+      "hrx_loom": "0.3.0",
+      "source": "pypi",
+      "hrx_system_sha": "e2c41a720363911c04606ce0f4417e2d55630352",
+      "wheel_sha256": "6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f"
+    },
+    "files": {
+      "info.json": "9aeeba5d3301ab48db17674187ef7bc6f2451f91a58adb0dbe17f14e41b553ac",
+      "model.json": "2b0c9f77bcd2727478dd41f7c9422e9f2c4456c6e29a7c1da693172f0794c548",
+      "model.json.lock": "d39acafb9bad4b6fcea23fb5710b8b14849a15ea6b8a730571dc00a18267cc27",
+      "llm_config.json": "26741c38018f88d7642b6f0f95d584043e2399ef4028764a49a20db394c4479f"
+    },
+    "package_serve": null,
+    "published_rows": [
+      "decode",
+      "decode_2k",
+      "decode_32k",
+      "prefill_16k",
+      "prefill_1k",
+      "prefill_2k",
+      "prefill_32k",
+      "prefill_8k",
+      "streams4"
+    ],
+    "preset": "chat",
+    "context_tokens": 131072,
+    "execution_rows": 4
+  }
+]

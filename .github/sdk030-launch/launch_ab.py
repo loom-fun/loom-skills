@@ -76,7 +76,7 @@ def measure(work, sdk, bench):
     selected = read(model / "model.json")
     preset = plan["preset"]
     execution = selected["presets"][preset].get("execution", {})
-    rows = int(execution.get("rows", plan.get("published_rows") or 1))
+    rows = int(execution.get("rows", plan.get("execution_rows", 1)))
     model_id = selected["model"]["id"]
     expected = plan.get("model_id")
     if expected and expected != model_id:
@@ -199,6 +199,33 @@ def measure(work, sdk, bench):
                 raise RuntimeError("empty answer or missing finish reason")
             return sum(result["exact"] for result in results)
 
+        def capabilities():
+            from spec_check import image_requests, TOOLS
+
+            features = plan.get("features", {})
+            results = {}
+            cases = {}
+            if features.get("image_input") == "yes":
+                cases["vision"] = {**image_requests(model_id)[0], "max_tokens": 96}
+            if features.get("tool_calling") == "yes":
+                cases["tools"] = {
+                    "model": model_id, "tools": TOOLS,
+                    "messages": [{"role": "user", "content": "Use the get_weather tool for Paris."}],
+                    "temperature": 0, "max_tokens": 128, "chat_template_kwargs": {"enable_thinking": False},
+                }
+            for name, body in cases.items():
+                response = requests.post(url + "/v1/chat/completions", json=body, timeout=180)
+                response.raise_for_status()
+                choice = response.json()["choices"][0]
+                message = choice["message"]
+                calls = [call["function"] for call in message.get("tool_calls") or []]
+                passed = any(call["name"] == "get_weather" and "paris" in call["arguments"].lower()
+                             for call in calls) if name == "tools" else bool(message.get("content"))
+                results[name] = {"request": digest(body), "content": message.get("content"),
+                                 "calls": calls, "finish": choice.get("finish_reason"), "passed": passed}
+            write(directory / "capabilities.json", results)
+            return results
+
         def perf(label, args):
             common = [url, arm, "--model", model_id, "--no-campaign", "--thinking", "off",
                       "--repeat-rows", "2", "--repeats", "3", "--log", f"{label}.jsonl"]
@@ -237,6 +264,7 @@ def measure(work, sdk, bench):
             try:
                 if phase("cold_launch", lambda: ready(server)):
                     report["functional_exact"] = phase("functional", functional)
+                    report["capabilities"] = phase("capabilities", capabilities)
                     phase("short", lambda: perf("short", []))
                     phase("long", lambda: perf("long", ["--long"]))
                     if rows >= 2:
@@ -278,13 +306,16 @@ def measure(work, sdk, bench):
                  for metric, value in current["metrics"].items() if value and bare["metrics"].get(metric)}
         pairs.append({"pair": pair, "bare_delta_pct": delta, "journals": journals,
                       "draft_work_match": current.get("draft_work") == bare.get("draft_work"),
+                      "capabilities_match": current.get("capabilities") == bare.get("capabilities"),
                       "functional_match": (a / "answers.json").exists() and (b / "answers.json").exists()
                       and read(a / "answers.json") == read(b / "answers.json")})
     medians = {metric: round(statistics.median(pair["bare_delta_pct"][metric] for pair in pairs), 2)
                for metric in pairs[0]["bare_delta_pct"].keys() & pairs[1]["bare_delta_pct"].keys()}
     write(out / "comparison.json", {"plan": plan, "launch_args": modes, "package_serve": package_args,
                                      "median_paired_bare_delta_pct": medians, "pairs": pairs, "sessions": reports})
-    if any(report["errors"] for report in reports) or any(not pair["functional_match"] for pair in pairs):
+    if any(report["errors"] for report in reports) or any(
+        not pair["functional_match"] or not pair["capabilities_match"] for pair in pairs
+    ):
         raise SystemExit(1)
 
 
