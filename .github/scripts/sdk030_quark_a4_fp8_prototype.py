@@ -2,7 +2,7 @@
 
 import re
 
-from quark_a4_prefill_prototype import activation_codes
+from quark_a4_prefill_prototype import OPERAND_I8, _kernel, _round_bf16_kernel, activation_codes
 
 
 def _rewrite_kernel(text, pattern, edit):
@@ -92,6 +92,32 @@ def _quantize_scaled_rows(kernel):
     return kernel[:start] + code + kernel[end:]
 
 
+def _cover_skinny_fallback(text, layers):
+    advance = re.search(r"^command\.def public target\(@device\) @llm_advance\(", text, re.M)
+    assert advance
+    start = advance.start()
+    end = text.index("\n}\n", start) + 3
+    pattern = re.compile(
+        r"^([ ]*)(kernel\.launch @g_quant_q8\[%t, %nH\]\(%t, %nH, %h, %h16q\) : [^\n]+)\n"
+        r"(\1kernel\.launch @g_mv_mxfp4s_k5120_t16_q8\[%nHV, %t\]\([^\n]*%galpha\) : [^\n]+\n"
+        r"\1kernel\.launch @g_mv_mxfp4s_k5120_t16_q8\[%nHV, %t\]\([^\n]*%gbeta\) : [^\n]+)$", re.M,
+    )
+
+    def replace(match):
+        indent, packing, projections = match.groups()
+        packing = packing.replace("@g_quant_q8", "@g_quark_a4_i8")
+        rounds = "".join(f"\n{indent}kernel.launch @g_quark_round_bf16[%t, %nHV]"
+                         f"(%t, %nHV, %{output}) : [index, index](index, index, buffer)"
+                         for output in ("galpha", "gbeta"))
+        return f"{indent}{packing}\n{projections}{rounds}"
+
+    changed, count = pattern.subn(replace, text[start:end])
+    assert count == layers, (count, layers)
+    print(f"Quark FP8 candidate covers {count} unaligned GDN alpha/beta fallbacks")
+    library = _kernel("g_quark_a4_i8", OPERAND_I8) + _round_bf16_kernel()
+    return text[:start] + library + changed + text[end:]
+
+
 def apply(text, config):
     """Radeon-only experiment. Keep the existing group schedules and select the serving variant on DevLab."""
     spec = config["quark"]["global_quant_config"]["input_tensors"]
@@ -105,6 +131,7 @@ def apply(text, config):
     text, row_count = _rewrite_kernel(text, "g_row_scale_f16_live_lv_f8_rdna4", _quantize_scaled_rows)
     text, norm_count = _rewrite_kernel(text, "g_post_add_norm_rs_live_lv_f8_rdna4", _quantize_norm_output)
     assert (store_count, swiglu_count, row_count, norm_count) == (6, 1, 1, 1)
+    text = _cover_skinny_fallback(text, len(config["recurrent_layers"]))
     first_kernel = text.index("\nkernel.def ") + 1
     print("Quark FP8 candidate fused A4 packing in two producers and BF16 rounding in seven GEMM kernels")
     return text[:first_kernel] + activation_codes() + text[first_kernel:]
