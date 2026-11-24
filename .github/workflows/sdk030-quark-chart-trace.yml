@@ -1,0 +1,100 @@
+name: DevLab Quark chart prefill dispatch comparison
+on:
+  push:
+    branches: [codex/sdk030-quark-r9700-diagnostic]
+    paths: [.github/workflows/sdk030-quark-chart-trace.yml]
+permissions:
+  contents: read
+  actions: read
+jobs:
+  traces:
+    runs-on: [self-hosted, devlab-dispatch, Linux, radeon-r9700]
+    timeout-minutes: 35
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 629d8f8aab61f53c4713b89fd21d26efe83f9e45
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Read the measured program bytes and define the chart-only trace
+        shell: bash
+        run: |
+          set -euo pipefail
+          work=$(mktemp -d "$(dirname "$GITHUB_WORKSPACE")/sdk030-quark-trace.XXXXXX")
+          echo "WORK=$work" >> "$GITHUB_ENV"
+          export WORK="$work"
+          mkdir -p "$work/receipt"
+          base=https://api.github.com/repos/loom-fun/loom-skills/actions/artifacts
+          curl -fsSL -H "Authorization: Bearer $GH_TOKEN" "$base/14950459597/zip" -o "$work/half.zip"
+          curl -fsSL -H "Authorization: Bearer $GH_TOKEN" "$base/14953497525/zip" -o "$work/fp8.zip"
+          echo "e99a7f382b0e89cf7b2a9b81f912e1c589c58e3ffcb0d81d48531762da122b5c  $work/half.zip" | sha256sum -c -
+          echo "e5968d4e110792a51a700ac9bbe31b6b163489114a1fa38ce07c8fabae7f9385  $work/fp8.zip" | sha256sum -c -
+          unzip -p "$work/half.zip" a4bf16-after.loom > "$work/half.loom"
+          unzip -p "$work/fp8.zip" fp8-after.loom > "$work/fp8.loom"
+          echo "fa7aa2e3cded5a0c47cc2c2238f472c44bb79848e0c32533b795da20b278dc05  $work/half.loom" | sha256sum -c -
+          echo "b8d9f2f31e9bc4f04857548d9c7c18c2f8f2adc91cf35d4de28252d6b21f6c8f  $work/fp8.loom" | sha256sum -c -
+          git show ed6c623eb457137123f2dfe55454b8943ab17a08:skills/loom-benchmark/scripts/profile_requests.py > skills/loom-benchmark/scripts/profile_requests.py
+          test "$(git hash-object skills/loom-benchmark/scripts/profile_requests.py)" = b6a0ea47ad7f72e9d3c70c09d534dff696d70aa9
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          work = Path(os.environ["WORK"])
+          frozen = "loom-fun/amd-Qwen3.8-27B-Quark-AWQ-MXFP4-loom@a999be30c6539c77a030e961748416892b06ac73"
+          build = dict.fromkeys(("POST_ADD_ROW_SCALE", "GDN_NORM_RS", "SILU_MUL_RS"), "0")
+          variant = {"sdk": "0.3.0", "ref": "4c28b772a8f22f121b3925788dae14b26c58511b", "context": 32768,
+                     "execution": {"context_capacity": 32768, "prefill_capacity": 1024, "rows": 4, "draft_depth": 0},
+                     "build_args": ["--memory-gib", "4096"], "require_preset_r9700": False}
+          half = dict(variant, name="half", build=dict(build, GEMM_MXFP4S_F8="0"))
+          fp8 = dict(variant, name="fp8", build=dict(build, GEMM_MXFP4S_F8="1", GDN_AB_F8="0"))
+          experiment = {"name": "quark-chart-trace", "card": frozen, "sdk": "0.3.0", "runner": "r9700",
+                        "memory_bytes": 34000000000, "memory_bytes_r9700": 34000000000,
+                        "require_preset_r9700": True, "variants": [half, fp8],
+                        "steps": ["profile:half:chart", "profile:fp8:chart"]}
+          (work / "receipt/experiment.json").write_text(json.dumps({"jobs": [experiment]}, indent=2) + "\n")
+
+          harness = Path(".github/scripts/devlab_perf.sh")
+          text = harness.read_text()
+          hook = '  # ablation: every kernel.launch in PROGRAM matching REGEX'
+          assert text.count(hook) == 1
+          harness.write_text(text.replace(hook, '''  cp "$WORK/$v.loom" "$pkg/program/llm.loom" || exit 1
+          ''' + hook))
+          profile = Path("skills/loom-benchmark/scripts/profile_requests.py")
+          text = profile.read_text()
+          text = text.replace('"dec", "dec32"]', '"dec", "dec32", "chart"]')
+          hook = '    elif a.scenario == "dec32":\n'
+          assert text.count(hook) == 1
+          text = text.replace(hook, '''    elif a.scenario == "chart":
+                  from vision_golden import builtin_images, data_url
+                  image, question = builtin_images()["chart"]
+                  reqs.append(go([{"type": "image_url", "image_url": {"url": data_url(image)}},
+                                  {"type": "text", "text": question}], 1))
+          ''' + hook)
+          profile.write_text(text)
+          PY
+          bash -n .github/scripts/devlab_perf.sh
+      - name: Capture Radeon HAL dispatches for the original image and prompt
+        shell: bash
+        run: bash .github/scripts/devlab_perf.sh "$WORK/receipt/experiment.json" quark-chart-trace
+      - name: Preserve profiling outputs
+        if: always() && env.WORK != ''
+        shell: bash
+        run: cp -r "$WORK/quark-chart-trace/out" "$WORK/receipt/"
+      - uses: actions/upload-artifact@v4
+        if: always() && env.WORK != ''
+        with:
+          name: sdk030-quark-chart-trace
+          path: ${{ env.WORK }}/receipt
+          if-no-files-found: error
+          retention-days: 30
+      - name: Release job disk
+        if: always() && env.WORK != ''
+        shell: bash
+        run: |
+          case "$WORK" in
+            "$(dirname "$GITHUB_WORKSPACE")"/sdk030-quark-trace.*) rm -rf -- "$WORK" ;;
+            *) exit 1 ;;
+          esac
