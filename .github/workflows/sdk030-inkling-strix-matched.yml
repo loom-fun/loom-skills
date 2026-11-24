@@ -1,0 +1,125 @@
+name: Strix Inkling frozen full qualification with matched reference
+on:
+  push:
+    branches: [codex/sdk030-special-qualification]
+    paths: [.github/workflows/sdk030-inkling-strix-matched.yml]
+permissions:
+  contents: read
+jobs:
+  verify:
+    name: ${{ matrix.device }} ${{ matrix.slug }}
+    strategy:
+      max-parallel: 2
+      fail-fast: false
+      matrix:
+        include:
+          - slug: unsloth-Inkling-2-Mini-loom
+            device: strix-halo
+            labels: '["self-hosted","devlab-dispatch","strix-halo","Linux"]'
+    runs-on: ${{ fromJSON(matrix.labels) }}
+    timeout-minutes: 240
+    env:
+      SLUG: ${{ matrix.slug }}
+      SDK_GPU_KEY: ${{ matrix.device }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 16261e288ef75481d93ebb1a32bf5332f1a35751
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Plan from the accepted production revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          export WORK="$(dirname "$GITHUB_WORKSPACE")/sdk030-wave-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$SDK_GPU_KEY-$SLUG"
+          mkdir -p "$WORK/receipt"
+          echo "WORK=$WORK" >> "$GITHUB_ENV"
+          python3 - <<'PY' >> "$GITHUB_ENV"
+          import json, os
+          from pathlib import Path
+          slug = os.environ['SLUG']
+          repo='loom-fun-staging/'+slug
+          job=dict(name='special', card=repo+'@bd021e649b158e608b389eca9bfed60a0ec2d225', sdk='0.3.0',
+                   llamacpp='b1384', reference_cache='none', variants=[dict(name='staging',sdk='0.3.0')],
+                   steps=['func:staging','gates:staging:full'])
+          plan=dict(runner='strix',memory_bytes=33000000000,jobs=[job])
+          out=Path(os.environ['WORK'])/'receipt'
+          (out/'experiment.json').write_text(json.dumps(plan,indent=2))
+          h=Path('.github/scripts/devlab_perf.sh')
+          import base64
+          kit=Path(os.environ['WORK'])/'inkling-strix-kit'
+          kit.mkdir()
+          (kit/'chat_probe.py').write_bytes(base64.b64decode('IiIiTWlycm9yIHRoZSBmcm96ZW4gU3RyaXggSW5rbGluZyBjaGFubmVsIHBvbGljeSBmb3IgdG9rZW4tbGV2ZWwgYmVuY2htYXJrIGNvbXBhcmlzb24uIiIiCgppbXBvcnQganNvbgoKTU9ERUwgPSAiPHxtZXNzYWdlX21vZGVsfD4iClNZU1RFTSA9ICI8fG1lc3NhZ2Vfc3lzdGVtfD4iClRPT0wgPSAiPHxtZXNzYWdlX3Rvb2x8PiIKVEVYVCA9ICI8fGNvbnRlbnRfdGV4dHw+IgpUSElOSyA9ICI8fGNvbnRlbnRfdGhpbmtpbmd8PiIKSU5WT0tFID0gIjx8Y29udGVudF9pbnZva2VfdG9vbF9qc29ufD4iCkVORCA9ICI8fGVuZF9tZXNzYWdlfD4iClRFUk1JTkFMID0gIjx8Y29udGVudF9tb2RlbF9lbmRfc2FtcGxpbmd8PiIKUk9MRSA9IHsic3lzdGVtIjogU1lTVEVNLCAidXNlciI6ICI8fG1lc3NhZ2VfdXNlcnw+IiwgImFzc2lzdGFudCI6IE1PREVMLCAidG9vbCI6IFRPT0x9CgoKZGVmIGNvbXBhY3QodmFsdWUsIHNvcnQ9RmFsc2UpOgogICAgcmV0dXJuIGpzb24uZHVtcHModmFsdWUsIGVuc3VyZV9hc2NpaT1GYWxzZSwgc2VwYXJhdG9ycz0oIiwiLCAiOiIpLCBzb3J0X2tleXM9c29ydCkKCgpkZWYgY2FsbF90ZXh0KGNhbGwsIHNvcnRfYXJncyk6CiAgICBmdW5jdGlvbiA9IGNhbGwuZ2V0KCJmdW5jdGlvbiIsIGNhbGwpCiAgICBuYW1lID0gZnVuY3Rpb25bIm5hbWUiXQogICAgYXJndW1lbnRzID0gZnVuY3Rpb24uZ2V0KCJhcmd1bWVudHMiKSBvciB7fQogICAgaWYgaXNpbnN0YW5jZShhcmd1bWVudHMsIHN0cik6CiAgICAgICAgYXJndW1lbnRzID0ganNvbi5sb2Fkcyhhcmd1bWVudHMpCiAgICByZXR1cm4gTU9ERUwgKyBuYW1lICsgSU5WT0tFICsgJ3sibmFtZSI6JyArIGNvbXBhY3QobmFtZSkgKyAnLCJhcmdzIjonICsgY29tcGFjdChhcmd1bWVudHMsIHNvcnRfYXJncykgKyAifSIgKyBFTkQKCgpkZWYgcmVuZGVyX2NhbGxzKGNoYXQsIGNhbGxzKToKICAgIHJldHVybiAiIi5qb2luKGNhbGxfdGV4dChjYWxsLCBGYWxzZSkgZm9yIGNhbGwgaW4gY2FsbHMpCgoKZGVmIHRvb2xfZGVjbGFyYXRpb24odG9vbHMpOgogICAgc3BlY3MgPSBbXQogICAgZm9yIHRvb2wgaW4gdG9vbHM6CiAgICAgICAgZnVuY3Rpb24gPSB0b29sLmdldCgiZnVuY3Rpb24iLCB0b29sKQogICAgICAgIHNwZWNzLmFwcGVuZCh7ImRlc2NyaXB0aW9uIjogZnVuY3Rpb24uZ2V0KCJkZXNjcmlwdGlvbiIpIG9yICIiLCAibmFtZSI6IGZ1bmN0aW9uWyJuYW1lIl0sCiAgICAgICAgICAgICAgICAgICAgICAicGFyYW1ldGVycyI6IGZ1bmN0aW9uLmdldCgicGFyYW1ldGVycyIpIG9yIHt9LCAidHlwZSI6IHRvb2wuZ2V0KCJ0eXBlIikgb3IgImZ1bmN0aW9uIn0pCiAgICByZXR1cm4gU1lTVEVNICsgInRvb2xfZGVjbGFyZTx8Y29udGVudF94bWx8PiIgKyBjb21wYWN0KHNwZWNzLCBUcnVlKSArIEVORAoKCmRlZiBzaW11bGF0ZShjaGF0LCBtZXNzYWdlcywgdG9vbHM9Tm9uZSwgZ2VuPUZhbHNlLCBlbmFibGVfdGhpbmtpbmc9Tm9uZSwgcmVhc29uaW5nX2VmZm9ydD1Ob25lKToKICAgIGVmZm9ydCA9IHJlYXNvbmluZ19lZmZvcnQKICAgIGlmIGVmZm9ydCBpcyBOb25lOgogICAgICAgIGVmZm9ydCA9ICJub25lIiBpZiBlbmFibGVfdGhpbmtpbmcgaXMgRmFsc2UgZWxzZSBjaGF0WyJyZWFzb25pbmdfZWZmb3J0X2RlZmF1bHQiXQogICAgaWYgaXNpbnN0YW5jZShlZmZvcnQsIHN0cik6CiAgICAgICAgZWZmb3J0ID0gY2hhdFsicmVhc29uaW5nX2luc3RydWN0aW9ucyJdW2VmZm9ydF0KICAgIGVmZm9ydF90ZXh0ID0gU1lTVEVNICsgVEVYVCArIGYiVGhpbmtpbmcgZWZmb3J0IGxldmVsOiB7ZWZmb3J0fSIgKyBFTkQKICAgIHBhcnRzID0gW3Rvb2xfZGVjbGFyYXRpb24odG9vbHMpXSBpZiB0b29scyBlbHNlIFtdCiAgICBjYWxsX25hbWVzID0ge2NhbGxbImlkIl06IGNhbGxbImZ1bmN0aW9uIl1bIm5hbWUiXSBmb3IgbSBpbiBtZXNzYWdlcyBpZiBtWyJyb2xlIl0gPT0gImFzc2lzdGFudCIKICAgICAgICAgICAgICAgICAgZm9yIGNhbGwgaW4gbS5nZXQoInRvb2xfY2FsbHMiKSBvciBbXSBpZiBjYWxsLmdldCgiaWQiKX0KICAgIGVtaXR0ZWQgPSBGYWxzZQogICAgZm9yIG1lc3NhZ2UgaW4gbWVzc2FnZXM6CiAgICAgICAgcm9sZSA9IG1lc3NhZ2VbInJvbGUiXQogICAgICAgIGlmIG5vdCBlbWl0dGVkIGFuZCByb2xlICE9ICJzeXN0ZW0iOgogICAgICAgICAgICBwYXJ0cy5hcHBlbmQoZWZmb3J0X3RleHQpCiAgICAgICAgICAgIGVtaXR0ZWQgPSBUcnVlCiAgICAgICAgc3VmZml4ID0gbWVzc2FnZS5nZXQoIm5hbWUiKSBvciAiIgogICAgICAgIGlmIHJvbGUgPT0gInRvb2wiIGFuZCBub3Qgc3VmZml4OgogICAgICAgICAgICBzdWZmaXggPSBjYWxsX25hbWVzLmdldChtZXNzYWdlLmdldCgidG9vbF9jYWxsX2lkIiksICIiKQogICAgICAgIGhlYWRlciA9IFJPTEVbcm9sZV0gKyBzdWZmaXgKICAgICAgICByZWFzb25pbmcgPSBtZXNzYWdlLmdldCgicmVhc29uaW5nX2NvbnRlbnQiKSBpZiByb2xlID09ICJhc3Npc3RhbnQiIGVsc2UgTm9uZQogICAgICAgIGNhbGxzID0gKG1lc3NhZ2UuZ2V0KCJ0b29sX2NhbGxzIikgb3IgW10pIGlmIHJvbGUgPT0gImFzc2lzdGFudCIgZWxzZSBbXQogICAgICAgIGlmIHJlYXNvbmluZzoKICAgICAgICAgICAgcGFydHMuYXBwZW5kKGhlYWRlciArIFRISU5LICsgcmVhc29uaW5nICsgRU5EKQogICAgICAgIGNvbnRlbnQgPSBtZXNzYWdlLmdldCgiY29udGVudCIpCiAgICAgICAgaWYgaXNpbnN0YW5jZShjb250ZW50LCBzdHIpIGFuZCAoY29udGVudCBvciBub3QgKHJlYXNvbmluZyBvciBjYWxscykpOgogICAgICAgICAgICBwYXJ0cy5hcHBlbmQoaGVhZGVyICsgVEVYVCArIGNvbnRlbnQgKyBFTkQpCiAgICAgICAgZWxpZiBpc2luc3RhbmNlKGNvbnRlbnQsIGxpc3QpOgogICAgICAgICAgICBmb3IgcGFydCBpbiBjb250ZW50OgogICAgICAgICAgICAgICAgdGV4dCA9IHBhcnQgaWYgaXNpbnN0YW5jZShwYXJ0LCBzdHIpIGVsc2UgcGFydC5nZXQoInRleHQiLCAiIikKICAgICAgICAgICAgICAgIHBhcnRzLmFwcGVuZChoZWFkZXIgKyBURVhUICsgdGV4dCArIEVORCkKICAgICAgICBwYXJ0cy5leHRlbmQoY2FsbF90ZXh0KGNhbGwsIFRydWUpIGZvciBjYWxsIGluIGNhbGxzKQogICAgICAgIGlmIHJvbGUgPT0gImFzc2lzdGFudCI6CiAgICAgICAgICAgIHBhcnRzLmFwcGVuZChURVJNSU5BTCkKICAgIGlmIG5vdCBlbWl0dGVkOgogICAgICAgIHBhcnRzLmFwcGVuZChlZmZvcnRfdGV4dCkKICAgIHJldHVybiAiIi5qb2luKHBhcnRzKQoKCmRlZiByYXdfZnJvbV9jaGF0KGNoYXQsIG1lc3NhZ2UsIGZpbmlzaGVkLCB0aGlua2luZz1Ob25lLCBwcm9tcHQ9Tm9uZSk6CiAgICByZWFzb25pbmcgPSBtZXNzYWdlLmdldCgicmVhc29uaW5nX2NvbnRlbnQiKQogICAgY29udGVudCA9IG1lc3NhZ2UuZ2V0KCJjb250ZW50Iikgb3IgIiIKICAgIGNhbGxzID0gbWVzc2FnZS5nZXQoInRvb2xfY2FsbHMiKSBvciBbXQogICAgcmF3ID0gIiIKICAgIGlmIHJlYXNvbmluZzoKICAgICAgICByYXcgKz0gTU9ERUwgKyBUSElOSyArIHJlYXNvbmluZyArIChFTkQgaWYgY29udGVudCBvciBjYWxscyBvciBmaW5pc2hlZCBlbHNlICIiKQogICAgaWYgY29udGVudDoKICAgICAgICByYXcgKz0gTU9ERUwgKyBURVhUICsgY29udGVudCArIChFTkQgaWYgY2FsbHMgb3IgZmluaXNoZWQgZWxzZSAiIikKICAgIHJldHVybiByYXcgKyByZW5kZXJfY2FsbHMoY2hhdCwgY2FsbHMpCgoKZGVmIHJhd19hbHRlcm5hdGl2ZXMoY2hhdCwgbWVzc2FnZSwgZmluaXNoZWQsIHRoaW5raW5nPU5vbmUsIHByb21wdD1Ob25lKToKICAgIHJhdyA9IHJhd19mcm9tX2NoYXQoY2hhdCwgbWVzc2FnZSwgZmluaXNoZWQsIHRoaW5raW5nLCBwcm9tcHQpCiAgICByZXR1cm4gW3JhdywgTU9ERUwgKyBURVhUICsgRU5EXSBpZiBub3QgcmF3IGFuZCBmaW5pc2hlZCBlbHNlIFtyYXddCg=='))
+          source=h.read_text()
+          line='export LOOM_KIT=${KIT[$p1]}'
+          assert source.count(line)==1
+          source=source.replace(line,'export LOOM_KIT="$WORK/inkling-strix-kit"')
+          fetch=Path('skills/loom-benchmark/scripts/fetch_llamacpp.sh')
+          text=fetch.read_text()
+          anchor='  if [ "$backend" = vulkan ]; then   # pinned archive: refuse any other bytes'
+          assert text.count(anchor)==1
+          pin='''  if [ "$backend" = rocm ] && [ "$rtag" = b1384 ]; then
+              [ "${url##*/}" = llama-b1384-ubuntu-rocm-gfx1151-x64.zip ] || exit 1
+              echo "a838b224d2e12039158c4b44931d8311b47bc6c3e8557674adcc22f9433a0943  $dir/release.zip" | sha256sum -c >&2 || exit 1
+              echo a838b224d2e12039158c4b44931d8311b47bc6c3e8557674adcc22f9433a0943 > "$dir/release.sha256"
+            fi'''
+          fetch.write_text(text.replace(anchor,pin+'\n'+anchor))
+          ref_anchor='safetensors=$("$T" -c '
+          assert source.count(ref_anchor)==1
+          source=source.replace(ref_anchor,'gguf="$WORK/inkling-e6427665-mainline.gguf"\n'+ref_anchor)
+          anchor='    ln -sfn "$vcard/parameter" "$pkg/parameter"'
+          assert source.count(anchor)==1
+          h.write_text(source.replace(anchor,'    rsync -a --exclude=/parameter --exclude=/.git "$vcard/" "$pkg/"\n'+anchor))
+          print('JOB=special')
+          PY
+      - name: Fetch and verify the publisher's compatible reference at the same checkpoint revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fLsS --retry 3 'https://huggingface.co/unsloth/Inkling-2-Mini-GGUF/resolve/ea0c79b2ecd73669e774c8519b79bfabfddbc027/Mainline_Support/Inkling-2-Mini-UD-Q4_K_XL.gguf_file' -o "$WORK/inkling-e6427665-mainline.gguf"
+          echo "e64276656f072e9b2197a61723667cbdb71da66a716ffd966e572c21088f3cd3  $WORK/inkling-e6427665-mainline.gguf" | sha256sum -c | tee "$WORK/receipt/reference-sha256.log"
+      - name: Build, serve and measure the release candidate
+        run: bash .github/scripts/devlab_perf.sh "$WORK/receipt/experiment.json" "$JOB"
+      - name: Save the measured package and identity
+        if: always() && env.JOB != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          d="$WORK/$JOB"
+          cp -r "$d/out" "$WORK/receipt/"
+          cp "$WORK/llamacpp/b1384/release.sha256" "$WORK/receipt/reference-release.sha256"
+          for file in spec_target.jsonl spec_draft.jsonl compare.json agent_golden.json agent_think_off.json; do
+            path="$d/staging/bench/$file"
+            if [ -f "$path" ]; then cp "$path" "$WORK/receipt/"; fi
+          done
+          if [ -e "$d/staging/pkg/model.json" ]; then
+            tar -C "$d/staging/pkg" --exclude=parameter --exclude='*.gguf' --exclude='*.safetensors' --exclude='bench' -czf "$WORK/receipt/package-without-weights.tar.gz" .
+          fi
+      - name: Require pinned program and report the full verdict
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import json, os
+          packet=Path(os.environ['WORK'])/'receipt'
+          out=packet/'out'
+          assert (packet/'reference-release.sha256').read_text().strip()=='a838b224d2e12039158c4b44931d8311b47bc6c3e8557674adcc22f9433a0943'
+          assert (out/'programs_sha256_staging.txt').read_text().strip()=='fdb1aaa4771f05a9cc9315aa774bddf121123c8143d3b81762563e6fedc0f6aa'
+          report=json.loads((out/'gates_staging/gates.json').read_text())
+          assert report['level']=='full' and report['verdict']=='PASS', report
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sdk030-inkling-strix-matched
+          path: ${{ env.WORK }}/receipt
+          retention-days: 30
+      - name: Release job disk
+        if: always()
+        shell: bash
+        run: |
+          if [ "${WORK:-}" = "$(dirname "$GITHUB_WORKSPACE")/sdk030-wave-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$SDK_GPU_KEY-$SLUG" ]; then rm -rf -- "$WORK"; fi
+
+
+
