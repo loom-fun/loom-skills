@@ -141,8 +141,8 @@ def check_image(path, component_hashes, slug, presets, old_revision):
             and comparison["pixels_match"] and comparison["max_abs_channel_diff"] == 0
             and comparison["repo"] == f"{PRODUCTION}/{slug}" and comparison["revision"] == old_revision
             and set(presets) == {comparison["preset"]}, f"{slug}: image qualification does not match release")
+    programs = {name: sha for name, sha in component_hashes.items() if name.endswith(".loom")}
     for version in ("0.2.0", "0.3.0"):
-        programs = {n: h for n, h in component_hashes.items() if n.startswith("program/") and n.endswith(".loom")}
         require(programs and comparison["runs"][version]["programs"] == programs,
                 f"{slug}: image programs differ from {version} qualification")
 

@@ -2,7 +2,9 @@ name: Prepared production package proof
 on:
   push:
     branches: [codex/sdk030-production-prepare]
-    paths: [.github/workflows/sdk030-production-prepare-proof.yml]
+    paths:
+      - .github/workflows/sdk030-production-prepare-proof.yml
+      - skills/loom-migrate/scripts/replay_promotion.py
 permissions:
   contents: read
 jobs:
