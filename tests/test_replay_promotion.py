@@ -26,6 +26,7 @@ def package(root):
         "model.json.lock": "{}",
         "info.json": '{\r\n  "repo": "loom-fun-staging/' + SLUG + '"\r\n}\r\n',
         "REPORT.md": "Keep the native-context caveat verbatim.\n",
+        ".gitattributes": "*.loom filter=lfs\n",
         "README.md": 'pipx install "hrx-loom[hf]==0.3.0"\n\n```sh\n'
                      f"loom-fetch huggingface:loom-fun-staging/{SLUG}:vision-mtp --output=example\n"
                      "loom-serve --model=example '--device=amdgpu://?completion_spin_ns=4294967295' --workers=8\n"
@@ -42,13 +43,16 @@ def bundle(tmp_path, deletion=False):
     source_hashes = package(source)
     root = tmp_path / "release"
     out = root / "packages" / SLUG
-    target = {"README.md": "e" * 64}
+    target_root = tmp_path / "production"
+    target_root.mkdir()
+    (target_root / ".gitattributes").write_bytes(b"*.bin filter=lfs\n")
+    target = {"README.md": "e" * 64, ".gitattributes": promotion.digest(target_root / ".gitattributes")}
     pins = PINS.copy()
     if deletion:
         target["program/retired.loom"] = "f" * 64
         pins["delete_target_files"] = {"program/retired.loom": target["program/retired.loom"]}
         pins["rollback_tag"] = "v0.2.0"
-    row = promotion.compose(SLUG, pins, source, source_hashes, source, target, out)
+    row = promotion.compose(SLUG, pins, source, source_hashes, target_root, target, out)
     manifest = root / "manifest.json"
     manifest.write_bytes(promotion.canonical({"schema": 1, "packages": {SLUG: row}}))
     return source, root, out, row, promotion.digest(manifest)
@@ -62,6 +66,8 @@ def check_composition(case, tmp_path):
         b"loom-fun-staging/", b"loom-fun/")
     for name in ("model.json", "model.json.lock", "REPORT.md", "quick-start-qualification.json"):
         assert row["source"][name] == row["output"][name]
+    assert row["source"][".gitattributes"] != row["output"][".gitattributes"] == row["target"][".gitattributes"]
+    assert ".gitattributes" not in row["operations"]
     assert promotion.inspect_bundle(root, sha) == [(SLUG, row)]
     (out / "REPORT.md").write_text("tampered")
     with case.assertRaisesRegex(ValueError, "incorrect bundle file"):

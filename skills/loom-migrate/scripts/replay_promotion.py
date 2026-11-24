@@ -17,6 +17,7 @@ ENDPOINT = "https://huggingface.co"
 REVISION = r"[0-9a-f]{40}"
 SHA256 = r"[0-9a-f]{64}"
 SLUG = r"[A-Za-z0-9][A-Za-z0-9._-]*"
+HUB_ATTRIBUTES = ".gitattributes"
 FETCH = re.compile(r"(?m)^([ \t]*loom-fetch[ \t]+)(?:([\x22\x27])([^\r\n]*?)\2|([^\s]+))")
 
 
@@ -57,7 +58,7 @@ def records(pins):
                 f"{slug}: exact staging and target revisions required")
         for field in ("retain_target_files", "delete_target_files"):
             paths = row.get(field, {})
-            require(isinstance(paths, dict) and all(safe_path(n) and re.fullmatch(SHA256, sha)
+            require(isinstance(paths, dict) and all(n != HUB_ATTRIBUTES and safe_path(n) and re.fullmatch(SHA256, sha)
                     for n, sha in paths.items()), f"{slug}: invalid {field} file map")
         if row.get("delete_target_files"):
             require(re.fullmatch(r"v\d+\.\d+\.\d+", row.get("rollback_tag", "")),
@@ -89,7 +90,7 @@ def snapshot(api, repo, revision):
 
     info = model_info(api, repo, revision=revision, files_metadata=True)
     require(info.id == repo and info.sha == revision and info.siblings, f"{repo}: incorrect or empty revision {revision}")
-    files = [file for file in info.siblings if file.rfilename != ".gitattributes"]
+    files = info.siblings
     require(files and all(safe_path(file.rfilename) for file in files), f"{repo}: empty package or unsafe path")
 
     def verify(file):
@@ -215,19 +216,22 @@ def compose(slug, row, source, source_hashes, target, target_hashes, out):
                 f"{slug}: missing generated card metadata on non-image package")
         require("sdk-qualification.json" in source_hashes, f"{slug}: image SDK qualification missing")
         check_image(source, source_hashes, slug, presets, row["target_revision"])
-    extras = {name: target_hashes[name] for name in sorted(target_hashes.keys() - source_hashes.keys())}
+    extras = {name: target_hashes[name] for name in sorted(target_hashes.keys() - source_hashes.keys())
+              if name != HUB_ATTRIBUTES}
     retained = row.get("retain_target_files", {})
     deleted = row.get("delete_target_files", {})
     require(not retained.keys() & deleted.keys() and extras == retained | deleted,
             f"{slug}: target-only files require explicit retain or delete pins: {extras}")
-    output_names = source_hashes.keys() | retained.keys()
+    output_names = (source_hashes.keys() | retained.keys()) - {HUB_ATTRIBUTES}
+    if HUB_ATTRIBUTES in target_hashes:
+        output_names.add(HUB_ATTRIBUTES)
     for name in sorted(output_names):
         dest = out / name
         dest.parent.mkdir(parents=True, exist_ok=True)
         if name in changed:
             dest.write_bytes(changed[name])
         else:
-            shutil.copyfile((target if name in retained else source) / name, dest)
+            shutil.copyfile((target if name in retained or name == HUB_ATTRIBUTES else source) / name, dest)
         data = dest.read_bytes()
         inspect_refs(name, data, slug)
         check_deleted_refs(name, data, deleted, slug)
@@ -269,7 +273,8 @@ def inspect_bundle(bundle, manifest_sha):
         expected_ops = sorted(n for n, sha in row["output"].items() if row["target"].get(n) != sha)
         deletions = {n: sha for n, sha in row["target"].items() if n not in row["output"]}
         require(expected_ops == row["operations"] and deletions == row.get("delete_target_files", {})
-                and sorted(deletions) == row.get("deletions", []),
+                and sorted(deletions) == row.get("deletions", [])
+                and row["output"].get(HUB_ATTRIBUTES) == row["target"].get(HUB_ATTRIBUTES),
                 f"{slug}: incorrect operation coverage")
     return rows
 
