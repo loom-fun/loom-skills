@@ -221,7 +221,7 @@ def grouped_gemm_ws(fmt, mode, N, K, E, KU, tile=64):
         for j in range(4):
             s.append(f"    %xc{j}{sfx} = index.add %xk{sfx}, %stage_col{j} : index")
             s.append(f"    %xr{j}{sfx} = vector.load %x_view[%x_row, %xc{j}{sfx}] : view<[%xrows]x[%k]xf16> -> vector<16xf16>")
-            if sw:
+            if sw and not cw.ZS:
                 s.append(f"    %xs{j}{sfx} = scf.select %st_valid, %xr{j}{sfx}, %zero16h : vector<16xf16>")
                 outs.append((f"%xs{j}{sfx}", "vector<16xf16>"))
             else:
@@ -231,6 +231,13 @@ def grouped_gemm_ws(fmt, mode, N, K, E, KU, tile=64):
     def body(nf):
         accs = [f"%acc0_{f}" for f in range(nf)]
         s = [f"    // nf = {nf}", f"    %nfrows = index.constant {nf * 16} : index\n    %stage_live = index.cmp ult, %stage_row, %nfrows : index"]
+        live = "%stage_live"
+        if sw and cw.ZS:
+            s.append("    %zs_not = scalar.xori %st_valid, %cw_true : i1\n    %zs_pad = scalar.andi %stage_live, %zs_not : i1\n    scf.if %zs_pad {")
+            for j in range(4):
+                s.append(f"      vector.store %zero16h, %a_view[%stage_row, %stage_col{j}] : vector<16xf16>, view<{R}x{KC + 8}xf16>")
+            s.append("    }\n    %stage_ok = scalar.andi %stage_live, %st_valid : i1")
+            live = "%stage_ok"
         wt, wouts = wload("%c0", "p")
         xt, xouts = xload("%c0", "p")
         s += [wt, xt]
@@ -240,7 +247,7 @@ def grouped_gemm_ws(fmt, mode, N, K, E, KU, tile=64):
         res = [a.replace("%acc", "%fin") for a in accs] + [f"%unused_{j}" for j in range(len(carried))]
         s.append(f"    {', '.join(res)} = scf.for %ch = [%c0 to %nch step %c1]({args}) -> ({types}) {{")
         cr = {v: f"%cr{j}" for j, (v, _) in enumerate(carried)}
-        s.append("    scf.if %stage_live {")
+        s.append(f"    scf.if {live} {{")
         for j in range(4):
             s.append(f"      vector.store {cr[xouts[j][0]]}, %a_view[%stage_row, %stage_col{j}] : vector<16xf16>, view<{R}x{KC + 8}xf16>")
         s.append(f"""    }}

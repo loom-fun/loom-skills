@@ -25,9 +25,13 @@ VARIANTS = {   # name -> environment of the kit generators
     "dq": dict(IQ4, GEMM_T64_G32="1", MOE_CW="1", MOE_CW_SWAP="1", MOE_CW_DQ="1"),   # cws, cheaper dequant (bit-identical)
     "xpair": dict(IQ4, GEMM_T64_G32="1", MOE_CW="1", MOE_CW_SWAP="1", MOE_CW_DQ="1", MOE_CW_PAIR="1"),   # dq, no select after the exchange
     "ws": dict(IQ4, GEMM_T64_G32="1", MOE_CW="1", MOE_CW_SWAP="1", MOE_CW_DQ="1", MOE_CW_WS="1"),   # dq, weight-stationary pair tiles
+    "dqz": dict(IQ4, GEMM_T64_G32="1", MOE_CW="1", MOE_CW_SWAP="1", MOE_CW_DQ="1", MOE_CW_ZS="1"),   # dq + zero-staged padding rows
+    "pf2": dict(IQ4, GEMM_T64_G32="1", MOE_CW="1", MOE_CW_SWAP="1", MOE_CW_DQ="1", MOE_CW_PF2="1"),   # dq, weights 2 chunks ahead
+    "pf2z": dict(IQ4, GEMM_T64_G32="1", MOE_CW="1", MOE_CW_SWAP="1", MOE_CW_DQ="1", MOE_CW_PF2="1", MOE_CW_ZS="1"),
+    "nodq": dict(IQ4, GEMM_T64_G32="1", MOE_CW="1", MOE_CW_SWAP="1", MOE_CW_DQ="1", MOE_CW_NODQ="1"),   # probe: no codebook/scale (wrong values)
     "xwsp": dict(IQ4, GEMM_T64_G32="1", MOE_CW="1", MOE_CW_SWAP="1", MOE_CW_DQ="1", MOE_CW_PAIR="1", MOE_CW_WS="1"),   # ws + pair
 }
-UNTESTED = {"cwf"}   # numerics-moving variants (covered by the model gates)
+UNTESTED = {"cwf", "nodq"}   # numerics-moving variants (covered by the model gates)
 TILE_OF = {"t128": 128}   # variants on another expert bucket (timing only: their rows are laid out differently)
 VARIANTS.update(json.loads(os.environ.get("JOY_MOE_VARIANTS", "{}")))
 BLOCK = 136   # IQ4_XS bytes per 256 values

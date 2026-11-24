@@ -31,6 +31,13 @@ DQ = os.environ.get("MOE_CW_DQ", "0") not in ("", "0")
 # consistent (A, B) pair, so the dot is right whichever half the hardware reads; lanes 16-31 add the K halves in the other order
 # (numerics-moving unless the hardware reads lanes 0-15 only: the kbench test says which).
 PAIR = os.environ.get("MOE_CW_PAIR", "0") not in ("", "0")
+# MOE_CW_ZS=1: gate/up stages padding rows (rowmap < 0) as zeros once before the K loop and stores only valid rows per chunk
+# (no per-chunk zero select of the gathered x vectors; bit-identical).
+ZS = os.environ.get("MOE_CW_ZS", "0") not in ("", "0")
+# MOE_CW_PF2=1: weights prefetched two 128-K chunks ahead (more bytes in flight per wave; x one chunk ahead as before).
+PF2 = os.environ.get("MOE_CW_PF2", "0") not in ("", "0")
+# MOE_CW_NODQ=1 (needs DQ; TIMING ONLY, wrong values): the codes reinterpreted as f16 without the codebook/scale (dequant VALU floor probe).
+NODQ = os.environ.get("MOE_CW_NODQ", "0") not in ("", "0")
 
 
 PLAIN_TAIL = '      %{o}_lo_i = vector.andi {packed}, %{o}_m15 : vector<16xi8>\n      %{o}_hn_s = vector.shrui {packed}, %{o}_f4 : vector<16xi8>\n      %{o}_hi_i = vector.andi %{o}_hn_s, %{o}_m15 : vector<16xi8>\n      %{o}_lo_u = vector.table.lookup %{o}_book[%{o}_lo_i] : vector<16xi8>, vector<16xi8> -> vector<16xi8>\n      %{o}_hi_u = vector.table.lookup %{o}_book[%{o}_hi_i] : vector<16xi8>, vector<16xi8> -> vector<16xi8>\n      %{o}_lo_f = vector.uitofp %{o}_lo_u : vector<16xi8> to vector<16xf16>\n      %{o}_hi_f = vector.uitofp %{o}_hi_u : vector<16xi8> to vector<16xf16>\n      %{o}_m128 = scalar.constant -128.0 : f32\n      %{o}_off32 = scalar.mulf %{o}_dlh32, %{o}_m128 : f32\n      %{o}_off_h = scalar.fptrunc %{o}_off32 : f32 to f16\n      %{o}_scales = vector.splat %{o}_dlh : vector<16xf16>\n      %{o}_offsets = vector.splat %{o}_off_h : vector<16xf16>\n      %{o}_v0 = vector.fmaf %{o}_lo_f, %{o}_scales, %{o}_offsets : vector<16xf16>\n      %{o}_v1 = vector.fmaf %{o}_hi_f, %{o}_scales, %{o}_offsets : vector<16xf16>\n'
@@ -57,7 +64,8 @@ def _dequant(o, hdr, packed, grp, swap=False):
     """%{o}_v0 / %{o}_v1: weights 0-15 / 16-31 of 32-group `grp` (an index SSA name, 0..7 in the superblock) as f16."""
     if DQ:
         assert swap, "MOE_CW_DQ needs MOE_CW_SWAP"
-        tail = (DQ_TAIL + DQ_XCH + (DQ_PAIR if PAIR else DQ_SEL)).format(o=o, packed=packed)
+        dq = DQ_TAIL if not NODQ else '      %{o}_il = vector.interleave<0> {packed}, %cw_m64 : vector<16xi8>, vector<16xi8> -> vector<32xi8>\n      %{o}_own = vector.bitcast %{o}_il : vector<32xi8> to vector<16xf16>\n'
+        tail = (dq + DQ_XCH + (DQ_PAIR if PAIR else DQ_SEL)).format(o=o, packed=packed)
     else:
         tail = (SWAP_TAIL if swap else PLAIN_TAIL).format(o=o, packed=packed)
     book = "\n".join(f"      %{o}_k{i} = scalar.constant {v + 128 - (256 if v + 128 > 127 else 0)} : i8" for i, v in enumerate(KV))
@@ -246,7 +254,7 @@ def grouped_gemm_cw(fmt, mode, N, K, E, KU, tile=64):
         outs = []
         for j in range(2):
             s.append(f"    %xr{j}{sfx} = vector.load %x_view[%x_row, %xc{j}{sfx}] : view<[%xrows]x[%k]xf16> -> vector<16xf16>")
-            if sw:
+            if sw and not ZS:
                 s.append(f"    %xs{j}{sfx} = scf.select %st_valid, %xr{j}{sfx}, %zero16h : vector<16xf16>")
                 outs.append((f"%xs{j}{sfx}", "vector<16xf16>"))
             else:
@@ -291,17 +299,32 @@ def grouped_gemm_cw(fmt, mode, N, K, E, KU, tile=64):
         s = [f"    // nf = {nf}"]
         s.append(f"    %stage_live = index.cmp ult, %stage_row, %c{nf * 16 if nf * 16 in (16, 32, 64) else 0} : index" if nf * 16 in (16, 32, 64)
                  else f"    %nfrows{nf} = index.constant {nf * 16} : index\n    %stage_live = index.cmp ult, %stage_row, %nfrows{nf} : index")
+        live = "%stage_live"
+        if sw and ZS:
+            s.append(f"""    %zs_not = scalar.xori %st_valid, %cw_true : i1
+    %zs_pad = scalar.andi %stage_live, %zs_not : i1
+    scf.if %zs_pad {{
+      vector.store %zero16h, %a_view[%stage_row, %stage_col0] : vector<16xf16>, view<64x{KC + 8}xf16>
+      vector.store %zero16h, %a_view[%stage_row, %stage_col1] : vector<16xf16>, view<64x{KC + 8}xf16>
+    }}
+    %stage_ok = scalar.andi %stage_live, %st_valid : i1""")
+            live = "%stage_ok"
         wt, wouts = wload("%c0", "p")
         xt, xouts = xload("%c0", "p")
         s += [wt, xt]
-        carried = wouts + xouts
+        wq = []
+        if PF2:
+            s.append("    %pf_c1 = index.min %c1, %ch_last : index")
+            wt2, wq = wload("%pf_c1", "q")
+            s.append(wt2)
+        carried = wouts + wq + xouts
         args = ", ".join([f"{a} = %init : vector<8xf32>" for a in accs] +
                          [f"%cr{j} = {v} : {t}" for j, (v, t) in enumerate(carried)])
         types = ", ".join(["vector<8xf32>"] * len(accs) + [t for _, t in carried])
         res = [a.replace("%acc", "%fin") for a in accs] + [f"%unused{nf}_{j}" for j in range(len(carried))]
         s.append(f"    {', '.join(res)} = scf.for %ch = [%c0 to %nch step %c1]({args}) -> ({types}) {{")
         cr = {v: f"%cr{j}" for j, (v, _) in enumerate(carried)}
-        s.append(f"""    scf.if %stage_live {{
+        s.append(f"""    scf.if {live} {{
       vector.store {cr[xouts[0][0]]}, %a_view[%stage_row, %stage_col0] : vector<16xf16>, view<64x{KC + 8}xf16>
       vector.store {cr[xouts[1][0]]}, %a_view[%stage_row, %stage_col1] : vector<16xf16>, view<64x{KC + 8}xf16>
     }}
@@ -309,7 +332,12 @@ def grouped_gemm_cw(fmt, mode, N, K, E, KU, tile=64):
     %ch1 = index.add %ch, %c1 : index
     %chm = index.min %ch1, %ch_last : index
     %chn = index.assume %chm [lt(%chm, %nch)] : index""")
-        wt, wouts_n = wload("%chn", "n")
+        if PF2:
+            s.append("    %ch2 = index.add %ch, %c2 : index\n    %ch2m = index.min %ch2, %ch_last : index\n    %ch2n = index.assume %ch2m [lt(%ch2m, %nch)] : index")
+            wt, wouts_n = wload("%ch2n", "n")
+            wouts_n = [(cr[v], t) for v, t in wq] + wouts_n
+        else:
+            wt, wouts_n = wload("%chn", "n")
         xt, xouts_n = xload("%chn", "n")
         s += [wt, xt]
         s.append(f"    %half_c = index.rem %ch, %c2 : index\n    %gbase = index.mul %half_c, %c4 : index")

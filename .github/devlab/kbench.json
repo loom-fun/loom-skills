@@ -8,16 +8,18 @@
       "gen_variants": [
         "cws",
         "dq",
-        "xpair",
-        "ws",
-        "xwsp"
+        "dqz",
+        "pf2",
+        "pf2z",
+        "nodq"
       ],
       "files": [
         "bench_cws.loom",
         "bench_dq.loom",
-        "bench_xpair.loom",
-        "bench_ws.loom",
-        "bench_xwsp.loom"
+        "bench_dqz.loom",
+        "bench_pf2.loom",
+        "bench_pf2z.loom",
+        "bench_nodq.loom"
       ],
       "tests": [
         "test.loom"
