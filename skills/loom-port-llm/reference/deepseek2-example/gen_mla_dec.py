@@ -24,7 +24,10 @@ import os
 
 SMAX = int(os.environ.get("MLA_DEC_S", "32"))      # splits per token at most (grid y)
 BMIN = int(os.environ.get("MLA_DEC_BMIN", "2"))    # 16-key blocks per split at least
-VTC = 16 + int(os.environ.get("MLA_DEC_VTPAD", "8"))   # padded V^T row (halves)
+# QL=1: the Q^T fragments live in workgroup memory (36 KB) instead of 72 VGPRs, read back per block, so PF 2 (next
+# block's K during this block's softmax / PV) fits in registers; needs MLA_DEC_VTPAD <= 2 to stay within 64 KB
+QL = int(os.environ.get("MLA_DEC_QL", "0"))
+VTC = 16 + int(os.environ.get("MLA_DEC_VTPAD", "2" if QL else "8"))   # padded V^T row (halves)
 # timing ablations (kbench only, results wrong): empty (no key blocks), noqk (no S MMAs), nostv (no V^T stores),
 # nopv (no PV MMAs), nosx (no S exchange: own partial, no first barrier), nopart (no partial O stores)
 # prefetch: 0 = g_kv_offset per block (3 dependent loads), 1 = page map hoisted + next page index prefetched (1 load
@@ -130,14 +133,19 @@ kernel.def export("g_mla_dsplit") @g_mla_dsplit(%tokens: index) {{
     %head_value = index.madd %ht, %c16, %lane_col : index
     %head = index.assume %head_value [range(%head_value, 0, {QH - 1})] : index
     %qbase = index.mul %qd, %c144 : index
-    %q_view = buffer.view %q[%zero] : buffer -> view<[%tokens]x{QH}x{D}xf32>""")
+    %q_view = buffer.view %q[%zero] : buffer -> view<[%tokens]x{QH}x{D}xf32>""" + (f"""
+    %ql_bytes = index.constant {8 * NJ * 16 * 16 * 2} : offset
+    %ql_tile = buffer.alloca<workgroup> align(16) %ql_bytes : buffer
+    %ql_view = buffer.view %ql_tile[%zero] : buffer -> view<8x{NJ}x16x16xf16>""" if QL else ""))
     for j in range(NJ):
         a(f"""    %qo{j} = index.constant {16 * j} : index
     %qd{j}_v = index.add %qbase, %qo{j} : index
     %qd{j} = index.assume %qd{j}_v [range(%qd{j}_v, 0, {D - 16})] : index
     %qraw{j} = vector.load %q_view[%token, %head, %qd{j}] : view<[%tokens]x{QH}x{D}xf32> -> vector<16xf32>
-    %qh{j} = vector.fptrunc %qraw{j} : vector<16xf32> to vector<16xf16>
-    %qf{j} = vector.fragment<rhs> %qh{j} shape [%c16, %c16] : vector<16xf16>""")
+    %qh{j} = vector.fptrunc %qraw{j} : vector<16xf32> to vector<16xf16>""" + (f"""
+    %cqj{j} = index.constant {j} : index
+    vector.store %qh{j}, %ql_view[%wave, %cqj{j}, %lane_col, %c0] : vector<16xf16>, view<8x{NJ}x16x16xf16>""" if QL else f"""
+    %qf{j} = vector.fragment<rhs> %qh{j} shape [%c16, %c16] : vector<16xf16>"""))
         # global 16-dim chunk index of this wave's chunk j (qd * 9 + j) and whether this wave stages it into V^T
         a(f"""    %cj{j} = index.constant {j} : index
     %gc{j} = index.madd %qd, %c9, %cj{j} : index
@@ -249,7 +257,9 @@ kernel.def export("g_mla_dsplit") @g_mla_dsplit(%tokens: index) {{
         a((f"""      %kr{j} = vector.load %kv[%lane_col, %qd{j}] : view<16x{D}xf16> -> vector<16xf16>
 """ if not pre else "") + f"""      %kh{j} = scf.select %kvalid, {"%kc" if pre else "%kr"}{j}, %zero16h : vector<16xf16>
       %kf{j} = vector.fragment<lhs> %kh{j} shape [%c16, %c16] : vector<16xf16>
-""" + (f"""      %s{j} = vector.mma %kf{j}, %qf{j}, {prev} : vector<16xf16>, vector<16xf16>, vector<8xf32>""" if "noqk" not in ABL else f"""      %s{j} = vector.addf {prev}, {prev} : vector<8xf32>"""))
+""" + (f"""      %qv{j} = vector.load %ql_view[%wave, %cqj{j}, %lane_col, %c0] : view<8x{NJ}x16x16xf16> -> vector<16xf16>
+      %qf{j} = vector.fragment<rhs> %qv{j} shape [%c16, %c16] : vector<16xf16>
+""" if QL else "") + (f"""      %s{j} = vector.mma %kf{j}, %qf{j}, {prev} : vector<16xf16>, vector<16xf16>, vector<8xf32>""" if "noqk" not in ABL else f"""      %s{j} = vector.addf {prev}, {prev} : vector<8xf32>"""))
         prev = f"%s{j}"
     for j in range(NJ):
         st = []

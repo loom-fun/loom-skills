@@ -386,6 +386,35 @@
       "tests": [
         "test.loom"
       ]
+    },
+    {
+      "suite": "mla_dec",
+      "dir": "mla_dec",
+      "gen": "mla_dec/gen_bench.py",
+      "gen_variants": [
+        "wmma",
+        "ql1",
+        "ql1+pf2",
+        "ql1+pf2+pfn5"
+      ],
+      "files": [
+        "bench_wmma.loom",
+        "bench_ql1.loom",
+        "bench_ql1+pf2.loom",
+        "bench_ql1+pf2+pfn5.loom"
+      ],
+      "tests": [
+        "test.loom"
+      ],
+      "config": [],
+      "args": [
+        "--measure=dispatch_complete",
+        "--batch-size=8",
+        "--profile-final-batch=true"
+      ],
+      "device": "amdgpu://?completion_spin_ns=4294967295",
+      "repeats": 5,
+      "case_timing": true
     }
   ]
 }
