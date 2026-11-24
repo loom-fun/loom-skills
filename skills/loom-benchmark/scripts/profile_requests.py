@@ -13,12 +13,12 @@ import os
 from pathlib import Path
 import time
 
-from bench_common import doc, server_draft_counters, stream, thinking_extra
+from bench_common import doc, long_prompt, server_draft_counters, stream, thinking_extra
 
 ap = argparse.ArgumentParser()
 ap.add_argument("url")
 ap.add_argument("model")
-ap.add_argument("scenario", choices=["probe", "pf2k", "pf8k", "dec"])
+ap.add_argument("scenario", choices=["probe", "pf2k", "pf8k", "dec", "dec32"])
 ap.add_argument("--reps", type=int, default=3)
 ap.add_argument("--tokens", type=int, default=int(os.environ.get("LOOM_PROFILE_TOKENS", "400")))
 ap.add_argument("--literal-decode", action="store_true", default=os.environ.get("LOOM_PROFILE_LITERAL_DECODE") == "1",
@@ -96,6 +96,8 @@ if a.scenario != "probe":
         n = 2000 if a.scenario == "pf2k" else 8000
         for i in range(a.reps):
             reqs.append(go(f"[{nonce} {i}] Summarize this documentation in one sentence.\n\n" + doc(n), 2))
+    elif a.scenario == "dec32":
+        reqs.append(go(long_prompt("decode_tps_32k", "1795476231.0670600"), a.tokens))
     else:
         content = ESSAY if a.literal_decode else f"[{nonce}] {ESSAY}"
         out["prompt_mode"] = "literal-perf" if a.literal_decode else "nonce"

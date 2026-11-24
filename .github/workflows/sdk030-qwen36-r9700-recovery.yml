@@ -1,4 +1,4 @@
-name: DevLab Qwen3.6 35B Radeon decode diagnosis
+name: DevLab Qwen3.6 35B Radeon attention ablation
 on:
   push:
     branches: [codex/sdk030-qwen36-r9700-recovery]
@@ -13,6 +13,8 @@ jobs:
       SLUG: ggml-org-Qwen3.6-35B-A3B-loom
       SDK_GPU_KEY: radeon-r9700
       POWER_LOG: '1'
+      LOOM_PROFILE_TOKENS: '128'
+      LOOM_PROFILE_PROCESS_IO: '1'
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
@@ -41,15 +43,14 @@ jobs:
           by_name = {variant['name']: variant for variant in job['variants']}
           assert by_name['fun']['sdk'] == 'card' and by_name['fun']['card'] == job['card']
           assert by_name['staging']['sdk'] == '0.3.0' and 'card' not in by_name['staging']
-          pin = copy.deepcopy(by_name['fun'])
-          pin.update(name='pin', sdk='0.3.0')
           pinnd = copy.deepcopy(by_name['funnd'])
           pinnd.update(name='pinnd', sdk='0.3.0')
-          job['variants'] = [by_name[name] for name in ('fun', 'staging', 'funnd', 'stagingnd')] + [pin, pinnd]
-          blocks = [('fun', 'pin', 'staging'), ('staging', 'fun', 'pin'), ('pin', 'staging', 'fun')]
+          split = copy.deepcopy(by_name['staging'])
+          split.update(name='split', config={'choices': {'decode.attn.kv_once.d256': False}})
+          job['variants'] = [by_name[name] for name in ('fun', 'staging', 'funnd')] + [split, pinnd]
+          blocks = [('fun', 'staging', 'split'), ('split', 'fun', 'staging'), ('staging', 'split', 'fun')]
           job['steps'] = [f'qwen36decode:{arm}:{index}' for index, block in enumerate(blocks) for arm in block]
-          job['steps'] += [f'qwen36decode:{arm}:1' for arm in ('funnd', 'pinnd', 'stagingnd')]
-          job['steps'] += ['func:pin', 'gates:pin:full']
+          job['steps'] += ['profile:funnd:dec32', 'profile:pinnd:dec32', 'func:split', 'ktest:split', 'gates:split:full']
           path.write_text(json.dumps(plan, indent=2) + '\n')
           print('JOB=' + job['name'])
           PY
@@ -62,8 +63,8 @@ jobs:
           set -euo pipefail
           d="$WORK/$JOB"
           cp -r "$d/out" "$WORK/receipt/"
-          if [ -f "$d/pin/pkg/model.json" ]; then
-            tar -C "$d/pin/pkg" --exclude=parameter --exclude='*.gguf' --exclude='*.safetensors' --exclude=bench -czf "$WORK/receipt/immutable-control-without-weights.tar.gz" .
+          if [ -f "$d/split/pkg/model.json" ]; then
+            tar -C "$d/split/pkg" --exclude=parameter --exclude='*.gguf' --exclude='*.safetensors' --exclude=bench -czf "$WORK/receipt/split-control-without-weights.tar.gz" .
           fi
       - name: Verify the exact variant identities and completed comparisons
         shell: bash
@@ -77,18 +78,18 @@ jobs:
           out = Path(os.environ['WORK']) / 'receipt/out'
           old = (out / 'programs_sha256_fun.txt').read_text().strip()
           new = (out / 'programs_sha256_staging.txt').read_text().strip()
-          pin = (out / 'programs_sha256_pin.txt').read_text().strip()
+          pin = (out / 'programs_sha256_pinnd.txt').read_text().strip()
+          split = (out / 'programs_sha256_split.txt').read_text().strip()
           expected_old = '014ae6cd00d911b8c6e2c984661ed0b390aa78185fae433c502bd36ee1157951'
           expected_new = 'fbf1f430ca8e42a28ee0e85f9f8246d45dc89e22a5e90308376b9da8b4bd3a2c'
-          assert old == pin == expected_old and new == expected_new, (old, new, pin)
+          assert old == pin == expected_old and new == expected_new and split not in (old, new), (old, new, pin, split)
           sdk_versions = [json.loads((out / f'sdk_{arm}.json').read_text())['hrx_loom']
-                          for arm in ('fun', 'pin', 'staging')]
-          assert sdk_versions == ['0.2.0', '0.3.0', '0.3.0']
+                          for arm in ('fun', 'pinnd', 'staging', 'split')]
+          assert sdk_versions == ['0.2.0', '0.3.0', '0.3.0', '0.3.0']
           results = json.loads((out / 'summary.json').read_text())['results']
           summary = {}
-          for arm in ('fun', 'pin', 'staging', 'funnd', 'pinnd', 'stagingnd'):
-              sessions = range(3) if not arm.endswith('nd') else [1]
-              captures = [json.loads((out / f'matched_{arm}-{i}.json').read_text()) for i in sessions]
+          for arm in ('fun', 'staging', 'split'):
+              captures = [json.loads((out / f'matched_{arm}-{i}.json').read_text()) for i in range(3)]
               summary[arm] = {context: [median(sample[context]['decode_tps'] for sample in capture['samples'])
                                         for capture in captures] for context in ('2k', '32k')}
               for capture in captures:
@@ -96,14 +97,15 @@ jobs:
                   for current, baseline in zip(capture['samples'], control['samples'], strict=True):
                       for context in ('2k', '32k'):
                           assert current[context]['prompt_sha256'] == baseline[context]['prompt_sha256']
-          summary['functions_and_gates'] = {key: results.get(key) for key in ('func:pin', 'gates:pin:full')}
+          summary['functions_and_gates'] = {key: results.get(key) for key in ('func:split', 'ktest:split', 'gates:split:full')}
+          summary['profiles'] = {arm: (out / f'profile_{arm}_dec32.json').is_file() for arm in ('funnd', 'pinnd')}
           (out / 'recovery-summary.json').write_text(json.dumps(summary, indent=2) + '\n')
           print(summary)
           PY
       - uses: actions/upload-artifact@v4
         if: always() && env.WORK != ''
         with:
-          name: sdk030-qwen36-r9700-diagnosis
+          name: sdk030-qwen36-r9700-attention-ablation
           path: ${{ env.WORK }}/receipt
           if-no-files-found: error
           retention-days: 30

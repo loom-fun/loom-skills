@@ -54,7 +54,7 @@ def main():
     for n, (c, t) in rows.items():
         f = by.setdefault(family(n, fams), {"count": 0, "ms": 0.0, "kernels": {}})
         f["count"] += c; f["ms"] += t; f["kernels"][n] = [c, t]
-    wall = sum((r["ttft_s"] if req["scenario"] != "dec" else r["total_s"]) for r in reqs) * 1e3
+    wall = sum((r["ttft_s"] if req["scenario"] not in ("dec", "dec32") else r["total_s"]) for r in reqs) * 1e3
     res = {"scenario": req["scenario"], "includes_warmup": includes_warmup, "tokens": toks, "busy_ms": round(total, 2), "wall_ms": round(wall, 1), "steps": a.steps or None,
            "ms_per_token_busy": round(total / toks, 4) if toks else None, "families": {}, "kernels": {}}
     L = [f"### {req['scenario']}: {toks} tokens, device busy {total:.1f} ms ({total / toks:.4f} ms/token), request wall {wall:.1f} ms"
