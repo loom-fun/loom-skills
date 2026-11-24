@@ -1,0 +1,128 @@
+name: DevLab Quark A4 BF16 full qualification
+on:
+  push:
+    branches: [codex/sdk030-quark-r9700-diagnostic]
+    paths: [.github/workflows/sdk030-quark-a4-full.yml]
+permissions:
+  contents: read
+  actions: read
+jobs:
+  qualify:
+    runs-on: [self-hosted, devlab-dispatch, Linux, radeon-r9700]
+    timeout-minutes: 105
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 629d8f8aab61f53c4713b89fd21d26efe83f9e45
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Lock the proved repair and original full reference
+        shell: bash
+        run: |
+          set -euo pipefail
+          work=$(mktemp -d "$(dirname "$GITHUB_WORKSPACE")/sdk030-quark-full.XXXXXX")
+          echo "WORK=$work" >> "$GITHUB_ENV"
+          export WORK="$work"
+          mkdir -p "$work/receipt" .github/sdk030-qwen36
+          git show fb2ef6d931182381465ce6e1012c90a6c40e842e:.github/scripts/sdk030_quark_a4_prototype.py > "$work/receipt/quark_a4_prefill_prototype.py"
+          test "$(git hash-object "$work/receipt/quark_a4_prefill_prototype.py")" = 21acaa6f0336859cc9c3d65ee6c3f163ba7c3119
+          git show c6e32060ece4b58032e0fea1792dc44535a58bff:.github/sdk030-qwen36/matched_decode.py > .github/sdk030-qwen36/matched_decode.py
+          test "$(git hash-object .github/sdk030-qwen36/matched_decode.py)" = d468f4240647263e5b8e0ca31115c99e9d93bf8a
+          git rev-parse "$GITHUB_SHA" > "$work/receipt/diagnostic-source.txt"
+          curl -fsSL -H "Authorization: Bearer $GH_TOKEN" \
+            'https://api.github.com/repos/loom-fun/loom-skills/actions/artifacts/14867447364/zip' -o "$work/baseline.zip"
+          echo "f34ee47d01b2040dd6f424c340edbbfd6dff58c97370bd2de763cd298a9e0887  $work/baseline.zip" | sha256sum -c -
+          unzip -p "$work/baseline.zip" out/gates_staging/llama_cache.tgz > .github/sdk030-quark-refs.tgz
+          echo 'd9600b3a1c50087e642fd0f05815d2d0b2ec2fa32dc2890cfa17968752b5f38b  .github/sdk030-quark-refs.tgz' \
+            | sha256sum -c - | tee "$work/receipt/reference-cache.txt"
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          work = Path(os.environ["WORK"])
+          frozen = "loom-fun/amd-Qwen3.8-27B-Quark-AWQ-MXFP4-loom@a999be30c6539c77a030e961748416892b06ac73"
+          settings = {"cap_pool": 113664, "context": 110592,
+                      "execution": {"context_capacity": 110592, "prefill_capacity": 1024, "rows": 4, "draft_depth": 3},
+                      "sdk": "0.3.0"}
+          build = dict.fromkeys(("GEMM_MXFP4S_F8", "POST_ADD_ROW_SCALE", "GDN_NORM_RS", "SILU_MUL_RS"), "0")
+          baseline = dict(settings, name="baseline", card=frozen)
+          repair = dict(settings, name="repair", ref="4c28b772a8f22f121b3925788dae14b26c58511b",
+                        build=build, build_args=["--memory-gib", "4096"], require_preset_r9700=False)
+          sequences = [("baseline", "repair"), ("repair", "baseline"), ("baseline", "repair")]
+          run = {"name": "quark-a4-full", "card": frozen, "runner": "r9700", "sdk": "0.3.0",
+                 "memory_bytes": 34000000000, "memory_bytes_r9700": 34000000000,
+                 "served_context": 110592, "require_preset_r9700": True, "llama_spec": "matched",
+                 "llamacpp": "b1375", "llamacpp_vulkan": "b12211", "reference_cache": ".github/sdk030-quark-refs.tgz",
+                 "variants": [baseline, repair],
+                 "steps": ["gates:repair:full", "ktest:repair", "func:repair", "textmatch:repair"]
+                         + [f"matcheddecode:{arm}:{i}" for i, pair in enumerate(sequences) for arm in pair]
+                         + [f"perf:{arm}:1" for pair in sequences[:2] for arm in pair]}
+          (work / "receipt/experiment.json").write_text(json.dumps({"jobs": [run]}, indent=2) + "\n")
+
+          harness = Path(".github/scripts/devlab_perf.sh")
+          source = harness.read_text()
+          hook = '  # ablation: every kernel.launch in PROGRAM matching REGEX'
+          assert source.count(hook) == 1
+          source = source.replace(hook, '''  if [ "$v" = repair ]; then
+              "$T" - "$WORK/receipt" "$pkg" <<'PATCH_GEN' || exit 1
+          import json
+          from pathlib import Path
+          import sys
+          sys.path.insert(0, sys.argv[1])
+          from quark_a4_prefill_prototype import apply
+
+          package = Path(sys.argv[2])
+          path = package / "program/llm.loom"
+          original = path.read_text()
+          repair = apply(original, json.loads((package / "llm_config.json").read_text()), round_outputs=True)
+          assert repair != original and "@g_quark_round_bf16[" in repair
+          path.write_text(repair)
+          PATCH_GEN
+            fi
+          ''' + hook)
+          hook = '    gates)\n'
+          assert source.count(hook) == 1
+          source = source.replace(hook, '''    matcheddecode)
+                serve_alone "$p1" || { res[$s]=ERROR; continue; }
+                step "matched Quark release decode $p1 session $p2"
+                if "$T" "$here/.github/sdk030-qwen36/matched_decode.py" "$url" "$cardid" "$p2" "$out/matched_$p1-$p2.json"; then
+                  res[$s]=PASS
+                else
+                  res[$s]=FAIL
+                fi;;
+          ''' + hook)
+          harness.write_text(source)
+          PY
+          bash -n .github/scripts/devlab_perf.sh
+      - name: Run original full gates, context, kernels and matched performance
+        shell: bash
+        run: bash .github/scripts/devlab_perf.sh "$WORK/receipt/experiment.json" quark-a4-full
+      - name: Archive measured release-candidate package and reports
+        if: always() && env.WORK != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp -r "$WORK/quark-a4-full/out" "$WORK/receipt/"
+          src="$WORK/quark-a4-full/repair/pkg"
+          if [ -f "$src/program/llm.loom" ]; then
+            tar -C "$src" -czf "$WORK/receipt/package-without-weights.tgz" program model.json llm_config.json tokenizer.json
+            sha256sum "$WORK/receipt/package-without-weights.tgz" > "$WORK/receipt/package-sha256.txt"
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always() && env.WORK != ''
+        with:
+          name: sdk030-quark-a4-full
+          path: ${{ env.WORK }}/receipt
+          if-no-files-found: error
+          retention-days: 30
+      - name: Release job disk
+        if: always() && env.WORK != ''
+        shell: bash
+        run: |
+          case "$WORK" in
+            "$(dirname "$GITHUB_WORKSPACE")"/sdk030-quark-full.*) rm -rf -- "$WORK" ;;
+            *) exit 1 ;;
+          esac
