@@ -14,10 +14,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - slug: bartowski-Qwen3.8-27B-loom
+          - slug: ggml-org-Qwen3-Coder-30B-A3B-Instruct-loom
             device: radeon-r9700
             labels: '["self-hosted","devlab-dispatch","radeon-r9700"]'
-            correctness: '{"run":45275710722,"job":138046833634,"artifact":14879821783,"digest":"sha256:2a86fa1892b8af06d248e7c182410f93a93439f090cb3778e7d89b509c6d9bd2","production":"loom-fun/bartowski-Qwen3.8-27B-loom@a73a11eba342bde5e2ab489b2687cf731b9c7128","generator":"3adfe7b7b6e68f753042e9f89b318e29a6088579"}'
+            correctness: '{"run":45275710722,"job":138046837164,"artifact":14881951432,"digest":"sha256:e9f2a8505b66d5f51d9f970f82514d56b3e665747da352c7ab6e645035c20fca","production":"loom-fun/ggml-org-Qwen3-Coder-30B-A3B-Instruct-loom@90f4d2874d066ab7ad0c16daab9a383fa55f47a5","generator":"3adfe7b7b6e68f753042e9f89b318e29a6088579"}'
     runs-on: ${{ fromJSON(matrix.labels) }}
     timeout-minutes: 240
     env:
