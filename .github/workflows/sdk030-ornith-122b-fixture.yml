@@ -69,8 +69,8 @@ jobs:
 
           ```loom-scope
           kind: architecture
-          scopes: [arch/llm/moe/qwen35moe]
-          kernels: []
+          scopes: arch/llm/moe/qwen35moe
+          kernels:
           ```
 
           The grouped GEMM numerical fixture for the frozen Ornith 122B Q4_K_M checkpoint rounds the per-group scale and minimum to FP16 before its reference multiply-add. The candidate checks retain their existing tensors, dimensions, assertions, and tolerances. The change touches test fixture code and its regression test.
