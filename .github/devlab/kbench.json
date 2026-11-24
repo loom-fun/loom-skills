@@ -368,11 +368,11 @@
       "gen": "dec_step/gen_bench.py",
       "gen_variants": [
         "base",
-        "hg2"
+        "rx4"
       ],
       "files": [
         "bench.loom",
-        "bench_hg2.loom"
+        "bench_rx4.loom"
       ],
       "config": [],
       "args": [
@@ -381,7 +381,7 @@
         "--profile-final-batch=true"
       ],
       "device": "amdgpu://?completion_spin_ns=4294967295",
-      "repeats": 2,
+      "repeats": 3,
       "case_timing": true,
       "tests": [
         "test.loom"
