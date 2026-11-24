@@ -12,17 +12,21 @@ import zipfile
 
 root, out = (Path(value).resolve() for value in sys.argv[1:])
 source_commit = 'e2c41a720363911c04606ce0f4417e2d55630352'
-wheel_name = 'hrx_loom-0.3.0-py3-none-win_amd64.whl'
-archive_name = 'loom-serve-0.3.0-win_amd64.zip'
+windows = sys.platform == 'win32'
+platform = 'win_amd64' if windows else 'manylinux_2_39_x86_64'
+wheel_name = f'hrx_loom-0.3.0-py3-none-{platform}.whl'
+archive_name = f'loom-serve-0.3.0-{platform}.zip'
 assets = {
-    wheel_name: '06afbc88370fde741037ebd38dba91c2184cb4d2fbd5cee337720cd494a06752',
-    archive_name: '2f0bb6b4ab6053941041659c1ae8a8bb8386b6d49d4c7731b61adacffd3e521a',
+    wheel_name: ('06afbc88370fde741037ebd38dba91c2184cb4d2fbd5cee337720cd494a06752' if windows
+                 else '6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f'),
+    archive_name: ('2f0bb6b4ab6053941041659c1ae8a8bb8386b6d49d4c7731b61adacffd3e521a' if windows
+                    else 'b41d42e9a1a957f2a425fa25c48360cd9d3845ae76a9412d9f552ec1baa5809e'),
 }
 
 
 def download(url, path):
     path.parent.mkdir(parents=True, exist_ok=True)
-    subprocess.run(['curl.exe', '--fail', '--location', '--silent', '--show-error', '--retry', '3',
+    subprocess.run(['curl.exe' if windows else 'curl', '--fail', '--location', '--silent', '--show-error', '--retry', '3',
                     url, '--output', str(path)], check=True, timeout=120)
     return path
 
@@ -60,7 +64,7 @@ def launch(exe, card, label, cxx):
                     time.sleep(0.2)
                     continue
                 record(f'{label}-status.json', status)
-                if cxx:
+                if cxx and registration == 'failed':
                     reason = model.get('loom', {}).get('error', {})
                     return {'registration': registration, 'error': reason, 'diagnostic': reason.get('message', '')}
                 assert registration == 'ready', status
@@ -80,19 +84,22 @@ def launch(exe, card, label, cxx):
                 server.wait(timeout=10)
 
 
-assert sys.platform == 'win32'
+assert windows or sys.platform == 'linux'
 for name, digest in assets.items():
     path = download('https://github.com/ROCm/hrx-system/releases/download/v0.3.0/' + name, root / name)
     assert sha(path) == digest, name
 venv = root / 'venv'
+bin_dir = venv / ('Scripts' if windows else 'bin')
+suffix = '.exe' if windows else ''
 subprocess.run([sys.executable, '-m', 'venv', str(venv)], check=True)
-subprocess.run([venv / 'Scripts/python.exe', '-m', 'pip', 'install', '--disable-pip-version-check',
+subprocess.run([bin_dir / ('python' + suffix), '-m', 'pip', 'install', '--disable-pip-version-check',
                 f'{root / wheel_name}[hf]'], check=True, timeout=240)
-exe = root / 'standalone/loom-serve.exe'
+exe = root / 'standalone' / ('loom-serve' + suffix)
 exe.parent.mkdir()
 with zipfile.ZipFile(root / archive_name) as bundle:
-    assert bundle.namelist() == ['loom-serve.exe'], bundle.namelist()
+    assert bundle.namelist() == [exe.name], bundle.namelist()
     exe.write_bytes(bundle.read(exe.name))
+exe.chmod(0o755)
 
 fixture = root / 'fixture'
 fixture_url = f'https://raw.githubusercontent.com/ROCm/hrx-system/{source_commit}/loom/docs/examples/serving/model-publication/model/tiny-text/'
@@ -100,7 +107,7 @@ for relative in ('model.json', 'model.json.lock', 'tokenizer.json', 'program/adv
                  'program/prepare.loom', 'program/storage.loom', 'program/weights.loom'):
     download(fixture_url + relative, fixture / relative)
 control = root / 'control'
-subprocess.run([venv / 'Scripts/loom-fetch.exe', fixture / 'model.json', '--materialize=copy',
+subprocess.run([bin_dir / ('loom-fetch' + suffix), fixture / 'model.json', '--materialize=copy',
                 f'--output={control}', '--no-input'], check=True, timeout=120)
 cxx = root / 'cxx'
 shutil.copytree(control, cxx)
@@ -109,12 +116,17 @@ model = json.loads(card.read_text(encoding='utf-8'))
 model['programs']['source']['inputs'].append({'format': 'cxx', 'path': 'program/probe.cxx'})
 card.write_text(json.dumps(model), encoding='utf-8')
 (cxx / 'program/probe.cxx').write_text('int loom_import_probe = ;\n', encoding='utf-8')
+valid = root / 'valid-cxx'
+shutil.copytree(cxx, valid)
+download(f'https://raw.githubusercontent.com/ROCm/hrx-system/{source_commit}/loom/docs/examples/getting-started/first-kernel/saxpy.cxx',
+         valid / 'program/probe.cxx')
 
 results = {}
-for name, executable in (('wheel', venv / 'Scripts/loom-serve.exe'), ('standalone', exe)):
+for name, executable in (('wheel', bin_dir / ('loom-serve' + suffix)), ('standalone', exe)):
     results[name] = {'executable_sha256': sha(executable),
                      'version': subprocess.check_output([executable, '--version'], timeout=30).decode().strip(),
                      'control': launch(executable, control / 'model.json', f'{name}-control', False),
-                     'cxx': launch(executable, card, f'{name}-cxx', True)}
+                     'cxx': launch(executable, card, f'{name}-cxx', True),
+                     'valid_cxx': launch(executable, valid / 'model.json', f'{name}-valid-cxx', True)}
 record('result.json', results)
 print(json.dumps(results, indent=2))

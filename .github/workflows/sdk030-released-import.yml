@@ -1,0 +1,56 @@
+name: DevLab verify released Linux and Windows C++ input support
+on:
+  push:
+    branches: [codex/sdk030-windows-perf-testing]
+    paths: [.github/workflows/sdk030-released-import.yml]
+permissions:
+  contents: read
+jobs:
+  linux:
+    runs-on: [Linux, strix-halo, devlab-dispatch]
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Exercise identical ABI 2 fixtures with both Linux executables
+        shell: bash
+        run: |
+          set -euo pipefail
+          work=$(mktemp -d "$RUNNER_TEMP/sdk030-released-import.XXXXXX")
+          trap 'rm -rf -- "$work"' EXIT
+          mkdir linux-proof
+          hostname > linux-proof/runner.txt
+          python3 .github/sdk030-windows-perf/wheel-import.py "$work" linux-proof
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sdk030-released-linux-import
+          path: linux-proof
+  windows:
+    runs-on: [windows, strix-halo, devlab-dispatch]
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Exercise a valid released C++ source with both Windows executables
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $base = [IO.Path]::GetFullPath($env:RUNNER_TEMP)
+          $work = Join-Path $base "sdk030-released-import-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          if ((Split-Path $work -Parent) -ne $base) { throw 'Unexpected runner scratch parent' }
+          New-Item -ItemType Directory -Path $work,'windows-proof' | Out-Null
+          $env:COMPUTERNAME | Set-Content 'windows-proof/runner.txt' -Encoding ascii
+          try {
+            python .github/sdk030-windows-perf/wheel-import.py $work 'windows-proof'
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          } finally {
+            Remove-Item -LiteralPath $work -Recurse -Force
+          }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sdk030-released-windows-import
+          path: windows-proof
