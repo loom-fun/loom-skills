@@ -1,0 +1,53 @@
+name: DevLab Linux Lemonade wheel upgrade and staged Flash
+on:
+  push:
+    branches: [codex/sdk030-windows-perf-testing]
+    paths: [.github/workflows/sdk030-linux-lemonade.yml]
+permissions:
+  contents: read
+env:
+  LEMONADE_REVISION: c183d72227b88bb7e32745c58b5a78178064ad34
+jobs:
+  native:
+    runs-on: [Linux, strix-halo, devlab-dispatch, self-hosted]
+    timeout-minutes: 100
+    env:
+      HF_TOKEN: ${{ secrets.HF_TOKEN }}
+      CMAKE_BUILD_PARALLEL_LEVEL: '8'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Build the exact draft while fetching the locked packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          work=$(mktemp -d "$RUNNER_TEMP/sdk030-lemonade.XXXXXX")
+          out="$PWD/linux-lemonade-evidence"
+          mkdir "$out" "$work/draft"
+          hostname > "$out/runner.txt"
+          probe="$PWD/.github/sdk030-windows-perf/lemonade.py"
+          python3 "$probe" prepare "$work" "$out" > "$out/prepare.log" 2>&1 &
+          fetch_pid=$!
+          trap 'kill "$fetch_pid" 2>/dev/null || true; rm -rf -- "$work"' EXIT
+          git init -q "$work/lemonade"
+          git -C "$work/lemonade" fetch -q --depth 1 https://github.com/lemonade-sdk/lemonade.git "$LEMONADE_REVISION"
+          git -C "$work/lemonade" checkout -q --detach FETCH_HEAD
+          cd "$work/lemonade"
+          test "$(git rev-parse HEAD)" = "$LEMONADE_REVISION"
+          cmake --preset default -DBUILD_WEB_APP=OFF
+          cmake --build --preset default --target test_loom_contract test_install_atomicity embeddable
+          ctest --test-dir build --output-on-failure --no-tests=error -R '^(LoomContractTest|InstallAtomicityTest)$'
+          artifacts=(build/lemonade-embeddable-*-ubuntu-x64.tar.gz)
+          test "${#artifacts[@]}" -eq 1
+          cp "${artifacts[0]}" "$work/draft/"
+          git rev-parse HEAD > "$work/draft/draft-head.txt"
+          sha256sum "${artifacts[0]}" | cut -d ' ' -f 1 > "$work/draft/draft-build-sha256.txt"
+          wait "$fetch_pid" || { tail -80 "$out/prepare.log"; exit 1; }
+          python3 "$probe" run "$work" "$out"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: lemonade-native-linux-proof
+          path: linux-lemonade-evidence
+          if-no-files-found: ignore

@@ -2,9 +2,11 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import signal
 import socket
 import subprocess
 import sys
+import tarfile
 import time
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
@@ -13,14 +15,22 @@ import zipfile
 
 phase, root_arg, evidence_arg = sys.argv[1:]
 root, evidence = (Path(value).resolve() for value in (root_arg, evidence_arg))
-wheel = 'hrx_loom-0.3.0-py3-none-win_amd64.whl'
-standalone = 'loom-serve-0.3.0-win_amd64.zip'
+windows = sys.platform == 'win32'
+suffix = '.exe' if windows else ''
+platform = 'win_amd64' if windows else 'manylinux_2_39_x86_64'
+wheel = f'hrx_loom-0.3.0-py3-none-{platform}.whl'
+standalone = f'loom-serve-0.3.0-{platform}.zip'
 release = 'https://github.com/ROCm/hrx-system/releases/download/v0.3.0/'
 pins = {
-    wheel: '06afbc88370fde741037ebd38dba91c2184cb4d2fbd5cee337720cd494a06752',
-    standalone: '2f0bb6b4ab6053941041659c1ae8a8bb8386b6d49d4c7731b61adacffd3e521a',
+    wheel: ('06afbc88370fde741037ebd38dba91c2184cb4d2fbd5cee337720cd494a06752' if windows
+            else '6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f'),
+    standalone: ('2f0bb6b4ab6053941041659c1ae8a8bb8386b6d49d4c7731b61adacffd3e521a' if windows
+                 else 'b41d42e9a1a957f2a425fa25c48360cd9d3845ae76a9412d9f552ec1baa5809e'),
 }
-installed_exe = 'c3071350a0404291a43843524bb9a9b891c2a715a58b84c457d440bcac1f523a'
+installed_exe = ('c3071350a0404291a43843524bb9a9b891c2a715a58b84c457d440bcac1f523a' if windows
+                 else '1db8c4d0cdf4787af6a685dd945802eb559e15e3948a931b446fb6a6570fa71d')
+previous_exe = ('e2d926f1ad37efd6a340ad52ee674516fc2186a268637b53bc9412378fecbb46' if windows
+                else 'b95424e54d77dac1a77a81f930aa53ebf78cd2a636c6e331565b59ab733e997a')
 cases = (
     ('legacy', 'Qwen3-0.6B-Loom', 'loom-fun/unsloth-Qwen3-0.6B-loom',
      '564d578f4e487c6fbabd84915439f873651b5953', 'chat', 1),
@@ -39,7 +49,7 @@ def write(name, data):
 
 
 def download(url, path, timeout=100):
-    subprocess.run(['curl.exe', '--fail', '--silent', '--show-error', '--location', '--retry', '3',
+    subprocess.run(['curl.exe' if windows else 'curl', '--fail', '--silent', '--show-error', '--location', '--retry', '3',
                     url, '--output', str(path)], check=True, timeout=timeout)
 
 
@@ -56,15 +66,16 @@ def prepare():
         download(release + name, root / name)
         assert sha(root / name) == expected, name
     venv = root / 'fetch-env'
+    bin_dir = venv / ('Scripts' if windows else 'bin')
     subprocess.run([sys.executable, '-m', 'venv', str(venv)], check=True)
-    subprocess.run([venv / 'Scripts/python.exe', '-m', 'pip', 'install', '--disable-pip-version-check',
+    subprocess.run([bin_dir / ('python' + suffix), '-m', 'pip', 'install', '--disable-pip-version-check',
                     f'{root / wheel}[hf]'], check=True, timeout=250)
     records = {}
     for label, alias, repo, revision, preset, abi in cases:
         target = root / ('package-' + label)
         with (evidence / f'{label}-fetch.log').open('wb') as log:
             print(f'Preparing {repo}@{revision}', flush=True)
-            subprocess.run([venv / 'Scripts/loom-fetch.exe', f'huggingface:{repo}:{preset}@{revision}',
+            subprocess.run([bin_dir / ('loom-fetch' + suffix), f'huggingface:{repo}:{preset}@{revision}',
                             f'--output={target}', '--materialize=share', '--no-input'],
                            check=True, stdout=log, stderr=subprocess.STDOUT, timeout=2700)
         base = f'https://huggingface.co/{repo}/resolve/{revision}'
@@ -108,7 +119,8 @@ def chat(exe, cache, config, label, alias):
     base = f'http://127.0.0.1:{port}'
     with (evidence / f'{label}-lemonade.log').open('wb') as log:
         args = [exe, cache, config, '--port', str(port), '--host', '127.0.0.1']
-        server = subprocess.Popen(args, cwd=root, stdout=log, stderr=subprocess.STDOUT)
+        server = subprocess.Popen(args, cwd=root, stdout=log, stderr=subprocess.STDOUT,
+                                  start_new_session=not windows)
         try:
             write(f'{label}-health.json', health(server, base))
             body = {'model': alias, 'messages': [{'role': 'user', 'content':
@@ -129,8 +141,11 @@ def chat(exe, cache, config, label, alias):
             print(f'{label}: {content} through Lemonade in {time.monotonic() - start:.2f}s including model load', flush=True)
         finally:
             if server.poll() is None:
-                subprocess.run(['taskkill.exe', '/PID', str(server.pid), '/T', '/F'],
-                               capture_output=True, timeout=15, check=True)
+                if windows:
+                    subprocess.run(['taskkill.exe', '/PID', str(server.pid), '/T', '/F'],
+                                   capture_output=True, timeout=15, check=True)
+                else:
+                    os.killpg(server.pid, signal.SIGTERM)
                 server.wait(timeout=15)
 
 
@@ -139,33 +154,40 @@ def run():
     os.environ['HF_HOME'] = str(root / 'weights-hf')
     draft = root / 'draft'
     assert (draft / 'draft-head.txt').read_text().strip() == os.environ['LEMONADE_REVISION']
-    archive, = draft.glob('lemonade-embeddable-*-windows-x64.zip')
+    archive, = draft.glob('lemonade-embeddable-*-windows-x64.zip' if windows
+                          else 'lemonade-embeddable-*-ubuntu-x64.tar.gz')
     assert sha(archive) == (draft / 'draft-build-sha256.txt').read_text().strip()
     write('draft-build.json', {'revision': os.environ['LEMONADE_REVISION'], 'sha256': sha(archive)})
     app = root / 'application'
-    with zipfile.ZipFile(archive) as bundle:
-        bundle.extractall(app)
-    executable, = app.rglob('lemond.exe')
+    if windows:
+        with zipfile.ZipFile(archive) as bundle:
+            bundle.extractall(app)
+    else:
+        with tarfile.open(archive) as bundle:
+            bundle.extractall(app, filter='data')
+    executable, = app.rglob('lemond' + suffix)
     cache, config = root / 'lc', root / 'cfg'
     install = cache / 'bin/loom/hrx'
     install.mkdir(parents=True)
     config.mkdir()
-    backend = install / 'loom-serve.exe'
+    backend = install / ('loom-serve' + suffix)
     with zipfile.ZipFile(root / standalone) as bundle:
-        backend.write_bytes(bundle.read('loom-serve.exe'))
+        backend.write_bytes(bundle.read(backend.name))
+    backend.chmod(0o755)
     (install / 'version.txt').write_text('v0.3.0', encoding='utf-8')
-    assert sha(backend) == 'e2d926f1ad37efd6a340ad52ee674516fc2186a268637b53bc9412378fecbb46'
+    assert sha(backend) == previous_exe
     before = sha(backend)
     label, alias, *_ = cases[0]
     chat(executable, cache, config, label, alias)
     assert sha(backend) == installed_exe
-    libraries = {name: sha(install / name) for name in ('iree.dll', 'loomc.dll')}
+    runtime_files = ('iree.dll', 'loomc.dll') if windows else ('libiree.so', 'libloomc.so')
+    libraries = {name: sha(install / name) for name in runtime_files}
     write('same-version-upgrade.json', {'version': (install / 'version.txt').read_text().strip(),
-                                      'before': before, 'after': installed_exe, 'dlls': libraries})
+                                      'before': before, 'after': installed_exe, 'libraries': libraries})
     label, alias, *_ = cases[1]
     chat(executable, cache, config, label, alias)
     assert sha(backend) == installed_exe
 
 
-assert sys.platform == 'win32'
+assert windows or sys.platform == 'linux'
 {'prepare': prepare, 'run': run}[phase]()
