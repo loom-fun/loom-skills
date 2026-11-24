@@ -21,10 +21,14 @@ g_mla_dcombine folds them into o[token][head][0:512] (o keeps the 576-dim row st
 v_b reads the first 512). Numerics: Q and P rounded to f16 (as the flash prefill), f32 accumulation.
 """
 import os
+import re
 
 SMAX = int(os.environ.get("MLA_DEC_S", "32"))      # splits per token at most (grid y)
 BMIN = int(os.environ.get("MLA_DEC_BMIN", "2"))    # 16-key blocks per split at least
-VTC = 16 + int(os.environ.get("MLA_DEC_VTPAD", "8"))   # padded V^T row (halves)
+# QL=1: the Q^T fragments live in workgroup memory (36 KB) instead of 72 VGPRs, read back per block, so PF 2 (next
+# block's K during this block's softmax / PV) fits in registers; needs MLA_DEC_VTPAD <= 2 to stay within 64 KB
+QL = int(os.environ.get("MLA_DEC_QL", "0"))
+VTC = 16 + int(os.environ.get("MLA_DEC_VTPAD", "2" if QL else "8"))   # padded V^T row (halves)
 # timing ablations (kbench only, results wrong): empty (no key blocks), noqk (no S MMAs), nostv (no V^T stores),
 # nopv (no PV MMAs), nosx (no S exchange: own partial, no first barrier), nopart (no partial O stores)
 # prefetch: 0 = g_kv_offset per block (3 dependent loads), 1 = page map hoisted + next page index prefetched (1 load
@@ -34,6 +38,14 @@ NPF = int(os.environ.get("MLA_DEC_PFN", "9"))   # PF 2: score chunks of the next
 # partial layout: 0 = part_acc[token][split][head][512] (transposed fragment stores: 8 scattered 4 B stores per lane),
 # 1 = part_acc[token][split][512][head] (16 lanes = 16 heads write 64 contiguous bytes per row); g_mla_dcombine follows
 PL = int(os.environ.get("MLA_DEC_PL", "1"))
+HG = int(os.environ.get("MLA_DEC_HG", "1"))   # 2: the 32 heads split over 2 workgroups (twice the workgroups, half the serial chain each)
+PH = int(os.environ.get("MLA_DEC_PH", "0"))   # 1 (PL 1, CU > 1): partial O normalized by its own l and stored as f16 (half the partial traffic)
+# KLDS=1 (PF 0): K blocks staged in workgroup memory, double-buffered: the next block's global loads are issued before
+# this block's QK / softmax / PV and stored to the other buffer after it (one barrier per block); V^T fragments are read
+# straight from the staged K block (no separate V^T tile). Rows past the token's position are stored as zeros.
+KLDS = int(os.environ.get("MLA_DEC_KLDS", "0"))
+QK2 = int(os.environ.get("MLA_DEC_QK2", "0"))   # 1: the score MMA chain split into two accumulators (even / odd chunks), summed at the end
+STI = int(os.environ.get("MLA_DEC_STI", "1" if HG == 2 else "0"))   # V^T staging of each chunk right after its score MMA
 CU = int(os.environ.get("MLA_DEC_CU", "4"))   # g_mla_dcombine (PL 1): splits whose loads are issued together
 ABL = set(x for x in os.environ.get("MLA_DEC_ABL", "").split(",") if x)
 
@@ -130,14 +142,19 @@ kernel.def export("g_mla_dsplit") @g_mla_dsplit(%tokens: index) {{
     %head_value = index.madd %ht, %c16, %lane_col : index
     %head = index.assume %head_value [range(%head_value, 0, {QH - 1})] : index
     %qbase = index.mul %qd, %c144 : index
-    %q_view = buffer.view %q[%zero] : buffer -> view<[%tokens]x{QH}x{D}xf32>""")
+    %q_view = buffer.view %q[%zero] : buffer -> view<[%tokens]x{QH}x{D}xf32>""" + (f"""
+    %ql_bytes = index.constant {8 * NJ * 16 * 16 * 2} : offset
+    %ql_tile = buffer.alloca<workgroup> align(16) %ql_bytes : buffer
+    %ql_view = buffer.view %ql_tile[%zero] : buffer -> view<8x{NJ}x16x16xf16>""" if QL else ""))
     for j in range(NJ):
         a(f"""    %qo{j} = index.constant {16 * j} : index
     %qd{j}_v = index.add %qbase, %qo{j} : index
     %qd{j} = index.assume %qd{j}_v [range(%qd{j}_v, 0, {D - 16})] : index
     %qraw{j} = vector.load %q_view[%token, %head, %qd{j}] : view<[%tokens]x{QH}x{D}xf32> -> vector<16xf32>
-    %qh{j} = vector.fptrunc %qraw{j} : vector<16xf32> to vector<16xf16>
-    %qf{j} = vector.fragment<rhs> %qh{j} shape [%c16, %c16] : vector<16xf16>""")
+    %qh{j} = vector.fptrunc %qraw{j} : vector<16xf32> to vector<16xf16>""" + (f"""
+    %cqj{j} = index.constant {j} : index
+    vector.store %qh{j}, %ql_view[%wave, %cqj{j}, %lane_col, %c0] : vector<16xf16>, view<8x{NJ}x16x16xf16>""" if QL else f"""
+    %qf{j} = vector.fragment<rhs> %qh{j} shape [%c16, %c16] : vector<16xf16>"""))
         # global 16-dim chunk index of this wave's chunk j (qd * 9 + j) and whether this wave stages it into V^T
         a(f"""    %cj{j} = index.constant {j} : index
     %gc{j} = index.madd %qd, %c9, %cj{j} : index
@@ -162,9 +179,12 @@ kernel.def export("g_mla_dsplit") @g_mla_dsplit(%tokens: index) {{
     %row_off = vector.iota %half32 step %two_i32 : vector<8xi32>
     %pos32 = index.cast %position : index to i32
     %pos_v = vector.splat %pos32 : vector<8xi32>
-    %vt_bytes = index.constant {KL * VTC * 2} : offset
+""" + (f"""    %kb_bytes = index.constant {2 * 16 * D * 2} : offset
+    %kbuf = buffer.alloca<workgroup> align(16) %kb_bytes : buffer
+    %kb_view = buffer.view %kbuf[%zero] : buffer -> view<2x16x{D}xf16>
+    %kslot_bytes = index.constant {16 * D * 2} : offset""" if KLDS else f"""    %vt_bytes = index.constant {KL * VTC * 2} : offset
     %vt_tile = buffer.alloca<workgroup> align(16) %vt_bytes : buffer
-    %vt_view = buffer.view %vt_tile[%zero] : buffer -> view<{KL}x{VTC}xf16>
+    %vt_view = buffer.view %vt_tile[%zero] : buffer -> view<{KL}x{VTC}xf16>""") + f"""
     %s_bytes = index.constant {8 * 16 * 16 * 4} : offset
     %s_tile = buffer.alloca<workgroup> align(16) %s_bytes : buffer
     %s_view = buffer.view %s_tile[%zero] : buffer -> view<128x16xf32>
@@ -212,9 +232,60 @@ kernel.def export("g_mla_dsplit") @g_mla_dsplit(%tokens: index) {{
                 a(f"""    %kq0_{j} = vector.load %kv0[%lane_col, %qd{j}] : view<16x{D}xf16> -> vector<16xf16>""")
             acc_pf = ", %ph = %ph1 : i32" + "".join(f", %kc{j} = %kq0_{j} : vector<16xf16>" for j in range(min(NPF, NJ)))
             ty_pf = ", i32" + ", vector<16xf16>" * min(NPF, NJ)
+    def kload(tag, blk, guard):
+        """global loads of block BLK's 16 x D K rows, cooperatively (lane = (row, 36-value segment)), rows past the
+        position as zeros; returns the 9 vector<4xf16> names"""
+        a(f"""    %{tag}_tf = index.mul {blk}, %c16 : index
+    %{tag}_r_v = index.div %kwi, %c16 : index
+    %{tag}_r = index.assume %{tag}_r_v [range(%{tag}_r_v, 0, 15)] : index
+    %{tag}_seg = index.rem %kwi, %c16 : index
+    %{tag}_kp = index.add %{tag}_tf, %{tag}_r : index
+    %{tag}_ok = index.cmp ule, %{tag}_kp, %position : index
+    %{tag}_ld = scalar.andi %{tag}_ok, {guard} : i1
+    {", ".join(f"%{tag}_v{m}" for m in range(9))} = scf.if %{tag}_ld -> ({", ".join(["vector<4xf16>"] * 9)}) {{
+      %{tag}_off = func.call @{kvo}(%origins, %row, %{tag}_tf, %blocks, %layer, %pool) : (buffer, index, index, index, index, index) -> (offset)
+      %{tag}_g = buffer.view %arena[%{tag}_off] : buffer -> view<16x{D}xf16>""")
+        for m in range(9):
+            a(f"""      %{tag}_d{m}_c = index.constant {4 * m} : index
+      %{tag}_d{m}_v = index.madd %{tag}_seg, %c36k, %{tag}_d{m}_c : index
+      %{tag}_d{m} = index.assume %{tag}_d{m}_v [range(%{tag}_d{m}_v, 0, {D - 4})] : index
+      %{tag}_l{m} = vector.load %{tag}_g[%{tag}_r, %{tag}_d{m}] : view<16x{D}xf16> -> vector<4xf16>""")
+        a(f"""      scf.yield {", ".join(f"%{tag}_l{m}" for m in range(9))} : {", ".join(["vector<4xf16>"] * 9)}
+    }} else {{
+      scf.yield {", ".join(["%zero4h"] * 9)} : {", ".join(["vector<4xf16>"] * 9)}
+    }}""")
+
+    def kstore(tag, slot, guard):
+        a(f"""    scf.if {guard} {{""")
+        for m in range(9):
+            a(f"""      %{tag}_e{m}_c = index.constant {4 * m} : index
+      %{tag}_e{m}_v = index.madd %{tag}_seg, %c36k, %{tag}_e{m}_c : index
+      %{tag}_e{m} = index.assume %{tag}_e{m}_v [range(%{tag}_e{m}_v, 0, {D - 4})] : index
+      vector.store %{tag}_v{m}, %kb_view[{slot}, %{tag}_r, %{tag}_e{m}] : vector<4xf16>, view<2x16x{D}xf16>""")
+        a("    }")
+    if KLDS:
+        assert PF == 0 and HG == 1
+        a(f"""    %kwi_id = kernel.workitem.id<x> : index
+    %kwi = index.assume %kwi_id [range(%kwi_id, 0, 255)] : index
+    %c36k = index.constant 36 : index
+    %zero4h = vector.splatf 0.0 : vector<4xf16>
+    %true_k = scalar.constant true : i1
+    %kslot0 = index.constant 0 : index""")
+        kload("kp0", "%b0", "%true_k")
+        kstore("kp0", "%kslot0", "%true_k")
+        a("""    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)""")
     a(f"""    %m_final, %l_final, {", ".join(f"%o{d}" for d in range(8))}{", %ph_fin" if PF else ""}{"".join(f", %kc_fin{j}" for j in range(min(NPF, NJ))) if PF == 2 else ""} = scf.for %b = [%b0 to {"%b1e" if "empty" in ABL else "%b1"} step %c1](%m = %neg_big : f32, %l = %zero_f : f32, {acc}{acc_pf}) -> (f32, f32, {", ".join(["vector<8xf32>"] * 8)}{ty_pf}) {{
       %tile_first = index.mul %b, %c16 : index""")
-    if PF == 0:
+    if PF == 0 and KLDS:
+        a(f"""      %kb_rel = index.sub %b, %b0 : index
+      %kb_cur = index.rem %kb_rel, %c2 : index
+      %kb_nxt = index.sub %c1, %kb_cur : index
+      %kb_off = index.scale %kb_cur, %kslot_bytes : index, offset -> offset
+      %kv = buffer.view %kbuf[%kb_off] : buffer -> view<16x{D}xf16>
+      %kb_bn = index.add %b, %c1 : index
+      %kb_has = index.cmp ult, %kb_bn, %b1 : index""")
+        kload("kn", "%kb_bn", "%kb_has")
+    elif PF == 0:
         a(f"""      %k_off = func.call @{kvo}(%origins, %row, %tile_first, %blocks, %layer, %pool) : (buffer, index, index, index, index, index) -> (offset)
       %kv = buffer.view %arena[%k_off] : buffer -> view<16x{D}xf16>""")
     elif PF == 1:
@@ -243,15 +314,7 @@ kernel.def export("g_mla_dsplit") @g_mla_dsplit(%tokens: index) {{
       %kv = buffer.view %arena[%k_offc] : buffer -> view<16x{D}xf16>""" if NPF < NJ else ""))
     a(f"""      %key_pos = index.add %tile_first, %lane_col : index
       %kvalid = index.cmp ule, %key_pos, %position : index""")
-    prev = "%init"
-    for j in range(NJ):
-        pre = PF == 2 and j < NPF
-        a((f"""      %kr{j} = vector.load %kv[%lane_col, %qd{j}] : view<16x{D}xf16> -> vector<16xf16>
-""" if not pre else "") + f"""      %kh{j} = scf.select %kvalid, {"%kc" if pre else "%kr"}{j}, %zero16h : vector<16xf16>
-      %kf{j} = vector.fragment<lhs> %kh{j} shape [%c16, %c16] : vector<16xf16>
-""" + (f"""      %s{j} = vector.mma %kf{j}, %qf{j}, {prev} : vector<16xf16>, vector<16xf16>, vector<8xf32>""" if "noqk" not in ABL else f"""      %s{j} = vector.addf {prev}, {prev} : vector<8xf32>"""))
-        prev = f"%s{j}"
-    for j in range(NJ):
+    def stage(j):
         st = []
         for i in range(8):
             st.append(f"""        %ea{j}_{i} = vector.extract %kh{j}[%ex{i}] : vector<16xf16> -> f16
@@ -262,10 +325,29 @@ kernel.def export("g_mla_dsplit") @g_mla_dsplit(%tokens: index) {{
         %vro{j}_{i} = index.assume %vro{j}_{i}_v [range(%vro{j}_{i}_v, 0, {KL - 1})] : index
         view.store %ev{j}_{i}, %vt_view[%vro{j}_{i}, %lane_col] : f16, view<{KL}x{VTC}xf16>""")
         if "nostv" in ABL:
-            continue
+            return
         a(f"""      scf.if %vst{j} {{
 {chr(10).join(st)}
       }}""")
+    prev = "%init"
+    prev2 = ["%init", "%init"]
+    for j in range(NJ):
+        pre = PF == 2 and j < NPF
+        a((f"""      %kr{j} = vector.load %kv[%lane_col, %qd{j}] : view<16x{D}xf16> -> vector<16xf16>
+""" if not pre else "") + f"""      %kh{j} = scf.select %kvalid, {"%kc" if pre else "%kr"}{j}, %zero16h : vector<16xf16>
+      %kf{j} = vector.fragment<lhs> %kh{j} shape [%c16, %c16] : vector<16xf16>
+""" + (f"""      %qv{j} = vector.load %ql_view[%wave, %cqj{j}, %lane_col, %c0] : view<8x{NJ}x16x16xf16> -> vector<16xf16>
+      %qf{j} = vector.fragment<rhs> %qv{j} shape [%c16, %c16] : vector<16xf16>
+""" if QL else "") + (f"""      %{"sq" if QK2 else "s"}{j} = vector.mma %kf{j}, %qf{j}, {(prev2[j % 2] if QK2 else prev)} : vector<16xf16>, vector<16xf16>, vector<8xf32>""" if "noqk" not in ABL else f"""      %s{j} = vector.addf {prev}, {prev} : vector<8xf32>"""))
+        prev = f"%s{j}"
+        prev2[j % 2] = f"%sq{j}"
+        if STI and not KLDS:
+            stage(j)
+    if not STI and not KLDS:
+        for j in range(NJ):
+            stage(j)
+    if QK2 and "noqk" not in ABL:
+        a(f"""      %s{NJ - 1} = vector.addf {prev2[0]}, {prev2[1]} : vector<8xf32>""")
     if PF == 2:
         a(f"""      %phb = scalar.assume %ph [range(%ph, 0, 134217727)] : i32
       %phys = index.cast %phb : i32 to index
@@ -321,8 +403,15 @@ kernel.def export("g_mla_dsplit") @g_mla_dsplit(%tokens: index) {{
       %alpha_v = vector.splat %alpha : vector<8xf32>""")
     for d in range(8):
         a(f"""      %os{d} = vector.mulf %a{d}, %alpha_v : vector<8xf32>
-      %vl{d} = vector.fragment.load<lhs> %vt_view[%vr{d}, %c0] shape [%c16, %c16] : view<{KL}x{VTC}xf16> -> vector<16xf16>
-""" + (f"""      %an{d} = vector.mma %vl{d}, %pt, %os{d} : vector<16xf16>, vector<16xf16>, vector<8xf32>""" if "nopv" not in ABL else f"""      %an{d} = vector.addf %os{d}, %os{d} : vector<8xf32>"""))
+""" + (f"""      %vl{d} = vector.fragment.load<lhs> %vt_view[%vr{d}, %c0] shape [%c16, %c16] : view<{KL}x{VTC}xf16> -> vector<16xf16>
+""" if not KLDS else f"""      %vdim{d}_v = index.add %vr{d}, %lane_col : index
+      %vdim{d} = index.assume %vdim{d}_v [range(%vdim{d}_v, 0, {KL - 1})] : index
+""" + "".join(f"""      %vk{d}_{k} = view.load %kv[%ex{k}, %vdim{d}] : view<16x{D}xf16> -> f16
+""" for k in range(16)) + f"""      %vle{d} = vector.from_elements {", ".join(f"%vk{d}_{k}" for k in range(16))} : vector<16xf16>
+      %vl{d} = vector.fragment<lhs> %vle{d} shape [%c16, %c16] : vector<16xf16>
+""") + (f"""      %an{d} = vector.mma %vl{d}, %pt, %os{d} : vector<16xf16>, vector<16xf16>, vector<8xf32>""" if "nopv" not in ABL else f"""      %an{d} = vector.addf %os{d}, %os{d} : vector<8xf32>"""))
+    if KLDS:
+        kstore("kn", "%kb_nxt", "%kb_has")
     a(f"""      kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
       scf.yield %m_new, %l_new, {", ".join(f"%an{d}" for d in range(8))}{", %ph_next" if PF else ""}{"".join(f", %kn{j}" for j in range(min(NPF, NJ))) if PF == 2 else ""} : f32, f32, {", ".join(["vector<8xf32>"] * 8)}{ty_pf}
     }}
@@ -341,7 +430,25 @@ kernel.def export("g_mla_dsplit") @g_mla_dsplit(%tokens: index) {{
 """) + f"""    %four = index.constant 4 : offset
     %acc_off = index.scale %acc_first, %four : index, offset -> offset
     %acc_view = buffer.view %part_acc[%acc_off] : buffer -> view<128x16xf32, %acc_layout>""")
-    for d in range(8 if "nopart" not in ABL else 0):
+    if PH and "nopart" not in ABL:
+        assert PL == 1
+        a(f"""    %ph_one = scalar.constant 1.0 : f32
+    %ph_l_gt = scalar.cmpf ogt, %l_final, %zero_f : f32
+    %ph_linv = scalar.divf %ph_one, %l_final : f32
+    %ph_inv = scf.select %ph_l_gt, %ph_linv, %zero_f : f32
+    %ph_invv = vector.splat %ph_inv : vector<8xf32>
+    %ph_view = buffer.view %part_acc[%zero] : buffer -> view<[%tokens]x{SMAX}x{KL}x{QH}xf16>""")
+        for d in range(8):
+            a(f"""    %on{d} = vector.mulf %o{d}, %ph_invv : vector<8xf32>
+    %oh{d} = vector.fptrunc %on{d} : vector<8xf32> to vector<8xf16>""")
+            for i in range(8):
+                a(f"""    %phe{d}_{i} = vector.extract %oh{d}[%ex{i}] : vector<8xf16> -> f16
+    %phr{d}_{i}_c = index.constant {16 * d + 2 * i} : index
+    %phr{d}_{i}_b = index.add %vbase, %phr{d}_{i}_c : index
+    %phr{d}_{i}_v = index.add %phr{d}_{i}_b, %lane_half : index
+    %phr{d}_{i} = index.assume %phr{d}_{i}_v [range(%phr{d}_{i}_v, 0, {KL - 1})] : index
+    view.store %phe{d}_{i}, %ph_view[%token, %split, %phr{d}_{i}, %head] : f16, view<[%tokens]x{SMAX}x{KL}x{QH}xf16>""")
+    for d in range(8 if "nopart" not in ABL and not PH else 0):
         a(f"""    vector.fragment.store<result> %o{d}, %acc_view[%vd{d}_o, %c0] shape [%c16, %c16] : vector<8xf32>, view<128x16xf32, %acc_layout>""")
     a(f"""    %q0 = index.cmp eq, %qd, %c0 : index
     %lo_half = index.cmp eq, %lane_half, %c0 : index
@@ -431,6 +538,16 @@ kernel.def export("g_mla_dcombine") @g_mla_dcombine(%tokens: index) {{
     # constants used before their natural place
     t = t.replace("    %ts = index.madd %token, %cS_, %split : index\n",
                   f"    %cS_ = index.constant {SMAX} : index\n    %head_tile0 = index.mul %ht, %c16 : index\n    %ts = index.madd %token, %cS_, %split : index\n")
+    if HG == 2:   # head groups: workgroup (token, split, head tile) of 4 waves (one 16-head tile, the 4 dim quarters)
+        for a_, b_ in (("kernel.launch.config workgroups(%tokens, %cS, %c1) workgroup_size(%c256, %c1, %c1)",
+                        "%c2hg = index.constant 2 : index\n  %c128hg = index.constant 128 : index\n  kernel.launch.config workgroups(%tokens, %cS, %c2hg) workgroup_size(%c128hg, %c1, %c1)"),
+                       ("%wave = index.assume %wave_id [range(%wave_id, 0, 7)] : index", "%wave = index.assume %wave_id [range(%wave_id, 0, 3)] : index"),
+                       ("    %ht = index.div %wave, %c4 : index", "    %ht_id = kernel.workgroup.id<z> : index\n    %ht = index.assume %ht_id [range(%ht_id, 0, 1)] : index"),
+                       ("    %qd = index.rem %wave, %c4 : index", "    %qd = index.add %wave, %c0 : index"),
+                       ("    %ht_s = index.mul %ht, %c4 : index", "    %ht_s = index.add %c0, %c0 : index")):
+            assert t.count(a_) == 1, a_
+            t = t.replace(a_, b_)
+        t = re.sub(r"%gcmine(\d+) = index.cmp eq, %gcpar\1, %ht : index", r"%gcmine\1 = index.cmp ult, %gcpar\1, %c2 : index", t)
     return t
 
 
@@ -438,7 +555,7 @@ def combine_loops_unrolled(QH, KL, U):
     """the two split loops of combine_pl1, U splits per iteration (loads in flight together; slots past s_eff are read
     in bounds and masked)"""
     ML = f"view<[%tokens]x{SMAX}x{QH}x2xf32>"
-    AV = f"view<[%tokens]x{SMAX}x{KL}x{QH}xf32>"
+    AV = f"view<[%tokens]x{SMAX}x{KL}x{QH}x{'f16' if PH else 'f32'}>"
     t = [f"""    %cU = index.constant {U} : index
     %cUl = index.constant {U - 1} : index
     %smax_l = index.constant {SMAX - 1} : index
@@ -470,7 +587,9 @@ def combine_loops_unrolled(QH, KL, U):
       %bi{i} = index.assume %bi{i}_m [range(%bi{i}_m, 0, {SMAX - 1})] : index
       %ms{i} = view.load %ml_view[%token, %bi{i}, %head, 0] : {ML} -> f32
       %lr{i} = view.load %ml_view[%token, %bi{i}, %head, 1] : {ML} -> f32""" + "".join(f"""
-      %pr{i}_{k} = view.load %acc_view[%token, %bi{i}, %dm{k}, %head] : {AV} -> f32""" for k in range(4)))
+      %pr{i}_{k} = view.load %acc_view[%token, %bi{i}, %dm{k}, %head] : {AV} -> f32""" if not PH else f"""
+      %prh{i}_{k} = view.load %acc_view[%token, %bi{i}, %dm{k}, %head] : {AV} -> f16
+      %pr{i}_{k} = scalar.extf %prh{i}_{k} : f16 to f32""" for k in range(4)))
     d, acc = "%d", "%acc"
     for i in range(U):
         t.append(f"""      %sh{i} = scalar.subf %ms{i}, %maximum : f32
@@ -481,7 +600,7 @@ def combine_loops_unrolled(QH, KL, U):
       %dn{i} = scalar.addf {d}, %wl{i} : f32""" + "".join(f"""
       %pz{i}_{k} = scf.select %vi{i}, %pr{i}_{k}, %zero_f : f32""" for k in range(4)) + f"""
       %part{i} = vector.from_elements %pz{i}_0, %pz{i}_1, %pz{i}_2, %pz{i}_3 : vector<4xf32>
-      %wv{i} = vector.splat %w{i} : vector<4xf32>
+      %wv{i} = vector.splat {"%wl" if PH else "%w"}{i} : vector<4xf32>
       %an{i} = vector.fmaf %wv{i}, %part{i}, {acc} : vector<4xf32>""")
         d, acc = f"%dn{i}", f"%an{i}"
     t.append(f"""      scf.yield {d}, {acc} : f32, vector<4xf32>
@@ -540,7 +659,7 @@ kernel.def export("g_mla_dcombine") @g_mla_dcombine(%tokens: index) {{
     %nblk = index.assume %nblk_value [range(%nblk_value, 1, 16384)] : index
     %s_eff = func.call @g_mla_dsplits(%nblk) : (index) -> (index)
     %ml_view = buffer.view %part_ml[%zero] : buffer -> view<[%tokens]x{SMAX}x{QH}x2xf32>
-    %acc_view = buffer.view %part_acc[%zero] : buffer -> view<[%tokens]x{SMAX}x{KL}x{QH}xf32>
+    %acc_view = buffer.view %part_acc[%zero] : buffer -> view<[%tokens]x{SMAX}x{KL}x{QH}x{'f16' if PH else 'f32'}>
 """ + (combine_loops_unrolled(QH, KL, CU) if CU > 1 else f"""    %maximum = scf.for %s = [%c0 to %s_eff step %c1](%mx = %neg_big : f32) -> (f32) {{
       %bs = index.assume %s [range(%s, 0, {SMAX - 1})] : index
       %ms = view.load %ml_view[%token, %bs, %head, 0] : view<[%tokens]x{SMAX}x{QH}x2xf32> -> f32

@@ -394,6 +394,47 @@ kernel.def export("{name}") @{name}(%tokens: index) {{
     return text.replace("  %c16 = index.constant 16 : index\n  %cn", "  %c16 = index.constant 16 : index\n  %c2 = index.constant 2 : index\n  %cn", 1)
 
 
+def rope_kb(rope, kb, name, TGC=8):
+    """MLA_ROPE_KB: g_mla_rope_store and the decode k_b matvec in one launch. The k_b grid (row blocks, heads, token
+    groups of TGC) gets one more row block; its workgroups (y < TGC) run the rope / cache store of token z * TGC + y,
+    the rest return. Both bodies unchanged (each in its own branch region). Args: the rope kernel's, then k_b's weights."""
+    import re as _re
+    def body(t):
+        i = t.index("} launch(")
+        i = t.index("\n", i) + 1
+        j = t.rindex("  kernel.return")
+        return t[i:j]
+    rb, kbb = body(rope), body(kb)
+    kbb = _re.sub(r"%x\b", "%qb", kbb)
+    kbb = _re.sub(r"%y\b", "%q", kbb)
+    rb = rb.replace("  %token_id = kernel.workgroup.id<x> : index\n", "  %token_id = index.madd %rk_z, %rk_tgc, %rk_y : index\n", 1)
+    cfg = kb[:kb.index("} launch(")]
+    cfg = cfg.replace("kernel.launch.config workgroups(%rblocks, %heads, %tgroups)", "%rblocks1 = index.add %rblocks, %c1 : index\n  kernel.launch.config workgroups(%rblocks1, %heads, %tgroups)")
+    kname = _re.search(r'export\("(\w+)"\)', kb).group(1)
+    cfg = cfg.replace(f'export("{kname}") @{kname}(', f'export("{name}") @{name}(')
+    nrb = _re.search(r"%rblocks = index.constant (\d+) : index", kb).group(1)
+    args = rope[rope.index("} launch(") + len("} launch("):rope.index(") {", rope.index("} launch("))]
+    return cfg + f"""}} launch({args}, %w: buffer) {{
+  %rk_x = kernel.workgroup.id<x> : index
+  %rk_y = kernel.workgroup.id<y> : index
+  %rk_z = kernel.workgroup.id<z> : index
+  %rk_nrb = index.constant {nrb} : index
+  %rk_tgc = index.constant {TGC} : index
+  %rk_isr = index.cmp eq, %rk_x, %rk_nrb : index
+  scf.if %rk_isr {{
+    %rk_ylt = index.cmp ult, %rk_y, %rk_tgc : index
+    %rk_tok = index.madd %rk_z, %rk_tgc, %rk_y : index
+    %rk_tin = index.cmp ult, %rk_tok, %tokens_arg : index
+    %rk_do = scalar.andi %rk_ylt, %rk_tin : i1
+    scf.if %rk_do {{
+{rb}    }}
+  }} else {{
+{kbb}  }}
+  kernel.return
+}}
+"""
+
+
 def kernels(cfg, eps, theta, layers, FMT, SB, row_bytes, kb_fmts, vb_fmts):
     """Every MLA kernel the layers launch: the q_a norm, the rope/cache store, and the k_b / v_b per-head matvecs
     (g_mla_kb_<fmt>, g_mla_vb_<fmt>) for each format in use."""
@@ -401,6 +442,8 @@ def kernels(cfg, eps, theta, layers, FMT, SB, row_bytes, kb_fmts, vb_fmts):
     QH, KL, NOPE, VD, D, QB = g["QH"], g["KL"], g["NOPE"], g["VD"], g["D"], g["QB"]
     return (rms_q(cfg, eps) + rope_store(cfg, eps, theta, layers)
             + "".join(bmv(f"g_mla_kb_{f}", f, NOPE, KL, QH, QB, D, FMT[f], SB[f], row_bytes(f, NOPE)) for f in kb_fmts)
+            + "".join(rope_kb(rope_store(cfg, eps, theta, layers), bmv(f"g_mla_kb_{f}", f, NOPE, KL, QH, QB, D, FMT[f], SB[f], row_bytes(f, NOPE)),
+                              f"g_mla_ropekb_{f}") for f in kb_fmts)
             + "".join(bmv(f"g_mla_vb_{f}", f, KL, VD, QH, D, VD, FMT[f], SB[f], row_bytes(f, KL)) for f in vb_fmts)
             + "".join(_bmm("kbm")(f"g_mla_kbm_{f}", f, NOPE, KL, QH, QB, D, FMT[f], SB[f], row_bytes(f, NOPE)) for f in kb_fmts)
             + "".join(_bmm("vbm")(f"g_mla_vbm_{f}", f, KL, VD, QH, D, VD, FMT[f], SB[f], row_bytes(f, KL)) for f in vb_fmts))

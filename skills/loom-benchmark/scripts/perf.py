@@ -61,6 +61,8 @@ ap.add_argument("--kind", default="loom", choices=["loom", "llama", "vllm", "guf
                      "no drafted-token counters read per request)")
 ap.add_argument("--model", default=None, help="Loom model id (model.json model.id), or the vLLM server's served model name")
 ap.add_argument("--long", action="store_true")
+ap.add_argument("--decode-ctx", default="", help="comma list of context sizes N (tokens): decode_tps_<N/1000>k rows, 128 tokens "
+                "generated after an N-token document (e.g. 16000,128000; refused-as-over-context rows are skipped)")
 ap.add_argument("--log", default="perf_log.jsonl")
 ap.add_argument("--reverted", action="store_true", help="this build is not kept (still logged: its time counts)")
 ap.add_argument("--no-campaign", action="store_true",
@@ -167,7 +169,19 @@ def repeats(key, metric, make, f):
     return median(vals) if vals else None
 
 
-if a.long:
+if a.decode_ctx:
+    out["nonce"] = nonce
+    for n in (int(x) for x in a.decode_ctx.split(",") if x):
+        k = f"decode_tps_{n // 1000}k"
+        full, rest = divmod(n, 32000)   # beyond the stored 32k document: copies of it (and a byte-proportional prefix), each part numbered
+        d32 = doc(32000)
+        parts = [doc(n)] if n in (1000, 2000, 8000, 16000, 32000) else \
+            [f"[part {i + 1}]\n" + d32 for i in range(full)] + ([f"[part {full + 1}]\n" + d32[:len(d32) * rest // 32000]] if rest else [])
+        content = f"[{nonce} dctx{n}] Read this documentation, then write a long essay about it.\n\n" + "\n\n".join(parts)
+        v = long_request(k, decode, k, content, 128)
+        out[k] = round(v, 2) if v is not None else None
+        print(k, out[k], flush=True)
+elif a.long:
     out["prefill_long"], out["nonce"] = [], nonce
     for n in (8000, 16000, 32000):
         k = f"prefill_{n}"
