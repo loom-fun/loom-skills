@@ -1,12 +1,12 @@
 {
-  "card": "loom-fun-staging/ggml-org-Qwen3.6-35B-A3B-loom@a671b626bc2dc0b860828a634f7d45fe3fcc1002",
+  "card": "loom-fun-staging/unsloth-Qwen3.5-35B-A3B-loom@8c46496151b2ed2f64cce911e2ba87d2c2b72fc1",
   "kit": null,
   "memory_bytes": 48000000000,
   "llamacpp": "b1375",
-  "llama_spec": "--spec-type draft-dflash --spec-draft-model {hf:ggml-org/Qwen3.6-35B-A3B-GGUF@52f9f9b8052fb9c8b69bba4a95eda0f319ac3d2a/dflash-Qwen3.6-35B-A3B-Q8_0.gguf#fdc58dc581a1f5826383528660ebe7687fd187d9c18bab87e587661af546155c} --spec-draft-n-max 7 -ngld 99",
+  "llama_spec": "matched",
   "jobs": [
     {
-      "name": "qwen35-strix-staged-profile",
+      "name": "qwen35-gen35-strix-staged-profile",
       "runner": "strix",
       "served_context": 262144,
       "repeat_rows": 3,
