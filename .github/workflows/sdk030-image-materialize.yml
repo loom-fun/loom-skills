@@ -1,0 +1,40 @@
+name: SDK 0.3 image materialization
+on:
+  push:
+    branches: [codex/sdk030-image-materialize]
+    paths: [.github/workflows/sdk030-image-materialize.yml, .github/scripts/sdk030_image_materialize.py]
+permissions:
+  contents: read
+jobs:
+  image-fetch:
+    runs-on: [Linux, strix-halo, devlab-dispatch]
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install and verify SDK 0.3.0
+        shell: bash
+        run: |
+          set -euo pipefail
+          work="$(mktemp -d "$(dirname "$GITHUB_WORKSPACE")/sdk030-image-${GITHUB_RUN_ID}-XXXXXX")"
+          echo "IMAGE_WORK=$work" >> "$GITHUB_ENV"
+          mkdir -p "$work/results"
+          bash skills/loom-setup/scripts/install_loom.sh "$work/sdk" 0.3.0 > "$work/results/sdk-install.log" 2>&1
+          cp "$work/sdk/loom-install.json" "$work/results/sdk.json"
+      - name: Fetch the full presets and compare image outputs
+        run: |
+          "$IMAGE_WORK/sdk/.tools/bin/python" .github/scripts/sdk030_image_materialize.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sdk030-image-materialization
+          path: ${{ env.IMAGE_WORK }}/results
+          retention-days: 30
+      - name: Release scratch disk
+        if: always()
+        shell: bash
+        run: |
+          case "${IMAGE_WORK:-}" in
+            "$(dirname "$GITHUB_WORKSPACE")/sdk030-image-${GITHUB_RUN_ID}-"*) rm -rf -- "$IMAGE_WORK";;
+          esac
