@@ -1,0 +1,30 @@
+[
+  {
+    "staging_repo": "loom-fun-staging/bartowski-Qwen2.5-0.5B-Instruct-loom",
+    "commit": "ace0ba40598f49866455ed9d335cf59e5ae42813"
+  },
+  {
+    "staging_repo": "loom-fun-staging/unsloth-Qwen3.8-27B-UD-Q4_K_XL",
+    "commit": "10a314e2f38a3551fa5b39e9b23b25b51c431850"
+  },
+  {
+    "staging_repo": "loom-fun-staging/amd-Qwen3.8-27B-Quark-AWQ-MXFP4-loom",
+    "commit": "5e76fa21ab283fd763a08af3a14233021645ad79"
+  },
+  {
+    "staging_repo": "loom-fun-staging/unsloth-gemma-4-26B-A4B-it-qat-loom",
+    "commit": "7e28fcd1f34dd66655f23b387ee77a258c5b5863"
+  },
+  {
+    "staging_repo": "loom-fun-staging/lmstudio-community-gemma-4-26B-A4B-it-loom",
+    "commit": "304c2bef6ed1993a4de801904eec8832528c1dc2"
+  },
+  {
+    "staging_repo": "loom-fun-staging/unsloth-gemma-4-12B-it-loom",
+    "commit": "eac424bdd1101a795831e4d3f6f64dc9e9ea49c6"
+  },
+  {
+    "staging_repo": "loom-fun-staging/unsloth-gemma-4-31B-it-loom",
+    "commit": "d1012c2abe26c4f204585f500c1fa923bb6db067"
+  }
+]

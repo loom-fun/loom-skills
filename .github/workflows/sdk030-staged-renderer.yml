@@ -1,0 +1,33 @@
+name: SDK 0.3 staged renderer verification
+on:
+  push:
+    branches: [codex/sdk030-staged-renderer-proof]
+permissions:
+  contents: read
+jobs:
+  render:
+    runs-on: [self-hosted, Linux, devlab-dispatch]
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Compare exact staged cards
+        env:
+          HF_HUB_DISABLE_IMPLICIT_TOKEN: "1"
+        run: |
+          set -euo pipefail
+          work=$(mktemp -d "$RUNNER_TEMP/staged-render-XXXXXXXX")
+          echo "RENDER_WORK=$work" >> "$GITHUB_ENV"
+          python3 -m venv "$work/venv"
+          "$work/venv/bin/python" -m pip install -q huggingface_hub jsonschema
+          "$work/venv/bin/python" .github/scripts/sdk030_staged_renderer.py "$work"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: staged-renderer-proof
+          path: ${{ env.RENDER_WORK }}/evidence
+      - name: Remove scratch
+        if: always() && env.RENDER_WORK != ''
+        run: |
+          case "$RENDER_WORK" in "$RUNNER_TEMP"/staged-render-????????) rm -rf -- "$RENDER_WORK" ;; esac
