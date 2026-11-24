@@ -1,0 +1,16 @@
+{
+  "sdk": "0.3.0",
+  "repeats": 3,
+  "suites": [
+    {
+      "suite": "qwen35-g8-flash-strix",
+      "runner": "strix",
+      "dir": "flash_strix",
+      "gen": "flash_strix/gen_bench.py",
+      "gen_variants": ["qwen35", "base", "kt16", "kt16+ng2", "kt16+ng2+db", "kt16+ng2+mt2", "tnl"],
+      "files": ["bench.loom", "bench_kt16.loom", "bench_kt16+ng2.loom", "bench_kt16+ng2+db.loom", "bench_kt16+ng2+mt2.loom", "bench_tnl.loom"],
+      "tests": ["test.loom"],
+      "args": ["--measure=dispatch_complete", "--batch-size=4", "--profile-final-batch=true"]
+    }
+  ]
+}

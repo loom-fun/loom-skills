@@ -10,14 +10,19 @@ import json, os, subprocess, sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(sys.argv[1]) if len(sys.argv) > 1 else os.path.abspath(os.path.join(HERE, "../../../.."))
 STARTER = os.path.join(ROOT, "skills", "loom-port-llm", "starter")
-CONFIG = os.path.join(ROOT, "fleet", "bartowski-Qwen3.8-27B-loom", "llm_config.json")
+MODEL = "bartowski-Qwen3.8-27B-loom"
+T = 1024
+if len(sys.argv) > 3 and sys.argv[3] == "qwen35":
+    MODEL = "unsloth-Qwen3.5-35B-A3B-loom"
+    T = 4096
+    del sys.argv[3]
+CONFIG = os.path.join(ROOT, "fleet", MODEL, "llm_config.json")
 import numpy as np
 
 HEAD = "amdgpu.target<gfx11-generic> @w32 {subgroup_size = 32}\n\n"
 CFG = json.load(open(CONFIG))
 QH, KVH, D = CFG["heads"], CFG["kv_heads"], CFG["head_dim"]
 QD, R = QH * D, KVH * D
-T = 1024
 CTXS = [("8k", 8192), ("32k", 32768)]
 VARIANTS = {   # name -> environment of gen_flash2s.py
     "lazy": {"FLASH2_G11": "lazy"}, "kvh": {"FLASH2_G11": "kvh"}, "vtf": {"FLASH2_G11": "vtf"}, "hot": {"FLASH2_G11": "hot"},
