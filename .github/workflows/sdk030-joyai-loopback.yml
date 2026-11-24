@@ -14,7 +14,6 @@ jobs:
       MODEL_REVISION: 364e26fac2a4c45293c3e002bab80a4c1b42fc72
       PROGRAMS_SHA256: ded93bd916d2b4aaad1731cb5c6bb1feb832a68323c5ebffa47e2af9d3869bde
       NO_PROXY: 127.0.0.1,localhost
-      no_proxy: 127.0.0.1,localhost
     steps:
       - uses: actions/checkout@v4
         with:
@@ -45,6 +44,7 @@ jobs:
           set -euo pipefail
           setup=skills/loom-setup/scripts
           benchmark=skills/loom-benchmark/scripts
+          export no_proxy="$NO_PROXY"
           export LOOM_SERVE_STATE="$WORK/state" VENV="$LOOM_ROOT/.venv" LOOM_MEMNEED=47000000000
           trap 'bash "$setup/stop.sh" joyai-loopback >/dev/null 2>&1 || true; if [ -f "$LOOM_SERVE_STATE/joyai-loopback.log" ]; then cp "$LOOM_SERVE_STATE/joyai-loopback.log" "$WORK/receipt/server.log"; fi' EXIT
           bash "$setup/serve.sh" joyai-loopback 8160 amdgpu none "$WORK/pkg/model.json" -- --pool_backing=fixed > "$WORK/receipt/serve.log" 2>&1
