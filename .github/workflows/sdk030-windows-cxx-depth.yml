@@ -1,0 +1,35 @@
+name: DevLab verify physical SDK 0.3 C++ header path limits
+on:
+  push:
+    branches: [codex/sdk030-windows-perf-testing]
+    paths: [.github/workflows/sdk030-windows-cxx-depth.yml]
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: [windows, strix-halo, devlab-dispatch]
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Test identical SDK C++ sources at four package depths
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $base = [IO.Path]::GetFullPath($env:RUNNER_TEMP)
+          $work = Join-Path $base "loom-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          if ((Split-Path $work -Parent) -ne $base) { throw 'Unexpected runner scratch parent' }
+          New-Item -ItemType Directory -Path $work,'windows-proof' | Out-Null
+          $env:COMPUTERNAME | Set-Content 'windows-proof/runner.txt' -Encoding ascii
+          try {
+            python .github/sdk030-windows-perf/cxx-depth.py $work 'windows-proof'
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          } finally {
+            Remove-Item -LiteralPath $work -Recurse -Force
+          }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sdk030-windows-cxx-depth
+          path: windows-proof
