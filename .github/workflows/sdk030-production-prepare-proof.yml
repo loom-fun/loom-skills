@@ -30,7 +30,18 @@ jobs:
           {
             "unsloth-Qwen3-0.6B-loom": {"staging_revision":"483f4e580c6e3a3ddd35942e3c0f54faf5825de0","target_revision":"564d578f4e487c6fbabd84915439f873651b5953"},
             "unsloth-gemma-4-E2B-it-loom": {"staging_revision":"50fcfed8d3d270d5facee6847a0c8e9a38e9666a","target_revision":"3503abcf7cfff7bc58bd819ea32ccab8c18c075d"},
-            "unsloth-Qwen3.8-Flash-Next-loom": {"staging_revision":"7d27c03e6450de529a4bf7d76118a8170b2ac1aa","target_revision":"d847c21bc93c0c6bc45752a9edaf91d80ac74490"},
+            "unsloth-Qwen3.8-Flash-Next-loom": {
+              "staging_revision":"7d27c03e6450de529a4bf7d76118a8170b2ac1aa",
+              "target_revision":"d847c21bc93c0c6bc45752a9edaf91d80ac74490",
+              "rollback_tag":"v0.2.0",
+              "delete_target_files": {
+                "program/dispatch/ple_stage.loom":"ec2e5dbd06fed36ec680241ff8437fb4994832635c0cd2bf3abdd0b16aa6d05e",
+                "program/shared/kernel/sequence/qwen3_8/continuation.loom":"6efe4fc3c65638055d1004fd3a32426e0be8f198da394adfc63d9fb525955153",
+                "program/text_epoch.loom":"ea2721da8c36ba6686ba3544f6caeb2aa0fb6a4b498df4e02c8d21dfbde8c86e",
+                "program/text_storage.loom":"2f39af9e5b5dcd4868a3b555116b3bb1dd40e003fd96895def69dd87f4115b13"
+              }
+            },
+            "ggml-org-Qwen3.6-27B-loom": {"staging_revision":"4ba4eb9e230a6e1d29f3a525e29a244f410204be","target_revision":"f86d908dd9e7caaf8312c4f753a600c3dfdc6ad8"},
             "xinntao-Real-ESRGAN-x4plus-loom": {"staging_revision":"97adb72ecc9da1e0a48042f9d421ef5f63e1d0fc","target_revision":"d7126ceb45f03476c8f6608ba77959dd48fe4515"},
             "black-forest-labs-FLUX.2-klein-4B-loom": {"staging_revision":"bf59bacc3e12830c9f1ea4ff8602e26f28a9191b","target_revision":"b21b10a168c368d67303fea32f5dbc5f6398375e"},
             "Tongyi-MAI-Z-Image-Turbo-loom": {"staging_revision":"0646e969add492143b982281cdae75d24527e02a","target_revision":"77e103e314324c35a88b62350286b07e8dc0f05d"}
