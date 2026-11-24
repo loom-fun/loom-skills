@@ -73,7 +73,7 @@ def case(tokens, continued, verify):
             np.save(out/f"{prefix}_{key}.npy",reference)
             ty=tensor(reference)
             p.append(f'  %expected_{key} = check.file.read.npy path("{prefix}_{key}.npy") : {ty}')
-            p.append(f"  check.expect.close actual(%{actual}) expected(%expected_{key}) atol({.003*np.abs(reference).max():.6e}) rtol(1.0e-2) nan(different) : {ty}")
+            p.append(f"  check.expect.approximate actual(%{actual}) expected(%expected_{key}) atol({.003*np.abs(reference).max():.6e}) rtol(1.0e-2) nan(different) : {ty}, {ty}")
     p.extend(["  check.return","}"])
     if not verify:
         p.append(f"check.benchmark<@{prefix}> @{prefix}_bm")
