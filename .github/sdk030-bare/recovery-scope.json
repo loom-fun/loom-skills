@@ -1,4 +1,3 @@
 {
-  "ggml-org-LFM2.5-24B-A2B-loom": "functional",
-  "unsloth-gpt-oss-20b-loom": "functional"
+  "rippertnt-HyperCLOVAX-SEED-Text-Instruct-1.5B-loom": "decode_32k_retry"
 }

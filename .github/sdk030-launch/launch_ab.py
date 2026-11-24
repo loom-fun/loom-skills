@@ -19,6 +19,9 @@ import time
 import requests
 
 
+HYPERCLOVAX_FROZEN_NONCES = {1: "1795477317.9922645", 2: "1795477406.426579"}
+
+
 def read(path):
     return json.loads(path.read_text(encoding="utf-8"))
 
@@ -49,6 +52,7 @@ def deterministic_benchmark(bench, name, seed, target, argv):
     journal = {}
     ordinals = {}
     lock = threading.Lock()
+    historical_retry = "--historical-retry-nonce" in argv
 
     def stream(url, model, messages, max_tokens, extra=None, timeout=None, on_token=None, metric=None):
         prompt = messages[0]["content"]
@@ -58,7 +62,7 @@ def deterministic_benchmark(bench, name, seed, target, argv):
             ordinal = ordinals.get(lane, 0)
             ordinals[lane] = ordinal + 1
         key = f"{lane}/{ordinal}"
-        if prompt.startswith("["):
+        if prompt.startswith("[") and not (historical_retry and metric == "decode_tps_32k"):
             prompt = re.sub(r"^\[[^\]]*\]", f"[benchmark {seed} {key}]", prompt, count=1)
             if prompt.startswith(f"[benchmark {seed} {key}] ["):
                 prompt = re.sub(r"\] \[[^\]]*\]", "]", prompt, count=1)
@@ -294,6 +298,9 @@ def measure(work, sdk, bench, focus):
                     report["functional_exact"] = phase("functional", functional)
                     if focus == "decode_32k":
                         phase("long", lambda: perf("long", ["--long", "--only-decode-32k"]))
+                    if focus == "decode_32k_retry":
+                        phase("long", lambda: perf("long", ["--long", "--only-decode-32k", "--historical-retry-nonce",
+                                                           HYPERCLOVAX_FROZEN_NONCES[pair]]))
                     if focus == "all":
                         report["capabilities"] = phase("capabilities", capabilities)
                         phase("short", lambda: perf("short", []))
@@ -361,6 +368,6 @@ if __name__ == "__main__":
         parser.add_argument("work", type=Path)
         parser.add_argument("sdk", type=Path)
         parser.add_argument("bench", type=Path)
-        parser.add_argument("--focus", choices=("all", "functional", "decode_32k"), default="all")
+        parser.add_argument("--focus", choices=("all", "functional", "decode_32k", "decode_32k_retry"), default="all")
         args = parser.parse_args()
         measure(args.work, args.sdk, args.bench, args.focus)

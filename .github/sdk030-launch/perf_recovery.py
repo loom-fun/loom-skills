@@ -45,6 +45,7 @@ different texts (a reasoning trace vs the answer) and drafting accepted very dif
 nothing (each engine's default: the behaviour before this flag). The setting is recorded in every log row.
 """
 import argparse
+from decimal import Decimal
 import json
 import random
 import time
@@ -62,6 +63,7 @@ ap.add_argument("--kind", default="loom", choices=["loom", "llama", "vllm", "guf
 ap.add_argument("--model", default=None, help="Loom model id (model.json model.id), or the vLLM server's served model name")
 ap.add_argument("--long", action="store_true")
 ap.add_argument("--only-decode-32k", action="store_true", help="Run the prespecified 32k completion recovery only")
+ap.add_argument("--historical-retry-nonce", help="Preserve the qualified dual-marker retry template at this archived nonce")
 ap.add_argument("--log", default="perf_log.jsonl")
 ap.add_argument("--reverted", action="store_true", help="this build is not kept (still logged: its time counts)")
 ap.add_argument("--no-campaign", action="store_true",
@@ -122,7 +124,7 @@ def decode(key, content, max_tokens):
     """A timed decode request -> its decode tok/s, or None when it generated fewer than max_tokens // 2 tokens twice
     (the second time with another nonce); out["completion_tokens"][key]: the tokens of each attempt;
     out["acceptance"][key]: the drafted-token acceptance of the request that counted (Loom)."""
-    for attempt in range(2):
+    for attempt in range(1 if a.historical_retry_nonce else 2):
         prompt = content if attempt == 0 else f"[retry {time.time()}] " + content
         before = server_draft_counters(U) if a.kind == "loom" else {}
         _, _, dtps, n = run(prompt, max_tokens, key)
@@ -193,6 +195,11 @@ if a.long:
             print(out["prefill_long"][-1], flush=True)
     def decode_prompt(index):
         tag = nonce if index == 0 else f"{nonce}.{index}"
+        if a.historical_retry_nonce:
+            archived = a.historical_retry_nonce if index == 0 else f"{a.historical_retry_nonce}.{index}"
+            # Original retry timestamps were not archived. Keep their numeric format and the two literal markers.
+            retry = Decimal(a.historical_retry_nonce) + Decimal(index + 1) / 10
+            return f"[retry {retry}] " + long_prompt("decode_tps_32k", archived)
         if a.only_decode_32k:
             return (f"[{tag} ctx] Read the documentation below. After the documentation, list 20 distinct "
                     "implementation ideas in numbered order and explain each idea in two complete sentences."
