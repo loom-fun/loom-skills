@@ -1,0 +1,29 @@
+{
+  "sdk": "0.3.0",
+  "suites": [
+    {
+      "tests": [
+        "test_pair.loom",
+        "test_quad.loom",
+        "test_tr2q.loom"
+      ],
+      "case_timing": true,
+      "gen": "qwen35_route/gen_bench.py",
+      "args": [
+        "--measure=dispatch_complete",
+        "--batch-size=4",
+        "--profile-final-batch=true"
+      ],
+      "runner": "strix",
+      "suite": "qwen35-exact-router-strix",
+      "files": [
+        "bench.loom",
+        "bench_pair.loom",
+        "bench_quad.loom",
+        "bench_tr2q.loom"
+      ],
+      "dir": "qwen35_route"
+    }
+  ],
+  "repeats": 3
+}
