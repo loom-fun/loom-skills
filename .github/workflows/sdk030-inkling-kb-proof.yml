@@ -12,11 +12,11 @@ jobs:
     timeout-minutes: 75
     env:
       BASE: 02ddced5c08599706fd110c68af9884d0ab0eeeb
-      HEAD_TO_PROVE: 8a8b400cda115d2f41af2d5e7aa3d5445606b36e
+      HEAD_TO_PROVE: 979ddf5ec2126341b37fb9d49d839f9cc3562239
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: 8a8b400cda115d2f41af2d5e7aa3d5445606b36e
+          ref: 979ddf5ec2126341b37fb9d49d839f9cc3562239
           fetch-depth: 0
           persist-credentials: false
       - name: Record exact sources and verify staged routing inputs
@@ -32,8 +32,8 @@ jobs:
           git diff --check "$BASE" HEAD
           git diff --name-only "$BASE" HEAD > "$work/result/paths.txt"
           if grep -vE '^skills/loom-kb/(arch/llm/moe/inkling2|facet/looped)/' "$work/result/paths.txt"; then exit 1; fi
-          curl -fsSL --retry 3 https://huggingface.co/loom-fun-staging/unsloth-Inkling-2-Mini-loom/resolve/44d754c12601125e34b9d32685c5c01c0bf198cf/llm_config.json -o "$work/strix.json"
-          curl -fsSL --retry 3 https://huggingface.co/loom-fun-staging/unsloth-Inkling-2-Mini-loom-r9700/resolve/072bdc02bfba879ea099b877c3acf29b044aad8f/llm_config.json -o "$work/radeon.json"
+          curl -fsSL --retry 3 https://huggingface.co/loom-fun-staging/unsloth-Inkling-2-Mini-loom/resolve/bd021e649b158e608b389eca9bfed60a0ec2d225/llm_config.json -o "$work/strix.json"
+          curl -fsSL --retry 3 https://huggingface.co/loom-fun-staging/unsloth-Inkling-2-Mini-loom-r9700/resolve/90c125c8b0686030e33ee899c7a5098a83a25a46/llm_config.json -o "$work/radeon.json"
           echo "c9eab78173a39302934deadeb3615cf2738c4dfdb4b5de3b136fcbca456fe544  $work/strix.json" | sha256sum -c | tee "$work/result/config-checks.txt"
           echo "39e55b112e04f7a1d2ec13ab48df961835e450ad227f50f44ddc3f4567dbca9a  $work/radeon.json" | sha256sum -c | tee -a "$work/result/config-checks.txt"
       - name: Check KB lint, architecture aliases, facet opt-in and fixtures
