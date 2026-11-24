@@ -1,0 +1,119 @@
+name: Inkling Strix native cancellation regression
+on:
+  push:
+    branches: [codex/inkling-strix-cancel-proof]
+    paths: [.github/workflows/sdk030-inkling-strix-cancel-proof.yml]
+permissions:
+  contents: read
+jobs:
+  verify:
+    name: ${{ matrix.device }} ${{ matrix.slug }}
+    strategy:
+      max-parallel: 2
+      fail-fast: false
+      matrix:
+        include:
+          - slug: unsloth-Inkling-2-Mini-loom
+            device: strix-halo
+            labels: '["self-hosted","devlab-dispatch","strix-halo","Linux"]'
+    runs-on: ${{ fromJSON(matrix.labels) }}
+    timeout-minutes: 240
+    env:
+      SLUG: ${{ matrix.slug }}
+      SDK_GPU_KEY: ${{ matrix.device }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Plan from the accepted production revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          export WORK="$(dirname "$GITHUB_WORKSPACE")/sdk030-wave-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$SDK_GPU_KEY-$SLUG"
+          mkdir -p "$WORK/receipt"
+          echo "WORK=$WORK" >> "$GITHUB_ENV"
+          python3 - <<'PY' >> "$GITHUB_ENV"
+          import json, os
+          from pathlib import Path
+          slug = os.environ['SLUG']
+          repo='loom-fun-staging/'+slug
+          job=dict(name='special',card=repo+'@bd021e649b158e608b389eca9bfed60a0ec2d225',sdk='0.3.0',
+                   variants=[dict(name='staging',sdk='0.3.0')],
+                   steps=['ctxold:staging','ctxfixed:staging'])
+          plan=dict(runner='strix',memory_bytes=33000000000,jobs=[job])
+          out=Path(os.environ['WORK'])/'receipt'
+          (out/'experiment.json').write_text(json.dumps(plan,indent=2))
+          h=Path('.github/scripts/devlab_perf.sh')
+          source=h.read_text()
+          anchor='    ln -sfn "$vcard/parameter" "$pkg/parameter"'
+          assert source.count(anchor)==1
+          probe='''    ctxold)
+                serve_alone "$p1" || { res[$s]=ERROR; continue; }
+                PYTHONPATH="$B" "$T" "$WORK/ctx-admit-original.py" "$D/$p1/pkg" "$url" --out "$out/ctx-original.json"
+                if [ -s "$out/ctx-original.json" ]; then res[$s]=CAPTURED; else res[$s]=ERROR; fi;;
+              ctxfixed)
+                serve_alone "$p1" || { res[$s]=ERROR; continue; }
+                "$T" "$B/ctx_admit.py" "$D/$p1/pkg" "$url" --out "$out/ctx-fixed.json"
+                if [ -s "$out/ctx-fixed.json" ]; then res[$s]=CAPTURED; else res[$s]=ERROR; fi;;
+              func)'''
+          assert source.count('    func)')==1
+          source=source.replace('    func)',probe)
+          h.write_text(source.replace(anchor,'    rsync -a --exclude=/parameter --exclude=/.git "$vcard/" "$pkg/"\n'+anchor))
+          print('JOB=special')
+          PY
+      - name: Prove the delayed-header regression before GPU use
+        shell: bash
+        run: |
+          set -euo pipefail
+          script=skills/loom-benchmark/scripts/ctx_admit.py
+          cp "$script" "$WORK/ctx-admit-fixed.py"
+          git show 16261e288ef75481d93ebb1a32bf5332f1a35751:"$script" > "$WORK/ctx-admit-original.py"
+          python3 -m venv "$WORK/fixture-venv"
+          py="$WORK/fixture-venv/bin/python"
+          "$py" -m pip install --quiet requests
+          "$py" -m unittest discover -s tests -p test_ctx_admit.py -v 2>&1 | tee "$WORK/receipt/fixture-fixed.log"
+          cp "$WORK/ctx-admit-original.py" "$script"
+          rc=0
+          "$py" -m unittest discover -s tests -p test_ctx_admit.py -v > "$WORK/receipt/fixture-original.log" 2>&1 || rc=$?
+          cp "$WORK/ctx-admit-fixed.py" "$script"
+          test "$rc" = 1
+          grep -q 'subprocess.TimeoutExpired' "$WORK/receipt/fixture-original.log"
+      - name: Build, serve and measure the release candidate
+        run: bash .github/scripts/devlab_perf.sh "$WORK/receipt/experiment.json" "$JOB"
+      - name: Save the measured package and identity
+        if: always() && env.JOB != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          d="$WORK/$JOB"
+          cp -r "$d/out" "$WORK/receipt/"
+          if [ -e "$d/staging/pkg/model.json" ]; then
+            tar -C "$d/staging/pkg" --exclude=parameter --exclude='*.gguf' --exclude='*.safetensors' --exclude='bench' -czf "$WORK/receipt/package-without-weights.tar.gz" .
+          fi
+      - name: Require exact native admission and drive the connection to idle
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import json, os
+          out=Path(os.environ['WORK'])/'receipt/out'
+          original=json.loads((out/'ctx-original.json').read_text())
+          fixed=json.loads((out/'ctx-fixed.json').read_text())
+          assert fixed['admitted'] and original['admitted'] and fixed['tokens']==original['tokens'], (original,fixed)
+          assert fixed['context']==262144, fixed
+          assert 'did not cancel' in original['detail'] and 'then cancelled' in fixed['detail'], (original,fixed)
+          assert (out/'programs_sha256_staging.txt').read_text().strip()=='fdb1aaa4771f05a9cc9315aa774bddf121123c8143d3b81762563e6fedc0f6aa'
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: inkling-strix-cancel-proof
+          path: ${{ env.WORK }}/receipt
+          retention-days: 30
+      - name: Release job disk
+        if: always()
+        shell: bash
+        run: |
+          if [ "${WORK:-}" = "$(dirname "$GITHUB_WORKSPACE")/sdk030-wave-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$SDK_GPU_KEY-$SLUG" ]; then rm -rf -- "$WORK"; fi

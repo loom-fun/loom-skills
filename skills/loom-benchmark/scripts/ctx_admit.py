@@ -12,11 +12,15 @@ usage: ctx_admit.py PKG LOOM_URL [--out FILE] [--wait 120] [--tokens N] [--compl
 Prints "ADMITTED n tokens (...)" or "REFUSED n tokens: HTTP ...". Exit status 1 on a refusal or no answer.
 """
 import argparse
+from contextlib import suppress
+from http.client import HTTPConnection, HTTPSConnection
 import json
 import os
+import socket
 import sys
 import threading
 import time
+from urllib.parse import urlsplit
 
 import requests
 
@@ -45,20 +49,40 @@ def main():
     while len(ids) < n:
         ids = ids + ids
     prompt = P.tok.decode(ids[:n])
+    endpoint = urlsplit(a.url.rstrip("/") + "/v1/chat/completions")
+    connector = HTTPSConnection if endpoint.scheme == "https" else HTTPConnection
     got = {}
+
+    def cancel():
+        transport = got.get("transport")
+        if transport is not None:
+            with suppress(OSError):
+                transport.shutdown(socket.SHUT_RDWR)
 
     def post():
         try:
-            r = requests.post(a.url + "/v1/chat/completions", stream=True, timeout=a.wait + 600, json={
+            body = json.dumps({
                 "model": P.model_id, "messages": [{"role": "user", "content": prompt}], "max_tokens": 1,
-                "stream": True, **extra})
-            got["resp"] = r
-            got["status"] = r.status_code
-            if r.status_code != 200:
-                got["body"] = r.text[:200]
-            elif a.complete is not None:
-                got["text"] = "".join(x.decode("utf-8", "replace") for x in r.iter_lines() if x)
-                got["finished"] = time.time()
+                "stream": True, **extra}).encode()
+            conn = connector(endpoint.hostname, endpoint.port, timeout=a.wait + 600)
+            try:
+                conn.connect()
+                # The service can register active prefill before sending any HTTP headers. Keep
+                # the transport so the probe can close it even while getresponse() is blocked.
+                got["transport"] = conn.sock
+                conn.request("POST", endpoint.path, body, {"Content-Type": "application/json"})
+                with conn.getresponse() as reply:
+                    if reply.status != 200:
+                        got["body"] = reply.read(200).decode("utf-8", "replace")
+                    got["status"] = reply.status
+                    if reply.status == 200 and a.complete is not None:
+                        got["text"] = "".join(line.decode("utf-8", "replace") for line in reply if line.strip())
+                        got["finished"] = time.time()
+                    elif reply.status == 200:
+                        # Keep the streaming connection open until the caller shuts it down.
+                        reply.read()
+            finally:
+                conn.close()
         except Exception as e:  # the connection closed below
             got.setdefault("error", str(e)[:200])
 
@@ -78,6 +102,8 @@ def main():
         while "finished" not in got and "error" not in got and time.time() - t0 < a.complete:
             time.sleep(2)
         ok = "finished" in got and '"finish_reason"' in got.get("text", "") and "error" not in got
+        if not ok:
+            cancel()
         msg = (f"COMPLETED {n} tokens of a {context}-token context in {got['finished'] - t0:.0f}s" if ok else
                f"NOT COMPLETED {n} tokens of a {context}-token context after {time.time() - t0:.0f}s: {got.get('error') or got.get('text', '')[:200] or 'no answer'}")
         print(msg, flush=True)
@@ -86,8 +112,7 @@ def main():
         sys.exit(0 if ok else 1)
     # Cancel: closing the connection makes the server drop the request; then it must go idle again (no long prefill).
     idle = True
-    if "resp" in got:
-        got["resp"].close()
+    cancel()
     if admitted:
         t1 = time.time()
         while active() and time.time() - t1 < 60:
