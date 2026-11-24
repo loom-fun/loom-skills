@@ -41,33 +41,45 @@ else:
         a = a or [x for x in d["assets"] if x["name"].endswith(want) and not x["name"].startswith("qualification")]
 print(d["tag_name"], a[0]["browser_download_url"] if a else "", (a[0].get("digest") or "").removeprefix("sha256:") if a else "")' - "$os" "$gfx" "$backend" <<< "$meta")
 [ -n "$url" ] || { echo "release $rtag has no $os $backend $gfx asset" >&2; exit 1; }
+[[ $rtag =~ ^[A-Za-z0-9][A-Za-z0-9_.+-]*$ ]] || { echo "invalid release tag: $rtag" >&2; exit 1; }
+asset=${url##*/}
+pin=
+if [ "$backend" = vulkan ]; then
+  pin=$(awk -v asset="$asset" '$2 == asset {print $1}' "$(dirname "$0")/../data/llamacpp-vulkan.sha256")
+fi
+expected=${pin:-$digest}
+if ! [[ $expected =~ ^[a-f0-9]{64}$ ]]; then
+  echo "$asset has no trusted SHA-256 in release metadata or the local pins" >&2
+  exit 1
+fi
 dir=$dest/$rtag
-if [ ! -x "$dir/llama-server" ] && [ ! -f "$dir/llama-server.exe" ]; then
-  asset=${url##*/}
-  pin=
-  if [ "$backend" = vulkan ]; then
-    pin=$(awk -v asset="$asset" '$2 == asset {print $1}' "$(dirname "$0")/../data/llamacpp-vulkan.sha256")
-  fi
-  expected=${pin:-$digest}
-  if ! [[ $expected =~ ^[a-f0-9]{64}$ ]]; then
-    echo "$asset has no trusted SHA-256 in release metadata or the local pins" >&2
-    exit 1
-  fi
-  mkdir -p "$dir"
+installed() { [ -x "$1/llama-server" ] || [ -f "$1/llama-server.exe" ]; }
+verified() {
+  installed "$dir" && [ -f "$dir/.verified-release" ] && [ "$(cat "$dir/.verified-release")" = "$expected" ];
+}
+if ! verified; then
+  mkdir -p "$dest"
+  lock=$dest/.fetch-$rtag.lock
+  mkdir "$lock" || { echo "another fetch is using $dir" >&2; exit 1; }
+  scratch=; previous=
+  cleanup() {
+    [ -z "$scratch" ] || rm -rf -- "$scratch"
+    [ -z "$previous" ] || { [ -e "$dir" ] || mv -- "$previous" "$dir"; }
+    rmdir "$lock"
+  }
+  trap cleanup EXIT
+  scratch=$(mktemp -d "$dest/.release.XXXXXX")
+  archive=$scratch/release.zip
   echo "downloading $url" >&2
-  archive=$(mktemp "$dir/.release.XXXXXX")
-  trap 'rm -f -- "$archive"' EXIT
   curl -fsSL --retry 6 --retry-all-errors --retry-delay 10 -o "$archive" "$url" >&2
   got=$(sha256sum "$archive" | cut -d' ' -f1)
   [ "$got" = "$expected" ] || { echo "$asset sha256 $got, expected $expected" >&2; exit 1; }
-  mv -f -- "$archive" "$dir/release.zip"
-  trap - EXIT
   # the Vulkan release for Linux is a tar.gz with one top directory: unpacked flat (release.zip is just the download's name)
   if [ "$backend" = vulkan ] && [ "$os" = ubuntu ]; then
-    (cd "$dir" && tar xzf release.zip --strip-components=1 && rm -f release.zip)
+    (cd "$scratch" && tar xzf release.zip --strip-components=1 && rm -f release.zip)
   else
   # unzip if present, else Python's zipfile (keeps the executable bits that unzip would restore).
-  (cd "$dir"; if command -v unzip >/dev/null; then unzip -qo release.zip; else "$py" -c '
+  (cd "$scratch"; if command -v unzip >/dev/null; then unzip -qo release.zip; else "$py" -c '
 import os, sys, zipfile
 with zipfile.ZipFile("release.zip") as z:
     for i in z.infolist():
@@ -76,9 +88,17 @@ with zipfile.ZipFile("release.zip") as z:
         if mode:
             os.chmod(p, mode & 0o777)' ; fi; rm -f release.zip; chmod +x llama-* 2>/dev/null || true)
   fi
-fi
-if [ -n "${got:-}" ]; then
-  echo "$got" > "$dir/release.sha256"
+  installed "$scratch" || { echo "verified archive did not contain llama-server" >&2; exit 1; }
+  printf '%s\n' "$got" > "$scratch/release.sha256"
+  printf '%s\n' "$got" > "$scratch/.verified-release"
+  if [ -e "$dir" ] || [ -L "$dir" ]; then
+    previous=$lock/previous
+    mv -- "$dir" "$previous"
+  fi
+  mv -- "$scratch" "$dir"
+  scratch=
+  [ -z "$previous" ] || rm -rf -- "$previous"
+  previous=
 fi
 dev=ROCm; [ "$backend" = vulkan ] && dev=Vulkan
 LD_LIBRARY_PATH=$dir "$dir/llama-server" --list-devices 2>&1 | grep -q $dev \

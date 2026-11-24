@@ -11,6 +11,7 @@ parameter/<gguf> (symlink)}. Serve it with
   loom-serve --model=PACKAGE_DIR/model.json '--device=amdgpu://?completion_spin_ns=4294967295' --memory_bytes=... --listen=...
 """
 import argparse
+import ast
 import glob
 import json
 import os
@@ -759,11 +760,11 @@ CALL_FORMATS = {"none": 0, "hermes": 1, "qwen_xml": 2, "glm": 3, "pythonic": 4, 
 call_format = chat["call_format"]
 if not isinstance(call_format, str) or not re.fullmatch(r"[A-Za-z0-9_-]+", call_format):
     sys.exit("chat.call_format must be a local kit format name")
-chat_dir = os.path.join(HERE, "chat")
+chat_dir = os.path.join(os.path.realpath(HERE), "chat")
 custom_chat = None
 if call_format not in CALL_FORMATS:
     custom_chat = os.path.join(chat_dir, call_format + ".loom")
-    if not os.path.isfile(custom_chat) or os.path.realpath(custom_chat) != custom_chat:
+    if not os.path.isfile(custom_chat) or os.path.dirname(os.path.realpath(custom_chat)) != chat_dir:
         sys.exit(f"chat format {call_format!r} has no local kit controller")
 subs = {
     "@@POS_BYTES@@": str(pos_bytes), "@@PLANES@@": str(2 * kv_layers), "@@BLOCK_BYTES@@": str(16 * pos_bytes),
@@ -834,11 +835,24 @@ for name in ("prepare", "control", "storage", "service"):
             text = text.replace(f"func.def public @{fn}(", f"func.def @generic_{fn}(")
         rodata_base = custom_chat[:-len(".loom")] + "_rodata"
         rodata_json = rodata_base + ".json"
-        if os.path.isfile(rodata_json):
-            if os.path.realpath(rodata_json) != rodata_json:
-                sys.exit("chat constants must be a local kit JSON file")
-            with open(rodata_json, encoding="utf-8") as source:
-                constants = json.load(source)
+        rodata_legacy = rodata_base + ".py"
+        rodata = next((path for path in (rodata_json, rodata_legacy) if os.path.lexists(path)), None)
+        if rodata:
+            if not os.path.isfile(rodata) or os.path.dirname(os.path.realpath(rodata)) != chat_dir:
+                sys.exit("chat constants must be a local kit file")
+            with open(rodata, encoding="utf-8") as source:
+                if rodata == rodata_json:
+                    constants = json.load(source)
+                else:
+                    declarations = [statement.value for statement in ast.parse(source.read(), filename=rodata).body
+                                    if isinstance(statement, ast.Assign) and len(statement.targets) == 1
+                                    and isinstance(statement.targets[0], ast.Name) and statement.targets[0].id == "S"]
+                    try:
+                        constants = ast.literal_eval(declarations[0]) if len(declarations) == 1 else None
+                    except (TypeError, ValueError):
+                        constants = None
+                    if constants is None:
+                        sys.exit("convert the kit's chat constants to a *_rodata.json string mapping")
             if not isinstance(constants, dict) or any(
                 not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key) or not isinstance(value, str)
                 for key, value in constants.items()
@@ -847,8 +861,6 @@ for name in ("prepare", "control", "storage", "service"):
             text += "\n" + "\n".join(
                 f'global.rodata.def @{key} = bytes("{hx(value)}")\n' for key, value in constants.items()
             )
-        elif os.path.lexists(rodata_base + ".py"):
-            sys.exit("convert the kit's chat constants to a *_rodata.json string mapping")
         kit_chat = open(custom_chat, encoding="utf-8").read()
         if "@ch_" in kit_chat:   # a channel format (<|start|>HEADER<|message|>TEXT): templates/control_channels.loom
             text += "\n" + open(os.path.join(HERE, "templates", "control_channels.loom"), encoding="utf-8").read()
