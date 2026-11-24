@@ -1,0 +1,132 @@
+name: DevLab verify portable Quark Radeon preset routing
+on:
+  push:
+    branches: [codex/sdk030-quark-r9700-diagnostic]
+    paths: [.github/workflows/sdk030-quark-preset-routing.yml]
+permissions:
+  contents: read
+  actions: read
+jobs:
+  routing:
+    runs-on: [self-hosted, devlab-dispatch, Linux, radeon-r9700]
+    timeout-minutes: 35
+    env:
+      GH_TOKEN: ${{ github.token }}
+      BASE: huggingface:loom-fun-staging/amd-Qwen3.8-27B-Quark-AWQ-MXFP4-loom:chat-r9700@c1eaa0960244132a038235fece80087aac9284a0
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 629d8f8aab61f53c4713b89fd21d26efe83f9e45
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Assemble the exact portable wrapper from the proved programs
+        shell: bash
+        run: |
+          set -euo pipefail
+          work=$(mktemp -d "$(dirname "$GITHUB_WORKSPACE")/sdk030-quark-routing.XXXXXX")
+          echo "WORK=$work" >> "$GITHUB_ENV"
+          echo "HF_HOME=$work/hf" >> "$GITHUB_ENV"
+          export HF_HOME="$work/hf"
+          mkdir -p "$work/receipt"
+          python -m venv "$work/sdk"
+          wheel="$work/hrx_loom-0.3.0-py3-none-manylinux_2_39_x86_64.whl"
+          "$work/sdk/bin/python" -m pip download --no-deps --dest "$work" hrx-loom==0.3.0
+          echo "6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f  $wheel" | sha256sum -c -
+          "$work/sdk/bin/python" -m pip install "$wheel[hf]" numpy pillow jinja2 gguf requests tokenizers
+          "$work/sdk/bin/loom-fetch" "$BASE" --output="$work/portable" --no-input
+          api=https://api.github.com/repos/loom-fun/loom-skills/actions/artifacts
+          curl -fsSL -H "Authorization: Bearer $GH_TOKEN" "$api/14958073560/zip" -o "$work/repair.zip"
+          echo "7ddee6b611c1533341598b44c878c0bf62556a0061ebbc816a2dfb7c0cf6a163  $work/repair.zip" | sha256sum -c -
+          unzip -p "$work/repair.zip" package-without-weights.tgz > "$work/repair.tgz"
+          echo "bda89ace3d5f99b1dc18b12a8f14e1c0687d802ae2d69f8688bbdcc18bc3b6f6  $work/repair.tgz" | sha256sum -c -
+          mkdir -p "$work/portable/program/original"
+          for name in llm control prepare; do
+            cp "$work/portable/program/$name.loom" "$work/portable/program/original/$name.loom"
+            tar -xOzf "$work/repair.tgz" "program/$name.loom" > "$work/$name.loom"
+            mv -- "$work/$name.loom" "$work/portable/program/$name.loom"
+          done
+          git show "$GITHUB_SHA":.github/sdk030-quark-portable-model.json > "$work/portable/model.json"
+          echo "b4713897a02d371113f3ab110039a526eb1502440bb1eb1aa676f8314f0628a3  $work/portable/model.json" | sha256sum -c -
+          cp "$work/portable/model.json" "$work/receipt/portable-model.json"
+          git rev-parse "$GITHUB_SHA" > "$work/receipt/workflow-head.txt"
+      - name: Materialize each public preset with the normal loader
+        shell: bash
+        run: |
+          set -euo pipefail
+          fetch="$WORK/sdk/bin/loom-fetch"
+          "$fetch" "$WORK/portable/model.json" --preset=chat --output="$WORK/chat" --no-input --json > "$WORK/receipt/chat-fetch.json"
+          "$fetch" "$WORK/portable/model.json" --preset=chat-r9700 --output="$WORK/chat-r9700" --no-input --json > "$WORK/receipt/chat-r9700-fetch.json"
+          "$WORK/sdk/bin/python" - <<'PY'
+          import hashlib,json,os
+          from pathlib import Path
+
+          work = Path(os.environ["WORK"])
+          expected = {
+              "chat": ("source-original", 262144, "program/original/llm.loom", "5df0cab4e88b260e8de20a7b02b1b3d866a9c84aee6c61c0e1f76d0d864eed5f"),
+              "chat-r9700": ("source", 110592, "program/llm.loom", "5c2c4ef5bee2f8b745646adbd169462ec33d75d9a8cb2970e6e8dd4f62273fe4"),
+          }
+          report = {}
+          for preset, (group, context, library, digest) in expected.items():
+              pkg = work / preset
+              card = json.loads((pkg / "model.json").read_text())
+              assert card["presets"][preset]["programs"] == group, card["presets"]
+              assert card["presets"][preset]["execution"]["context_capacity"] == context
+              assert hashlib.sha256((pkg / library).read_bytes()).hexdigest() == digest
+              other = "program/llm.loom" if preset == "chat" else "program/original/llm.loom"
+              assert not (pkg / other).exists(), (preset, other)
+              report[preset] = {"program_set": group, "context": context, "llm_sha256": digest}
+          (work / "receipt/preset-routing.json").write_text(json.dumps(report, indent=2) + "\n")
+          PY
+      - name: Run one chart request through the materialized Radeon preset
+        shell: bash
+        run: |
+          set -euo pipefail
+          api=https://api.github.com/repos/loom-fun/loom-skills/actions/artifacts
+          curl -fsSL -H "Authorization: Bearer $GH_TOKEN" "$api/14888387655/zip" -o "$WORK/embed.zip"
+          echo "e49f5fe2e69d09a5f79fb36f6928bd68236f1c4132557d1e348b65b5be8b1764  $WORK/embed.zip" | sha256sum -c -
+          unzip -q "$WORK/embed.zip" 'embed/gufo/*' -d "$WORK"
+          lib="$WORK/embed/gufo/lib"
+          chmod +x "$lib/ld-linux-x86-64.so.2"
+          echo "e61e489514807022bb689d96261b1dff83daec5d7209b99370fe3e1a333bf706  $lib/libloom_text_embed.so" | sha256sum -c -
+          curl -fsSL 'https://raw.githubusercontent.com/loom-fun/gufo/bccf173b2664432d03d068413a91639bdd6242f7/src/models/loom/embed/loom_text_embed.h' -o "$WORK/loom_text_embed.h"
+          git show "$GITHUB_SHA":.github/scripts/sdk030_quark_chart_logits.c > "$WORK/chart-logits.c"
+          gcc -std=c17 -Wall -Wextra -Werror -I "$WORK" "$WORK/chart-logits.c" \
+            -Wl,--allow-shlib-undefined -L "$lib" -lloom_text_embed -o "$WORK/chart-logits"
+          export PYTHONPATH="$GITHUB_WORKSPACE/skills/loom-benchmark/scripts"
+          "$WORK/sdk/bin/python" - <<'PY'
+          import json,os,subprocess
+          from pathlib import Path
+
+          from vision_golden import builtin_images, data_url
+
+          work = Path(os.environ["WORK"])
+          lib = work / "embed/gufo/lib"
+          image, question = builtin_images()["chart"]
+          req = work / "chart.json"
+          req.write_text(json.dumps({"model": "qwen3.8-27b-mxfp4", "messages": [{"role": "user", "content": [
+              {"type": "image_url", "image_url": {"url": data_url(image)}}, {"type": "text", "text": question}]}],
+              "temperature": 0, "enable_thinking": False, "max_tokens": 1, "logits": True}))
+          cmd = [lib / "ld-linux-x86-64.so.2", "--library-path", lib, work / "chart-logits",
+                 work / "chat-r9700/model.json", "chat-r9700", req, work / "chart.f32"]
+          result = json.loads(subprocess.check_output(cmd, text=True).splitlines()[-1])
+          assert result["prompt_tokens"] == 430 and result["device_token"] == 760, result
+          (work / "receipt/chart-native.json").write_text(json.dumps(result, indent=2) + "\n")
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always() && env.WORK != ''
+        with:
+          name: sdk030-quark-preset-routing
+          path: ${{ env.WORK }}/receipt
+          if-no-files-found: error
+          retention-days: 30
+      - name: Release job disk
+        if: always() && env.WORK != ''
+        shell: bash
+        run: |
+          case "$WORK" in
+            "$(dirname "$GITHUB_WORKSPACE")"/sdk030-quark-routing.*) rm -rf -- "$WORK" ;;
+            *) exit 1 ;;
+          esac
