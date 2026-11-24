@@ -58,21 +58,26 @@ jobs:
 
           harness = Path(".github/scripts/devlab_perf.sh")
           source = harness.read_text()
-          hook = '    extra=$(qv "$v" '
+          hook = '  # ablation: every kernel.launch in PROGRAM matching REGEX'
           assert source.count(hook) == 1
-          source = source.replace(hook, '''    if [ "$v" = a4 ]; then
-                cp "$WORK/receipt/quark_a4_prefill_prototype.py" "${KIT[$v]}/quark_a4_prefill_prototype.py"
-                "$T" - "${KIT[$v]}/gen_llm.py" <<'PATCH_GEN'
+          source = source.replace(hook, '''  if [ "$v" = a4 ]; then
+              sha256sum "$pkg/program/llm.loom" > "$WORK/receipt/source-before-a4.txt"
+              "$T" - "$WORK/receipt" "$pkg" <<'PATCH_GEN' || exit 1
+          import json
           from pathlib import Path
           import sys
-          path = Path(sys.argv[1])
-          source = path.read_text()
-          hook = '    out = os.path.join(out_dir, "model.loom")\n'
-          assert source.count(hook) == 1
-          source = source.replace(hook, '    from quark_a4_prefill_prototype import apply\n    text = apply(text, CFG)\n' + hook)
-          path.write_text(source)
+          sys.path.insert(0, sys.argv[1])
+          from quark_a4_prefill_prototype import apply
+
+          package = Path(sys.argv[2])
+          path = package / "program/llm.loom"
+          original = path.read_text()
+          modified = apply(original, json.loads((package / "llm_config.json").read_text()))
+          assert modified != original and "@g_quark_a4_f16[" in modified
+          path.write_text(modified)
           PATCH_GEN
-              fi
+              grep -Fq 'kernel.launch @g_quark_a4_f16[' "$pkg/program/llm.loom" || exit 1
+            fi
           ''' + hook)
           hook = '      nref1=$("$T" "$B/reference_cache.py" count "$D/$p1/bench"'
           assert source.count(hook) == 1
@@ -105,6 +110,7 @@ jobs:
             grep '^VISION_RESULT ' "$WORK/receipt/out/gates_$variant/gates_vision.log"
             cat "$WORK/receipt/out/gates_$variant/reference_cache.txt"
           done
+          test "$(cut -d' ' -f1 "$WORK/receipt/llm-source-digests.txt" | sort -u | wc -l)" = 2
       - uses: actions/upload-artifact@v4
         if: always() && env.WORK != ''
         with:
