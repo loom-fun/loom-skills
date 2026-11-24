@@ -13,7 +13,8 @@ from urllib.request import Request, urlopen
 import zipfile
 
 
-root, evidence, docs = (Path(path).resolve() for path in sys.argv[1:])
+root, evidence, docs = (Path(path).resolve() for path in sys.argv[1:4])
+shipping = len(sys.argv) == 5 and sys.argv[4] == 'shipping'
 # Keep the hub cache in the job scope and reuse exact checkpoint downloads across packages.
 os.environ['HF_HOME'] = str(root / 'hf-home')
 os.environ['HF_HUB_DISABLE_SYMLINKS_WARNING'] = '1'
@@ -21,11 +22,15 @@ release_hashes = {
     'loom-serve-0.2.0-win_amd64.zip': '7864cbd21bb054296245b5e78623767a5a20f460a1e402529c14e38c5c321976',
     'loom-serve-0.3.0-win_amd64.zip': '2f0bb6b4ab6053941041659c1ae8a8bb8386b6d49d4c7731b61adacffd3e521a',
     'hrx_loom-0.2.0-py3-none-win_amd64.whl': '14c133b032eb3b9c9b59b2092b7f564699fd2ec69fc8c1d04874e74be30664fa',
+    'hrx_loom-0.3.0-py3-none-win_amd64.whl': '06afbc88370fde741037ebd38dba91c2184cb4d2fbd5cee337720cd494a06752',
 }
 packages = {
     'qwen3-0.6b': ('loom-fun/unsloth-Qwen3-0.6B-loom', '564d578f4e487c6fbabd84915439f873651b5953', 'chat'),
     'flash-next': ('loom-fun/unsloth-Qwen3.8-Flash-Next-loom', 'd847c21bc93c0c6bc45752a9edaf91d80ac74490', 'vision-mtp'),
 }
+staged_flash = ('loom-fun-staging/unsloth-Qwen3.8-Flash-Next-loom',
+                '473e5815cedcf3117fcac905c27ed3434f9fe836', 'vision-mtp')
+flash_lock = '53a173df16767be788e32dcf4b219d07a1726b3384b3acb28660c8d0ca0b6c07'
 
 
 def write_json(path, value):
@@ -53,7 +58,8 @@ def download_sdk(version, name):
 def setup():
     if os.name != 'nt':
         raise RuntimeError('This workflow requires native Windows')
-    write_json(evidence / 'pins.json', {'releases': release_hashes, 'packages': packages})
+    write_json(evidence / 'pins.json', {'releases': release_hashes, 'packages': packages,
+                                       'staged_flash': staged_flash if shipping else None})
     executables = {}
     for version in ('0.2.0', '0.3.0'):
         archive = download_sdk(version, f'loom-serve-{version}-win_amd64.zip')
@@ -66,28 +72,43 @@ def setup():
         executables[version] = executable
         version_print = subprocess.check_output([executable, '--version'], timeout=30, stderr=subprocess.STDOUT)
         (evidence / f'sdk-{version}.txt').write_bytes(version_print)
-    wheel = download_sdk('0.2.0', 'hrx_loom-0.2.0-py3-none-win_amd64.whl')
-    venv = root / 'fetch-venv'
-    subprocess.run([sys.executable, '-m', 'venv', str(venv)], check=True)
-    subprocess.run([venv / 'Scripts/python.exe', '-m', 'pip', 'install', '--disable-pip-version-check',
-                    f'{wheel}[hf]'], check=True, timeout=240)
-    return executables, venv / 'Scripts/loom-fetch.exe'
+    fetchers = {}
+    for version in (('0.2.0', '0.3.0') if shipping else ('0.2.0',)):
+        wheel = download_sdk(version, f'hrx_loom-{version}-py3-none-win_amd64.whl')
+        venv = root / f'fetch-venv-{version}'
+        subprocess.run([sys.executable, '-m', 'venv', str(venv)], check=True)
+        subprocess.run([venv / 'Scripts/python.exe', '-m', 'pip', 'install', '--disable-pip-version-check',
+                        f'{wheel}[hf]'], check=True, timeout=240)
+        fetchers[version] = venv / 'Scripts/loom-fetch.exe'
+    return executables, fetchers
 
 
-def fetch(fetch_exe, label, repo, revision, preset):
+def fetch(fetch_exe, label, repo, revision, preset, expected_abi=1):
     target = root / label
     url = f'https://huggingface.co/{repo}/resolve/{revision}/model.json'
     print(f'{label}: fetching {repo}@{revision} preset {preset}', flush=True)
+    if shipping:
+        with urlopen(f'{url}.lock', timeout=60) as lock:
+            if hashlib.sha256(lock.read()).hexdigest() != flash_lock:
+                raise ValueError(f'The locked Flash checkpoint differs for {repo}')
     with (evidence / f'{label}-fetch.log').open('wb') as log:
-        subprocess.run([fetch_exe, url, f'--preset={preset}', f'--output={target}', '--no-input'],
-                       check=True, stdout=log, stderr=subprocess.STDOUT, timeout=1800)
+        args = [fetch_exe, url, f'--preset={preset}', f'--output={target}', '--no-input']
+        if shipping:
+            args.append('--materialize=share')
+        subprocess.run(args, check=True, stdout=log, stderr=subprocess.STDOUT, timeout=2400)
     card = target / 'model.json'
     config = json.loads(card.read_text(encoding='utf-8'))
     service = config['presets'][preset]['service']
-    if config['services'][service]['version'] != 1:
-        raise ValueError('Both release arms must share the same controller ABI 1 package')
+    if config['services'][service]['version'] != expected_abi:
+        raise ValueError(f'Expected controller ABI {expected_abi} for {label}')
+    if expected_abi == 2:
+        sys.path.insert(0, str(docs.parent / 'scripts/card'))
+        from card_lib import programs_sha256
+        if programs_sha256(target) != 'c0cf0958949af15430bb8791eb167e8108a5a374f3f5aa3828eb55f0d88ac920':
+            raise ValueError('The staged Flash program digest differs')
     write_json(evidence / f'{label}-package.json', {
-        'model_sha256': sha_file(card), 'service': service,
+        'model_sha256': sha_file(card), 'service': service, 'abi': expected_abi,
+        'source_lock_sha256': flash_lock if shipping else None,
         'program_file_sha256': {
             file.relative_to(target).as_posix(): sha_file(file)
             for file in sorted((target / 'program').rglob('*')) if file.is_file()
@@ -126,7 +147,7 @@ def request(base_url, model, prompt, limit, thinking):
             'max_tokens': limit, 'stream': True, 'stream_options': {'include_usage': True},
             'cache_prompt': False}
     if thinking is not None:
-        data['enable_thinking'] = thinking
+        data['chat_template_kwargs'] = {'enable_thinking': thinking}
     message = Request(base_url + '/v1/chat/completions', data=json.dumps(data).encode(),
                       headers={'Content-Type': 'application/json'})
     start = time.perf_counter()
@@ -182,8 +203,11 @@ def measure(label, card, preset, executable, release, session, document_set):
         port = sock.getsockname()[1]
     url = f'http://127.0.0.1:{port}'
     args = [str(executable), '--device=amdgpu://?completion_spin_ns=4294967295',
-            '--pool_backing=elastic', '--workers=8', f'--model={card}', f'--preset={preset}',
             f'--listen=127.0.0.1:{port}']
+    if shipping:
+        args += [f'--model={card.parent}', '--pool_backing=fixed' if release == '0.2.0' else '--workers=8']
+    else:
+        args += ['--pool_backing=elastic', '--workers=8', f'--model={card}', f'--preset={preset}']
     write_json(evidence / f'{case}-args.json', args)
     with (evidence / f'{case}-serve.log').open('wb') as log:
         server = subprocess.Popen(args, cwd=root, stdout=log, stderr=subprocess.STDOUT)
@@ -244,14 +268,24 @@ def summarize(label):
     print(json.dumps({label: results}), flush=True)
 
 
-executables, fetch_exe = setup()
+executables, fetchers = setup()
 documents = {name: (docs / f'doc_{count}.txt').read_text(encoding='utf-8')
              for name, count in (('2k', 2000), ('32k', 32000))}
+sequence = (('0.2.0', 0), ('0.3.0', 0), ('0.3.0', 1), ('0.2.0', 1))
+if shipping:
+    # Present both immutable packages on the same machine, using their respective README launch arguments.
+    cards = {'0.2.0': fetch(fetchers['0.2.0'], 'flash-production', *packages['flash-next']),
+             '0.3.0': fetch(fetchers['0.3.0'], 'flash-staged', *staged_flash, expected_abi=2)}
+    for release, session in sequence:
+        print(f'Flash published/staged {release} period {session}', flush=True)
+        measure('flash-next', cards[release], 'vision-mtp', executables[release], release, session, documents)
+    summarize('flash-next')
+    sys.exit(0)
 failed = []
 for label, (repo, revision, preset) in packages.items():
     try:
-        card = fetch(fetch_exe, label, repo, revision, preset)
-        for release, session in (('0.2.0', 0), ('0.3.0', 0), ('0.3.0', 1), ('0.2.0', 1)):
+        card = fetch(fetchers['0.2.0'], label, repo, revision, preset)
+        for release, session in sequence:
             print(f'{label} {release} period {session}', flush=True)
             measure(label, card, preset, executables[release], release, session, documents)
         summarize(label)
