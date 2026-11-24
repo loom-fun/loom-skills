@@ -58,10 +58,10 @@ jobs:
           card["tensors"] = {t.name: {"type": t.tensor_type.name.lower(), "shape": [int(x) for x in t.shape]} for t in gguf.GGUFReader(card["gguf"]).tensors}
           for key in ("model_id", "draft"):
               card.pop(key, None)
-          (work / "exact-config.json").write_text(json.dumps(card, indent=1))
+          (work / "cfg.json").write_text(json.dumps(card, indent=1))
           PY
           "$WORK/measured-source/skills/loom-port-llm/reference/apply_example.sh" deepseek2 "$WORK/measured-kit"
-          export EXACT_CONFIG="$joy/exact-config.json" EXACT_TOKENIZER="$joy/pinned-tokenizer.json"
+          export EXACT_CONFIG="$joy/cfg.json" EXACT_TOKENIZER="$joy/pinned-tokenizer.json"
           build() {
             local label=$1 tree=$2 kit=$3 rdna4=$4
             (cd "$kit" && LOOM_RDNA4="$rdna4" LOOM_KB_ROOT="$tree/skills/loom-kb" "$py" build.py "$EXACT_CONFIG" "$WORK/$label" --slug "$JOYAI" --context 131072 --pool 131072 --prefill 4096 --prefill 8192 --memory-gib 4096 --tokenizer "$EXACT_TOKENIZER" --model-id jdopensource/JoyAI-LLM-Flash) > "$WORK/receipt/$label.log" 2>&1
