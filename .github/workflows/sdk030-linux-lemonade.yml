@@ -1,4 +1,4 @@
-name: DevLab Linux Lemonade wheel upgrade and staged Flash
+name: DevLab Linux Lemonade with pinned registered Flash
 on:
   push:
     branches: [codex/sdk030-windows-perf-testing]
