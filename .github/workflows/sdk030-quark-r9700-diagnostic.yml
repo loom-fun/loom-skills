@@ -1,0 +1,202 @@
+name: DevLab Quark chart and long decode diagnosis
+on:
+  push:
+    branches: [codex/sdk030-quark-r9700-diagnostic]
+    paths: [.github/workflows/sdk030-quark-r9700-diagnostic.yml]
+permissions:
+  contents: read
+jobs:
+  diagnostic:
+    runs-on: [self-hosted, devlab-dispatch, radeon-r9700]
+    timeout-minutes: 95
+    env:
+      POWER_LOG: '1'
+      LOOM_PROFILE_TOKENS: '128'
+      VISION_ONLY: '1'
+      VISION_ARGS: --cases chart,chart_pre,wide
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 629d8f8aab61f53c4713b89fd21d26efe83f9e45
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Prepare frozen arms and chart-only evidence collection
+        shell: bash
+        run: |
+          set -euo pipefail
+          export WORK="$(mktemp -d "$(dirname "$GITHUB_WORKSPACE")/sdk030-quark-diag.XXXXXX")"
+          echo "WORK=$WORK" >> "$GITHUB_ENV"
+          mkdir -p "$WORK/receipt" .github/sdk030-qwen36
+          git show c6e32060ece4b58032e0fea1792dc44535a58bff:.github/sdk030-qwen36/matched_decode.py > .github/sdk030-qwen36/matched_decode.py
+          test "$(git hash-object .github/sdk030-qwen36/matched_decode.py)" = d468f4240647263e5b8e0ca31115c99e9d93bf8a
+          git show ed6c623eb457137123f2dfe55454b8943ab17a08:skills/loom-benchmark/scripts/profile_requests.py > skills/loom-benchmark/scripts/profile_requests.py
+          test "$(git hash-object skills/loom-benchmark/scripts/profile_requests.py)" = b6a0ea47ad7f72e9d3c70c09d534dff696d70aa9
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          work = Path(os.environ["WORK"])
+          production = "loom-fun/amd-Qwen3.8-27B-Quark-AWQ-MXFP4-loom@a999be30c6539c77a030e961748416892b06ac73"
+          previous = "fun"
+          current = "pin"
+          experiment = {
+              "name": "quark-r9700-diagnostic",
+              "card": production,
+              "runner": "r9700",
+              "sdk": "0.3.0",
+              "memory_bytes_r9700": 34000000000,
+              "require_preset_r9700": True,
+              "variants": [
+                  {"name": previous, "card": production, "sdk": "card"},
+                  {"name": current, "card": production, "sdk": "0.3.0"},
+                  {"name": "funnd", "card": production, "sdk": "card", "execution": {"draft_depth": 0}},
+                  {"name": "pinnd", "card": production, "sdk": "0.3.0", "execution": {"draft_depth": 0}},
+              ],
+          }
+          chart_execution = {"context_capacity": 32768, "prefill_capacity": 1024, "rows": 4, "draft_depth": 0}
+          chart_control = {"name": "chart", "card": production, "sdk": "0.3.0", "execution": chart_execution}
+          rebuild = {"sdk": "0.3.0", "ref": "4c28b772a8f22f121b3925788dae14b26c58511b", "context": 32768,
+                     "execution": chart_execution, "build_args": ["--memory-gib", "4096"],
+                     "require_preset_r9700": False}
+          experiment["variants"] += [
+              chart_control,
+              dict(rebuild, name="chartgen", build={}),
+              dict(rebuild, name="chartbf16", build={"VERIFY_HEAD_PREP": ""}),
+              dict(rebuild, name="chartfp16", build={"GEMM_MXFP4S_F8": "0"}),
+          ]
+          pairs = (("fun", "pin"), ("pin", "fun"), ("pin", "fun"), ("fun", "pin"),
+                   ("fun", "pin"), ("pin", "fun"))
+          experiment["steps"] = [
+              f"matcheddecode:{arm}:{block}"
+              for block, arms in enumerate(pairs) for arm in arms
+          ] + ["matcheddecode:funnd:2", "matcheddecode:pinnd:2",
+               "matcheddecode:pinnd:3", "matcheddecode:funnd:3",
+               "profile:funnd:dec32", "profile:pinnd:dec32",
+               "gates:chart:quick", "gates:chartgen:quick",
+               "gates:chartbf16:quick", "gates:chartfp16:quick"]
+          experiment["reference_cache"] = ".github/sdk030-quark-refs.tgz"
+          (work / "receipt/experiment.json").write_text(json.dumps({"jobs": [experiment]}, indent=2) + "\n")
+
+          harness = Path(".github/scripts/devlab_perf.sh")
+          original = harness.read_text()
+          marker = "    gates)\n"
+          replacement = """    matcheddecode)
+                serve_alone "$p1" || { res[$s]=ERROR; continue; }
+                step "matched Quark decode $p1 session $p2"
+                if "$T" "$here/.github/sdk030-qwen36/matched_decode.py" "$url" "$cardid" "$p2" "$out/matched_$p1-$p2.json"; then
+                  res[$s]=PASS
+                else
+                  res[$s]=ERROR
+                fi;;
+              gates)
+          """
+          assert original.count(marker) == 1
+          updated = original.replace(marker, replacement)
+          marker = '      nref1=$("$T" "$B/reference_cache.py" count "$D/$p1/bench"'
+          assert updated.count(marker) == 1
+          updated = updated.replace(marker, '''      if [ -s "$out/gates_$p1/llama_cache.tgz" ]; then
+                  cp "$out/gates_$p1/llama_cache.tgz" "$here/.github/sdk030-quark-refs.tgz"
+                fi
+                cp "$D/$p1/bench/vision_golden.json" "$out/gates_$p1/" 2>/dev/null || true
+                cp "$D/$p1/pkg/llm_config.json" "$out/gates_$p1/"
+          ''' + marker)
+          harness.write_text(updated)
+
+          vision = Path("skills/loom-benchmark/scripts/vision_golden.py")
+          original = vision.read_text()
+          marker = '    out["chart"] = (im, "What is the title of this chart, and which day has the tallest bar?")\n'
+          assert original.count(marker) == 1
+          updated = original.replace(marker, marker + '''    pre = im.resize((800, 512), Image.Resampling.BICUBIC)
+              out["chart_pre"] = (pre, out["chart"][1])
+              evidence = os.environ.get("QUARK_VISION_INPUTS")
+              if evidence:
+                  im.save(os.path.join(evidence, "chart.png"))
+                  pre.save(os.path.join(evidence, "chart-pre.png"))
+          ''')
+          marker = '"llama": refs[name].get("content", "")}'
+          assert updated.count(marker) == 1
+          vision.write_text(updated.replace(marker, '''"llama": refs[name].get("content", ""),
+                               "loom_prompt_tokens": got.get("prompt_tokens"),
+                               "reference_prompt_tokens": refs[name].get("tokens_evaluated"),
+                               "image_size": size, "loom_finish": got.get("finish"),
+                               "reference_first_top_logprobs": (refs[name].get("completion_probabilities") or [{}])[0].get("top_logprobs", [])}'''))
+          PY
+          tar -C "$WORK" -czf .github/sdk030-quark-refs.tgz --files-from /dev/null
+          bash -n .github/scripts/devlab_perf.sh
+      - name: Measure matched decode and collect chart responses
+        shell: bash
+        run: |
+          export QUARK_VISION_INPUTS="$WORK/receipt"
+          bash .github/scripts/devlab_perf.sh "$WORK/receipt/experiment.json" quark-r9700-diagnostic
+      - name: Save benchmark artifacts and validate identities
+        if: always() && env.WORK != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp -r "$WORK/quark-r9700-diagnostic/out" "$WORK/receipt/"
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          from statistics import median
+
+          out = Path(os.environ["WORK"]) / "receipt/out"
+          load = lambda file: json.loads((out / file).read_text())
+          expected = "c9530f9f4cec5937eaf53022da6335d241be8bd539bf9dbc687d3a13a7235499"
+          wheels = {"0.2.0": "5148f9e3a264af400ec4bae38bd7b06bf551d28cc33b7a61d67f7bcefa590438",
+                    "0.3.0": "6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f"}
+          summary = {}
+          for old, new, sessions in (("fun", "pin", range(6)), ("funnd", "pinnd", (2, 3))):
+              for arm, version in ((old, "0.2.0"), (new, "0.3.0")):
+                  actual = (out / f"programs_sha256_{arm}.txt").read_text().strip()
+                  assert actual == expected, (arm, actual)
+                  sdk = load(f"sdk_{arm}.json")
+                  assert sdk["hrx_loom"] == version and sdk["wheel_sha256"] == wheels[version], (arm, sdk)
+              assert load(f"model_{old}.json") == load(f"model_{new}.json"), (old, new)
+              for context in ("2k", "32k"):
+                  pairs = [tuple(load(f"matched_{arm}-{session}.json")["samples"] for arm in (old, new)) for session in sessions]
+                  for left, right in pairs:
+                      assert [x[context]["prompt_sha256"] for x in left] == [x[context]["prompt_sha256"] for x in right]
+                  baseline, candidate = [median(median(x[context]["decode_tps"] for x in pair[arm])
+                                               for pair in pairs) for arm in (0, 1)]
+                  summary[f"{old}-{context}"] = {
+                      "old_tps": baseline, "new_tps": candidate, "delta_percent": 100 * (candidate / baseline - 1),
+                      "identical_outputs": sum(x[context]["output_sha256"] == y[context]["output_sha256"]
+                                               for left, right in pairs for x, y in zip(left, right, strict=True)),
+                  }
+          for variant in ("funnd", "pinnd"):
+              assert (out / f"profile_{variant}_dec32.md").stat().st_size > 0
+          for variant in ("chart", "chartgen", "chartbf16", "chartfp16"):
+              model = load(f"model_{variant}.json")
+              for preset in model["presets"].values():
+                  execution = preset["execution"]
+                  assert (execution["context_capacity"], execution["prefill_capacity"],
+                          execution["rows"], execution["draft_depth"]) == (32768, 1024, 4, 0)
+              rows = load(f"gates_{variant}/vision_golden.json")
+              assert {row["case"] for row in rows} == {"chart", "chart_pre", "wide"}, variant
+              props = load(f"gates_{variant}/reference.json")
+              assert props["engine"] == "vllm" and props["version"] == "0.18.0", props
+              summary[variant] = rows
+          for variant, key in (("chartbf16", "decode.head.verify"), ("chartfp16", "prefill.gemm.mxfp4s_f8")):
+              config = load(f"gates_{variant}/llm_config.json")
+              assert config["resolved"]["dirty"] == [key], (variant, config["resolved"]["dirty"])
+          (out / "quark-diagnostic.json").write_text(json.dumps(summary, indent=2) + "\n")
+          print(json.dumps(summary, indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always() && env.WORK != ''
+        with:
+          name: sdk030-quark-r9700-diagnostic
+          path: ${{ env.WORK }}/receipt
+          if-no-files-found: error
+          retention-days: 30
+      - name: Release job disk
+        if: always() && env.WORK != ''
+        shell: bash
+        run: |
+          case "$WORK" in
+            "$(dirname "$GITHUB_WORKSPACE")"/sdk030-quark-diag.*) rm -rf -- "$WORK" ;;
+            *) exit 1 ;;
+          esac
