@@ -2,7 +2,7 @@ name: Public Skills install security baseline
 
 on:
   push:
-    branches: [codex/skills-security-probe, codex/skills-security-verify]
+    branches: [codex/skills-security-probe, codex/skills-security-verify, codex/skills-security-source-check]
     paths:
       - .github/workflows/skills-security-baseline.yml
       - .github/scripts/skills-security-baseline.sh
@@ -12,6 +12,7 @@ permissions:
 
 jobs:
   baseline:
+    if: github.ref_name != 'codex/skills-security-source-check'
     runs-on: [self-hosted, devlab-dispatch, Linux, strix-halo]
     timeout-minutes: 12
     steps:
@@ -53,7 +54,7 @@ jobs:
           retention-days: 14
 
   source:
-    if: github.ref_name == 'codex/skills-security-verify'
+    if: github.ref_name != 'codex/skills-security-probe'
     runs-on: [self-hosted, devlab-dispatch, Linux, strix-halo]
     timeout-minutes: 15
     env:
@@ -70,7 +71,11 @@ jobs:
           set -euo pipefail
           proof="$(mktemp -d "$RUNNER_TEMP/skills-source-${GITHUB_RUN_ID}-XXXXXX")"
           echo "SKILLS_SOURCE_EVIDENCE=$proof" >> "$GITHUB_ENV"
-          python3 -m unittest discover -s tests -v 2>&1 | tee "$proof/tests.log"
+          export HF_HOME="$proof/hf"
+          unset HF_TOKEN HUGGING_FACE_HUB_TOKEN GH_TOKEN GITHUB_TOKEN
+          for suite in skill_source_boundaries fetch_llamacpp promotion_pins install_skills sdk_pin port_image; do
+            python3 -m unittest discover -s tests -p "test_$suite.py" -v 2>&1 | tee -a "$proof/tests.log"
+          done
           git init -q "$proof/catalog"
           git -C "$proof/catalog" fetch --depth 1 https://github.com/ROCm/hrx-loom-library "$CATALOG"
           git -C "$proof/catalog" ls-tree -r --name-only FETCH_HEAD | awk '/(^|\/)BUILD(\.bazel)?$/' > "$proof/catalog-build-files.txt"
