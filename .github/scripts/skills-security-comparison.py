@@ -32,6 +32,13 @@ def verify(name, commit):
 
 
 before, original_prompts = verify("current", baseline)
+if len(sys.argv) > 3 and sys.argv[3] == "postmerge":
+    assert "Security Risk Assessments" in original_prompts
+    subprocess.run(["git", "merge-base", "--is-ancestor", candidate, baseline], check=True)
+    resolved = {"source": baseline, "includes_merge": candidate, "skills": before["skills"],
+                "installed_files": len(before["files"]), "prompts": original_prompts}
+    (directory / "postmerge-verification.json").write_text(json.dumps(resolved, indent=2) + "\n")
+    sys.exit(0)
 after, updated_prompts = verify("candidate", candidate)
 assert before["skills"] == after["skills"], "the available skill choices differ"
 assert original_prompts == updated_prompts and "Security Risk Assessments" in updated_prompts
