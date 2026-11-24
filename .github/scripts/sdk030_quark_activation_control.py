@@ -1,6 +1,7 @@
 """Read first-token scores with only Quark activation QDQ toggled."""
 
 import argparse
+import importlib.metadata
 import json
 import sys
 from pathlib import Path
@@ -90,20 +91,26 @@ def main():
                   for position in row.logprobs]
         return completion_response(row.token_ids, scores, row.text, 12, len(reply.prompt_token_ids))
 
+    result = {"reference": props, "amd_quark_version": importlib.metadata.version("amd-quark")}
+
+    def record(key, value):
+        result[key] = value
+        args.output.write_text(json.dumps(result, indent=2) + "\n")
+
     before = measure()
+    record("stock_qdq", before)
     disabled = engine.llm.apply_model(lambda model: set_activation_mode(model, False))
+    assert len(disabled) == 1, disabled
+    record("modified_text_linear_layers", disabled[0])
     after = measure()
+    record("without_activation_qdq", after)
     restored_layers = engine.llm.apply_model(lambda model: set_activation_mode(model, True))
+    assert disabled == restored_layers
     restored = measure()
-    assert disabled == restored_layers and len(disabled) == 1
-    result = {"reference": props, "modified_text_linear_layers": disabled[0],
-              "stock_qdq": before, "without_activation_qdq": after, "restored_stock_qdq": restored}
-    args.output.write_text(json.dumps(result, indent=2) + "\n")
-    result["stock_with_external_projector"] = {
-        "loom": use_projection("chart-loom-projection.npy"),
-        "transformers_bf16": use_projection("chart-torch.bfloat16_identical_loom_pixels.npy"),
-    }
-    args.output.write_text(json.dumps(result, indent=2) + "\n")
+    record("restored_stock_qdq", restored)
+    record("stock_with_loom_projector", use_projection("chart-loom-projection.npy"))
+    record("stock_with_transformers_bf16_projector",
+           use_projection("chart-torch.bfloat16_identical_loom_pixels.npy"))
     for arm, variants in (("stock", before), ("no_activation_qdq", after), ("restored", restored)):
         for name, request in variants.items():
             first = request["completion_probabilities"][0]["top_logprobs"][:5]
