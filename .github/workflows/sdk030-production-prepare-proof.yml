@@ -1,0 +1,46 @@
+name: Prepared production package proof
+on:
+  push:
+    branches: [codex/sdk030-production-prepare]
+    paths: [.github/workflows/sdk030-production-prepare-proof.yml]
+permissions:
+  contents: read
+jobs:
+  replay:
+    runs-on: [Linux, devlab-dispatch, self-hosted]
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Verify guarded replay and special package shapes
+        shell: bash
+        run: |
+          set -euo pipefail
+          unset HF_TOKEN HUGGING_FACE_HUB_TOKEN HF_ENDPOINT
+          export HF_HUB_DISABLE_IMPLICIT_TOKEN=1
+          export HF_HUB_DISABLE_XET=1
+          python3 -m unittest discover -s tests -p test_replay_promotion.py
+          python3 -m venv "$RUNNER_TEMP/prepared-promotion-venv"
+          py="$RUNNER_TEMP/prepared-promotion-venv/bin/python"
+          "$py" -m pip install 'huggingface_hub==0.36.0'
+          cat > "$RUNNER_TEMP/pins.json" <<'EOF'
+          {
+            "unsloth-Qwen3-0.6B-loom": {"staging_revision":"483f4e580c6e3a3ddd35942e3c0f54faf5825de0","target_revision":"564d578f4e487c6fbabd84915439f873651b5953"},
+            "unsloth-gemma-4-E2B-it-loom": {"staging_revision":"50fcfed8d3d270d5facee6847a0c8e9a38e9666a","target_revision":"3503abcf7cfff7bc58bd819ea32ccab8c18c075d"},
+            "unsloth-Qwen3.8-Flash-Next-loom": {"staging_revision":"7d27c03e6450de529a4bf7d76118a8170b2ac1aa","target_revision":"d847c21bc93c0c6bc45752a9edaf91d80ac74490"},
+            "xinntao-Real-ESRGAN-x4plus-loom": {"staging_revision":"97adb72ecc9da1e0a48042f9d421ef5f63e1d0fc","target_revision":"d7126ceb45f03476c8f6608ba77959dd48fe4515"},
+            "black-forest-labs-FLUX.2-klein-4B-loom": {"staging_revision":"bf59bacc3e12830c9f1ea4ff8602e26f28a9191b","target_revision":"b21b10a168c368d67303fea32f5dbc5f6398375e"},
+            "Tongyi-MAI-Z-Image-Turbo-loom": {"staging_revision":"0646e969add492143b982281cdae75d24527e02a","target_revision":"77e103e314324c35a88b62350286b07e8dc0f05d"}
+          }
+          EOF
+          tool=skills/loom-migrate/scripts/replay_promotion.py
+          "$py" "$tool" prepare --pins "$RUNNER_TEMP/pins.json" --bundle "$RUNNER_TEMP/prepared-promotion"
+          sha=$(sha256sum "$RUNNER_TEMP/prepared-promotion/manifest.json" | cut -d' ' -f1)
+          "$py" "$tool" replay --bundle "$RUNNER_TEMP/prepared-promotion" --manifest-sha256 "$sha"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: prepared-promotion-proof
+          path: |
+            ${{ runner.temp }}/pins.json
+            ${{ runner.temp }}/prepared-promotion/manifest.json
