@@ -1,24 +1,24 @@
 [
   {
     "gpu": "strix-halo",
-    "slug": "ggml-org-LFM2.5-24B-A2B-loom",
-    "repo": "loom-fun-staging/ggml-org-LFM2.5-24B-A2B-loom",
-    "revision": "6e159b12fd85ff025617b95bec99927608396672",
+    "slug": "ggml-org-Muse-Glimmer-30B-loom",
+    "repo": "loom-fun-staging/ggml-org-Muse-Glimmer-30B-loom",
+    "revision": "1685274f1331c4972d98b333a0e63bb40efe6aa2",
     "device": "amdgpu://?completion_spin_ns=4294967295",
     "args": [
       "--pool_backing=fixed"
     ],
-    "model_id": "LiquidAI/LFM2.5-24B-A2B",
+    "model_id": "meta-models/Muse-Glimmer-30B",
     "features": {
       "api": "yes",
       "audio": "unknown",
       "concurrency": "yes",
       "context": "yes",
-      "image_input": "unknown",
+      "image_input": "yes",
       "max_output_tokens": "yes",
       "reasoning_effort": "n/a",
       "sampling": "yes",
-      "speculative_decoding": "n/a",
+      "speculative_decoding": "yes",
       "thinking": "yes",
       "tool_calling": "yes"
     },
@@ -29,10 +29,10 @@
       "wheel_sha256": "6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f"
     },
     "files": {
-      "info.json": "6d9c889752ecad6f1e72940dd9abe4154240346d6e68b92d35cdb6f966ba705e",
-      "model.json": "25ab1d6ae6c754513ac0554aabb95c526264209545f331e21cbf3943af1083eb",
-      "model.json.lock": "166b4b4797187808c2a0b1f205dd4a6588cb8287ad8fd35d18055ebb0c0db12b",
-      "llm_config.json": "b93960546facca6a14527af3629c65495ab90751c21f7536a0e2212b371c1f45"
+      "info.json": "78de8f845d1811690998118ca08af67579d710b5e2c05be0b12b3eca942bb6da",
+      "model.json": "0e3ed29f69bb9bca1d6b352389be41c247877f9d18852434cc79275c88c6de3b",
+      "model.json.lock": "c532d64c2c4f48ef34af8fb2c6ef8b8f59ce74145ceb32dfd0ba2d1dc6f03454",
+      "llm_config.json": "e287d23aa87fe45603afa5dfc49b9c29abb891140f37477b3a97e4045353711c"
     },
     "package_serve": null,
     "published_rows": [
@@ -50,7 +50,9 @@
     "context_tokens": 131072,
     "execution_rows": 4,
     "focus": [
-      "functional"
+      "functional",
+      "capabilities",
+      "concurrency"
     ]
   }
 ]

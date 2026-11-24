@@ -217,7 +217,9 @@ def measure(work, sdk, bench):
             results = {}
             cases = {}
             if features.get("image_input") == "yes":
-                cases["vision"] = {**image_requests(model_id)[0], "max_tokens": 96}
+                cases["vision"] = {**image_requests(model_id)[0],
+                                   "max_tokens": 512 if forced_reasoning else 96,
+                                   "chat_template_kwargs": {"enable_thinking": forced_reasoning}}
             if features.get("tool_calling") == "yes":
                 cases["tools"] = {
                     "model": model_id, "tools": TOOLS,
