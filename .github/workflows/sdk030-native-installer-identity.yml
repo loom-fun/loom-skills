@@ -1,0 +1,48 @@
+name: SDK 0.3 normal Linux and Windows installer identity
+
+on:
+  push:
+    branches: [codex/sdk030-native-installer-identity]
+    paths:
+      - .github/workflows/sdk030-native-installer-identity.yml
+      - .github/scripts/sdk030-native-installer-identity.sh
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    runs-on: [Linux, strix-halo, devlab-dispatch]
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+      - name: Verify the ordinary stable-version install
+        shell: bash
+        run: bash .github/scripts/sdk030-native-installer-identity.sh linux
+      - uses: actions/upload-artifact@v4
+        if: always() && env.SDK_INSTALL_EVIDENCE != ''
+        with:
+          name: sdk030-native-installer-linux
+          path: ${{ env.SDK_INSTALL_EVIDENCE }}
+          retention-days: 14
+
+  windows:
+    runs-on: [Windows, strix-halo, devlab-dispatch]
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+      - name: Verify the ordinary stable-version and explicit release installs in Git Bash
+        shell: bash
+        run: bash .github/scripts/sdk030-native-installer-identity.sh windows
+      - uses: actions/upload-artifact@v4
+        if: always() && env.SDK_INSTALL_EVIDENCE != ''
+        with:
+          name: sdk030-native-installer-windows
+          path: ${{ env.SDK_INSTALL_EVIDENCE }}
+          retention-days: 14
