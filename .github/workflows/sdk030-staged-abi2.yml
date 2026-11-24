@@ -1,0 +1,101 @@
+name: DevLab staged Flash Next in Gufo embedding libraries
+on:
+  push:
+    branches: [codex/sdk030-consumer-devlab]
+    paths:
+      - .github/workflows/sdk030-staged-abi2.yml
+permissions:
+  actions: read
+  contents: read
+jobs:
+  staged-abi2:
+    runs-on: [strix-halo, devlab-dispatch, Linux, self-hosted]
+    timeout-minutes: 75
+    env:
+      STAGING_REVISION: '473e5815cedcf3117fcac905c27ed3434f9fe836'
+      HF_TOKEN: ${{ secrets.HF_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Prepare isolated runner workspace
+        shell: bash
+        run: |
+          set -euo pipefail
+          work=$(mktemp -d "$RUNNER_TEMP/sdk030-staged-abi2.XXXXXX")
+          echo "WORK=$work" >> "$GITHUB_ENV"
+          mkdir "$work/out"
+          hostname > "$work/out/runner.txt"
+          awk '/MemAvailable/ { print; if ($2 < 107421875) exit 1 }' /proc/meminfo | tee "$work/out/memavailable.txt"
+      - uses: actions/download-artifact@v4
+        with:
+          run-id: '45278213432'
+          github-token: ${{ github.token }}
+          name: sdk030-controller-abi
+          path: ${{ env.WORK }}/tested
+      - name: Verify the staged model revision and run both tested embedding libraries
+        shell: bash
+        run: |
+          set -euo pipefail
+          recipes="$GITHUB_WORKSPACE/.github/sdk030-staged-abi2"
+          cd "$WORK"
+          test "$(git hash-object tested/gufo-loom_text_embed.c)" = f3f6e58481995cf0f10882193160472bd4d0489d
+          test "$(git hash-object tested/extension-loom_text_embed.c)" = 5637437260beb37f43c517067107d0a0a1957120
+          cp tested/revisions.txt out/embed-source-revisions.txt
+          python3 -m venv "$WORK/venv"
+          source "$WORK/venv/bin/activate"
+          wheel=hrx_loom-0.3.0-py3-none-manylinux_2_39_x86_64.whl
+          curl -fsSL --retry 3 "https://github.com/ROCm/hrx-system/releases/download/v0.3.0/$wheel" -o "$wheel"
+          echo "6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f  $wheel" | sha256sum -c -
+          python -m pip install -q "./$wheel[hf]"
+          legacy=loom-fun-staging/unsloth-Qwen3-0.6B-loom
+          legacy_rev=f3ffda86d7bd1fa98d615f4972a7d3f82345294c
+          loom-fetch "huggingface:$legacy:chat@$legacy_rev" --materialize=share --output="$WORK/staged-abi1" --no-input
+          echo "$legacy@$legacy_rev" > out/abi1-package.txt
+          repo=loom-fun-staging/unsloth-Qwen3.8-Flash-Next-loom
+          echo "$repo@$STAGING_REVISION" > out/package.txt
+          loom-fetch "huggingface:$repo:vision-mtp@$STAGING_REVISION" --materialize=share --output="$WORK/flash" --no-input
+          python - "$GITHUB_WORKSPACE/skills/loom-benchmark/scripts/card" <<'PY' | tee out/package-check.txt
+          import json
+          from pathlib import Path
+          import sys
+          sys.path.insert(0, sys.argv[1])
+          from card_lib import programs_sha256
+          model = json.loads(Path("flash/model.json").read_text())
+          settings = json.loads(Path("flash/llm_config.json").read_text())
+          legacy = json.loads(Path("staged-abi1/model.json").read_text())
+          legacy_settings = json.loads(Path("staged-abi1/llm_config.json").read_text())
+          assert legacy["services"]["chat"]["version"] == 1 and legacy_settings["sdk"]["hrx_loom"] == "0.3.0"
+          selected = model["presets"]["vision-mtp"]["service"]
+          abi = model["services"][selected]["version"]
+          digest = programs_sha256("flash")
+          assert abi == 2 and settings["sdk"]["hrx_loom"] == "0.3.0"
+          assert digest == "c0cf0958949af15430bb8791eb167e8108a5a374f3f5aa3828eb55f0d88ac920", digest
+          print(f"vision-mtp: controller ABI {abi}, SDK {settings['sdk']['hrx_loom']}, programs {digest}")
+          PY
+          ulimit -l 8192
+          test "$(ulimit -Hl)" = 8192
+          test "$(ulimit -Sl)" = 8192
+          printf 'soft=%s KiB hard=%s KiB\n' "$(ulimit -Sl)" "$(ulimit -Hl)" > out/memlock.txt
+          rc=0
+          for consumer in gufo extension; do
+            runtime="$WORK/tested/embed/$consumer"
+            chmod +x "$runtime/logits-probe"
+            LD_LIBRARY_PATH="$runtime" timeout 180s "$runtime/logits-probe" "$WORK/staged-abi1" 6 2 chat \
+              | tee "out/$consumer-staged-abi1.json" || rc=1
+            cc -D_GNU_SOURCE -I "$runtime" "$recipes/controller-abi.c" \
+              -L "$runtime" -Wl,-rpath,"$runtime" -lloom_text_embed -o "$WORK/$consumer-abi"
+            timeout 1500s "$WORK/$consumer-abi" "$WORK/flash" vision-mtp flash \
+              2>&1 | tee "out/$consumer-flash.log" || rc=1
+          done
+          exit "$rc"
+      - uses: actions/upload-artifact@v4
+        if: always() && env.WORK != ''
+        with:
+          name: sdk030-staged-abi2
+          path: ${{ env.WORK }}/out
+      - name: Remove isolated workspace
+        if: always() && env.WORK != ''
+        shell: bash
+        run: |
+          case "$WORK" in "$RUNNER_TEMP"/sdk030-staged-abi2.*) rm -rf -- "$WORK";; *) exit 1;; esac
