@@ -2,7 +2,7 @@ name: SDK 0.3 materialization card golden proof
 on:
   push:
     branches: [codex/sdk030-materialize-card-proof]
-    paths: [.github/workflows/sdk030-materialize-card-proof.yml]
+    paths: [.github/workflows/sdk030-materialize-card-proof.yml, .github/scripts/loom_factory.py, skills/loom-benchmark/scripts/card/test/check.sh]
 permissions:
   contents: read
 jobs:

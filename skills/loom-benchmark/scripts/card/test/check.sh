@@ -496,7 +496,7 @@ for directory, source, old_card, copy in (
     text = (Path(directory) / 'README.md').read_text(encoding='utf-8')
     fetch = quick_start_fetch(text, '/tmp/factory test')
     assert fetch == ['loom-fetch', source] + (['--preset=chat'] if old_card else []) + (['--materialize=copy'] if copy else []) + ['--output=/tmp/factory test'], fetch" \
-  "$here/../../../../../.github/scripts" "$tmp/gpus4" "$tmp/gpus4_pypi" "$tmp/gpus4_pypi_030" \
+  "$here/../../../../../.github/scripts" "$here/gpus4/expected" "$tmp/gpus4_pypi" "$tmp/gpus4_pypi_030" \
   && echo "OK   Factory replays the generated 0.1, 0.2 and 0.3 fetch arguments" \
   || { echo "FAIL Factory Quick start verification arguments"; bad=1; }
 # the data file is the only source of a device's data: rebuilding the card from itself (--from-info) with the same files doubles nothing
