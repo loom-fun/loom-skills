@@ -1901,7 +1901,7 @@
          TT = src["T"]
 --- a/mv_rows.py
 +++ b/mv_rows.py
-@@ -11,7 +11,7 @@
+@@ -11,14 +11,20 @@
  import os
  
  ADAPT = os.environ.get("MV_ADAPT", "1") not in ("", "0")
@@ -1910,6 +1910,19 @@
  WG_LONG = int(os.environ.get("MV_WG_LONG", "640"))
  SAME_R = "MV_WG4" not in os.environ
  
+ 
++# MV_R="K:N:R,...": rows per workgroup for these exact shapes (both token counts unless MV_WG4 separates them)
++R_OVERRIDE = {(int(k), int(n)): int(r) for k, n, r in (x.split(":") for x in os.environ.get("MV_R", "").split(",") if x)}
++
++
+ def pick_r(n, K, TG):
+     if not ADAPT or n is None:
+         return 16
++    if (K, n) in R_OVERRIDE and (SAME_R or TG == 1):
++        return R_OVERRIDE[(K, n)]
+     if SAME_R:
+         TG = 1
+     target = (WG_LONG if K >= 8192 else WG1) if TG == 1 else WG4
 --- a/templates/control.loom
 +++ b/templates/control.loom
 @@ -460,6 +460,7 @@

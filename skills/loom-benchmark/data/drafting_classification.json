@@ -708,5 +708,18 @@
   "llama_spec": "--spec-type draft-mtp",
   "llama_n_max": null,
   "nmax_src": "llama.cpp default"
+ },
+ "loom-fun/jdopensource-JoyAI-LLM-Flash-loom": {
+  "card": "loom-fun/jdopensource-JoyAI-LLM-Flash-loom",
+  "live_kind": "none",
+  "live_depth": null,
+  "choice": "none",
+  "provenance": [
+   "https://huggingface.co/jdopensource/JoyAI-LLM-Flash-GGUF"
+  ],
+  "evidence": "deepseek2 GGUF without nextn/MTP tensors; no drafter from the model maker or Z-Lab for this exact model",
+  "llama_spec": "",
+  "llama_n_max": null,
+  "nmax_src": ""
  }
 }
