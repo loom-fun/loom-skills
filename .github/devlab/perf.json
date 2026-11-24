@@ -1,5 +1,5 @@
 {
- "_comment": "JoyAI lc lane round 2 (experiment only): dev gates on the 8192-chunk build (c8, capped partials).",
+ "_comment": "JoyAI lc lane round 4 (experiment only): c8 (kept: 8192 chunk + capped partials) vs c8 + xflash s4,fma; short + long ABBA, fullctx both, dev gates on the variant.",
  "card": "loom-fun/jdopensource-JoyAI-LLM-Flash-loom@58159cc30c1b9a18fb883f75188b35d03bfea4ed",
  "memory_bytes": 47000000000,
  "kit": "deepseek2",
@@ -9,7 +9,7 @@
  },
  "jobs": [
   {
-   "name": "lc-r2-gates",
+   "name": "lc-r4-perf",
    "variants": [
     {
      "name": "c8",
@@ -18,11 +18,61 @@
       "--prefill",
       "8192"
      ],
-     "ref": "b65157cd36e91c57aa52a72d3cec473671d9d2ba"
+     "ref": "e5d7492523aaab3d055e316543daba97e7a99b71"
+    },
+    {
+     "name": "sf",
+     "build": {
+      "MLA_XF_T": "s4,fma"
+     },
+     "build_args": [
+      "--prefill",
+      "8192"
+     ],
+     "ref": "e5d7492523aaab3d055e316543daba97e7a99b71"
     }
    ],
    "steps": [
-    "gates:c8:dev"
+    "ktest:sf",
+    "perf:c8:1",
+    "perf:sf:1",
+    "perf:sf:1",
+    "perf:c8:1",
+    "perf:c8:1:long",
+    "perf:sf:1:long",
+    "perf:sf:1:long",
+    "perf:c8:1:long",
+    "profile:sf:pf8k"
+   ]
+  },
+  {
+   "name": "lc-r4-fullctx",
+   "variants": [
+    {
+     "name": "c8",
+     "build": {},
+     "build_args": [
+      "--prefill",
+      "8192"
+     ],
+     "ref": "e5d7492523aaab3d055e316543daba97e7a99b71"
+    },
+    {
+     "name": "sf",
+     "build": {
+      "MLA_XF_T": "s4,fma"
+     },
+     "build_args": [
+      "--prefill",
+      "8192"
+     ],
+     "ref": "e5d7492523aaab3d055e316543daba97e7a99b71"
+    }
+   ],
+   "steps": [
+    "fullctx:sf",
+    "fullctx:c8",
+    "gates:sf:dev"
    ]
   }
  ]
