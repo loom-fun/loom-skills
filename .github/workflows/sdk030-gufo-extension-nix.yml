@@ -1,0 +1,94 @@
+name: SDK 0.3 Gufo extension Nix package proof on DevLab
+on:
+  push:
+    branches: [codex/sdk030-gufo-nix-proof]
+    paths: [.github/workflows/sdk030-gufo-extension-nix.yml]
+permissions:
+  contents: read
+jobs:
+  extension-nix:
+    runs-on: [strix-halo, devlab-dispatch, Linux, self-hosted]
+    timeout-minutes: 360
+    env:
+      EXTENSION_REV: 20b0617fa7f0f8f080319b29bc35e0a9fe8df72a
+      NIX_IMAGE: nixos/nix@sha256:9b6a776642088021e9251e7cdb47988747008178ca2f7398cb3e1b365bde3372
+    steps:
+      - name: Check available Docker daemon on this runner
+        id: docker
+        shell: bash
+        run: |
+          set -euo pipefail
+          work=$(mktemp -d "$RUNNER_TEMP/sdk030-extension-nix.XXXXXX")
+          printf 'PROOF_DIR=%s\n' "$work" >> "$GITHUB_ENV"
+          uname -a > "$work/runner.txt"
+          printf '%s\n' "$RUNNER_NAME" >> "$work/runner.txt"
+          if command -v docker >> "$work/docker.log" && timeout 15 docker info --format '{{.ServerVersion}}' >> "$work/docker.log" 2>&1; then
+            echo 'docker=true' >> "$GITHUB_OUTPUT"
+          else
+            printf '%s\n' 'Docker daemon unavailable to the DevLab job user' | tee -a "$work/docker.log"
+            echo 'docker=false' >> "$GITHUB_OUTPUT"
+          fi
+          if command -v nix >/dev/null; then
+            nix --version > "$work/native-nix.txt"
+          else
+            printf '%s\n' 'Native Nix unavailable' > "$work/native-nix.txt"
+          fi
+          cat "$work/docker.log" "$work/native-nix.txt"
+      - uses: actions/checkout@v4
+        if: steps.docker.outputs.docker == 'true'
+        with:
+          repository: loom-fun/loom-gufo-extension
+          ref: 20b0617fa7f0f8f080319b29bc35e0a9fe8df72a
+          path: extension
+          persist-credentials: false
+      - name: Build and check the exact normal Nix package outputs
+        if: steps.docker.outputs.docker == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C extension rev-parse HEAD)" = "$EXTENSION_REV"
+          {
+            echo "extension=$EXTENSION_REV"
+            echo "container=$NIX_IMAGE"
+            sha256sum extension/flake.lock extension/nix/loom-runtime.nix extension/nix/hrx-deps.nix
+            python3 -c 'import json; f=json.load(open("extension/flake.lock")); print("locked_gufo="+f["nodes"]["gufo"]["locked"]["rev"])'
+          } > "$PROOF_DIR/origins.txt"
+          docker run --rm --name "sdk030-extension-nix-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" \
+            --mount "type=bind,src=$PWD/extension,dst=/extension,readonly" \
+            --mount "type=bind,src=$PROOF_DIR,dst=/evidence" \
+            "$NIX_IMAGE" sh -ec '
+              mkdir -p /root/.config/nix /build
+              printf "%s\n" \
+                "experimental-features = nix-command flakes" \
+                "sandbox = false" \
+                "build-users-group =" \
+                "build-dir = /build" \
+                "accept-flake-config = true" \
+                "extra-substituters = https://gufo.cachix.org" \
+                "extra-trusted-public-keys = gufo.cachix.org-1:rfZe3n4lHINgyoACKzs5EthIZmBNvEyCCtufUpth0PE=" > /root/.config/nix/nix.conf
+              export HOME=/root
+              nix --version
+              package=$(nix build -L --no-link --no-write-lock-file --no-update-lock-file --print-out-paths path:/extension#default)
+              runtime=$(nix build -L --no-link --no-write-lock-file --no-update-lock-file --print-out-paths path:/extension#runtime)
+              test -x "$package/bin/gufo"
+              test -s "$runtime/lib/libloom_text_embed.so"
+              "$package/bin/gufo" --version > /evidence/gufo-version.txt
+              "$package/bin/gufo" extension list > /evidence/gufo-extension-list.txt
+              grep -iE "(^|[^[:alnum:]_])loom($|[^[:alnum:]_])" /evidence/gufo-extension-list.txt
+              sha256sum "$runtime/lib/libloom_text_embed.so" > /evidence/runtime.sha256
+              nix path-info --json "$package" "$runtime" > /evidence/nix-outputs.json
+            ' 2>&1 | tee "$PROOF_DIR/nix-build.log"
+      - uses: actions/upload-artifact@v4
+        if: always() && env.PROOF_DIR != ''
+        with:
+          name: sdk030-extension-nix-evidence
+          path: ${{ env.PROOF_DIR }}
+      - name: Report unsupported DevLab substrate
+        if: steps.docker.outputs.docker == 'false'
+        run: |
+          echo '::error::Exact Nix build blocked because DevLab did not expose a usable Docker daemon.'
+          exit 1
+      - name: Remove isolated evidence directory
+        if: always() && env.PROOF_DIR != ''
+        run: |
+          case "$PROOF_DIR" in "$RUNNER_TEMP"/sdk030-extension-nix.*) rm -rf -- "$PROOF_DIR";; *) exit 1;; esac
