@@ -1,0 +1,31 @@
+{
+  "sdk": "0.3.0",
+  "repeats": 3,
+  "suites": [
+    {
+      "suite": "qwen35-gdn-exact-cols",
+      "runner": "strix",
+      "dir": "qwen35_gdn",
+      "gen": "qwen35_gdn/gen_bench.py",
+      "files": [
+        "bench.loom",
+        "bench_cols2.loom",
+        "bench_cols8.loom"
+      ],
+      "tests": [
+        "test_base.loom",
+        "test_cols2.loom",
+        "test_cols8.loom"
+      ],
+      "case_timing": true,
+      "args": [
+        "--measure=dispatch_complete",
+        "--batch-size=4",
+        "--profile-final-batch=true"
+      ],
+      "gen_variants": [
+        "exact"
+      ]
+    }
+  ]
+}
