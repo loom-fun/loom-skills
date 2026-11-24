@@ -28,7 +28,9 @@ def image_cases(root, toolkit):
 
 
 def loom_layers(root, toolkit, package):
-    sys.path.insert(0, str(toolkit / "skills/loom-port-llm/starter/vision"))
+    starter = toolkit / "skills/loom-port-llm/starter"
+    sys.path[:0] = [str(starter), str(starter / "vision")]
+    import dual_target
     import encoder
     import gen_component
     import preprocess
@@ -42,7 +44,8 @@ def loom_layers(root, toolkit, package):
     c = encoder.config_st(vision)
     plan = encoder.build(c)
     actual_program = (package / "program/vision_encoder.loom").read_text()
-    assert gen_component.encoder_program(c).strip() == actual_program.strip(), "encoder source differs from frozen program"
+    generated = dual_target.apply(gen_component.encoder_program(c))
+    assert generated.strip() == actual_program.strip(), "encoder source differs from frozen program"
     scheme = preprocess.FAMILY[c["family"]]
     (horizontal, h_source), (vertical, v_source) = gen_component.resize_kernels(scheme["filt"])
     raw = st_load.raw_weights([str(package / "parameter/model.safetensors")], vision)
