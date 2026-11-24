@@ -16,7 +16,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: e7b105187a14ef94bcc9f927c99b97f297a54d99
+          ref: 9adca4fc5893aa71e2e8be18aa2b7bb9fc96a28b
           fetch-depth: 0
           persist-credentials: false
       - name: Pin checkpoint and prior cards
@@ -84,9 +84,68 @@ jobs:
               rows = [json.loads(line) for line in (out / f"perf_{arm}.jsonl").read_text().splitlines()]
               for metric in ("decode_tps", "decode_tps_2k", "decode_tps_32k", "decode_tps_16k", "decode_tps_124k", "prefill_long"):
                   assert any(row.get(metric) for row in rows), (arm, metric)
+              for metric in ("decode_tps_16k", "decode_tps_124k"):
+                  assert any(all(n > 0 for n in samples) for row in rows if (samples := row.get("decode_ctx_prompt_tokens", {}).get(metric))), (arm, metric)
               assert "agg_tps" in (out / f"c4_{arm}.txt").read_text(), arm
               sdk = json.loads((out / f"sdk_{arm}.json").read_text())
               assert sdk["hrx_loom"] == "0.3.0" and sdk["wheel_sha256"] == "6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f", sdk
+          PY
+      - name: Exercise the normal port build on JoyAI and a non-target checkpoint
+        shell: bash
+        run: |
+          set -euo pipefail
+          export LOOM_ROOT="$WORK/loom-sdk-0.3.0"
+          python="$LOOM_ROOT/.tools/bin/python"
+          joy=jdopensource-JoyAI-LLM-Flash-loom
+          other=unsloth-Qwen3-0.6B-loom
+          "$python" fleet/build_fleet.py --tree . --out "$WORK/port-fixtures" --keep-work --rdna4 0 --slugs "$joy,$other" > "$WORK/receipt/port-fixtures.log" 2>&1
+          base="$WORK/port-base"
+          git worktree add --detach "$base" e4dd46e1e34323b15af59bf833c32562075ee049
+          trap 'git worktree remove --force "$base"' EXIT
+          port_model() {
+            local tree=$1 slug=$2 repo=$3 label=$4
+            local fixture="$WORK/port-fixtures/_work/$slug" dest="$WORK/$label"
+            mkdir -p "$dest/gguf" "$dest/tok"
+            for gguf in "$fixture"/*.gguf; do ln -s "$gguf" "$dest/gguf/$(basename "$gguf")"; done
+            cp "$fixture/tokenizer_min.json" "$dest/tok/tokenizer.json"
+            "$python" - "$fixture/cfg.json" "$dest/cfg.json" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          cfg = json.loads(Path(sys.argv[1]).read_text())
+          cfg["gguf"] = "gguf/" + Path(cfg["gguf"]).name
+          cfg.pop("slug", None)
+          cfg.pop("prefill_capacity", None)
+          Path(sys.argv[2]).write_text(json.dumps(cfg, indent=1))
+          PY
+            local kit="$tree/skills/loom-port-llm/starter"
+            [ "$slug" != "$joy" ] || kit="$fixture/kit"
+            FROM=build STOP_AFTER=build KIT="$kit" bash "$tree/skills/loom-port-llm/port.sh" "$repo" "$dest" 8160 4096 "$repo" > "$WORK/receipt/$label.log" 2>&1
+          }
+          port_model "$GITHUB_WORKSPACE" "$joy" jdopensource/JoyAI-LLM-Flash-GGUF port-joyai
+          port_model "$GITHUB_WORKSPACE" "$other" unsloth/Qwen3-0.6B-GGUF port-head
+          port_model "$base" "$other" unsloth/Qwen3-0.6B-GGUF port-base-model
+          "$python" - <<'PY' > "$WORK/receipt/port-verdict.json"
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          root = Path(os.environ["WORK"])
+          joy = root / "port-joyai/pkg"
+          config = json.loads((joy / "llm_config.json").read_text())
+          model = json.loads((joy / "model.json").read_text())
+          assert config["slug"] == "jdopensource-JoyAI-LLM-Flash-loom"
+          assert config["resolved"]["env"]["MOE_CW_DQ"] == "1"
+          assert model["presets"]["chat"]["execution"]["prefill_capacity"] == 8192
+          def package(root):
+              program = {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in (root / "program").glob("*.loom")}
+              return program, json.loads((root / "model.json").read_text())
+          control, candidate = (root / name / "pkg" for name in ("port-base-model", "port-head"))
+          assert package(control) == package(candidate), "non-target programs or preset changed under port.sh"
+          assert "slug" not in json.loads((candidate.parent / "cfg.json").read_text())
+          print(json.dumps({"joyai_slug": config["slug"], "joyai_prefill": 8192, "non_target_programs_unchanged": True}, indent=2))
           PY
       - uses: actions/upload-artifact@v4
         if: always() && env.WORK != ''
