@@ -1,0 +1,110 @@
+name: Inkling Strix draft-depth correctness triage
+on:
+  push:
+    branches: [codex/sdk030-special-qualification]
+    paths: [.github/workflows/sdk030-inkling-strix-triage.yml]
+permissions:
+  contents: read
+jobs:
+  verify:
+    name: ${{ matrix.device }} ${{ matrix.slug }}
+    strategy:
+      max-parallel: 2
+      fail-fast: false
+      matrix:
+        include:
+          - slug: unsloth-Inkling-2-Mini-loom
+            device: strix-halo
+            labels: '["self-hosted","devlab-dispatch","strix-halo","Linux"]'
+    runs-on: ${{ fromJSON(matrix.labels) }}
+    timeout-minutes: 240
+    env:
+      SLUG: ${{ matrix.slug }}
+      SDK_GPU_KEY: ${{ matrix.device }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 16261e288ef75481d93ebb1a32bf5332f1a35751
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Plan from the accepted production revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          export WORK="$(dirname "$GITHUB_WORKSPACE")/sdk030-wave-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$SDK_GPU_KEY-$SLUG"
+          mkdir -p "$WORK/receipt"
+          echo "WORK=$WORK" >> "$GITHUB_ENV"
+          python3 - <<'PY' >> "$GITHUB_ENV"
+          import json, os
+          from pathlib import Path
+          slug = os.environ['SLUG']
+          repo = 'loom-fun-staging/' + slug
+          job = dict(name='special', card=repo+'@bd021e649b158e608b389eca9bfed60a0ec2d225', sdk='0.3.0',
+                     variants=[dict(name=v, sdk='0.3.0', execution=dict(draft_depth=d))
+                               for v,d in (('draft3',3),('draft1',1),('draft0',0))],
+                     steps=[f'strixprobe:{v}' for v in ('draft3','draft1','draft0')])
+          plan=dict(runner='strix',memory_bytes=33000000000,jobs=[job])
+          out=Path(os.environ['WORK'])/'receipt'
+          (out/'experiment.json').write_text(json.dumps(plan,indent=2))
+          h=Path('.github/scripts/devlab_perf.sh')
+          source=h.read_text()
+          anchor='    ln -sfn "$vcard/parameter" "$pkg/parameter"'
+          assert source.count(anchor)==1
+          import base64
+          (Path(os.environ['WORK'])/'inkling-strix-probe.py').write_bytes(base64.b64decode('IiIiUmVjb3JkIGV4YWN0IHJlcXVlc3Qgb3V0cHV0cyBmb3IgdGhlIGZyb3plbiBTdHJpeCBwYWNrYWdlIGF0IGVhY2ggZHJhZnQgZGVwdGguIiIiCgppbXBvcnQgY29uY3VycmVudC5mdXR1cmVzCmltcG9ydCBqc29uCmltcG9ydCBzeXMKZnJvbSBwYXRobGliIGltcG9ydCBQYXRoCgpmcm9tIGJlbmNoX2NvbW1vbiBpbXBvcnQgZG9jCmZyb20gc3BlY19jaGVjayBpbXBvcnQgcG9zdCwgcmVjb3JkCgoKZGVmIG1haW4oKToKICAgIHVybCwgbW9kZWwsIG91dHB1dCA9IHN5cy5hcmd2WzE6XQogICAgcHJlZml4ID0gUGF0aChvdXRwdXQpCiAgICBib2R5ID0gZG9jKDEwMDApCiAgICBwcm9tcHRzID0gW2YiUXVlc3Rpb24ge2l9OiBzdW1tYXJpemUgcGFydCB7aX0gb2YgdGhpcyB0ZXh0LlxuXG4iICsgYm9keVtpICogNzAwOmkgKiA3MDAgKyA3MDAgKyAxNTcgKiBpXQogICAgICAgICAgICAgICBmb3IgaSBpbiByYW5nZSg0KV0KCiAgICBkZWYgcmVxdWVzdChwcm9tcHQpOgogICAgICAgIHJlcGx5ID0gcG9zdCh1cmwsIHsibW9kZWwiOiBtb2RlbCwgIm1lc3NhZ2VzIjogW3sicm9sZSI6ICJ1c2VyIiwgImNvbnRlbnQiOiBwcm9tcHR9XSwKICAgICAgICAgICAgICAgICAgICAgICAgICAgIm1heF90b2tlbnMiOiA0MCwgInRlbXBlcmF0dXJlIjogMH0pCiAgICAgICAgc2VsZWN0ZWQgPSByZXBseVsiY2hvaWNlcyJdWzBdCiAgICAgICAgcmV0dXJuIHtrZXk6IHNlbGVjdGVkW2tleV0gZm9yIGtleSBpbiAoIm1lc3NhZ2UiLCAiZmluaXNoX3JlYXNvbiIpfSB8IHsidXNhZ2UiOiByZXBseVsidXNhZ2UiXX0KCiAgICBzb2xvID0gW3JlcXVlc3QocHJvbXB0KSBmb3IgcHJvbXB0IGluIHByb21wdHNdCiAgICBjb25jdXJyZW50ID0gW10KICAgIGZvciBfIGluIHJhbmdlKDMpOgogICAgICAgIHdpdGggY29uY3VycmVudC5mdXR1cmVzLlRocmVhZFBvb2xFeGVjdXRvcihtYXhfd29ya2Vycz1sZW4ocHJvbXB0cykpIGFzIHBvb2w6CiAgICAgICAgICAgIGNvbmN1cnJlbnQuYXBwZW5kKGxpc3QocG9vbC5tYXAocmVxdWVzdCwgcHJvbXB0cykpKQogICAgYWZ0ZXIgPSBbcmVxdWVzdChwcm9tcHQpIGZvciBwcm9tcHQgaW4gcHJvbXB0c10KICAgIHByZWZpeC53aXRoX3N1ZmZpeCgiLmpzb24iKS53cml0ZV90ZXh0KGpzb24uZHVtcHMoeyJwcm9tcHRzIjogcHJvbXB0cywgInNvbG8iOiBzb2xvLCAiY29uY3VycmVudCI6IGNvbmN1cnJlbnQsCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgImFmdGVyIjogYWZ0ZXJ9LCBpbmRlbnQ9MikgKyAiXG4iKQogICAgcmVjb3JkKHVybCwgbW9kZWwsIHByZWZpeC53aXRoX3N1ZmZpeCgiLnNwZWMuanNvbmwiKSkKCgppZiBfX25hbWVfXyA9PSAiX19tYWluX18iOgogICAgbWFpbigpCg=='))
+          probe='''    strixprobe)
+                serve_alone "$p1" || { res[$s]=ERROR; continue; }
+                if PYTHONPATH="$B" "$T" "$WORK/inkling-strix-probe.py" "$url" "$cardid" "$out/$p1"; then
+                  curl -fsS "$url/metrics" > "$out/$p1.metrics.txt" || true
+                  res[$s]=CAPTURED
+                else res[$s]=ERROR; fi;;
+              func)'''
+          assert source.count('    func)')==1
+          source=source.replace('    func)',probe)
+          h.write_text(source.replace(anchor,'    rsync -a --exclude=/parameter --exclude=/.git "$vcard/" "$pkg/"\n'+anchor))
+          print('JOB=special')
+          PY
+      - name: Build, serve and measure the release candidate
+        run: bash .github/scripts/devlab_perf.sh "$WORK/receipt/experiment.json" "$JOB"
+      - name: Save the measured package and identity
+        if: always() && env.JOB != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          d="$WORK/$JOB"
+          cp -r "$d/out" "$WORK/receipt/"
+          if [ -e "$d/staging/pkg/model.json" ]; then
+            tar -C "$d/staging/pkg" --exclude=parameter --exclude='*.gguf' --exclude='*.safetensors' --exclude='bench' -czf "$WORK/receipt/package-without-weights.tar.gz" .
+          fi
+      - name: Require identical programs and all request captures
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import json, os
+          out=Path(os.environ['WORK'])/'receipt/out'
+          variants=('draft3','draft1','draft0')
+          digests={(out/f'programs_sha256_{v}.txt').read_text().strip() for v in variants}
+          assert digests=={'fdb1aaa4771f05a9cc9315aa774bddf121123c8143d3b81762563e6fedc0f6aa'},digests
+          summary=json.loads((out/'summary.json').read_text())['results']
+          for v in variants:
+              assert summary[f'strixprobe:{v}']=='CAPTURED', summary
+              assert len((out/f'{v}.spec.jsonl').read_text().splitlines())==13
+              capture=json.loads((out/f'{v}.json').read_text())
+              assert len(capture['solo'])==4 and len(capture['concurrent'])==3 and all(len(w)==4 for w in capture['concurrent'])
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sdk030-${{ matrix.device }}-${{ matrix.slug }}
+          path: ${{ env.WORK }}/receipt
+          retention-days: 30
+      - name: Release job disk
+        if: always()
+        shell: bash
+        run: |
+          if [ "${WORK:-}" = "$(dirname "$GITHUB_WORKSPACE")/sdk030-wave-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$SDK_GPU_KEY-$SLUG" ]; then rm -rf -- "$WORK"; fi
+
+
+
