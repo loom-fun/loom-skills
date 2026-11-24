@@ -10,6 +10,9 @@
 #   decoding: the performance runs use it, so Loom is compared drafting vs drafting; references never do.
 #   stop: llamacpp_server.sh --stop PORT   (LLAMACPP_STATE: pid/log dir, default /tmp)
 #   LLAMACPP_ARGS_FILE=F writes the exact server arguments to F (finalize.sh: llamacpp_args.txt, the card's baseline)
+#   LLAMACPP_EXTRA_ARGS="--skip-chat-parsing": extra server arguments, recorded with the others. --skip-chat-parsing is for
+#   a template whose output llama.cpp's PEG chat parser rejects (JoyAI-LLM-Flash: HTTP 500 "does not match the expected
+#   peg-native format" on every perf.py chat request); generation is unchanged, only the reply is not split into channels.
 # Refuses a build that does not see a ROCm (Vulkan) device: on Windows, builds missing their HIP/BLAS DLLs
 # silently fall back to CPU.
 set -e
@@ -60,10 +63,11 @@ ctxarg=(-c $((np * per))); [ "$mode" = unified ] && ctxarg=(-c $per -kvu)
 # an old build (b10820, a sliding-window model) answered the PREVIOUS prompt from that cache.
 mm=(); [ -n "${MMPROJ:-}" ] && { mm=(--mmproj "$MMPROJ"); export LLAMA_MEDIA_MARKER='<__media__>'; }   # vision_golden.py's marker
 spec=(); [ -n "${LLAMA_SPEC:-}" ] && read -r -a spec <<< "$LLAMA_SPEC"
+extra=(); [ -n "${LLAMACPP_EXTRA_ARGS:-}" ] && read -r -a extra <<< "$LLAMACPP_EXTRA_ARGS"
 # -ngl 99 offloads the repeating layers only: llama.cpp keeps input-layer tensors (token_embd, per-layer embedding tables)
 # in the CPU buffer on its own (mmap'd), so nothing here forces them onto the GPU.
 # Do not add --no-mmap, -ot or --override-tensor for them.
-args=(-ngl 99 -cram 0 "${mm[@]}" "${spec[@]}" "${ctxarg[@]}" -np $np)
+args=(-ngl 99 -cram 0 "${mm[@]}" "${spec[@]}" "${extra[@]}" "${ctxarg[@]}" -np $np)
 # LLAMACPP_ARGS_FILE: record the server's exact arguments (model path, host and port left out), the card's baseline args
 if [ -n "${LLAMACPP_ARGS_FILE:-}" ]; then echo "${args[*]}" > "$LLAMACPP_ARGS_FILE"; fi
 nohup $exe -m "$gguf" "${args[@]}" --port $port --host 127.0.0.1 > $state/llamacpp-$port.log 2>&1 &

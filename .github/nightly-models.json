@@ -578,6 +578,14 @@
     "draft",
     "thinking-toggle"
    ]
+  },
+  {
+   "repo": "loom-fun/jdopensource-JoyAI-LLM-Flash-loom",
+   "slug": "joyai-llm-flash-iq4_xs",
+   "memory_bytes": 47000000000,
+   "kit": "deepseek2",
+   "llamacpp": "b1386",
+   "features": []
   }
  ]
 }
