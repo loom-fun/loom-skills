@@ -2,64 +2,14 @@
   "include": [
     {
       "gpu": "radeon-r9700",
-      "slug": "ggml-org-Flint-loom",
-      "repo": "loom-fun-staging/ggml-org-Flint-loom",
-      "revision": "d9f8f69c9923dd1e343f73a837a29311ed1738be",
+      "slug": "ggml-org-LFM2.5-24B-A2B-loom",
+      "repo": "loom-fun-staging/ggml-org-LFM2.5-24B-A2B-loom",
+      "revision": "6e159b12fd85ff025617b95bec99927608396672",
       "device": "amdgpu://?completion_spin_ns=4294967295",
       "args": [
         "--pool_backing=fixed"
       ],
-      "model_id": "flint",
-      "features": {
-        "api": "yes",
-        "audio": "unknown",
-        "concurrency": "yes",
-        "context": "yes",
-        "image_input": "unknown",
-        "max_output_tokens": "yes",
-        "reasoning_effort": "n/a",
-        "sampling": "yes",
-        "speculative_decoding": "yes",
-        "thinking": "yes",
-        "tool_calling": "yes"
-      },
-      "sdk": {
-        "hrx_loom": "0.3.0",
-        "source": "pypi",
-        "hrx_system_sha": "e2c41a720363911c04606ce0f4417e2d55630352",
-        "wheel_sha256": "6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f"
-      },
-      "files": {
-        "info.json": "750cbbd27125f4a7746c5306778877c22ce87d53240ae14ef62e246557df7efa",
-        "model.json": "8ea0ab75cfc5c522377454e393ae2c90e067dc97c108f29d9c34e6dca7bf74b7",
-        "model.json.lock": "fdf52625d05116b3b8b6a7d106f39e1400d63e16e6a5d399b9293d1f5adc97da",
-        "llm_config.json": "f7cd28e2db2a771e4c4fe2b5f55d6478603274fd47945ce03be81e831d791f63"
-      },
-      "package_serve": null,
-      "published_rows": [
-        "decode",
-        "decode_2k",
-        "decode_32k",
-        "prefill_16k",
-        "prefill_1k",
-        "prefill_2k",
-        "prefill_32k",
-        "prefill_8k",
-        "streams4"
-      ],
-      "preset": "chat-r9700",
-      "context_tokens": 36864
-    },
-    {
-      "gpu": "radeon-r9700",
-      "slug": "rippertnt-HyperCLOVAX-SEED-Text-Instruct-1.5B-loom",
-      "repo": "loom-fun-staging/rippertnt-HyperCLOVAX-SEED-Text-Instruct-1.5B-loom",
-      "revision": "b81c05d4348b3fd1fc3a7f17c1ace06c9da84470",
-      "device": "amdgpu://?completion_spin_ns=4294967295",
-      "args": [
-        "--pool_backing=fixed"
-      ],
-      "model_id": "naver-hyperclovax/HyperCLOVAX-SEED-Text-Instruct-1.5B",
+      "model_id": "LiquidAI/LFM2.5-24B-A2B",
       "features": {
         "api": "yes",
         "audio": "unknown",
@@ -70,8 +20,8 @@
         "reasoning_effort": "n/a",
         "sampling": "yes",
         "speculative_decoding": "n/a",
-        "thinking": "n/a",
-        "tool_calling": "n/a"
+        "thinking": "yes",
+        "tool_calling": "yes"
       },
       "sdk": {
         "hrx_loom": "0.3.0",
@@ -80,10 +30,10 @@
         "wheel_sha256": "6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f"
       },
       "files": {
-        "info.json": "e3a55c17c08393e56063924757b911054aae557c97a0ddf98d91a2cf354e3e03",
-        "model.json": "5428f5f85d175f399571bb814cf26bb99c320a20f21da58fe1cd54f27548a49b",
-        "model.json.lock": "301f72804848cf14e68f8921fb66e7f3a8d245ddbe767b32aa35e6ea0a68583e",
-        "llm_config.json": "164237c070bb6ff4c03120df095ec392e419b26b3a8e53013bd8ca98556eb1f6"
+        "info.json": "6d9c889752ecad6f1e72940dd9abe4154240346d6e68b92d35cdb6f966ba705e",
+        "model.json": "25ab1d6ae6c754513ac0554aabb95c526264209545f331e21cbf3943af1083eb",
+        "model.json.lock": "166b4b4797187808c2a0b1f205dd4a6588cb8287ad8fd35d18055ebb0c0db12b",
+        "llm_config.json": "b93960546facca6a14527af3629c65495ab90751c21f7536a0e2212b371c1f45"
       },
       "package_serve": null,
       "published_rows": [
@@ -97,7 +47,57 @@
         "prefill_8k",
         "streams4"
       ],
-      "preset": "chat-r9700",
+      "preset": "chat",
+      "context_tokens": 131072
+    },
+    {
+      "gpu": "radeon-r9700",
+      "slug": "unsloth-gpt-oss-20b-loom",
+      "repo": "loom-fun-staging/unsloth-gpt-oss-20b-loom",
+      "revision": "b325f82c091ff5f8515af694815169538b74f959",
+      "device": "amdgpu://?completion_spin_ns=4294967295",
+      "args": [
+        "--pool_backing=fixed"
+      ],
+      "model_id": "openai/gpt-oss-20b",
+      "features": {
+        "api": "yes",
+        "audio": "unknown",
+        "concurrency": "yes",
+        "context": "yes",
+        "image_input": "unknown",
+        "max_output_tokens": "yes",
+        "reasoning_effort": "yes",
+        "sampling": "yes",
+        "speculative_decoding": "n/a",
+        "thinking": "yes",
+        "tool_calling": "yes"
+      },
+      "sdk": {
+        "hrx_loom": "0.3.0",
+        "source": "pypi",
+        "hrx_system_sha": "e2c41a720363911c04606ce0f4417e2d55630352",
+        "wheel_sha256": "6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f"
+      },
+      "files": {
+        "info.json": "9aeeba5d3301ab48db17674187ef7bc6f2451f91a58adb0dbe17f14e41b553ac",
+        "model.json": "2b0c9f77bcd2727478dd41f7c9422e9f2c4456c6e29a7c1da693172f0794c548",
+        "model.json.lock": "d39acafb9bad4b6fcea23fb5710b8b14849a15ea6b8a730571dc00a18267cc27",
+        "llm_config.json": "26741c38018f88d7642b6f0f95d584043e2399ef4028764a49a20db394c4479f"
+      },
+      "package_serve": null,
+      "published_rows": [
+        "decode",
+        "decode_2k",
+        "decode_32k",
+        "prefill_16k",
+        "prefill_1k",
+        "prefill_2k",
+        "prefill_32k",
+        "prefill_8k",
+        "streams4"
+      ],
+      "preset": "chat",
       "context_tokens": 131072
     }
   ]
