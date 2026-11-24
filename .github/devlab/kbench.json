@@ -2,16 +2,22 @@
   "repeats": 3,
   "suites": [
     {
-      "suite": "mla_xpf",
-      "dir": "mla_xpf",
-      "gen": "mla_xpf/gen_bench.py",
+      "suite": "joyai_route",
+      "dir": "joyai_route",
+      "gen": "joyai_route/gen_bench.py",
       "gen_variants": [
-        "x+xt",
-        "x+xt+xr"
+        "tr",
+        "tg",
+        "wm",
+        "tgnk",
+        "wmnk"
       ],
       "files": [
-        "bench_x_xt.loom",
-        "bench_x_xt_xr.loom"
+        "bench_tr.loom",
+        "bench_tg.loom",
+        "bench_wm.loom",
+        "bench_tgnk.loom",
+        "bench_wmnk.loom"
       ],
       "tests": [
         "test.loom"
@@ -19,11 +25,11 @@
       "config": [],
       "args": [
         "--measure=dispatch_complete",
-        "--batch-size=2",
+        "--batch-size=8",
         "--profile-final-batch=true"
       ],
       "device": "amdgpu://?completion_spin_ns=4294967295",
-      "repeats": 3,
+      "repeats": 5,
       "case_timing": true
     }
   ]
