@@ -1,6 +1,6 @@
 #!/bin/bash
-# Download the latest lemonade-sdk/llamacpp-rocm release for this GPU (pre-approved source: no need
-# to ask the user). Idempotent: a release already unpacked is reused. Prints the build dir last.
+# Download and verify the selected llama.cpp release for this GPU.
+# Idempotent: a release already unpacked is reused. Prints the build dir last.
 # usage: fetch_llamacpp.sh [DEST=$LLAMACPP_HOME or ~/llamacpp-rocm] [TAG=latest] [GFX=auto]
 #   LLAMACPP_BACKEND=vulkan: the official ggml-org/llama.cpp Vulkan release TAG (bNNNN; GFX unused) instead, e.g.
 #   fetch_llamacpp.sh ~/llamacpp-vulkan b12211. The archive's sha256 must equal data/llamacpp-vulkan.sha256's pin
@@ -43,29 +43,42 @@ print(d["tag_name"], a[0]["browser_download_url"] if a else "", (a[0].get("diges
 [ -n "$url" ] || { echo "release $rtag has no $os $backend $gfx asset" >&2; exit 1; }
 dir=$dest/$rtag
 if [ ! -x "$dir/llama-server" ] && [ ! -f "$dir/llama-server.exe" ]; then
+  asset=${url##*/}
+  pin=
+  if [ "$backend" = vulkan ]; then
+    pin=$(awk -v asset="$asset" '$2 == asset {print $1}' "$(dirname "$0")/../data/llamacpp-vulkan.sha256")
+  fi
+  expected=${pin:-$digest}
+  if ! [[ $expected =~ ^[a-f0-9]{64}$ ]]; then
+    echo "$asset has no trusted SHA-256 in release metadata or the local pins" >&2
+    exit 1
+  fi
   mkdir -p "$dir"
   echo "downloading $url" >&2
-  curl -fsSL --retry 6 --retry-all-errors --retry-delay 10 -o "$dir/release.zip" "$url" >&2   # GitHub's release CDN answers 504 for minutes at times
-  if [ "$backend" = vulkan ]; then   # pinned archive: refuse any other bytes
-    got=$(sha256sum "$dir/release.zip" | cut -d' ' -f1); asset=${url##*/}
-    pin=$(grep -h " $asset\$" "$(dirname "$0")/../data/llamacpp-vulkan.sha256" | cut -d' ' -f1)
-    [ "$got" = "${pin:-$digest}" ] || { echo "$asset sha256 $got, expected ${pin:-$digest}" >&2; rm -rf "$dir"; exit 1; }
-    echo "$got" > "$dir/release.sha256"
-  fi
+  archive=$(mktemp "$dir/.release.XXXXXX")
+  trap 'rm -f -- "$archive"' EXIT
+  curl -fsSL --retry 6 --retry-all-errors --retry-delay 10 -o "$archive" "$url" >&2
+  got=$(sha256sum "$archive" | cut -d' ' -f1)
+  [ "$got" = "$expected" ] || { echo "$asset sha256 $got, expected $expected" >&2; exit 1; }
+  mv -f -- "$archive" "$dir/release.zip"
+  trap - EXIT
   # the Vulkan release for Linux is a tar.gz with one top directory: unpacked flat (release.zip is just the download's name)
   if [ "$backend" = vulkan ] && [ "$os" = ubuntu ]; then
     (cd "$dir" && tar xzf release.zip --strip-components=1 && rm -f release.zip)
   else
   # unzip if present, else Python's zipfile (keeps the executable bits that unzip would restore).
-  (cd "$dir" && { if command -v unzip >/dev/null; then unzip -qo release.zip; else "$py" -c '
+  (cd "$dir"; if command -v unzip >/dev/null; then unzip -qo release.zip; else "$py" -c '
 import os, sys, zipfile
 with zipfile.ZipFile("release.zip") as z:
     for i in z.infolist():
         p = z.extract(i)
         mode = i.external_attr >> 16
         if mode:
-            os.chmod(p, mode & 0o7777)' ; fi; } && rm -f release.zip && chmod +x llama-* 2>/dev/null || true)
+            os.chmod(p, mode & 0o777)' ; fi; rm -f release.zip; chmod +x llama-* 2>/dev/null || true)
   fi
+fi
+if [ -n "${got:-}" ]; then
+  echo "$got" > "$dir/release.sha256"
 fi
 dev=ROCm; [ "$backend" = vulkan ] && dev=Vulkan
 LD_LIBRARY_PATH=$dir "$dir/llama-server" --list-devices 2>&1 | grep -q $dev \

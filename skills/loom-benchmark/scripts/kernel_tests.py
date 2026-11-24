@@ -8,7 +8,7 @@ PKG_DIR_OR_REPO  the repository root (the directory holding kernel/, motif/, pro
 TEST_DIR         the test directory (BUILD.bazel + *.loom), absolute or relative to the root
 
 How a target is translated (the Bazel rule's semantics, without Bazel):
-  * BUILD.bazel files are evaluated as (near-)Python with stub rules; every loom_library / loom_motif_library /
+  * BUILD.bazel declarations are read with a limited Starlark syntax parser; every loom_library / loom_motif_library /
     loom_kernel_library records name, srcs and deps, loom_test records srcs, deps, configs, variants, execution_profiles.
   * each library is compiled to a relocatable .loombc (`loom-link --allow-unresolved`, its srcs merged), cached per label.
   * the target's own srcs (labels like //pkg:file.loom and filegroups are resolved under the root) are merged the same way.
@@ -18,18 +18,100 @@ without --device loom-test still loads and plans the module (links libraries, bi
 by the runner; such targets are reported "skipped", never "pass". A target also is "skipped" when no case/sample executed.
 Statuses: pass | fail | skipped (+reason). A target that did not execute its checks is never "pass".
 """
-import argparse, hashlib, json, os, re, subprocess, sys, tempfile, time
-
-class Prof(str):
-    def __getattr__(self, n): return Noop()
+import argparse, ast, hashlib, json, os, re, subprocess, sys, tempfile, time
 
 class Noop:
-    def __call__(self, *a, **k): return Noop()
-    def __getattr__(self, n): return Noop()
     def __iter__(self): return iter(())
     def __getitem__(self, k): return Noop()
     def __add__(self, o): return list(o) if isinstance(o, (list, tuple)) else Noop()
     __radd__ = __add__
+
+
+def assign(target, value, values):
+    if isinstance(target, ast.Name):
+        values[target.id] = value
+    elif isinstance(target, (ast.Tuple, ast.List)):
+        for item, part in zip(target.elts, value, strict=True):
+            assign(item, part, values)
+    else:
+        raise ValueError(f"unsupported BUILD assignment: {type(target).__name__}")
+
+
+def declarations(text, path, rules, values):
+    """Read the catalog's declaration subset without executing a BUILD as Python."""
+    def comprehension(generators, scope):
+        if not generators:
+            yield scope
+            return
+        first, *remaining = generators
+        for item in expression(first.iter, scope):
+            nested = scope.copy()
+            assign(first.target, item, nested)
+            if all(expression(condition, nested) for condition in first.ifs):
+                yield from comprehension(remaining, nested)
+
+    def expression(node, scope):
+        get = lambda child: expression(child, scope)
+        match node:
+            case ast.Constant(value=value):
+                return value
+            case ast.Name(id=name):
+                return scope.get(name, Noop())
+            case ast.List(elts=items):
+                return [get(item) for item in items]
+            case ast.Tuple(elts=items):
+                return tuple(get(item) for item in items)
+            case ast.Dict(keys=keys, values=items):
+                return {get(key): get(item) for key, item in zip(keys, items, strict=True)}
+            case ast.ListComp(elt=item, generators=generators):
+                return [expression(item, scope) for scope in comprehension(generators, scope)]
+            case ast.DictComp(key=key, value=value, generators=generators):
+                return {expression(key, row): expression(value, row) for row in comprehension(generators, scope)}
+            case ast.BinOp(left=left, op=ast.Add(), right=right):
+                return get(left) + get(right)
+            case ast.BinOp(left=left, op=ast.BitOr(), right=right):
+                return get(left) | get(right)
+            case ast.BinOp(left=left, op=ast.Mod(), right=right):
+                return get(left) % get(right)
+            case ast.UnaryOp(op=ast.USub(), operand=operand):
+                return -get(operand)
+            case ast.Compare(left=left, ops=[ast.Eq()], comparators=[right]):
+                return get(left) == get(right)
+            case ast.Compare(left=left, ops=[ast.NotEq()], comparators=[right]):
+                return get(left) != get(right)
+            case ast.IfExp(test=condition, body=yes, orelse=no):
+                return get(yes if get(condition) else no)
+            case ast.Subscript(value=value, slice=key):
+                return get(value)[get(key)]
+            case ast.Attribute(value=ast.Name(id=profile), attr=field) if profile.endswith("_PROFILE") and field in {
+                "build_requirements", "resource_group", "run_requirements", "runner_args",
+            }:
+                return Noop()
+            case ast.Call(func=ast.Name(id=name), args=args, keywords=keywords):
+                # Other catalog rules are out of scope. Their bodies and imports are never run.
+                if name in rules:
+                    return rules[name](*map(get, args), **{kw.arg: get(kw.value) for kw in keywords})
+                return Noop()
+            case ast.Call(func=ast.Attribute(value=ast.Name(id="native"), attr=name), args=args, keywords=keywords) if name in {"filegroup", "package_name"}:
+                return rules[name](*map(get, args), **{kw.arg: get(kw.value) for kw in keywords})
+            case ast.Call(func=ast.Attribute(value=value, attr="items"), args=[], keywords=[]):
+                return dict.items(get(value))
+            case ast.Call(func=ast.Attribute(value=value, attr="endswith"), args=[suffix], keywords=[]):
+                return str.endswith(get(value), get(suffix))
+            case _:
+                raise ValueError(f"{path}:{node.lineno}: unsupported BUILD expression {type(node).__name__}")
+
+    for statement in ast.parse(text, filename=path).body:
+        match statement:
+            case ast.Expr(value=value):
+                expression(value, values)
+            case ast.Assign(targets=targets, value=value):
+                result = expression(value, values)
+                for target in targets:
+                    assign(target, result, values)
+            case _:
+                raise ValueError(f"{path}:{statement.lineno}: unsupported BUILD declaration {type(statement).__name__}")
+
 
 def find_root(p):
     p = os.path.abspath(p)
@@ -38,49 +120,53 @@ def find_root(p):
     for d in (p, os.path.join(p, "pkg")):
         if ok(d): return d
     d = p
-    while d != "/":
+    while d != os.path.dirname(d):
         if ok(d): return d
         d = os.path.dirname(d)
     sys.exit(f"cannot find the repository root (motif/, program/, ...) from {p}")
 
 class Build:
-    """Evaluates BUILD.bazel files lazily, one per package."""
-    def __init__(self, root): self.root, self.pk = root, {}
+    """Reads BUILD.bazel declarations lazily, one per package."""
+    def __init__(self, root): self.root, self.pk = os.path.realpath(root), {}
+
+    def source_path(self, *parts):
+        path = os.path.realpath(os.path.join(self.root, *parts))
+        if os.path.commonpath((self.root, path)) != self.root:
+            raise ValueError("BUILD source must stay within the selected repository")
+        return path
+
     def package(self, pkg):
         if pkg in self.pk: return self.pk[pkg]
         rules = {"lib": {}, "test": {}, "fg": {}}
         self.pk[pkg] = rules
-        path = os.path.join(self.root, pkg, "BUILD.bazel")
-        if not os.path.exists(path): path = os.path.join(self.root, pkg, "BUILD")
+        path = self.source_path(pkg, "BUILD.bazel")
+        if not os.path.exists(path): path = self.source_path(pkg, "BUILD")
         if not os.path.exists(path): return rules
-        text = open(path, encoding="utf-8").read()
-        # drop load(...) statements (balanced parens, starting at line start)
-        out, i = [], 0
-        for m in re.finditer(r"^load\(", text, re.M):
-            if m.start() < i: continue
-            depth, j = 0, m.end() - 1
-            while True:
-                depth += {"(": 1, ")": -1}.get(text[j], 0); j += 1
-                if depth == 0: break
-            out.append(text[i:m.start()]); i = j
-        out.append(text[i:]); text = "".join(out)
-        def lib(name, srcs=(), deps=(), **kw): rules["lib"][name] = {"srcs": list(srcs), "deps": list(deps), "kw": kw}
+        with open(path, encoding="utf-8") as source:
+            text = source.read()
+        def target_name(value):
+            if not isinstance(value, str) or not re.fullmatch(r"[A-Za-z0-9_+.-]+", value) or value in {".", ".."}:
+                raise ValueError(f"invalid BUILD target name: {value!r}")
+            return value
+
+        def lib(name, srcs=(), deps=(), **kw): rules["lib"][target_name(name)] = {"srcs": list(srcs), "deps": list(deps), "kw": kw}
         def test(name, srcs=(), deps=(), configs=None, variants=None, execution_profiles=(), **kw):
-            rules["test"][name] = {"srcs": list(srcs), "deps": list(deps), "configs": dict(configs or {}),
-                                   "variants": variants, "profiles": [str(p) for p in execution_profiles], "tags": kw.get("tags", [])}
+            if variants:
+                variants = {target_name(variant): spec for variant, spec in variants.items()}
+            rules["test"][target_name(name)] = {"srcs": list(srcs), "deps": list(deps), "configs": dict(configs or {}),
+                                               "variants": variants, "profiles": [str(p) for p in execution_profiles], "tags": kw.get("tags", [])}
         def fg(name, srcs=(), **kw): rules["fg"][name] = list(srcs)
-        g = {"loom_library": lib, "loom_motif_library": lib, "loom_kernel_library": lib, "loom_test": test,
-             "filegroup": fg, "package_name": lambda: pkg, "glob": lambda *a, **k: [], "select": lambda d, **k: [],
-             "AMD_GPU_HARDWARE_PROFILE": Prof("AMD_GPU_HARDWARE_PROFILE"), "VM_REFERENCE_PROFILE": Prof("VM_REFERENCE_PROFILE"),
-             "True": True, "False": False}
-        g["native"] = type("N", (), {"filegroup": staticmethod(fg), "package_name": staticmethod(lambda: pkg)})()
-        for _ in range(200):
-            try:
-                exec(compile(text, path, "exec"), g); break
-            except NameError as e:
-                m = re.search(r"name '(\w+)'", str(e))
-                if not m: raise
-                g[m.group(1)] = Noop()
+        def bounded_range(*args):
+            result = range(*args)
+            if len(result) > 100_000:
+                raise ValueError("BUILD range exceeds 100,000 elements")
+            return result
+
+        handlers = {"loom_library": lib, "loom_motif_library": lib, "loom_kernel_library": lib, "loom_test": test,
+                    "filegroup": fg, "package_name": lambda: pkg, "glob": lambda *a, **k: [], "select": lambda d, **k: [],
+                    "range": bounded_range, "str": str}
+        profiles = {name: name for name in ("AMD_GPU_HARDWARE_PROFILE", "VM_REFERENCE_PROFILE")}
+        declarations(text, path, handlers, profiles)
         return rules
 
     def label(self, lab, cur):
@@ -102,7 +188,7 @@ class Build:
             elif name in r["lib"] and not name.endswith(".loom"):
                 out += self.files(r["lib"][name]["srcs"], pkg)
             else:
-                f = os.path.join(self.root, pkg, name)
+                f = self.source_path(pkg, name)
                 out.append((f, s) if os.path.isfile(f) else (None, f"missing file {pkg}/{name}"))
         return out
 
@@ -245,4 +331,5 @@ def main():
     print(f"{counts['pass']}/{len(results)} passed")   # make_info.py gates reads this last line; a skipped target is not a pass
     sys.exit(1 if counts["fail"] else 0)
 
-main()
+if __name__ == "__main__":
+    main()
