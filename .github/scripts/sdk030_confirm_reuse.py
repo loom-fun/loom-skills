@@ -178,7 +178,16 @@ def prepare(work, proof, checkout):
         capture = ('  if [ -n "${SDK030_LAUNCH_PROOF:-}" ]; then\n'
                    '    "$T" "$SDK030_LAUNCH_PROOF" capture "$1" "$LOOM_SERVE_STATE/perf-$1.pid" "$out/launches.jsonl" || return 1\n'
                    '  fi\n')
-        (scripts / "sdk030_record_perf.sh").write_text(original_script.replace(anchor, capture + anchor, 1), encoding="utf-8")
+        reference_probe = (
+            '      llama_up || { res[$s]=ERROR; continue; }\n'
+            '      "$T" "$B/text_match.py" compare "$lurl" "$out/text_$p1.json" --tokenizer "$card/tokenizer.json" --thinking "$TH" | tee "$out/textmatch_$p1.log"\n'
+            '      res[$s]=$(grep TEXT_MATCH "$out/textmatch_$p1.log" | cut -c1-200);;'
+        )
+        assert original_script.count(reference_probe) == 1, "Greedy text capture could not attach to the reviewed harness"
+        instrumented = original_script.replace(anchor, capture + anchor, 1).replace(
+            reference_probe, '      if [ -s "$out/text_$p1.json" ]; then res[$s]="Loom greedy text captured"; else res[$s]=ERROR; fi;;', 1
+        )
+        (scripts / "sdk030_record_perf.sh").write_text(instrumented, encoding="utf-8")
         write(work / "reuse-plan.json", {
             **proof, "original_launch": original_launch, "original_launch_source": "reconstructed from pinned harness and immutable inputs",
             "original_correctness_seconds": seconds(out, FULL_STEPS), "original_runner": run_job["runner_name"],
