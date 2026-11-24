@@ -22,7 +22,7 @@ HEAD = "amdgpu.target<gfx11-generic> @w32 {subgroup_size = 32}\n\n"
 VARIANTS = {"split": {"MLA_DEC": "split"}, "pl1": {"MLA_DEC_PL": "1"}, "s32": {"MLA_DEC_S": "32"}, "b8": {"MLA_DEC_BMIN": "8"},
             "b2": {"MLA_DEC_BMIN": "2"}, "b1": {"MLA_DEC_BMIN": "1"}, "shslot": {"MOE_SHSLOT": "1"},
             "iq4q8": {"IQ4_Q8": "1"}, "wg1k": {"MV_WG1": "1024"}, "wg256": {"MV_WG1": "256"}, "moer4": {"MOE_R": "4"}, "moer1": {"MOE_R": "1"},
-            "rt1": {"MOE_ROUTE_SPLIT": "0"}, "rt2": {"MOE_ROUTE_FUSE": "0"}, "wg128": {"MV_WG1": "128"}, "wg64": {"MV_WG1": "64"}, "sh0": {"MOE_SHSLOT": "0"}, "qadual": {"MLA_QA_DUAL": "1"}, "rmsx": {"MLA_RMSQ_FUSE": "1"},
+            "rt1": {"MOE_ROUTE_SPLIT": "0"}, "rt2": {"MOE_ROUTE_FUSE": "0"}, "ropekb": {"MLA_ROPE_KB": "1"}, "wg128": {"MV_WG1": "128"}, "wg64": {"MV_WG1": "64"}, "sh0": {"MOE_SHSLOT": "0"}, "qadual": {"MLA_QA_DUAL": "1"}, "rmsx": {"MLA_RMSQ_FUSE": "1"},
             "dnr1": {"MOE_R_DN": "1"}, "dnr4": {"MOE_R_DN": "4"}, "dnr8": {"MOE_R_DN": "8"}, "dnu2": {"MOE_DN_U": "2"}, "dnu4": {"MOE_DN_U": "4"},
             "old": {"MLA_DEC": "split", "MOE_ROUTE_SPLIT": "0", "MOE_SHSLOT": "0", "MLA_QA_DUAL": "0", "MLA_RMSQ_FUSE": "0", "MV_WG1": "4096"}}
 CTXS = [("short", 300, 1), ("2k", 2048, 1), ("8k", 8192, 1), ("c4", 1024, 4)]   # (tag, context, tokens = streams)
@@ -414,6 +414,54 @@ def rmsx_test(lib, rng):
     return "\n".join(ks) + "".join(out)
 
 
+def ropekb_test(lib, rng):
+    """g_mla_ropekb (MLA_ROPE_KB) against g_mla_rope_store + g_mla_kb: q and the cache equal, 2 live tokens + 1 dead."""
+    ks = []
+    for k in ("g_mla_rope_store", "g_mla_kb_iq4_nl", "g_mla_ropekb_iq4_nl"):
+        m = re.search(rf'^kernel\.def export\("{k}"\) @{k}\((?:.|\n)*?^\}}\n', lib, re.M)
+        assert m, k
+        ks.append(m.group(0).replace(f'export("{k}") @{k}(', f'export("rk_{k}") @rk_{k}('))
+    T, L, CTX = 3, 40, 64
+    blocks = CTX // 16
+    info = np.array([[0, 37, 1, 0], [0, 5, 0, 0], [0, 38, 1, 0]], np.int32)
+    o = np.zeros(10, np.int32); o[8] = 40
+    org = np.concatenate([o, rng.permutation(blocks).astype(np.int32)])
+    wkb = rng.integers(0, 256, 1179648, dtype=np.uint8).reshape(-1, 18)
+    wkb[:, 0:2] = np.array([0.02], np.float16).view(np.uint8)
+    for n, a in (("info", info), ("org", org), ("qb", rng.standard_normal((T, 32 * 192)).astype(np.float32)),
+                 ("kv", rng.standard_normal((T, 576)).astype(np.float32)), ("kvn", rng.uniform(0.5, 1.5, 512).astype(np.float32)),
+                 ("wkb", wkb.reshape(-1).view(np.int8))):
+        np.save(os.path.join(OUT, f"rk_{n}.npy"), a)
+    QB, KV, QT, AR, IT, OT, WT, NT = (f"tensor<{T}x{32 * 192}xf32>", f"tensor<{T}x576xf32>", f"tensor<{T}x{32 * 576}xf32>",
+                                      f"tensor<{L * CTX * 1152}xi8>", f"tensor<{T}x4xi32>", f"tensor<{len(org)}xi32>", "tensor<1179648xi8>", "tensor<512xf32>")
+    case = f"""check.case public @ropekb {{
+  %t = check.literal value({T}) : index
+  %l = check.literal value(3) : index
+  %ctx = check.literal value({CTX}) : index
+  %pool = check.literal value({CTX}) : index
+  %info = check.file.read.npy path("rk_info.npy") : {IT}
+  %org = check.file.read.npy path("rk_org.npy") : {OT}
+  %qb = check.file.read.npy path("rk_qb.npy") : {QB}
+  %kv = check.file.read.npy path("rk_kv.npy") : {KV}
+  %kv2 = check.file.read.npy path("rk_kv.npy") : {KV}
+  %kvn = check.file.read.npy path("rk_kvn.npy") : {NT}
+  %w = check.file.read.npy path("rk_wkb.npy") : {WT}
+  %q = check.generate.fill value(0.0) : {QT}
+  %q2 = check.generate.fill value(0.0) : {QT}
+  %ar = check.generate.fill value(0) : {AR}
+  %ar2 = check.generate.fill value(0) : {AR}
+  kernel.launch @rk_g_mla_rope_store[%t](%t, %l, %ctx, %pool, %qb, %kv, %kvn, %q, %info, %org, %ar) : [index](index, index, index, index, {QB}, {KV}, {NT}, {QT}, {IT}, {OT}, {AR})
+  kernel.launch @rk_g_mla_kb_iq4_nl[%t](%t, %qb, %w, %q) : [index](index, {QB}, {WT}, {QT})
+  kernel.launch @rk_g_mla_ropekb_iq4_nl[%t](%t, %l, %ctx, %pool, %qb, %kv2, %kvn, %q2, %info, %org, %ar2, %w) : [index](index, index, index, index, {QB}, {KV}, {NT}, {QT}, {IT}, {OT}, {AR}, {WT})
+  check.expect.equal actual(%q2) expected(%q) : {QT}
+  check.expect.equal actual(%ar2) expected(%ar) : {AR}
+  check.expect.equal actual(%kv2) expected(%kv) : {KV}
+  check.return
+}}
+"""
+    return "\n".join(ks) + case
+
+
 def shslot_test(lib, rng):
     """the shared expert as a ninth slot (g_moe_gu/dn_..._sh + g_moe_combine_sh) against the separate launches (shared
     swiglu matvec + down matvec into y, routed gu / dn, g_moe_combine accumulating): 2 tokens, 16 experts, IQ4_XS."""
@@ -489,7 +537,8 @@ if __name__ == "__main__" and len(sys.argv) > 2:
     lib0, cmd0 = split_program(prog0)
     lib1, _ = split_program(program("qadual"))
     open(os.path.join(OUT, "test.loom"), "w").write(route_test(lib0) + shslot_test(lib0 + cmd0, rng) + qadual_test(lib1, rng)
-                                                           + rmsx_test(split_program(program("rmsx"))[0], rng))
+                                                           + rmsx_test(split_program(program("rmsx"))[0], rng)
+                                                           + ropekb_test(split_program(program("ropekb"))[0], rng))
     for v in sys.argv[3:] or ["base"]:
         if v != "base" and not all(x in VARIANTS for x in v.split("+")):
             raise SystemExit("unknown variant " + v)
