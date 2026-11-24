@@ -1993,7 +1993,19 @@
  
 --- a/make_kernel_tests.py
 +++ b/make_kernel_tests.py
-@@ -26,6 +26,8 @@
+@@ -12,6 +12,11 @@
+ real shapes of the model, not toy ones.
+ """
+ import json, sys, os, numpy as np
++
++
++def _YS(fd):   # MOE_YS16: the column-wave down GEMM stores f16 rows, read by g_moe_combine_sorted16
++    import gen_moe_cw as _gcw
++    return "16" if _gcw.YS16 and fd == "iq4_xs" and os.environ.get("MOE_CW", "0").strip() in ("1",) else ""
+ from gguf import GGUFReader
+ from gguf.quants import dequantize
+ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+@@ -26,6 +31,8 @@
  from gen_gemm_rdna4 import f16o_swiglu as _f16o_on  # noqa: E402  formats with no 256-row (_m256) GEMM
  ACT_Q8 = os.environ.get("ACT_Q8", "1") == "1"   # gen_llm.py's default: int8 activations for these formats
  from formats import ICODES as IQ_FMTS  # noqa: E402  (gen_llm.py takes int8 activations for these)
@@ -2002,7 +2014,7 @@
  import attn_rules  # noqa: E402
  
  
-@@ -218,7 +220,9 @@
+@@ -218,7 +225,9 @@
  seen = set(); todo = []
  VD = cfg["gdn"]["inner"] if cfg.get("gdn") else 0
  for li in KT_LAYERS:
@@ -2013,7 +2025,7 @@
                     ("attn_qkv", H), ("attn_gate", H), ("ssm_alpha", H), ("ssm_out", VD),
                     ("ffn_gate_shexp", H), ("ffn_down_shexp", (cfg.get("moe") or {}).get("shared_ffn", 0)), ("nextn.eh_proj", 2 * H)]:
          name = f"blk.{li}.{nm_}.weight"
-@@ -504,6 +508,12 @@
+@@ -504,6 +513,12 @@
    check.return
  }}
  """)
@@ -2026,7 +2038,7 @@
  # 3. qk norm + rope on q (live = 0: no KV store)
  t = 4; pos = np.array([0, 1, 7, 300])
  A0 = next(i for i in range(cfg["layers"]) if i not in set(cfg.get("recurrent_layers", [])))
-@@ -531,7 +541,7 @@
+@@ -531,7 +546,7 @@
      c, s = np.cos(ang)[:, None] * msc, np.sin(ang)[:, None] * msc
      if cfg["rope_type"] == "neox":
          a1, a2 = a[..., :RD // 2], a[..., RD // 2:RD]; return np.concatenate([a1 * c - a2 * s, a2 * c + a1 * s, a[..., RD:]], -1)
@@ -2035,7 +2047,7 @@
  # attention projection biases (cfg "attn_bias", qwen2): g_qk_rope_store adds them to q/k/v before the norm and RoPE
  BIAS = cfg.get("attn_bias") or []
  BW = {"q": QH * D, "k": KVH * D, "v": KVH * D}
-@@ -3144,6 +3154,10 @@
+@@ -3144,6 +3159,10 @@
      cases += [invariance_case(s, st) for s in ((0, 1) if WIN else (0,)) for st in (5, 0, 'zero')]
      cases += [order_case(s) for s in ((0, 1) if WIN else (0,))]
  
@@ -2046,7 +2058,7 @@
  # 6. MoE (gen_moe.py) on real tensors, one layer per expert-down format: the decode chain (router -> top-k ->
  # gate/up -> down -> combine, plus the prefill router with padding tokens) and the prefill chain (prefill router ->
  # bucket by expert -> grouped WMMA gate/up GEMM -> tile row scale -> grouped down GEMM -> combine of the sorted rows),
-@@ -3180,7 +3194,9 @@
+@@ -3180,7 +3199,9 @@
              wts = wts / np.maximum(wts.sum(-1, keepdims=True), 6.103515625e-05)
          wts = wts * M.get("scale", 1.0)
          ss = np.sort(sel, -1)[:, ::-1]
@@ -2057,7 +2069,7 @@
          return ids, wts, rel
      def clear_tokens(t):
          """t random rows whose k-th and (k+1)-th scores differ by > 0.2 %: f32 kernels pick the same experts as the
-@@ -3220,7 +3236,7 @@
+@@ -3220,7 +3241,7 @@
          fu = T[b + UN].tensor_type.name.lower(); gun = (fg if fg == fu else f"{fg}_{fu}") + ("_fused" if FUSED else "")   # gate+up formats (gen_moe)
          if (fd, gun) in done: continue
          done.add((fd, gun))
@@ -2066,13 +2078,10 @@
                and H // 32 <= 1024 and FE // 32 <= 1024 and not EB)   # gen_llm.moe_iq
          # gen_llm.moe_iq also needs the router input as the experts' input (gemma4's experts read %h2): the package says which it built
          MQ = MQ and (_pkg_llm_text() is None or f'"g_moe_gu_{gun}_q8_k{H}_' in _pkg_llm_text())
-@@ -3307,10 +3323,27 @@
+@@ -3307,10 +3328,24 @@
          SGA, SGT = ("%sg, ", f"tensor<{t}xf32>, ") if SHG else ("", "")
          GUB, GUBT = (", %bg, %bu", f", tensor<{E_ * FE}xf32>, tensor<{E_ * FE}xf32>") if EB else ("", "")
          DNB, DNBT = (", %bd", f", tensor<{E_ * H}xf32>") if EB else ("", "")
-+        def _YS(fd):   # MOE_YS16: the column-wave down GEMM stores f16 rows, read by g_moe_combine_sorted16
-+            import gen_moe_cw as _gcw
-+            return "16" if _gcw.YS16 and fd == "iq4_xs" and os.environ.get("MOE_CW", "0").strip() in ("1",) else ""
 +        import gen_moe as _gm   # MOE_ROUTE_TG: the tiled prefill router replaces g_moe_route_tr_live (same outputs up to f32 sum order)
 +        ROUTE_NAME = "g_moe_route_wm_live" if _gm.ROUTE_WM else "g_moe_route_tg_live" if _gm.ROUTE_TG else "g_moe_route_tr_live"
 +        def tg_chain(t):   # the tiled / WMMA router against the chain's expected ids (dead tokens: nothing stored)
@@ -2094,7 +2103,7 @@
          save(tag + "_info", info_l); save(tag + "_ids_l", np.where(np.arange(t)[:, None] >= 4, 0, ids).astype(np.int32))
          save(tag + "_wts_l", np.where(np.arange(t)[:, None] >= 4, 0, wts).astype(np.float32))
          cases.append(f"""check.case public @moe_chain_{li} {{
-@@ -3328,7 +3361,7 @@
+@@ -3328,7 +3363,7 @@
    kernel.launch @g_moe_route_tr_live[%t](%t, %h, %wr, %b, %ids_l, %wts_l, %info_l) : [index](index, tensor<{t}x{H}xf32>, {wr_t}, tensor<{E_}xf32>, tensor<{t}x{KU}xi32>, tensor<{t}x{KU}xf32>, tensor<{t}x4xi32>)
    check.expect.equal actual(%ids_l) expected(%eids_l) : tensor<{t}x{KU}xi32>
    check.expect.close actual(%wts_l) expected(%ewts_l) atol(1.0e-5) rtol(1.0e-4) nan(different) : tensor<{t}x{KU}xf32>
@@ -2103,7 +2112,7 @@
    kernel.launch @g_moe_combine[%t](%t, %ys, %wts, {SGA}%y) : [index](index, tensor<{t * KU}x{H}xf32>, tensor<{t}x{KU}xf32>, {SGT}tensor<{t}x{H}xf32>)
    check.expect.equal actual(%ids) expected(%eids) : tensor<{t}x{KU}xi32>
    check.expect.equal actual(%ids_tr) expected(%eids) : tensor<{t}x{KU}xi32>
-@@ -3357,12 +3390,12 @@
+@@ -3357,12 +3392,12 @@
    %act16 = check.generate.fill value(0.0) : tensor<{mr}x{FE}xf16>
    %ys_sorted = check.generate.fill value(0.0) : tensor<{mr}x{H}xf32>
    kernel.launch @g_row_scale_f16[%t](%t, %nH, %h, %s_h, %h16) : [index](index, index, tensor<{t}x{H}xf32>, tensor<{t}x2xf32>, tensor<{t}x{H}xf16>)
@@ -2118,7 +2127,36 @@
    check.expect.equal actual(%ids) expected(%eids) : tensor<{t}x{KU}xi32>
    check.expect.close actual(%wts) expected({EW}) atol(1.0e-5) rtol(1.0e-4) nan(different) : tensor<{t}x{KU}xf32>
    check.expect.close actual(%y) expected(%ey) atol({0.05 * routed_scale["_p"]:.3g}) rtol(5.0e-2) nan(different) : tensor<{t}x{H}xf32>
-@@ -3689,7 +3722,7 @@
+@@ -3466,8 +3501,9 @@
+         for r in np.flatnonzero(live):
+             e = tile_exp[tile_of[r]]
+             ys_ref[r] = (wds[e] @ a16[r].astype(np.float64)) * sr[r, 1].astype(np.float64)
++        YS7 = "f" + _YS(fd) if _YS(fd) else "f32"   # MOE_YS16: the column-wave down GEMM stores f16 rows
+         for n, a in [("_ti", tile_info), ("_rm", rowmap), ("_x", x16), ("_s", sc), ("_act", act_ref.astype(np.float32)), ("_a16", a16),
+-                     ("_sr", sr), ("_ys", ys_ref.astype(np.float32))]:
++                     ("_sr", sr), ("_ys", ys_ref.astype(np.float16 if _YS(fd) else np.float32))]:
+             save(tg + n, a)
+         for n, a in [("_wg", raw(b + "ffn_gate_exps.weight")), ("_wu", raw(b + "ffn_up_exps.weight")), ("_wd", raw(b + "ffn_down_exps.weight"))]:
+             save(tg + n, a)
+@@ -3487,13 +3523,13 @@
+   %eact = check.file.read.npy path("{tg}_act.npy") : tensor<{mr}x{FE7}xf32>
+   %a16 = check.file.read.npy path("{tg}_a16.npy") : tensor<{mr}x{FE7}xf16>
+   %sr = check.file.read.npy path("{tg}_sr.npy") : tensor<{mr}x2xf32>
+-  %eys = check.file.read.npy path("{tg}_ys.npy") : tensor<{mr}x{H}xf32>
++  %eys = check.file.read.npy path("{tg}_ys.npy") : tensor<{mr}x{H}x{YS7}>
+   %act = check.generate.fill value(0.0) : tensor<{mr}x{FE7}xf32>
+-  %ys = check.generate.fill value(0.0) : tensor<{mr}x{H}xf32>
++  %ys = check.generate.fill value(0.0) : tensor<{mr}x{H}x{YS7}>
+   kernel.launch @g_moe_ggu_{gun}_k{H}[%max_rows, %nFE](%max_rows, %nH, %nFE, %t, %ti, %rm, %x, %s, %wg, %wu, %act) : [index, index](index, index, index, index, tensor<{mt}x2xi32>, tensor<{mr}xi32>, tensor<{t7}x{H}xf16>, tensor<{t7}x2xf32>, {gt7}, {ut7}, tensor<{mr}x{FE7}xf32>)
+-  kernel.launch @g_moe_gdn_{fd}_k{FE7}[%max_rows, %nH](%max_rows, %nFE, %nH, %max_rows, %ti, %rm, %a16, %sr, %wd, %ys) : [index, index](index, index, index, index, tensor<{mt}x2xi32>, tensor<{mr}xi32>, tensor<{mr}x{FE7}xf16>, tensor<{mr}x2xf32>, {dt7}, tensor<{mr}x{H}xf32>)
++  kernel.launch @g_moe_gdn_{fd}_k{FE7}[%max_rows, %nH](%max_rows, %nFE, %nH, %max_rows, %ti, %rm, %a16, %sr, %wd, %ys) : [index, index](index, index, index, index, tensor<{mt}x2xi32>, tensor<{mr}xi32>, tensor<{mr}x{FE7}xf16>, tensor<{mr}x2xf32>, {dt7}, tensor<{mr}x{H}x{YS7}>)
+   check.expect.close actual(%act) expected(%eact) atol({0.15 * float(np.abs(act_ref).mean()):.3g}) rtol(5.0e-2) nan(different) : tensor<{mr}x{FE7}xf32>
+-  check.expect.close actual(%ys) expected(%eys) atol({0.05 * float(np.abs(ys_ref).mean()):.3g}) rtol(5.0e-2) nan(different) : tensor<{mr}x{H}xf32>
++  check.expect.close actual(%ys) expected(%eys) atol({0.05 * float(np.abs(ys_ref).mean()):.3g}) rtol(5.0e-2) nan(different) : tensor<{mr}x{H}x{YS7}>
+   check.return
+ }}
+ """)
+@@ -3689,7 +3725,7 @@
  
      def rule(n):
          return iq_r(n, K, tg, sw) if q8 else pick_r(n, K, tg)
