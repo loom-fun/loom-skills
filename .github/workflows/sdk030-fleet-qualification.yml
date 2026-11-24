@@ -14,10 +14,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - slug: unsloth-Qwen3-30B-A3B-Instruct-2507-loom
+          - slug: unsloth-gemma-4-31B-it-loom
             device: radeon-r9700
             labels: '["self-hosted","devlab-dispatch","radeon-r9700"]'
-            correctness: '{"run":45275710722,"job":138046836821,"artifact":14881479311,"digest":"sha256:05e1aeebefa29fca0f1360540421aa8bc7d0fa72ab499f3eddd187c4f63b7eed","production":"loom-fun/unsloth-Qwen3-30B-A3B-Instruct-2507-loom@c6598438289b2cbb1543e73e90b749136c888797","generator":"3adfe7b7b6e68f753042e9f89b318e29a6088579"}'
+            capacity_limit: 8192
     runs-on: ${{ fromJSON(matrix.labels) }}
     timeout-minutes: 240
     env:
@@ -28,6 +28,7 @@ jobs:
       DISPATCH_HEAD: ${{ github.event.pull_request.head.sha }}
       ABBA_REPS: ${{ matrix.reps }}
       PINNED_PROGRAMS: ${{ matrix.pinned_programs }}
+      CAPACITY_LIMIT: ${{ matrix.capacity_limit }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -120,8 +121,21 @@ jobs:
           results=json.loads((out/'summary.json').read_text())['results']
           failures={k:v for k,v in results.items() if not v or 'FAIL' in str(v) or 'ERROR' in str(v)}
           rows=[json.loads(line) for line in (out/'perf_staging.jsonl').read_text().splitlines()] if (out/'perf_staging.jsonl').is_file() else []
-          if not any(r.get('decode_tps') for r in rows) or not any(r.get('prefill_long') for r in rows):
+          limit=int(os.environ['CAPACITY_LIMIT'] or 0)
+          if not any(r.get('decode_tps') for r in rows) or (not limit and not any(r.get('prefill_long') for r in rows)):
               failures['performance']='missing short or long metrics'
+          if limit:
+              gpu=os.environ['SDK_GPU_KEY']
+              frozen=json.loads((out/'info_card.json').read_text())['devices'][gpu]['quick_start']['preset']
+              published=json.loads((out/'model_card.json').read_text())['presets'][frozen]['execution']['context_capacity']
+              assert gpu=='radeon-r9700' and published==limit, (gpu,published,limit)
+              for name in ('fun','funnd','staging','stagingnd'):
+                  presets=json.loads((out/f'model_{name}.json').read_text())['presets']
+                  base=next(iter(presets))
+                  selected=presets.get(f'{base}-r9700',presets[base])['execution']
+                  assert selected['context_capacity']==limit, (name,selected,limit)
+              for name in ('fun','staging'):
+                  assert 'beyond the served context' in results[f'perf:{name}:1:long'], (name,results)
           common=('c4:funnd', 'c4:stagingnd', 'perf:fun:1', 'perf:fun:1:long', 'textmatch:fun', 'textmatch:staging')
           correctness=('smoke:fun', 'smoke:staging') if (receipt/'correctness-reused.json').is_file() else ('func:staging', 'ktest:staging', 'gates:staging:full')
           for step in common + correctness:
