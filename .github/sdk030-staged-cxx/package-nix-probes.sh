@@ -4,10 +4,14 @@ sha256sum "$GUFO_RUNTIME/lib/libloom_text_embed.so" "$EXTENSION_RUNTIME/lib/libl
 
 package() {
   local name=$1 sdk=$2 out="/proof/embed/$1" loader
+  local controller_flags=()
+  if [[ "$name" == gufo ]]; then
+    controller_flags+=(-DGUFO_HAS_MEMORY_INFO)
+  fi
   mkdir -p "$out/lib"
   gcc -I "$sdk/include" /extension/validation/devlab/embed_probe.c \
     -L "$sdk/lib" -Wl,-rpath,"$sdk/lib" -lloom_text_embed -lm -o "$out/logits-probe"
-  gcc -I "$sdk/include" /recipes/controller-abi.c \
+  gcc "${controller_flags[@]}" -I "$sdk/include" /recipes/controller-abi.c \
     -L "$sdk/lib" -Wl,-rpath,"$sdk/lib" -lloom_text_embed -o "$out/controller-abi"
   loader=$(patchelf --print-interpreter "$out/controller-abi")
   cp -L "$loader" "$out/lib/ld-linux-x86-64.so.2"

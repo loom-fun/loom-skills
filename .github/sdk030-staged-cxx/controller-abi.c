@@ -95,17 +95,22 @@ static int32_t check_cold_checkpoint(loom_text_embed_t* embed, loom_text_embed_r
   printf("cold_checkpoint=pass bytes=%zu position=%u\n", record.size, record.info.position);
 
   reset_row(embed);
+#ifdef GUFO_HAS_MEMORY_INFO
   loom_text_embed_memory_t before, after;
   loom_text_embed_memory(embed, &before);
+#endif
   loom_text_embed_checkpoint_t* invalid = NULL;
   if (!loom_text_embed_checkpoint_import(embed, &record.info, image, record.size - 1, &invalid) ||
       invalid || !strstr(loom_text_embed_error(embed), "checkpoint image is"))
     fail("Import accepted a truncated checkpoint image or returned the wrong error");
+#ifdef GUFO_HAS_MEMORY_INFO
   loom_text_embed_memory(embed, &after);
   if (before.free_tokens != after.free_tokens)
     fail("Importing a truncated checkpoint leaked page ownership");
+  printf("checkpoint_free_tokens=%llu\n", (unsigned long long)after.free_tokens);
+#endif
   restore_checkpoint(embed, request, &record, image, extent);
-  printf("checkpoint_rollback=pass free_tokens=%llu\n", (unsigned long long)after.free_tokens);
+  puts("checkpoint_rollback=pass");
   free(image);
   return record.info.token;
 }
