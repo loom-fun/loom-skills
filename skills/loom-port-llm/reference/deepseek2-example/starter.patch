@@ -1077,7 +1077,7 @@
  GATE_NAME = {1: "softmax(logits)", 2: "sigmoid(logit)", 3: "logit"}   # llama.cpp's expert_gating_func values
  # gating 3 (SOFTMAX_WEIGHT): `bias` is the router's own bias (ffn_gate_inp.bias, added to the logits before the top-k)
  # and the k weights are a softmax over the k picked logits.
-@@ -500,7 +502,386 @@
+@@ -500,7 +502,390 @@
      return "\n" + text
  
  
@@ -1116,6 +1116,8 @@
 +    %store_lane = scalar.andi %first, %tl_a : i1
 +""")
 +    topk = "\n".join("  " + l if l else l for l in topk.split("\n"))
++    if __import__("os").environ.get("MOE_ROUTE_NOTOPK") == "1":   # timing probe: logits only (wrong outputs)
++        topk = ""
 +    NKC = H // TG_K
 +    wl = (f"""        %wraw = vector.load %w_view[%we_eb, %wg, %c0] : view<{E}x{H // 4}x4xbf16> -> vector<4xbf16>
 +        %wv = vector.extf %wraw : vector<4xbf16> to vector<4xf32>""" if wty == "bf16" else
@@ -1318,6 +1320,8 @@
 +    %store_lane = scalar.andi %first, %tl_a : i1
 +""")
 +    topk = "\n".join("  " + l if l else l for l in topk.split("\n"))
++    if __import__("os").environ.get("MOE_ROUTE_NOTOPK") == "1":   # timing probe: logits only (wrong outputs)
++        topk = ""
 +    accs = [(m, n) for m in range(4) for n in range(2)]
 +    acc_in = ", ".join(f"%a{m}{n} = %init : vector<8xf32>" for m, n in accs)
 +    acc_ty = ", ".join(["vector<8xf32>"] * len(accs))
@@ -1465,7 +1469,7 @@
      """g_row_scale_f16_tiles: the starter's g_row_scale_f16 over the bucketed expert rows (max_tiles x 64), skipping
      the rows of unused tiles (tile_info expert < 0; g_moe_gdn skips those tiles). max_tiles is sized for the worst
      case (t*KU/64 + E tiles), so most of them are unused."""
-@@ -509,11 +890,12 @@
+@@ -509,11 +894,12 @@
          nonlocal text
          assert text.count(a) == 1, a
          text = text.replace(a, b)
@@ -1480,7 +1484,7 @@
    %rt_tiles = index.div %rows, %rt_c64 : index
    %rt_tile_v = index.div %row, %rt_c64 : index
    %rt_tile = index.assume %rt_tile_v [lt(%rt_tile_v, %rt_tiles)] : index
-@@ -528,11 +910,80 @@
+@@ -528,11 +914,80 @@
  
  
  def route(H, E, KU, gating, norm, bias, wty="f32", scale=1.0):
@@ -1564,7 +1568,7 @@
      """mode 'gu': act[a] = silu(Wg[e] x[a/KU]) * Wu[e] x[a/KU]; mode 'dn': ys[a] = Wd[e] x[a].
      fmt "GATE+UP" ('gu'): gate and up weights in different formats, each with its own strides and dequant.
      fused ('gu'): one gate_up tensor passed as both weights, expert e's N gate rows then its N up rows.
-@@ -540,8 +991,13 @@
+@@ -540,8 +995,13 @@
      act: the gate/up activation (see act_scalar).
      iq: (iq_decode, iq_dot, iq_load) of gen_llm (ACT_Q8): the activation is read as int8 codes + (scale, code sum) written by
      g_quant_q8 (layout: rows x groups x 32 int8, then rows x groups x (d, sum)) and contracted with the weight codes by
@@ -1579,7 +1583,7 @@
      assert iq is None or (not fmt2 and not bias), "int8 expert matvecs: one weight format, no biases"
      groups = K // 32
      lanes = (groups + 31) // 32 * 32
-@@ -549,24 +1005,40 @@
+@@ -549,24 +1009,40 @@
      rb = row_bytes(fmt, K)
      eb = rb * N
      nw = 2 if mode == "gu" else 1
@@ -1626,7 +1630,7 @@
    %workitem_id = kernel.workitem.id<x> : index
    %workitem = index.assume %workitem_id [range(%workitem_id, 0, {lanes - 1})] : index
    %wave_id = kernel.subgroup.id : index
-@@ -587,16 +1059,26 @@
+@@ -587,16 +1063,26 @@
    %c0_i32 = scalar.constant 0 : i32
    %cE1_i32 = scalar.constant {E - 1} : i32
    %ids_view = buffer.view %ids[%zero] : buffer -> view<[%tokens]xi32>
@@ -1656,7 +1660,7 @@
      else:
          L.append("  %xr = index.assume %a [lt(%a, %tokens)] : index")
      xview = (f"""  %xq_view = buffer.view %x[%zero] : buffer -> view<[{xrows}]x{groups}x8xi32>
-@@ -671,6 +1153,24 @@
+@@ -671,6 +1157,24 @@
      %qm{wi} = scalar.mulf %mn{wi}, %xs : f32
      %qs{wi} = scalar.mulf %qd{wi}, %sc{wi} : f32
      %d{wi} = scalar.subf %qs{wi}, %qm{wi} : f32""")
@@ -1681,7 +1685,7 @@
          elif fold:
              L.append(f"""    %wv{wi} = scf.if %ok -> (vector<32xf32>) {{
        %v = func.call @g_{fw}_values(%{w}, {o}, {within}) : (buffer, offset, index) -> (vector<32xf32>)
-@@ -719,12 +1219,35 @@
+@@ -719,12 +1223,35 @@
      else:
          L.append(f"    %value = scalar.addf {t0}, %zero_f : f32")
      L.append("""    %out_row = index.add %row_base, %rr : index
@@ -1719,7 +1723,7 @@
  
  
  def combine(H, KU, acc=False):
-@@ -762,6 +1285,46 @@
+@@ -762,6 +1289,46 @@
  """
  
  
@@ -1766,7 +1770,7 @@
  def shared_gated(text):
      """A combine kernel (combine / combine_sorted with acc=True) that scales the shared experts' output already in y
      by the token's gate sg[t] (g_moe_shared_gate) before adding the routed experts: y = sg * y + sum_k w_k ys_k."""
-@@ -826,9 +1389,16 @@
+@@ -826,9 +1393,16 @@
  TILE = 64
  
  
@@ -1785,7 +1789,7 @@
      return f"""
  kernel.def export("g_moe_bucket") @g_moe_bucket(%tokens: index) {{
    %c1 = index.constant 1 : index
-@@ -843,12 +1413,12 @@
+@@ -843,12 +1417,12 @@
    %c0 = index.constant 0 : index
    %c1 = index.constant 1 : index
    %cKU = index.constant {KU} : index
@@ -1801,7 +1805,7 @@
    %minus_one = scalar.constant -1 : i32
    %cEm1 = scalar.constant {E - 1} : i32
    %cE = index.constant {E} : index
-@@ -1130,6 +1700,14 @@
+@@ -1130,6 +1704,14 @@
      fused (swiglu): one gate_up tensor as both weights (expert_mv's layout).
      bias / act: as expert_mv (per-expert output biases, the gate/up activation)."""
      import gen_gemm
@@ -1816,7 +1820,7 @@
      fmt, _, fmt2 = fmt.partition("+")
      rb = N and (K // SB[fmt] * FMT[fmt])
      eb = rb * N
-@@ -1228,6 +1806,89 @@
+@@ -1228,6 +1810,89 @@
      return text + "\n" + gen_gemm_rdna4.twin(text) if gen_gemm_rdna4.enabled() else text   # the gfx12 twin K_rdna4 beside K
  
  
