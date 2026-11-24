@@ -1,5 +1,5 @@
 {
- "_comment": "JoyAI lc lane round 4 (experiment only): c8 (kept: 8192 chunk + capped partials) vs c8 + xflash s4,fma; short + long ABBA, fullctx both, dev gates on the variant.",
+ "_comment": "JoyAI lc lane final (experiment only): base = deepseek2-joyai 13a30433 (pf2 merged, 4096 chunk) vs lc (lane-lc merged: 8192 chunk + capped split-K partials); short + long ABBA, c4, pf8k profile, ktest; fullctx both; dev gates on lc.",
  "card": "loom-fun/jdopensource-JoyAI-LLM-Flash-loom@58159cc30c1b9a18fb883f75188b35d03bfea4ed",
  "memory_bytes": 47000000000,
  "kit": "deepseek2",
@@ -9,70 +9,62 @@
  },
  "jobs": [
   {
-   "name": "lc-r4-perf",
+   "name": "lc-final-perf",
    "variants": [
     {
-     "name": "c8",
+     "name": "base",
+     "build": {},
+     "ref": "13a304335b50a5fc53f7c6e6d31d2dff6895c73e"
+    },
+    {
+     "name": "lc",
      "build": {},
      "build_args": [
       "--prefill",
       "8192"
      ],
-     "ref": "e5d7492523aaab3d055e316543daba97e7a99b71"
-    },
-    {
-     "name": "sf",
-     "build": {
-      "MLA_XF_T": "s4,fma"
-     },
-     "build_args": [
-      "--prefill",
-      "8192"
-     ],
-     "ref": "e5d7492523aaab3d055e316543daba97e7a99b71"
+     "ref": "6eb05e72ec20c27313d2f1cae581a8c8efe79ed8"
     }
    ],
    "steps": [
-    "ktest:sf",
-    "perf:c8:1",
-    "perf:sf:1",
-    "perf:sf:1",
-    "perf:c8:1",
-    "perf:c8:1:long",
-    "perf:sf:1:long",
-    "perf:sf:1:long",
-    "perf:c8:1:long",
-    "profile:sf:pf8k"
+    "ktest:lc",
+    "perf:base:1",
+    "perf:lc:1",
+    "perf:lc:1",
+    "perf:base:1",
+    "perf:base:1:long",
+    "perf:lc:1:long",
+    "perf:lc:1:long",
+    "perf:base:1:long",
+    "c4:lc",
+    "c4:base",
+    "c4:base",
+    "c4:lc",
+    "profile:lc:pf2k,pf8k"
    ]
   },
   {
-   "name": "lc-r4-fullctx",
+   "name": "lc-final-fullctx",
    "variants": [
     {
-     "name": "c8",
+     "name": "base",
+     "build": {},
+     "ref": "13a304335b50a5fc53f7c6e6d31d2dff6895c73e"
+    },
+    {
+     "name": "lc",
      "build": {},
      "build_args": [
       "--prefill",
       "8192"
      ],
-     "ref": "e5d7492523aaab3d055e316543daba97e7a99b71"
-    },
-    {
-     "name": "sf",
-     "build": {
-      "MLA_XF_T": "s4,fma"
-     },
-     "build_args": [
-      "--prefill",
-      "8192"
-     ],
-     "ref": "e5d7492523aaab3d055e316543daba97e7a99b71"
+     "ref": "6eb05e72ec20c27313d2f1cae581a8c8efe79ed8"
     }
    ],
    "steps": [
-    "fullctx:sf",
-    "fullctx:c8",
-    "gates:sf:dev"
+    "fullctx:lc",
+    "fullctx:base",
+    "gates:lc:dev"
    ]
   }
  ]
