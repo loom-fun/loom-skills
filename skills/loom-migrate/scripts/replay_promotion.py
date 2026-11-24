@@ -165,6 +165,16 @@ def inspect_refs(name, data, slug):
             if re.fullmatch(expected, arm.get("package", "")):
                 arm.pop("package")
         text = json.dumps(proof)
+    if name == "sdk-qualification.json" and STAGING in text:
+        proof = json.loads(data)
+        prior = proof.get("reference", {}).get("prior-staging", {})
+        repo = f"{STAGING}/{slug}"
+        require(prior.get("repo") == repo and pinned_sha(prior.get("revision")),
+                f"{slug}: unpinned prior staging qualification")
+        prior.pop("repo")
+        require(text.count(STAGING) == 1 and STAGING not in json.dumps(proof),
+                f"{slug}: qualification contains additional staging references")
+        text = text.replace(repo, "", 1)
     if name == "quick-start-qualification.json" and STAGING in text:
         proof = json.loads(data)
         repo = f"{STAGING}/{slug}"

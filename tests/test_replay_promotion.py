@@ -137,6 +137,18 @@ def check_provenance(case):
     proof["extra"] = f"loom-fun-staging/{SLUG}@{STAGE}"
     with case.assertRaisesRegex(ValueError, "unhandled staging reference"):
         promotion.inspect_refs("sdk-comparison-strix.json", promotion.canonical(proof), SLUG)
+    repo = f"loom-fun-staging/{SLUG}"
+    prior = {"repo": repo, "revision": STAGE}
+    proof = {"reference": {"prior-staging": prior}}
+    promotion.inspect_refs("sdk-qualification.json", promotion.canonical(proof), SLUG)
+    for wrong in ({"repo": repo, "revision": "main"},
+                  {"repo": "loom-fun-staging/different-loom", "revision": STAGE}):
+        with case.assertRaisesRegex(ValueError, "unpinned prior staging qualification"):
+            misplaced = {"reference": {"prior-staging": wrong}}
+            promotion.inspect_refs("sdk-qualification.json", promotion.canonical(misplaced), SLUG)
+    proof["extra"] = repo
+    with case.assertRaisesRegex(ValueError, "additional staging references"):
+        promotion.inspect_refs("sdk-qualification.json", promotion.canonical(proof), SLUG)
     retired = {"program/kernel/continuation.loom": "f" * 64}
     promotion.check_deleted_refs("model.json", b'["program/motif/continuation.loom"]', retired, SLUG)
     with case.assertRaisesRegex(ValueError, "references deleted target file"):
