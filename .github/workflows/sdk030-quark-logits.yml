@@ -14,6 +14,7 @@ jobs:
       CARD: huggingface:loom-fun/amd-Qwen3.8-27B-Quark-AWQ-MXFP4-loom:chat-r9700@a999be30c6539c77a030e961748416892b06ac73
       KIT_REVISION: 629d8f8aab61f53c4713b89fd21d26efe83f9e45
       GUFO_REVISION: bccf173b2664432d03d068413a91639bdd6242f7
+      RUN_REFERENCE: '0'
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
@@ -83,7 +84,7 @@ jobs:
           for name, (image, question) in inputs.items():
               request = work / f"{name}.json"
               raw = out / f"{name}.f32"
-              request.write_text(json.dumps({"model": "chat-r9700", "messages": [{"role": "user", "content": [
+              request.write_text(json.dumps({"model": pkg.model_id, "messages": [{"role": "user", "content": [
                   {"type": "image_url", "image_url": {"url": data_url(image)}},
                   {"type": "text", "text": question},
               ]}], "temperature": 0, "max_tokens": 1, "enable_thinking": False, "logits": True}))
@@ -103,7 +104,7 @@ jobs:
           print({name: row["top"][:3] for name, row in rows.items()})
           PY
       - name: Isolate vLLM Quark activation QDQ with the pinned checkpoint
-        if: always() && steps.prepare.outcome == 'success'
+        if: always() && steps.prepare.outcome == 'success' && env.RUN_REFERENCE == '1'
         shell: bash
         run: |
           set -euo pipefail
