@@ -29,7 +29,7 @@ for target in targets:
     qualification = json.loads((directory / "sdk-qualification.json").read_text())
     digest = render_card.programs_sha256(directory)
     assert qualification["programs_sha256"] == digest, slug
-    comparison = info.get("promotion_hold") or qualification["performance_disposition"]["previous_hold"]
+    comparison = info.get("promotion_hold") or qualification["sdk_performance_comparison"]
     assert "## SDK evidence" not in readme and "## Production promotion hold" not in readme
     assert "[SDK qualification](sdk-qualification.json)" in readme
     assert comparison["comparison_url"] in readme and comparison["comparison_url"] in report
@@ -41,6 +41,9 @@ for target in targets:
             pin = info["sources"][session["source"]].get("hrx_loom")
             if isinstance(pin, dict) and pin.get("hrx_loom"):
                 assert pin["hrx_loom"] in report, (slug, pin)
-    if "performance_disposition" in qualification:
+    if "sdk_performance_comparison" in qualification:
+        assert qualification["state"] == "qualified"
+        assert "--materialize=copy" not in readme
+        assert not info.get("promotion_hold")
         assert not render_card.sdk_performance_comparison(info, str(directory), "stale", summary=True)
     print(repo, revision, digest, "PASS", flush=True)
