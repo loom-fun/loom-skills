@@ -154,7 +154,7 @@ def compose(slug, row, source, source_hashes, target, target_hashes, out):
     require(b'hrx-loom[hf]==0.3.0' in readme, f"{slug}: no exact release install pin")
     changed = {"README.md": readme}
     if "info.json" in source_hashes:
-        text = (source / "info.json").read_text(encoding="utf-8")
+        text = (source / "info.json").read_bytes().decode("utf-8")
         require(json.loads(text).get("repo") == f"{STAGING}/{slug}", f"{slug}: incorrect info.json repo")
         src = re.escape(f"{STAGING}/{slug}")
         new_text, count = re.subn(rf'("repo"\s*:\s*"){src}(")', rf"\g<1>{PRODUCTION}/{slug}\g<2>", text, count=1)
@@ -218,25 +218,52 @@ def inspect_bundle(bundle, manifest_sha):
     return rows
 
 
+def checked_result(api, repo, revision, output):
+    _, result = snapshot(api, repo, revision)
+    require(result == output, f"{repo}@{revision}: readback differs from review")
+    require_head(api, repo, revision)
+
+
+def read_progress(path, manifest_sha, rows):
+    if not path.exists():
+        return {}
+    require(not path.is_symlink(), "receipt must be a regular file")
+    repo_to_row = {f"{PRODUCTION}/{slug}": row for slug, row in rows}
+    entries = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        event = json.loads(line)
+        repo, commit = event["repo"], event["commit"]
+        require(event["manifest_sha256"] == manifest_sha and pinned_sha(commit) and repo in repo_to_row,
+                "receipt does not belong to the reviewed release")
+        require(repo not in entries or entries[repo] == commit, f"{repo}: ambiguous production receipt")
+        entries[repo] = commit
+    return entries
+
+
 def replay(api, bundle, manifest_sha, execute, receipt_path):
     rows = inspect_bundle(bundle, manifest_sha)
     if execute:
         require(receipt_path and os.environ.get("PROMOTE_CONFIRM") == PRODUCTION,
                 "execution requires --receipt and explicit PROMOTE_CONFIRM=loom-fun")
-        log = receipt_path.open("x", encoding="utf-8", buffering=1)
-    else:
-        log = None
-    try:
-        # Preflight every reviewed parent before any upload. Each actual commit also uses CAS.
-        for slug, row in rows:
-            repo = f"{PRODUCTION}/{slug}"
+    prior = read_progress(receipt_path, manifest_sha, rows) if receipt_path else {}
+    # Preflight every reviewed parent before any upload. Each actual commit also uses CAS.
+    for slug, row in rows:
+        repo = f"{PRODUCTION}/{slug}"
+        if repo in prior:
+            checked_result(api, repo, prior[repo], row["output"])
+        else:
             require_head(api, repo, row["target_revision"])
             _, content = snapshot(api, repo, row["target_revision"])
             require(content == row["target"], f"{repo}: target bytes differ from review")
+    if not execute:
+        for slug, row in rows:
+            print(f"{PRODUCTION}/{slug}@{row['target_revision']}: {len(row['operations'])} change(s)", flush=True)
+        return
+    with receipt_path.open("a", encoding="utf-8", buffering=1) as log:
         for slug, row in rows:
             repo = f"{PRODUCTION}/{slug}"
-            print(f"{repo}@{row['target_revision']}: {len(row['operations'])} change(s)", flush=True)
-            if not execute or not row["operations"]:
+            if repo in prior or not row["operations"]:
+                print(f"{repo}: verified, no pending upload", flush=True)
                 continue
             commit = api.create_commit(
                 repo, repo_type="model", revision="main", parent_commit=row["target_revision"], token=True,
@@ -244,14 +271,12 @@ def replay(api, bundle, manifest_sha, execute, receipt_path):
                 operations=[CommitOperationAdd(name, bundle / "packages" / slug / name) for name in row["operations"]],
             )
             require(pinned_sha(commit.oid), f"{repo}: missing upload commit; reconcile before retry")
-            print(json.dumps({"repo": repo, "commit": commit.oid, "verified": False}), file=log)
-            _, result = snapshot(api, repo, commit.oid)
-            require(result == row["output"], f"{repo}@{commit.oid}: readback differs from review")
-            require_head(api, repo, commit.oid)
-            print(json.dumps({"repo": repo, "commit": commit.oid, "verified": True}), file=log)
-    finally:
-        if log is not None:
-            log.close()
+            event = {"repo": repo, "commit": commit.oid, "manifest_sha256": manifest_sha}
+            print(json.dumps({**event, "verified": False}), file=log)
+            os.fsync(log.fileno())
+            checked_result(api, repo, commit.oid, row["output"])
+            print(json.dumps({**event, "verified": True}), file=log)
+            print(f"{repo}@{commit.oid}: verified", flush=True)
 
 
 def main():
