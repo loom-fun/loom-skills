@@ -109,6 +109,12 @@ def check_provenance(case):
         promotion.inspect_refs("model.json", f"https://huggingface.co/loom-fun-staging/{SLUG}/resolve/{STAGE}/x".encode(), SLUG)
     with case.assertRaisesRegex(ValueError, "unhandled staging reference"):
         promotion.inspect_refs("REPORT.md", f"https://huggingface.co/loom-fun-staging/{SLUG}/blob/main/REPORT.md".encode(), SLUG)
+    proof = {"production_revision": TARGET, "fixed_prompt_replays": {"decode_2k": {
+        "arms": {"staging": {"package": f"loom-fun-staging/{SLUG}@{STAGE}"}}}}}
+    promotion.inspect_refs("sdk-comparison-strix.json", promotion.canonical(proof), SLUG)
+    proof["extra"] = f"loom-fun-staging/{SLUG}@{STAGE}"
+    with case.assertRaisesRegex(ValueError, "unhandled staging reference"):
+        promotion.inspect_refs("sdk-comparison-strix.json", promotion.canonical(proof), SLUG)
 
 
 class ReplayPromotionTests(unittest.TestCase):

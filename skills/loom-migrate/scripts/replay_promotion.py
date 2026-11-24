@@ -150,6 +150,15 @@ def inspect_refs(name, data, slug):
     if name.endswith(".md") or name.endswith("qualification.json"):
         pinned = rf"{STAGING}/{SLUG}(?:@{REVISION}|/(?:resolve|commit|tree|blob)/{REVISION})(?![0-9a-f])"
         text = re.sub(pinned, "", text)
+    if re.fullmatch(r"sdk-comparison-[a-z0-9-]+\.json", name):
+        proof = json.loads(data)
+        require(pinned_sha(proof.get("production_revision")), f"{slug}: unpinned comparison production source")
+        expected = rf"{STAGING}/{re.escape(slug)}@{REVISION}"
+        for metric in proof["fixed_prompt_replays"].values():
+            arm = metric.get("arms", {}).get("staging", {})
+            if re.fullmatch(expected, arm.get("package", "")):
+                arm.pop("package")
+        text = json.dumps(proof)
     if name == "quick-start-qualification.json" and STAGING in text:
         proof = json.loads(data)
         repo = f"{STAGING}/{slug}"
@@ -296,6 +305,7 @@ def replay(api, bundle, manifest_sha, execute, receipt_path):
             commit = api.create_commit(
                 repo, repo_type="model", revision="main", parent_commit=row["target_revision"], token=True,
                 commit_message=f"Promote reviewed package from staging {row['staging_revision']}",
+                commit_description=f"Reviewed promotion manifest SHA256: {manifest_sha}",
                 operations=[CommitOperationAdd(name, bundle / "packages" / slug / name) for name in row["operations"]],
             )
             require(pinned_sha(commit.oid), f"{repo}: missing upload commit; reconcile before retry")
