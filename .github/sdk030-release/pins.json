@@ -1,0 +1,230 @@
+{
+  "InternScience-Sage-A1.5-loom": {
+    "staging_revision": "6213ad10959e27205b69a1c37d7205eab22aacdb",
+    "target_revision": "bfa32772063c03a549b3452520d3110e0d978f2f"
+  },
+  "Tongyi-MAI-Z-Image-Turbo-loom": {
+    "staging_revision": "0646e969add492143b982281cdae75d24527e02a",
+    "target_revision": "77e103e314324c35a88b62350286b07e8dc0f05d"
+  },
+  "XHToken-Spark-X2.5-4B-loom": {
+    "staging_revision": "60236ca25f04a2357122f503d98896a03775a380",
+    "target_revision": "b2e87e163ac1e1db1912ea4aaed57bc3816b78a5"
+  },
+  "bartowski-LFM3-1.7B-loom": {
+    "staging_revision": "08725e51be2730081c7ac587fabddfe038437762",
+    "target_revision": "b2554fcb467b22105aff94eb4b63e2017bc76e4c"
+  },
+  "bartowski-Mellum2.1-12B-A2.5B-Thinking-loom": {
+    "staging_revision": "4a6190b1224e2c552be03fb4323e8f287654529c",
+    "target_revision": "5d172ab9262e8f7f64f14541d43b876f150132fe"
+  },
+  "bartowski-MiniCPM-V-4.7-35B-A3B-loom": {
+    "staging_revision": "4d3a1f90332543a396558e451ef9ce8fe3a4ac49",
+    "target_revision": "bb64688865697edb8b1f1329dc9bf1c32d520e71"
+  },
+  "bartowski-Nanbeige4.3-33B-loom": {
+    "staging_revision": "2d51be476781754573c4fc2aa185345fc982b22a",
+    "target_revision": "bfe6f26ea510f721ba5751dc5115e8fca18ef66b"
+  },
+  "bartowski-Ornith-1.5-122B-loom": {
+    "staging_revision": "94ba295eb754b96eb6464ee01f7514df9831f325",
+    "target_revision": "549484e582abe6c5014b27d76a82fc5f63c7c45f"
+  },
+  "bartowski-Ornith-1.5-35B-A3B-loom": {
+    "staging_revision": "70bf2b0f69d21fe154182abead3e1e3b989b2e31",
+    "target_revision": "a04f7adb325c45a30c8c9a5196bc4bac3e98fb9e"
+  },
+  "bartowski-Ornith-1.5-9B-loom": {
+    "staging_revision": "564b62df5cf9969545818d0dcf60a4dbaf6f240d",
+    "target_revision": "fd3c6efebabc4ea9502c296326402a079bb84827"
+  },
+  "bartowski-Qwen2.5-0.5B-Instruct-loom": {
+    "staging_revision": "575a4b9653fda4cac7fbaa50069ff3d7e633000b",
+    "target_revision": "6fe5ac03a656c4e5d51ecb270c7d7bedc56c2a57"
+  },
+  "bartowski-Qwen2.5-1.5B-Instruct-loom": {
+    "staging_revision": "1907f7f535487463e4558f7faf72e39529082cff",
+    "target_revision": "a78f4fd5b9cda2a40ce321c2f60ea09228ca9950"
+  },
+  "bartowski-Qwen2.5-32B-Instruct-loom": {
+    "staging_revision": "4258df66d242334a8c74c2651137b656cc9948d1",
+    "target_revision": "07da8bface8f684e61d007ed15295e861c734a33"
+  },
+  "bartowski-Qwen2.5-7B-Instruct-loom": {
+    "staging_revision": "f89255a5db4e5dc4daa05185459ba951c3a5ef8d",
+    "target_revision": "7a755e3f50d67b6bf97487135d025c19cce0f14c"
+  },
+  "bartowski-Qwen3.8-27B-loom": {
+    "staging_revision": "5ed8a23288b4488ff1f9dc48ef6a0b6b4ad1c212",
+    "target_revision": "a73a11eba342bde5e2ab489b2687cf731b9c7128"
+  },
+  "bartowski-Spark-X2.6-4B-loom": {
+    "staging_revision": "b3ffac8a455665d248eac9e09d0bfe11e91a8499",
+    "target_revision": "d38e0b2578353ca0a7dc999b3c8ee44944ad1753"
+  },
+  "black-forest-labs-FLUX.2-klein-4B-loom": {
+    "staging_revision": "bf59bacc3e12830c9f1ea4ff8602e26f28a9191b",
+    "target_revision": "b21b10a168c368d67303fea32f5dbc5f6398375e"
+  },
+  "ggml-org-Flint-loom": {
+    "staging_revision": "0e7a781a61a49e8af185e2a998b8ba65af13d01f",
+    "target_revision": "d60f073d32ca9f4c78fb20e79bb1187f8d60841f"
+  },
+  "ggml-org-LFM2.5-24B-A2B-loom": {
+    "staging_revision": "b454b4394f59fa3eeae3cbb4041b10066ce88b95",
+    "target_revision": "5dc159ccab5c1f446f7f5454ff5a94d9f78ac280"
+  },
+  "ggml-org-LFM3-Omni-2B-loom": {
+    "staging_revision": "bf24ef3d31498ce063f5e1425980e074050953cc",
+    "target_revision": "82e3ff40dd639c936f2909111d73191b2d6d0da6"
+  },
+  "ggml-org-Laguna-XS-2.1-loom": {
+    "staging_revision": "ed27556712448e265a669900b6a59126a10c0614",
+    "target_revision": "640cfee4a72a1336888459ba83948d5d74ab9f44"
+  },
+  "ggml-org-Muse-Glimmer-30B-loom": {
+    "staging_revision": "191429a1271948cf504de969371a21c5eb4cc65c",
+    "target_revision": "40344e99e4b4d632b89c45278e5d1ffc46023cfb"
+  },
+  "ggml-org-Qwen2.5-VL-7B-Instruct-loom": {
+    "staging_revision": "221100253cd14f15c18b1c0581337efe76cce9b5",
+    "target_revision": "2611dac7db74f0042ce3fc06dd821ca613efe3fa"
+  },
+  "ggml-org-Qwen3-1.7B-loom": {
+    "staging_revision": "7668e64c0992eddc485428f873f0430383b51944",
+    "target_revision": "e1d356b458ad21cb476546c6454abbb4f32a3bf2"
+  },
+  "ggml-org-Qwen3-14B-loom": {
+    "staging_revision": "7d9125702602456bc362e57195d98a121ab47389",
+    "target_revision": "71bad2d9362daa394f2ed58ae5fb97628a139021"
+  },
+  "ggml-org-Qwen3-4B-loom": {
+    "staging_revision": "435ca576c642d67d50a8f00962a2835f04bbd322",
+    "target_revision": "b0944ed9f7f284e15f31aa4a9d14473c193707a8"
+  },
+  "ggml-org-Qwen3-Coder-30B-A3B-Instruct-loom": {
+    "staging_revision": "fffa4a5ad5cb43a299cef0e98d689493728c7b17",
+    "target_revision": "90f4d2874d066ab7ad0c16daab9a383fa55f47a5"
+  },
+  "ggml-org-Qwen3.6-27B-loom": {
+    "staging_revision": "4ba4eb9e230a6e1d29f3a525e29a244f410204be",
+    "target_revision": "f86d908dd9e7caaf8312c4f753a600c3dfdc6ad8"
+  },
+  "ggml-org-Qwen3.6-35B-A3B-loom": {
+    "staging_revision": "a671b626bc2dc0b860828a634f7d45fe3fcc1002",
+    "target_revision": "9a06cc9ba5ca93e2de3a5fa40b2ad4e415d191fe"
+  },
+  "ggml-org-gemma-3-1b-it-loom": {
+    "staging_revision": "844e1a1100459bf32bffaf3d53fd491266c21b9a",
+    "target_revision": "ed544f633706e706da5098bd5f2fd3c1579921ac"
+  },
+  "lmstudio-community-Ornith-1.0-35B-loom": {
+    "staging_revision": "a16e13988f98fcfa0ea89a49215365ed080b3cd0",
+    "target_revision": "70e56c1cc62e13fda963337500228fded6ffdb9d"
+  },
+  "lmstudio-community-gemma-4-26B-A4B-it-loom": {
+    "staging_revision": "3407629b0c0dd3e20a0fbf74e26a034bc21c3703",
+    "target_revision": "eb2bd1117e4a1de4d949b39fb6ac217e7ef35e6a"
+  },
+  "nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom": {
+    "staging_revision": "2b231876b23182f288ba6a4ca83fc4c25cf33072",
+    "target_revision": "3f36ed722f6c8bdb51d90526bc05e03a05f24dbf"
+  },
+  "rippertnt-HyperCLOVAX-SEED-Text-Instruct-1.5B-loom": {
+    "staging_revision": "d7a55107ffeed49def553693d16e5c0ea4e257fc",
+    "target_revision": "0c8e8831544e6625431a8177873fa531e75d0cc0"
+  },
+  "unsloth-Llama-3.2-3B-Instruct-loom": {
+    "staging_revision": "04f51d2c440c8bf3491128078ee2ffe32f3c7f9a",
+    "target_revision": "c6defa4cd5a8764b2cd8d4c14cb81ca0f118a76c"
+  },
+  "unsloth-Ornith-1.0-9B-loom": {
+    "staging_revision": "c37de958e22cae3681de28914900910d052e3634",
+    "target_revision": "dff6b66ed20512c86ec2f847bfe78fc6b5589149"
+  },
+  "unsloth-Qwen3-0.6B-loom": {
+    "staging_revision": "483f4e580c6e3a3ddd35942e3c0f54faf5825de0",
+    "target_revision": "564d578f4e487c6fbabd84915439f873651b5953"
+  },
+  "unsloth-Qwen3-30B-A3B-Instruct-2507-loom": {
+    "staging_revision": "2a3bd610127ec09e30e39f9008b5248b3871b8e0",
+    "target_revision": "c6598438289b2cbb1543e73e90b749136c888797"
+  },
+  "unsloth-Qwen3-4B-Instruct-2507-loom": {
+    "staging_revision": "72fec2ea78fe7148cc3326d4f36021271d908d14",
+    "target_revision": "d0df214dfcbf73e905ad7930498e110bb5525e3d"
+  },
+  "unsloth-Qwen3-8B-loom": {
+    "staging_revision": "701b15c229b3e96ea7f4e9da01197e1525c1961f",
+    "target_revision": "35d393f359b50ec874e5f2d635bcf03fb48d080f"
+  },
+  "unsloth-Qwen3-VL-4B-Instruct-loom": {
+    "staging_revision": "327d23686e83fe3596f389a35f20d0c7d36b71b0",
+    "target_revision": "c9e8f9868c0be8bbef11ee5f7bebf35f2feb419b"
+  },
+  "unsloth-Qwen3-VL-8B-Instruct-loom": {
+    "staging_revision": "9f372775e03c9991427a37a67708bfe51482a566",
+    "target_revision": "4c126a53d2beabbcd03700071be10ac811b6778a"
+  },
+  "unsloth-Qwen3.5-0.8B-loom": {
+    "staging_revision": "a12f715174db5b59bd6ae9a4a5551d73eb24541a",
+    "target_revision": "9131414f6d7c0e37a890bb23fb7a1693e82b4db3"
+  },
+  "unsloth-Qwen3.5-2B-loom": {
+    "staging_revision": "e577016d9654894154b3c56f959b66f04502ac25",
+    "target_revision": "5891a2d021871b4eb8e0e0adfd87bd20ab940c9e"
+  },
+  "unsloth-Qwen3.5-35B-A3B-loom": {
+    "staging_revision": "8c46496151b2ed2f64cce911e2ba87d2c2b72fc1",
+    "target_revision": "89e9db91429a851ccf55e5f31f3c81d1c3b7bea4"
+  },
+  "unsloth-Qwen3.5-4B-loom": {
+    "staging_revision": "9902e09dab0cd42602b262ca1f2ae9bb9428f22a",
+    "target_revision": "64bf40259117d99f3e6a9f43b7e80fb030300697"
+  },
+  "unsloth-Qwen3.5-9B-loom": {
+    "staging_revision": "e945cf70130eb9110887c2955015ec344fd878e2",
+    "target_revision": "331114c19f4c4cbeb40ffac290659dbc8be7936c"
+  },
+  "unsloth-Qwen3.8-27B-UD-Q4_K_XL": {
+    "staging_revision": "4cc21d921c59e96da4adc9029fac1082ca5e54ca",
+    "target_revision": "3e43d41d0bfae65f17a77794264f82a3b5f2c990"
+  },
+  "unsloth-Qwen3.8-Flash-Next-loom": {
+    "staging_revision": "7d27c03e6450de529a4bf7d76118a8170b2ac1aa",
+    "target_revision": "d847c21bc93c0c6bc45752a9edaf91d80ac74490"
+  },
+  "unsloth-gemma-4-12B-it-loom": {
+    "staging_revision": "bc879b02f9112c1bbbb8dfdcd27ca1c39a2edfc9",
+    "target_revision": "34d4382c23b9357cd46894e7a6b1577aa86cf084"
+  },
+  "unsloth-gemma-4-26B-A4B-it-qat-loom": {
+    "staging_revision": "3432ee7f49f50560d0c89b4f1f4fc60322b0f242",
+    "target_revision": "da1e6ae137920f0565d989e0731128288eb712e3"
+  },
+  "unsloth-gemma-4-31B-it-loom": {
+    "staging_revision": "2e953b9c342104eb56c4a6a55fa9212beb89ddd8",
+    "target_revision": "568071f2fbee4b39c45d10ed9ea2453d5eec7137"
+  },
+  "unsloth-gemma-4-31B-it-qat-loom": {
+    "staging_revision": "dbb390929bf52c178069127dbaf30af4d167ff58",
+    "target_revision": "0826c6e9d4cc3971f94f2730a07f6b33ad9982e2"
+  },
+  "unsloth-gemma-4-E2B-it-loom": {
+    "staging_revision": "50fcfed8d3d270d5facee6847a0c8e9a38e9666a",
+    "target_revision": "3503abcf7cfff7bc58bd819ea32ccab8c18c075d"
+  },
+  "unsloth-gemma-4-E4B-it-loom": {
+    "staging_revision": "65e1fd3baa62578ec433ff71c7cee26bef4aaec1",
+    "target_revision": "e53717d9759ed9faa3454a65818c8401b5ff9f14"
+  },
+  "unsloth-gpt-oss-20b-loom": {
+    "staging_revision": "97082ebdec7558f58e822a107732de82a6b1fe91",
+    "target_revision": "caf72ae4ed037eeaeb9d818b7d3e358ba464c16a"
+  },
+  "xinntao-Real-ESRGAN-x4plus-loom": {
+    "staging_revision": "97adb72ecc9da1e0a48042f9d421ef5f63e1d0fc",
+    "target_revision": "d7126ceb45f03476c8f6608ba77959dd48fe4515"
+  }
+}

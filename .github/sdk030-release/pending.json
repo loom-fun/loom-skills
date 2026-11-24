@@ -1,0 +1,23 @@
+{
+  "jdopensource-JoyAI-LLM-Flash-loom": {
+    "current_disposition": "awaiting final receipt",
+    "device_keys": [
+      "strix-halo"
+    ],
+    "frozen_production_revision": "cb7861a81dbb586782044145ebb11f8cd48d8c8e",
+    "frozen_production_sdk": {
+      "hrx_loom": "0.2.0",
+      "hrx_system_sha": "0cd370f2baaa0cfef47cc23007f1a109906f8a52",
+      "source": "pypi",
+      "wheel_sha256": "5148f9e3a264af400ec4bae38bd7b06bf551d28cc33b7a61d67f7bcefa590438"
+    },
+    "live_staging_revision": "1c3c331fcfdb784eabe03231b9a4ee6ba44c11ff",
+    "production": "loom-fun/jdopensource-JoyAI-LLM-Flash-loom",
+    "qualification_run": 45264713576,
+    "staging": "loom-fun-staging/jdopensource-JoyAI-LLM-Flash-loom",
+    "staging_receipt_url": "https://huggingface.co/loom-fun-staging/jdopensource-JoyAI-LLM-Flash-loom/commit/1c3c331fcfdb784eabe03231b9a4ee6ba44c11ff",
+    "staging_revision": "1c3c331fcfdb784eabe03231b9a4ee6ba44c11ff",
+    "target_revision": "b4787e7927e3863b612b50c13c69207efaa7806e",
+    "verified_source_files": 16
+  }
+}

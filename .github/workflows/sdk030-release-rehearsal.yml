@@ -1,0 +1,64 @@
+name: SDK 0.3 production-form release rehearsal
+on:
+  push:
+    branches: [codex/sdk030-release-rehearsal]
+    paths:
+      - .github/workflows/sdk030-release-rehearsal.yml
+      - .github/sdk030-release/**
+permissions:
+  contents: read
+  actions: read
+jobs:
+  rehearse:
+    name: Read-only exact production composition and SDK dry run
+    runs-on: [self-hosted, devlab-dispatch, Linux, strix-halo]
+    timeout-minutes: 45
+    env:
+      HF_HUB_DISABLE_IMPLICIT_TOKEN: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install local read-only tools and verified release wheel
+        shell: bash
+        run: |
+          set -euo pipefail
+          work="$(mktemp -d "${RUNNER_TEMP}/loom-release-${GITHUB_RUN_ID}-XXXXXX")"
+          echo "REHEARSAL_WORK=$work" >> "$GITHUB_ENV"
+          mkdir -p "$work/evidence"
+          export LOOM_SKILL_DIR="$GITHUB_WORKSPACE/skills/loom-setup"
+          bash "$LOOM_SKILL_DIR/scripts/install_loom.sh" "$work/sdk" release:0.3.0 | tee "$work/evidence/sdk-install.log"
+          cp "$work/sdk/loom-install.json" "$work/evidence/sdk.json"
+          grep -Fq 6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f "$work/evidence/sdk.json"
+          python3 -m venv "$work/verify"
+          "$work/verify/bin/pip" install huggingface_hub==0.36.0
+          "$work/verify/bin/python" -m unittest discover -s tests -p test_replay_promotion.py 2>&1 | tee "$work/evidence/replay-tests.log"
+      - name: Validate production-form release rows
+        shell: bash
+        run: |
+          set -euo pipefail
+          export HF_HUB_CACHE="$REHEARSAL_WORK/hub-cache"
+          inputs="$GITHUB_WORKSPACE/.github/sdk030-release"
+          evidence="$REHEARSAL_WORK/evidence"
+          mkdir "$evidence/inputs"
+          cp "$inputs"/*.json "$evidence/inputs/"
+          cp skills/loom-migrate/scripts/replay_promotion.py "$evidence/"
+          cp "$inputs/rehearse.py" "$evidence/"
+          git rev-parse HEAD > "$evidence/source-commit.txt"
+          "$REHEARSAL_WORK/verify/bin/python" "$inputs/rehearse.py" "$inputs" "$REHEARSAL_WORK/rows" \
+            "$evidence" "$REHEARSAL_WORK/sdk/.venv/bin/loom-fetch" | tee "$evidence/devlab.log"
+          cat "$evidence/review.md" >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload reviewed content and evidence
+        if: always() && env.REHEARSAL_WORK != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdk030-production-rehearsal
+          path: ${{ env.REHEARSAL_WORK }}/evidence
+          retention-days: 90
+      - name: Remove isolated rehearsal scratch
+        if: always() && env.REHEARSAL_WORK != ''
+        shell: bash
+        run: |
+          case "$REHEARSAL_WORK" in
+            "$RUNNER_TEMP"/loom-release-"$GITHUB_RUN_ID"-*) rm -rf -- "$REHEARSAL_WORK" ;;
+          esac
