@@ -11,6 +11,8 @@ python skills/loom-migrate/scripts/replay_promotion.py prepare \
 
 The pin file maps each approved slug to its exact `staging_revision` and `target_revision`. Use `retain_target_files` to preserve a reviewed file that exists only in production. If the release explicitly retires a production-only file, list its path and current SHA256 in `delete_target_files` and supply the outgoing `rollback_tag`. Preparation checks for references to retired files. Verify every advertised preset's released SDK fetch plan against those deletions as part of the release receipt. The tool verifies both pinned inventories and refuses unaccounted production-only files. Include the prepared directory, manifest SHA256, tool commit and exact outgoing tag plan in the release handoff. The model repos remain unchanged during preparation.
 
+Hugging Face's `.gitattributes` is included in the source, target and output checksums wherever present. The prepared output preserves the production bytes, with no upload operation for that path.
+
 An operator in a fresh session uses the downloaded bundle and the **reviewed** manifest SHA256 supplied by the release handoff:
 
 ```bash
