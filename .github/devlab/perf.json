@@ -6,22 +6,28 @@
   "llama_spec": "matched",
   "jobs": [
     {
-      "name": "qwen35-gen35-strix-staged-profile",
+      "name": "qwen35-gen35-strix-chunk-screen",
       "runner": "strix",
       "served_context": 262144,
       "repeat_rows": 3,
       "variants": [
-        {"name": "staged"},
-        {"name": "nodraft", "execution": {"draft_depth": 0}}
+        {
+          "name": "staged"
+        },
+        {
+          "execution": {
+            "prefill_capacity": 8192
+          },
+          "name": "chunk8k"
+        }
       ],
       "steps": [
-        "profile:staged:pf2k,pf8k,pf32k,dec",
-        "perf:staged:1", "perf:staged:1:long",
-        "perf:staged:1:long", "perf:staged:1",
-        "perf:staged:1", "perf:staged:1:long",
-        "c4:nodraft",
-        "llama@rocm.np1:1", "llama@rocm.np1:1:long",
-        "llamac4@rocm.nodraft"
+        "perf:staged:1:long",
+        "perf:chunk8k:1:long",
+        "perf:chunk8k:1:long",
+        "perf:staged:1:long",
+        "perf:staged:1",
+        "perf:chunk8k:1"
       ]
     }
   ]
