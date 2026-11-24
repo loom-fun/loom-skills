@@ -42,6 +42,7 @@ def main():
     parser.add_argument("package", type=Path)
     parser.add_argument("projector", type=Path)
     parser.add_argument("output", type=Path)
+    parser.add_argument("--compiled-reference", action="store_true")
     args = parser.parse_args()
     sys.path.insert(0, str(args.toolkit.resolve() / "skills/loom-benchmark/scripts"))
     from bench_common import Package
@@ -61,8 +62,10 @@ def main():
         "chart_pre": (chart.resize((800, 512), Image.Resampling.BICUBIC), chart_prompt),
         "wide": fixtures["wide"],
     }
-    engine = VllmEngine(CHECKPOINT, 16384, REVISION, images=2,
-                        extra={"enforce_eager": True, "mm_processor_cache_gb": 0, "enable_mm_embeds": True})
+    extra = {"enable_mm_embeds": True}
+    if not args.compiled_reference:
+        extra.update(enforce_eager=True, mm_processor_cache_gb=0)
+    engine = VllmEngine(CHECKPOINT, 33792, REVISION, images=2, extra=extra)
     props = engine.props()
     assert props["version"] == "0.18.0" and props["quantization"] == "quark", props
 
@@ -91,7 +94,8 @@ def main():
                   for position in row.logprobs]
         return completion_response(row.token_ids, scores, row.text, 12, len(reply.prompt_token_ids))
 
-    result = {"reference": props, "amd_quark_version": importlib.metadata.version("amd-quark")}
+    result = {"reference": props, "amd_quark_version": importlib.metadata.version("amd-quark"),
+              "transformers_version": importlib.metadata.version("transformers"), "engine_overrides": extra}
 
     def record(key, value):
         result[key] = value
@@ -99,18 +103,21 @@ def main():
 
     before = measure()
     record("stock_qdq", before)
+    record("stock_with_loom_projector", use_projection("chart-loom-projection.npy"))
+    record("stock_with_transformers_bf16_projector",
+           use_projection("chart-torch.bfloat16_identical_loom_pixels.npy"))
+    if args.compiled_reference:
+        return
     disabled = engine.llm.apply_model(lambda model: set_activation_mode(model, False))
     assert len(disabled) == 1, disabled
     record("modified_text_linear_layers", disabled[0])
     after = measure()
     record("without_activation_qdq", after)
+    record("without_activation_qdq_with_loom_projector", use_projection("chart-loom-projection.npy"))
     restored_layers = engine.llm.apply_model(lambda model: set_activation_mode(model, True))
     assert disabled == restored_layers
     restored = measure()
     record("restored_stock_qdq", restored)
-    record("stock_with_loom_projector", use_projection("chart-loom-projection.npy"))
-    record("stock_with_transformers_bf16_projector",
-           use_projection("chart-torch.bfloat16_identical_loom_pixels.npy"))
     for arm, variants in (("stock", before), ("no_activation_qdq", after), ("restored", restored)):
         for name, request in variants.items():
             first = request["completion_probabilities"][0]["top_logprobs"][:5]
