@@ -3,15 +3,19 @@ set -euo pipefail
 
 repository=https://github.com/loom-fun/loom-skills.git
 evidence=/evidence
+source=${1:-loom-fun/loom-skills}
 mkdir -p /tmp/install-project
 cd /tmp/install-project
+printf '%s\n' "$source" > "$evidence/install-source.txt"
 git ls-remote "$repository" HEAD > "$evidence/repository-before.txt"
 node --version > "$evidence/node-version.txt"
 npx skills --version | tee "$evidence/skills-version.txt"
+grep -Fxq '1.9.0' "$evidence/skills-version.txt"
 
 terminal="$evidence/public-terminal.log"
+printf -v command 'npx skills add %q --skill %q' "$source" '*'
 coproc PUBLIC_INSTALL {
-  script -qefc "npx skills add loom-fun/loom-skills --skill '*'" "$terminal" >/dev/null
+  script -qefc "$command" "$terminal" >/dev/null
 }
 installer_pid="$PUBLIC_INSTALL_PID"
 exec {installer_input}>&"${PUBLIC_INSTALL[1]}"
@@ -48,7 +52,10 @@ exec {installer_input}>&-
 wait "$installer_pid"
 
 git ls-remote "$repository" HEAD > "$evidence/repository-after.txt"
-cmp "$evidence/repository-before.txt" "$evidence/repository-after.txt"
+if [[ $source == loom-fun/loom-skills ]]; then
+  cmp "$evidence/repository-before.txt" "$evidence/repository-after.txt"
+fi
+if [[ -f skills-lock.json ]]; then cp skills-lock.json "$evidence/skills-lock.json"; fi
 node --input-type=module - "$terminal" "$evidence" <<'JS'
 import { createHash } from 'node:crypto';
 import { readdirSync, readFileSync, writeFileSync } from 'node:fs';

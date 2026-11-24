@@ -2,7 +2,7 @@ name: Public Skills install security baseline
 
 on:
   push:
-    branches: [codex/skills-security-probe]
+    branches: [codex/skills-security-probe, codex/skills-security-verify]
     paths:
       - .github/workflows/skills-security-baseline.yml
       - .github/scripts/skills-security-baseline.sh
@@ -22,22 +22,84 @@ jobs:
         shell: bash
         env:
           NODE_IMAGE: docker.io/library/node@sha256:6b33b0be1647d1a577f9cebb6c8fc2587cc02c98c9956af8d0289df1791a3d10
+          CANDIDATE: 652e234441f480da7891dc33750c24bbb6b7676a
         run: |
           set -euo pipefail
           command -v docker
           evidence="$(mktemp -d "$RUNNER_TEMP/skills-install-${GITHUB_RUN_ID}-XXXXXX")"
-          chmod 0777 "$evidence"
           echo "SKILLS_AUDIT_EVIDENCE=$evidence" >> "$GITHUB_ENV"
           docker pull "$NODE_IMAGE"
-          docker run --rm -i --cap-drop=ALL --security-opt no-new-privileges \
-            --read-only --tmpfs /root:rw,nosuid,nodev --tmpfs /tmp:rw,nosuid,nodev \
-            --mount "type=bind,source=$evidence,target=/evidence" \
-            --env GIT_CONFIG_NOSYSTEM=1 --env npm_config_yes=true \
-            --env TERM=xterm --env LC_ALL=C.UTF-8 \
-            "$NODE_IMAGE" bash -s -- < .github/scripts/skills-security-baseline.sh
+          run_install() {
+            local name=$1 source=$2
+            mkdir -p "$evidence/$name"
+            chmod 0777 "$evidence/$name"
+            docker run --rm -i --cap-drop=ALL --security-opt no-new-privileges \
+              --read-only --tmpfs /root:rw,nosuid,nodev --tmpfs /tmp:rw,nosuid,nodev \
+              --mount "type=bind,source=$evidence/$name,target=/evidence" \
+              --env GIT_CONFIG_NOSYSTEM=1 --env npm_config_yes=true \
+              --env TERM=xterm --env LC_ALL=C.UTF-8 \
+              "$NODE_IMAGE" bash -s -- "$source" < .github/scripts/skills-security-baseline.sh
+          }
+          run_install current loom-fun/loom-skills
+          if [[ $GITHUB_REF_NAME == codex/skills-security-verify ]]; then
+            run_install candidate "loom-fun/loom-skills#$CANDIDATE"
+            python3 .github/scripts/skills-security-comparison.py "$evidence" "$CANDIDATE"
+          fi
       - uses: actions/upload-artifact@v4
         if: always() && env.SKILLS_AUDIT_EVIDENCE != ''
         with:
           name: skills-installer-baseline
           path: ${{ env.SKILLS_AUDIT_EVIDENCE }}
+          retention-days: 14
+
+  source:
+    if: github.ref_name == 'codex/skills-security-verify'
+    runs-on: [self-hosted, devlab-dispatch, Linux, strix-halo]
+    timeout-minutes: 15
+    env:
+      CANDIDATE: 652e234441f480da7891dc33750c24bbb6b7676a
+      CATALOG: 279afe368b82e0d7acfe38c4f47e8e7e5cfb7bc8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.CANDIDATE }}
+          persist-credentials: false
+      - name: Run source suites and read the exact upstream BUILD declarations
+        shell: bash
+        run: |
+          set -euo pipefail
+          proof="$(mktemp -d "$RUNNER_TEMP/skills-source-${GITHUB_RUN_ID}-XXXXXX")"
+          echo "SKILLS_SOURCE_EVIDENCE=$proof" >> "$GITHUB_ENV"
+          python3 -m unittest discover -s tests -v 2>&1 | tee "$proof/tests.log"
+          git init -q "$proof/catalog"
+          git -C "$proof/catalog" fetch --depth 1 https://github.com/ROCm/hrx-loom-library "$CATALOG"
+          git -C "$proof/catalog" ls-tree -r --name-only FETCH_HEAD | awk '/(^|\/)BUILD(\.bazel)?$/' > "$proof/catalog-build-files.txt"
+          while IFS= read -r path; do
+            mkdir -p "$(dirname "$proof/catalog/$path")"
+            git -C "$proof/catalog" show "FETCH_HEAD:$path" > "$proof/catalog/$path"
+          done < "$proof/catalog-build-files.txt"
+          python3 - "$proof/catalog" <<'PY' | tee "$proof/catalog-test-summary.txt"
+          import importlib.util, pathlib, sys
+          catalog = pathlib.Path(sys.argv[1])
+          spec = importlib.util.spec_from_file_location('catalog_test', 'skills/loom-benchmark/scripts/kernel_tests.py')
+          runner = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(runner)
+          build = runner.Build(catalog)
+          paths = list(catalog.rglob('BUILD.bazel'))
+          assert len(paths) == 49
+          tests = 0
+          for path in sorted(paths):
+              relative = path.parent.relative_to(catalog).as_posix()
+              tests += len(build.package(relative)['test'])
+          assert tests > 0
+          print(f'{len(paths)} published BUILD declarations read, {tests} test targets preserved.')
+          PY
+          skills/loom-port-llm/reference/check_examples.sh | tee "$proof/reference-check.txt"
+      - uses: actions/upload-artifact@v4
+        if: always() && env.SKILLS_SOURCE_EVIDENCE != ''
+        with:
+          name: skills-source-verification
+          path: |
+            ${{ env.SKILLS_SOURCE_EVIDENCE }}/*.log
+            ${{ env.SKILLS_SOURCE_EVIDENCE }}/*.txt
           retention-days: 14
