@@ -1,0 +1,54 @@
+name: DevLab compare Windows wheel and standalone C++ input support
+on:
+  push:
+    branches: [codex/sdk030-windows-perf-testing]
+    paths: [.github/workflows/sdk030-windows-import.yml]
+permissions:
+  contents: read
+jobs:
+  matched:
+    runs-on: [windows, strix-halo, devlab-dispatch]
+    timeout-minutes: 22
+    defaults:
+      run:
+        shell: powershell
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Test official Windows wheel and standalone CLI C++ registration
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $out = Join-Path $env:GITHUB_WORKSPACE 'windows-sdk030-perf-evidence'
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          $scratch = Join-Path $env:RUNNER_TEMP "windows-sdk030-perf-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          New-Item -ItemType Directory -Path $scratch | Out-Null
+          "WINPERF_SCRATCH=$scratch" >> $env:GITHUB_ENV
+          [ordered]@{
+            machine = $env:COMPUTERNAME
+            os = Get-CimInstance Win32_OperatingSystem | Select-Object Caption,Version,BuildNumber
+            cpu = Get-CimInstance Win32_Processor | Select-Object Name,NumberOfCores,NumberOfLogicalProcessors
+            gpu = Get-CimInstance Win32_VideoController | Select-Object Name,DriverVersion
+            system = Get-CimInstance Win32_ComputerSystem | Select-Object Model,TotalPhysicalMemory
+            power = powercfg /GetActiveScheme
+          } | ConvertTo-Json -Depth 4 | Set-Content (Join-Path $out 'machine.json') -Encoding UTF8
+          python .github/sdk030-windows-perf/wheel-import.py "$scratch" "$out"
+          if ($LASTEXITCODE -ne 0) { throw 'Windows benchmark did not pass all cases' }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-sdk030-import
+          path: windows-sdk030-perf-evidence
+          if-no-files-found: ignore
+      - name: Clean isolated benchmark directory
+        if: always() && env.WINPERF_SCRATCH != ''
+        run: |
+          $root = [IO.Path]::GetFullPath($env:RUNNER_TEMP).TrimEnd('\') + '\'
+          $target = [IO.Path]::GetFullPath($env:WINPERF_SCRATCH)
+          if (!$target.StartsWith($root, [StringComparison]::OrdinalIgnoreCase) -or
+              !(Split-Path $target -Leaf).StartsWith('windows-sdk030-perf-')) {
+            throw 'Benchmark scratch path is outside the expected runner directory'
+          }
+          Remove-Item -LiteralPath $target -Recurse -Force
