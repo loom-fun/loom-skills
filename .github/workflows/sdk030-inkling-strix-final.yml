@@ -26,7 +26,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: 429af0fe1f81e32a0a857f1467258f7ed0206940
+          ref: 76cd39c899a6fd52f3b2b6208f27fc1a7a67f173
           fetch-depth: 0
           persist-credentials: false
       - name: Plan from the accepted production revision
@@ -95,6 +95,7 @@ jobs:
           "$py" -m pip install --quiet requests
           "$py" -m unittest discover -s tests -p test_ctx_admit.py -v |& tee "$WORK/receipt/ctx-fixture.log"
           "$py" -m unittest discover -s tests -p test_spec_check.py -v |& tee "$WORK/receipt/spec-fixture.log"
+          "$py" -m unittest discover -s tests -p test_agent_deferred.py -v |& tee "$WORK/receipt/agent-fixture.log"
           sha256sum skills/loom-benchmark/scripts/{ctx_admit,spec_check,agent_golden}.py > "$WORK/receipt/benchmark-source.sha256"
       - name: Restore checksum-pinned references from the initial matched run
         shell: bash
