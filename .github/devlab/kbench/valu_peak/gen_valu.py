@@ -12,6 +12,8 @@ bit op); the variants measure the sustained rate of each family:
   f16_pk_fma:      acc = fma(acc, x, y), vector<16xf16>      1 v_pk_fma_f16 per 2 elements
   i32_and_or:      acc = (acc & x) | y, vector<8xi32>        1 v_and_or_b32 per element (or 2 ops)
   f32_exp:         acc = exp(acc * x), vector<8xf32>         1 v_exp_f32 + 1-2 multiplies per element (softmax's exp)
+  f32_mul, f16_pk_mul: acc = acc * x                         2-source forms
+  f32_fma_k, f16_pk_fma_k: acc = fma(acc, 0.999, 0.001)      FMA with constant operands (1 VGPR source)
 Elements per run = G * NT * ITER * NACC * W; instructions per element come from the compiled listing
 (--compile-report / target listing), recorded in the device preset's note.
 """
@@ -22,6 +24,9 @@ G, NT, ITER, NACC = 2560, 256, 1024, 8   # workgroups, threads, loop steps, inde
 VARIANTS = {  # name: (element type, width, op)
     "base": ("f32", 8, "fma"), "f16_pk_fma": ("f16", 16, "fma"),
     "i32_and_or": ("i32", 8, "andor"), "f32_exp": ("f32", 8, "exp"),
+    # 2-source and constant-operand forms: is a 3-source FMA (3 VGPR reads) slower than the issue rate?
+    "f32_mul": ("f32", 8, "mul"), "f16_pk_mul": ("f16", 16, "mul"),
+    "f32_fma_k": ("f32", 8, "fmak"), "f16_pk_fma_k": ("f16", 16, "fmak"),
 }
 
 
@@ -60,11 +65,17 @@ def kernel(et, W, op):
             L.append(f"  %sh{j} = vector.splati {j} : {vt}\n  %a0_{j} = vector.xori %ya, %sh{j} : {vt}")
         else:
             L.append(f"  %sh{j} = vector.splatf {0.125 * j} : {vt}\n  %a0_{j} = vector.addf %ya, %sh{j} : {vt}")
+    if op == "fmak":
+        L.append(f"  %kx = vector.splatf 0.999 : {vt}\n  %ky = vector.splatf 0.001 : {vt}")
     L.append("  " + ", ".join(f"%r{j}" for j in range(NACC)) + " = scf.for %it = [%c0 to %citer step %c1](" +
              ", ".join(f"%i{j} = %a0_{j} : {vt}" for j in range(NACC)) + ") -> (" + ", ".join(vt for _ in range(NACC)) + ") {")
     for j in range(NACC):
         if op == "fma":
             L.append(f"    %n{j} = vector.fmaf %i{j}, %xa, %ya : {vt}")
+        elif op == "mul":
+            L.append(f"    %n{j} = vector.mulf %i{j}, %xa : {vt}")
+        elif op == "fmak":   # x, y compile-time constants (inline/literal operands: 1 VGPR read)
+            L.append(f"    %n{j} = vector.fmaf %i{j}, %kx, %ky : {vt}")
         elif op == "andor":
             L.append(f"    %m{j} = vector.andi %i{j}, %xa : {vt}\n    %n{j} = vector.ori %m{j}, %ya : {vt}")
         elif op == "exp":

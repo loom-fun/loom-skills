@@ -370,13 +370,21 @@
         "base",
         "f16_pk_fma",
         "i32_and_or",
-        "f32_exp"
+        "f32_exp",
+        "f32_mul",
+        "f16_pk_mul",
+        "f32_fma_k",
+        "f16_pk_fma_k"
       ],
       "files": [
         "bench.loom",
         "bench_f16_pk_fma.loom",
         "bench_i32_and_or.loom",
-        "bench_f32_exp.loom"
+        "bench_f32_exp.loom",
+        "bench_f32_mul.loom",
+        "bench_f16_pk_mul.loom",
+        "bench_f32_fma_k.loom",
+        "bench_f16_pk_fma_k.loom"
       ],
       "config": [],
       "args": [
