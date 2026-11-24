@@ -44,7 +44,9 @@ def kernels(variant, tag):
         sp, co = "g_attention_split", "g_attention_combine"
     else:
         env = {k: v for k, v in os.environ.items() if not k.startswith("MLA_DEC")}
-        env.update({k: v for x in variant.split("+") for k, v in VARIANTS[x].items()})
+        for x in variant.split("+"):
+            for k, v in VARIANTS[x].items():
+                env[k] = env[k] + "," + v if k == "MLA_DEC_ABL" and k in env else v
         code = f"import json,sys; sys.path.insert(0, {kit()!r}); import gen_mla_dec; print(gen_mla_dec.kernels(json.load(open({os.path.join(ROOT, 'skills/loom-port-llm/reference/deepseek2-example/cfg.json')!r}))))"
         t = subprocess.run([sys.executable, "-c", code], check=True, env=env, capture_output=True, text=True).stdout
         i = open(os.path.join(HERE if os.path.exists(os.path.join(HERE, "old_attn.loom")) else OUT, "old_attn.loom")).read()
