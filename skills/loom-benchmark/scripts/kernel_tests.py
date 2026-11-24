@@ -39,6 +39,8 @@ def assign(target, value, values):
 
 def declarations(text, path, rules, values):
     """Read the catalog's declaration subset without executing a BUILD as Python."""
+    remaining = 100_000
+
     def comprehension(generators, scope):
         if not generators:
             yield scope
@@ -51,6 +53,10 @@ def declarations(text, path, rules, values):
                 yield from comprehension(remaining, nested)
 
     def expression(node, scope):
+        nonlocal remaining
+        remaining -= 1
+        if remaining < 0:
+            raise ValueError(f"{path}: BUILD declarations exceed the evaluation budget")
         get = lambda child: expression(child, scope)
         match node:
             case ast.Constant(value=value):
@@ -72,7 +78,10 @@ def declarations(text, path, rules, values):
             case ast.BinOp(left=left, op=ast.BitOr(), right=right):
                 return get(left) | get(right)
             case ast.BinOp(left=left, op=ast.Mod(), right=right):
-                return get(left) % get(right)
+                format_string = get(left)
+                if isinstance(format_string, str) and re.search(r"%(?![%ds])", format_string.replace("%%", "")):
+                    raise ValueError(f"{path}:{node.lineno}: unsupported BUILD format specifier")
+                return format_string % get(right)
             case ast.UnaryOp(op=ast.USub(), operand=operand):
                 return -get(operand)
             case ast.Compare(left=left, ops=[ast.Eq()], comparators=[right]):
@@ -143,7 +152,9 @@ class Build:
         if not os.path.exists(path): path = self.source_path(pkg, "BUILD")
         if not os.path.exists(path): return rules
         with open(path, encoding="utf-8") as source:
-            text = source.read()
+            text = source.read(4 * 1024 * 1024 + 1)
+        if len(text) > 4 * 1024 * 1024:
+            raise ValueError(f"{path}: BUILD file exceeds 4 MiB")
         def target_name(value):
             if not isinstance(value, str) or not re.fullmatch(r"[A-Za-z0-9_+.-]+", value) or value in {".", ".."}:
                 raise ValueError(f"invalid BUILD target name: {value!r}")
