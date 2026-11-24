@@ -39,14 +39,14 @@ def record(name, obj):
     (out / name).write_text(json.dumps(obj, indent=2) + '\n', encoding='utf-8')
 
 
-def launch(exe, card, label, cxx):
+def launch(exe, card, label, cxx, working_dir=None):
     with socket.socket() as listener:
         listener.bind(('127.0.0.1', 0))
         port = listener.getsockname()[1]
     base = f'http://127.0.0.1:{port}'
     args = [exe, '--device=amdgpu', f'--model={card}', f'--listen=127.0.0.1:{port}']
     with (out / f'{label}.log').open('wb') as log:
-        server = subprocess.Popen(args, cwd=root, stdout=log, stderr=subprocess.STDOUT)
+        server = subprocess.Popen(args, cwd=working_dir or root, stdout=log, stderr=subprocess.STDOUT)
         try:
             deadline = time.monotonic() + 90
             while time.monotonic() < deadline:
@@ -127,9 +127,9 @@ header_rel = Path('program/shared/program/text/publication.h')
 lexical_suffix = 'program/shared/program/text/qwen3_8/../../../program/text/publication.h'
 exe = bin_dir / ('loom-serve' + suffix)
 results = {}
-for length in (230, 251, 271, 298):
+for length in (230, 251, 259, 260, 261, 271):
     padding_size = length - len(str(root / lexical_suffix)) - 1
-    assert 1 <= padding_size <= 150
+    assert 1 <= padding_size <= 240
     case = root / ('x' * padding_size)
     shutil.copytree(control, case)
     card = case / 'model.json'
@@ -149,6 +149,7 @@ for length in (230, 251, 271, 298):
         'header_readable_by_python': candidate.is_file(),
         'backend': launch(exe, card, f'lexical-{length}', True),
     }
+results['relative_271'] = launch(exe, Path('model.json'), 'relative-271', True, working_dir=case)
 record('path-depth-matrix.json', results)
 print(json.dumps(results, indent=2))
 assert results['230']['backend']['registration'] == 'ready', results
