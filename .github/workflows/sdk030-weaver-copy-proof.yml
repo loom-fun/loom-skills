@@ -1,0 +1,107 @@
+name: DevLab Weaver generated card fetch
+on:
+  push:
+    branches: [codex/sdk030-weaver-copy-devlab]
+    paths: [.github/workflows/sdk030-weaver-copy-proof.yml]
+permissions:
+  contents: read
+jobs:
+  cards:
+    runs-on: [self-hosted, devlab-dispatch, Linux, strix-halo]
+    timeout-minutes: 25
+    env:
+      WEAVER_REVISION: 3a8064093bd87096a2c5e00d4b30603afe0fa9b1
+      CARD: loom-fun-staging/unsloth-Qwen3-0.6B-loom@f3ffda86d7bd1fa98d615f4972a7d3f82345294c
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Prepare isolated work directory
+        shell: bash
+        run: |
+          set -euo pipefail
+          work=$(mktemp -d "$RUNNER_TEMP/weaver-copy.XXXXXX")
+          echo "WORK=$work" >> "$GITHUB_ENV"
+          mkdir "$work/out"
+      - name: Test both normal card emitters and their fetch command
+        shell: bash
+        run: |
+          set -euo pipefail
+          exec > >(tee "$WORK/out/validation.log") 2>&1
+          git clone --quiet --depth 1 --branch codex/sdk030-weaver-copy-proof https://github.com/loom-fun/weaver.git "$WORK/weaver"
+          cd "$WORK/weaver"
+          test "$(git rev-parse HEAD)" = "$WEAVER_REVISION"
+          git rev-parse HEAD > "$WORK/out/weaver-revision.txt"
+          git ls-tree HEAD -- docs/plan.md docs/release-notes.md tests/test_core.py weaver/commands/upload.py weaver/templates/model_card.md +            > "$WORK/out/weaver-blobs.txt"
+          git submodule update --init --depth 1
+          python -m venv "$WORK/venv"
+          source "$WORK/venv/bin/activate"
+          python -m pip download --no-deps --dest "$WORK" hrx-loom==0.3.0
+          wheel="$WORK/hrx_loom-0.3.0-py3-none-manylinux_2_39_x86_64.whl"
+          echo "6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f  $wheel" | sha256sum -c -
+          python -m pip install "$wheel" '.[test]'
+          export WEAVER_HOME="$WORK/weaver-state" HF_HOME="$WORK/hf"
+          python -m pytest -q
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          import shlex
+          import subprocess
+          from pathlib import Path
+
+          from weaver import jobs
+          from weaver.commands.upload import ensure_run_commands
+
+          work = Path(os.environ["WORK"])
+          out = work / "out"
+          card = os.environ["CARD"]
+          short = "qwen3-0.6b"
+          template = jobs.template_file("model_card.md").read_text(encoding="utf-8")
+          template_command, = [line for line in template.splitlines() if line.startswith("loom-fetch ")]
+          rendered = out / "generated-card.md"
+          rendered.write_text(template, encoding="utf-8")
+          ensure_run_commands(rendered, card, "Qwen/Qwen3-0.6B", 8_000_000_000)
+          generated_command, = [line for line in rendered.read_text().splitlines() if line.startswith("loom-fetch ")]
+          expected = f"loom-fetch huggingface:{card} --output={short}"
+          assert generated_command == expected
+          assert template_command.replace("<repo id>", card).replace("<short name>", short) == expected
+
+          subprocess.run(shlex.split(generated_command), cwd=work, check=True)
+          subprocess.run(["loom-fetch", f"huggingface:{card}", "--materialize=copy", "--output=detached"],
+                         cwd=work, check=True)
+          weight = Path("parameter/Qwen3-0.6B-Q4_K_M.gguf")
+          shared = work / short / weight
+          detached = work / "detached" / weight
+          assert (work / short / "model.json").is_file()
+          assert (work / "detached" / "model.json").is_file()
+          assert shared.is_symlink() or shared.stat().st_nlink > 1, "default did not share the cached weight"
+          assert not detached.is_symlink() and detached.stat().st_nlink == 1
+          assert not shared.samefile(detached)
+          checksums = {}
+          for path in (shared, detached):
+              with path.open("rb") as data:
+                  checksums[path.parent.parent.name] = hashlib.file_digest(data, "sha256").hexdigest()
+          assert set(checksums.values()) == {"ac2d97712095a558e31573f62f466a3f9d93990898b0ec79d7c974c1780d524a"}
+          result = {
+              "command": generated_command, "card": card, "sha256": checksums,
+              "shared_link_count": shared.stat().st_nlink, "detached_link_count": detached.stat().st_nlink,
+              "shared_is_symlink": shared.is_symlink(), "detached_is_symlink": detached.is_symlink(),
+          }
+          (out / "fetch-proof.json").write_text(json.dumps(result, indent=2) + "\n")
+          print("WEAVER_CARD_FETCH_PASS", json.dumps(result))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always() && env.WORK != ''
+        with:
+          name: sdk030-weaver-copy-proof
+          path: ${{ env.WORK }}/out
+          if-no-files-found: error
+      - name: Remove isolated workspace
+        if: always() && env.WORK != ''
+        shell: bash
+        run: |
+          case "$WORK" in
+            "$RUNNER_TEMP"/weaver-copy.*) rm -rf -- "$WORK" ;;
+            *) exit 1 ;;
+          esac
