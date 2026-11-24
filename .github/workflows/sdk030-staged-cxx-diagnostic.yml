@@ -1,0 +1,47 @@
+name: DevLab diagnose Flash Next with exact Nix Gufo libraries
+on:
+  push:
+    branches: [codex/sdk030-consumer-devlab]
+    paths:
+      - .github/workflows/sdk030-staged-cxx-diagnostic.yml
+permissions:
+  actions: read
+  contents: read
+jobs:
+  diagnose-staged:
+    runs-on: [strix-halo, devlab-dispatch, Linux, self-hosted]
+    timeout-minutes: 100
+    env:
+      HF_TOKEN: ${{ secrets.HF_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Prepare isolated runner workspace
+        shell: bash
+        run: |
+          set -euo pipefail
+          work=$(mktemp -d "$RUNNER_TEMP/sdk030-cxx-diag.XXXXXX")
+          echo "WORK=$work" >> "$GITHUB_ENV"
+          mkdir "$work/out"
+          hostname > "$work/out/runner.txt"
+          awk '/MemAvailable/ { print; if ($2 < 107421875) exit 1 }' /proc/meminfo | tee "$work/out/memavailable.txt"
+      - uses: actions/download-artifact@v4
+        with:
+          run-id: '45311703705'
+          github-token: ${{ github.token }}
+          name: sdk030-staged-cxx
+          path: ${{ env.WORK }}/tested
+      - name: Reuse the staged ABI 1 proof and diagnose exact staged Flash Next
+        shell: bash
+        run: bash .github/sdk030-staged-cxx/diagnostic.sh
+      - uses: actions/upload-artifact@v4
+        if: always() && env.WORK != ''
+        with:
+          name: sdk030-staged-cxx-diagnostic
+          path: ${{ env.WORK }}/out
+      - name: Remove isolated workspace
+        if: always() && env.WORK != ''
+        shell: bash
+        run: |
+          case "$WORK" in "$RUNNER_TEMP"/sdk030-cxx-diag.*) rm -rf -- "$WORK";; *) exit 1;; esac

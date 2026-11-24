@@ -14,6 +14,7 @@ static void require(int status, loom_text_embed_t* embed, const char* action) {
 
 static void check_checkpoint(loom_text_embed_t* embed, loom_text_embed_request_t* request,
                              size_t extent) {
+  fprintf(stderr, "checkpoint: pin and size\n");
   loom_text_embed_checkpoint_t* checkpoint = NULL;
   require(loom_text_embed_row_pin(embed, 0, &checkpoint), embed, "pin checkpoint");
   loom_text_embed_checkpoint_info_t info;
@@ -25,6 +26,7 @@ static void check_checkpoint(loom_text_embed_t* embed, loom_text_embed_request_t
   }
   uint8_t* image = malloc(size);
   if (!image) exit(1);
+  fprintf(stderr, "checkpoint: download %zu bytes\n", size);
   require(loom_text_embed_checkpoint_export(embed, checkpoint, image, size, &size, &info),
           embed, "download checkpoint");
   loom_text_embed_checkpoint_release(embed, checkpoint);
@@ -33,6 +35,7 @@ static void check_checkpoint(loom_text_embed_t* embed, loom_text_embed_request_t
 
   loom_text_embed_row_end(embed, 0);
   require(loom_text_embed_row_reset(embed, 0), embed, "reset row");
+  fprintf(stderr, "checkpoint: upload and restore\n");
   require(loom_text_embed_checkpoint_import(embed, &info, image, size, &checkpoint),
           embed, "upload checkpoint");
   free(image);
@@ -59,6 +62,7 @@ int main(int argc, char** argv) {
   }
   const int tiny = !strcmp(argv[3], "tiny");
   const size_t max_tokens = tiny ? 2 : 64;
+  setvbuf(stdout, NULL, _IONBF, 0);
   loom_text_embed_options_ex_t options = {0};
   options.struct_size = sizeof(options);
   options.base.model_path = argv[1];
@@ -67,6 +71,7 @@ int main(int argc, char** argv) {
   options.elastic = 1;
   loom_text_embed_t* embed = NULL;
   char error[4096] = {0};
+  fprintf(stderr, "opening package %s preset %s\n", argv[1], argv[2]);
   if (loom_text_embed_open_ex(&options, &embed, error, sizeof(error))) {
     fprintf(stderr, "open: %s\n", error);
     return 1;
@@ -74,6 +79,7 @@ int main(int argc, char** argv) {
 
   loom_text_embed_info_t info;
   loom_text_embed_info(embed, &info);
+  fprintf(stderr, "opened %s with context capacity %u\n", info.model_id, info.context_capacity);
   char body[1024];
   snprintf(body, sizeof(body),
            "{\"model\":\"%s\",\"messages\":[{\"role\":\"user\",\"content\":\"%s\"}],"
@@ -88,7 +94,9 @@ int main(int argc, char** argv) {
           embed, "prepare");
   require(loom_text_embed_row_begin(embed, 0, request, count + max_tokens, 1),
           embed, "begin");
+  fprintf(stderr, "prefill: %zu tokens\n", count);
   require(loom_text_embed_row_prefill(embed, 0, tokens, count), embed, "prefill");
+  fprintf(stderr, "prefill complete\n");
   const size_t prompt_tokens = count;
   count = 0;
   const int32_t initial = loom_text_embed_row_token(embed, 0);
@@ -101,6 +109,7 @@ int main(int argc, char** argv) {
     if (count < max_tokens)
       require(loom_text_embed_row_decode(embed, 0), embed, "decode");
   }
+  fprintf(stderr, "decode complete: %zu tokens\n", count);
   char decoded[4096];
   size_t decoded_size = 0;
   require(loom_text_embed_detokenize(embed, tokens, count, decoded, sizeof(decoded), &decoded_size),
@@ -113,6 +122,7 @@ int main(int argc, char** argv) {
                                       sizeof(answer), &answer_size), embed, "read output");
   printf("answer=%.*s\n", (int)answer_size, answer);
   loom_text_embed_request_free(request);
+  fprintf(stderr, "closing model\n");
   loom_text_embed_close(embed);
   if (tiny)
     return prompt_tokens == 4 && count == 2 && decoded_size == 2 && !memcmp(decoded, "bx", 2) ? 0 : 1;
