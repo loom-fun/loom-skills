@@ -38,9 +38,6 @@ jobs:
           mkdir -p "$WORK/receipt"
           git rev-parse HEAD > "$WORK/receipt/generator-revision.txt"
           python3 skills/loom-kb/kb.py lint
-          python3 fleet/scope_lint.py --base ed6c623eb457137123f2dfe55454b8943ab17a08 --head b4347a68799c83ddb7f44cc5345d9f9da692a687 --local --no-impact --scope-block 'kind: targeted
-          scopes: model/ggml-org-Qwen3.6-35B-A3B-loom, arch/llm/moe/qwen35moe, device/rdna4
-          kernels: g_attention_split'
           python3 fleet/regen.py plan --base codex/sdk030-migration --mode sdk-loom --new-sdk 0.3.0 --gates full --device "$SDK_GPU_KEY" --batch 1 --work "$WORK/plan" --state "$WORK/receipt/state.json" "$SLUG"
           python3 .github/scripts/ab_jobs.py --device "$SDK_GPU_KEY" --reps 6 --gates full --sdk-ab --old-sdk card --new-sdk 0.3.0 --refs "$WORK/plan/refs_$SDK_GPU_KEY.json" "$SLUG" > "$WORK/receipt/experiment.json"
           python3 - <<'PY' >> "$GITHUB_ENV"
@@ -98,6 +95,20 @@ jobs:
           failures = {name: row for name, row in comparison['metrics'].items() if row['status'] != 'PASS'}
           assert not failures, failures
           PY
+      - name: Verify the full fleet program impact of the scoped rule
+        if: always() && env.WORK != '' && matrix.device == 'radeon-r9700'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m venv "$WORK/scope-tools"
+          "$WORK/scope-tools/bin/pip" -q install gguf numpy jinja2 pyyaml
+          "$WORK/scope-tools/bin/python" fleet/scope_lint.py \
+            --base ed6c623eb457137123f2dfe55454b8943ab17a08 \
+            --head b4347a68799c83ddb7f44cc5345d9f9da692a687 \
+            --local --work "$WORK/scope-impact" \
+            --json "$WORK/receipt/scope-lint.json" --md "$WORK/receipt/scope-lint.md" \
+            --scope-block 'kind: targeted
+          scopes: model/ggml-org-Qwen3.6-35B-A3B-loom, arch/llm/moe/qwen35moe, device/rdna4'
       - uses: actions/upload-artifact@v4
         if: always() && env.WORK != ''
         with:
