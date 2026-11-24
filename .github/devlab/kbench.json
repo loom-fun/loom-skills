@@ -7,17 +7,19 @@
    "gen": "mla_xpf/gen_bench.py",
    "gen_variants": [
     "x",
-    "s4",
+    "x8",
+    "x16",
     "s4f",
-    "aw",
-    "sp"
+    "x8sf",
+    "x16sf"
    ],
    "files": [
     "bench_x.loom",
-    "bench_s4.loom",
+    "bench_x8.loom",
+    "bench_x16.loom",
     "bench_s4f.loom",
-    "bench_aw.loom",
-    "bench_sp.loom"
+    "bench_x8sf.loom",
+    "bench_x16sf.loom"
    ],
    "tests": [
     "test.loom"

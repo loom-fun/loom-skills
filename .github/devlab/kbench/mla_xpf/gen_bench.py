@@ -32,7 +32,8 @@ VARIANTS = {"x": {}, "xg": {"MLA_XF": "global"},   # x: LDS-staged flash (defaul
             "sv": {"MLA_XF_SRC": "vg"}, "sp": {"MLA_XF_SRC": "pg"}, "sk": {"MLA_XF_SRC": "kg"}, "spv": {"MLA_XF_SRC": "pg,vg"},
             "skp": {"MLA_XF_SRC": "kg,pg"}, "anobar": {"MLA_XF_ABL": "nobar"}, "anofrag": {"MLA_XF_ABL": "nofrag"},
             "aboth": {"MLA_XF_ABL": "nofrag,nobar"}, "s4": {"MLA_XF_T": "s4"}, "s4f": {"MLA_XF_T": "s4,fma"},
-            "aw": {"MLA_XF_ABL": "nofrag,nobar,nox,nosm"}}
+            "aw": {"MLA_XF_ABL": "nofrag,nobar,nox,nosm"}, "x16": {"MLA_XQ": "16"}, "x8sf": {"MLA_XQ": "8", "MLA_XF_T": "s4,fma"},
+            "x16sf": {"MLA_XQ": "16", "MLA_XF_T": "s4,fma"}}
 TIMING_ONLY = {"anox", "anosm", "anoxsm", "anobar", "anofrag", "aboth", "aw"}   # g_mla_xexp fault bisection   # small-scratch twins for the staged tests
 
 
