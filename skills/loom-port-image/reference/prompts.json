@@ -1,0 +1,15 @@
+{
+  "_note": "Fixed evaluation set for image ports (8 prompts x 3 seeds). Changing it invalidates stored measurements.",
+  "seeds": [0, 42, 1234],
+  "sizes": ["1024x1024", "512x512", "768x1344"],
+  "prompts": [
+    {"id": "fox", "text": "A red fox standing in fresh snow at sunrise, detailed fur, shallow depth of field"},
+    {"id": "sign", "text": "A wooden storefront sign that reads \"OPEN LATE\" in hand-painted gold letters"},
+    {"id": "portrait", "text": "Studio portrait of an elderly fisherman with a grey beard, soft window light, 85mm photo"},
+    {"id": "city", "text": "Aerial view of a dense coastal city at night, neon reflections on wet streets"},
+    {"id": "still", "text": "Still life of three glass bottles and a lemon on a linen tablecloth, oil painting"},
+    {"id": "robot", "text": "A small friendly robot watering houseplants in a sunlit apartment, 3D render"},
+    {"id": "diagram", "text": "A clean flat vector infographic of the water cycle with arrows and labels"},
+    {"id": "mountain", "text": "Alpine lake reflecting jagged mountains under dramatic storm clouds, wide angle"}
+  ]
+}

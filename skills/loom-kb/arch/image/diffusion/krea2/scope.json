@@ -1,0 +1,10 @@
+{
+  "scope": "arch/image/diffusion/krea2",
+  "match": {
+    "arch": [
+      "krea2"
+    ]
+  },
+  "owner": "kb",
+  "choices": []
+}
