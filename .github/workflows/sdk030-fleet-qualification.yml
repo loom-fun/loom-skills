@@ -14,7 +14,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - slug: unsloth-Qwen3-VL-4B-Instruct-loom
+          - slug: unsloth-Qwen3-4B-Instruct-2507-loom
             device: strix-halo
             labels: '["self-hosted","devlab-dispatch","strix-halo","Linux"]'
     runs-on: ${{ fromJSON(matrix.labels) }}
