@@ -1,0 +1,101 @@
+name: JoyAI tuned SDK 0.3 Strix Halo qualification
+on:
+  push:
+    branches: [codex/sdk030-joyai-1389-proof]
+    paths: [.github/workflows/sdk030-joyai-1389-qualification.yml]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: [self-hosted, devlab-dispatch, strix-halo, Linux]
+    timeout-minutes: 240
+    env:
+      GH_TOKEN: ${{ github.token }}
+      LLAMACPP_EXTRA_ARGS: --skip-chat-parsing
+      MIN_MEMAVAIL_GB: '64'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: e7b105187a14ef94bcc9f927c99b97f297a54d99
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Pin checkpoint and prior cards
+        shell: bash
+        run: |
+          set -euo pipefail
+          work="$(dirname "$GITHUB_WORKSPACE")/sdk030-joyai-tuned-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          mkdir -p "$work/receipt"
+          printf 'WORK=%s\n' "$work" >> "$GITHUB_ENV"
+          git rev-parse HEAD > "$work/receipt/generator.txt"
+          export QUALIFICATION_WORK="$work"
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          slug = "jdopensource-JoyAI-LLM-Flash-loom"
+          published = f"loom-fun/{slug}@b4787e7927e3863b612b50c13c69207efaa7806e"
+          prior = f"loom-fun-staging/{slug}@1c3c331fcfdb784eabe03231b9a4ee6ba44c11ff"
+          asset = "jdopensource/JoyAI-LLM-Flash-GGUF@f995fe33074210c0ce6707ac087bdb5fa77c60e7"
+          fixed = dict(sdk="0.3.0", serve_args=["--pool_backing=fixed"], memory_bytes="none")
+          staging = dict(name="staging", build={}, build_args=["--prefill", "8192", "--memory-gib", "4096"], **fixed)
+          old = dict(name="fun", card=prior, **fixed)
+          release = dict(name="published", card=published, **fixed)
+          steps = ["func:staging", "ktest:staging", "gates:staging:full", "admit:staging"]
+          for suffix in ("", ":long"):
+              steps.extend(f"perf:{arm}:1{suffix}" for arm in ("fun", "staging", "staging", "fun", "published", "fun", "staging", "published"))
+          steps.extend(f"c4:{arm}" for arm in ("fun", "staging", "published", "staging", "fun"))
+          steps.extend(f"perf:{arm}:1:ctx" for arm in ("fun", "staging", "published"))
+          steps.extend(("llama@rocm.np1:3", "llama@rocm.np1:3:long", "llamac4@rocm.nodraft"))
+          job = dict(name="joyai-tuned", card=published, kit="deepseek2", sdk="0.3.0", llamacpp="b1386", llama_spec="",
+                     variants=[staging, old, release], steps=steps)
+          work = Path(os.environ["QUALIFICATION_WORK"]) / "receipt"
+          (work / "experiment.json").write_text(json.dumps(dict(runner="strix", memory_bytes=47000000000, jobs=[job]), indent=2))
+          (work / "frozen-refs.json").write_text(json.dumps(dict(published=published, staging=prior, asset=asset), indent=2))
+          PY
+      - name: Run the matched full gates and repeated performance rows
+        shell: bash
+        run: bash .github/scripts/devlab_perf.sh "$WORK/receipt/experiment.json" joyai-tuned
+      - name: Save the run and the measured source package
+        if: always() && env.WORK != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          d="$WORK/joyai-tuned"
+          cp -r "$d/out" "$WORK/receipt/"
+          if [ -f "$d/staging/pkg/model.json" ]; then
+            tar -C "$d/staging/pkg" --exclude=parameter --exclude='*.gguf' --exclude=bench -czf "$WORK/receipt/package-without-weights.tar.gz" .
+          fi
+      - name: Require full correctness and long-context evidence
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          out = Path(os.environ["WORK"]) / "receipt/out"
+          results = json.loads((out / "summary.json").read_text())["results"]
+          assert results["func:staging"] == "pass", results
+          assert results["ktest:staging"].startswith("PASS ("), results
+          assert results["gates:staging:full"].startswith("GATES PASS"), results
+          assert results["admit:staging"].startswith("ADMITTED"), results
+          for arm in ("staging", "fun", "published"):
+              rows = [json.loads(line) for line in (out / f"perf_{arm}.jsonl").read_text().splitlines()]
+              for metric in ("decode_tps", "decode_tps_2k", "decode_tps_32k", "decode_tps_16k", "decode_tps_124k", "prefill_long"):
+                  assert any(row.get(metric) for row in rows), (arm, metric)
+              assert "agg_tps" in (out / f"c4_{arm}.txt").read_text(), arm
+              sdk = json.loads((out / f"sdk_{arm}.json").read_text())
+              assert sdk["hrx_loom"] == "0.3.0" and sdk["wheel_sha256"] == "6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f", sdk
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always() && env.WORK != ''
+        with:
+          name: joyai-1389-tuned-strix
+          path: ${{ env.WORK }}/receipt
+          retention-days: 30
+      - name: Release job disk
+        if: always()
+        shell: bash
+        run: |
+          if [ "${WORK:-}" = "$(dirname "$GITHUB_WORKSPACE")/sdk030-joyai-tuned-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" ]; then rm -rf -- "$WORK"; fi
