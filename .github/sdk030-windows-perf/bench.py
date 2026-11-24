@@ -18,6 +18,7 @@ mode = sys.argv[4] if len(sys.argv) == 5 else 'runtime'
 shipping = mode in ('shipping', 'shipping-recovery')
 waiting = mode == 'waiting'
 large_control = mode == '27b'
+wheel_runtime = mode == 'wheel-runtime'
 # Keep the hub cache in the job scope and reuse exact checkpoint downloads across packages.
 os.environ['HF_HOME'] = str(root / 'hf-home')
 os.environ['HF_HUB_DISABLE_SYMLINKS_WARNING'] = '1'
@@ -66,7 +67,8 @@ def setup():
                                        'staged_flash': staged_flash if shipping else None,
                                        'large_control': qwen27 if large_control else None})
     executables = {}
-    for version in (('0.3.0',) if waiting else ('0.2.0', '0.3.0')):
+    versions = ('0.3.0',) if waiting else ('0.2.0', '0.3.0')
+    for version in (() if wheel_runtime else versions):
         archive = download_sdk(version, f'loom-serve-{version}-win_amd64.zip')
         install = root / version
         install.mkdir()
@@ -78,7 +80,7 @@ def setup():
         version_print = subprocess.check_output([executable, '--version'], timeout=30, stderr=subprocess.STDOUT)
         (evidence / f'sdk-{version}.txt').write_bytes(version_print)
     fetchers = {}
-    fetch_versions = ('0.2.0', '0.3.0') if shipping else (('0.3.0',) if waiting else ('0.2.0',))
+    fetch_versions = versions if shipping or waiting or wheel_runtime else ('0.2.0',)
     for version in fetch_versions:
         wheel = download_sdk(version, f'hrx_loom-{version}-py3-none-win_amd64.whl')
         venv = root / f'fetch-venv-{version}'
@@ -86,6 +88,13 @@ def setup():
         subprocess.run([venv / 'Scripts/python.exe', '-m', 'pip', 'install', '--disable-pip-version-check',
                         f'{wheel}[hf]'], check=True, timeout=240)
         fetchers[version] = venv / 'Scripts/loom-fetch.exe'
+        if wheel_runtime:
+            executables[version] = venv / 'Scripts/loom-serve.exe'
+            version_print = subprocess.check_output([executables[version], '--version'], timeout=30,
+                                                    stderr=subprocess.STDOUT)
+            (evidence / f'sdk-{version}.txt').write_bytes(version_print)
+            (evidence / f'sdk-{version}-executable-sha256.txt').write_text(
+                sha_file(executables[version]) + '\n', encoding='utf-8')
     return executables, fetchers
 
 
@@ -326,6 +335,8 @@ if shipping:
     sys.exit(0)
 failed = []
 for label, (repo, revision, preset) in packages.items():
+    if wheel_runtime and label != 'qwen3-0.6b':
+        continue
     try:
         card = fetch(fetchers['0.2.0'], label, repo, revision, preset)
         for release, session in sequence:
