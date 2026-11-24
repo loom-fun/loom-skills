@@ -1,0 +1,51 @@
+{
+  "sdk": "0.3.0",
+  "repeats": 3,
+  "suites": [
+    {
+      "suite": "qwen35-g8-flash-decomposition",
+      "runner": "strix",
+      "dir": "flash_strix",
+      "gen": "flash_strix/gen_bench.py",
+      "gen_variants": [
+        "qwen35",
+        "base",
+        "ngx",
+        "vp",
+        "pf",
+        "pfu",
+        "lazy",
+        "bcast",
+        "nokld",
+        "nostv",
+        "nobar",
+        "noqk",
+        "nopv",
+        "nosm"
+      ],
+      "files": [
+        "bench.loom",
+        "bench_ngx.loom",
+        "bench_vp.loom",
+        "bench_pf.loom",
+        "bench_pfu.loom",
+        "bench_lazy.loom",
+        "bench_bcast.loom",
+        "bench_nokld.loom",
+        "bench_nostv.loom",
+        "bench_nobar.loom",
+        "bench_noqk.loom",
+        "bench_nopv.loom",
+        "bench_nosm.loom"
+      ],
+      "tests": [
+        "test.loom"
+      ],
+      "args": [
+        "--measure=dispatch_complete",
+        "--batch-size=4",
+        "--profile-final-batch=true"
+      ]
+    }
+  ]
+}
