@@ -28,9 +28,9 @@
     ]
    },
    "set": {
-    "decode.attn.kv_once.d256": true
+    "decode.attn.kv_once.d256": false
    },
-   "evidence": "The drafted-qwen35moe rule (decode.attn.kv_once.d256=false, arch/llm/moe/qwen35moe) fixes decode_32k on both GPUs but costs this model R9700 decode_2k: 0.930 (run 43636425163) and 0.895 (run 43652305001, band 0.04) vs the staging package before the rule, while decode_32k gained +20..23 %. The gfx12 twin keeps the K/V-once body (the pre-rule R9700 programs, whose card numbers stay valid); the gfx11 kernel keeps the rule (Strix decode_32k 1.04 vs loom-fun, run 43631671557)."
+   "evidence": "SDK 0.3.0 R9700, DevLab 45297807464: matched 32k decode 83.16 to 121.18 tok/s with split attention (frozen 0.2.0 baseline 121.92); 2k 160.83 to 161.24 (baseline 161.05). Eight full gates and 93 kernel checks passed. The 32k frozen-source depth-0 profile measured g_attention_split_rdna4 at 427.80 ms on 0.2.0 and 1109.92 ms on 0.3.0 for 1290 launches. The gfx11 rule already uses split attention."
   }
  ]
 }
