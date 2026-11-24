@@ -12,11 +12,12 @@ usage: ctx_admit.py PKG LOOM_URL [--out FILE] [--wait 120] [--tokens N] [--compl
 Prints "ADMITTED n tokens (...)" or "REFUSED n tokens: HTTP ...". Exit status 1 on a refusal or no answer.
 """
 import argparse
-from contextlib import suppress
 from http.client import HTTPConnection
 import json
 import os
+import select
 import socket
+import struct
 import sys
 import threading
 import time
@@ -53,16 +54,13 @@ def main():
     endpoint = urlsplit(url)
     loopback = endpoint.hostname in ("127.0.0.1", "::1", "localhost")
     proxy = requests.utils.select_proxy(url, requests.utils.get_environ_proxies(url))
-    local_http = endpoint.scheme == "http" and loopback and endpoint.username is None and proxy is None
+    reset_local = (sys.platform == "linux" and a.complete is None and endpoint.scheme == "http" and loopback
+                   and endpoint.username is None and proxy is None and requests.utils.get_netrc_auth(url) is None)
     stopped = threading.Event()
     got = {}
 
     def cancel():
         stopped.set()
-        transport = got.get("transport")
-        if transport is not None:
-            with suppress(OSError):
-                transport.shutdown(socket.SHUT_RDWR)
         response = got.get("response")
         if response is not None:
             response.close()
@@ -74,7 +72,7 @@ def main():
                 "stream": True, **extra}
             if stopped.is_set():
                 return
-            if not local_http:
+            if not reset_local:
                 # Requests retains its configured proxies, credentials and certificate trust for remote endpoints.
                 r = requests.post(url, stream=True, timeout=a.wait + 600, json=body)
                 got["response"] = r
@@ -91,23 +89,33 @@ def main():
             conn = HTTPConnection(endpoint.hostname, endpoint.port, timeout=a.wait)
             try:
                 conn.connect()
-                # The service can register active prefill before sending any HTTP headers. Keep
-                # the transport so the probe can close it even while getresponse() is blocked.
-                got["transport"] = conn.sock
                 if stopped.is_set():
                     return
-                conn.sock.settimeout(a.wait + 600)
                 conn.request("POST", endpoint.path, json.dumps(body).encode(), {"Content-Type": "application/json"})
-                with conn.getresponse() as reply:
-                    if reply.status != 200:
-                        got["body"] = reply.read(200).decode("utf-8", "replace")
-                    got["status"] = reply.status
-                    if reply.status == 200 and a.complete is not None:
-                        got["text"] = "".join(line.decode("utf-8", "replace") for line in reply if line.strip())
-                        got["finished"] = time.time()
-                    elif reply.status == 200:
-                        # Keep the streaming connection open until the caller shuts it down.
-                        reply.read()
+                # Loom accepts a TCP FIN as a half-close. An abortive close signals that a local
+                # probe no longer needs the reply, so the server can retire active prefill.
+                conn.sock.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
+                # The worker owns the socket and does not open a buffered response reader until
+                # it has complete headers. Cancellation can then close the connection even if
+                # the server registers the request before sending any headers.
+                while not stopped.is_set():
+                    ready, _, _ = select.select([conn.sock], [], [], 0.05)
+                    if not ready:
+                        continue
+                    headers = conn.sock.recv(65536, socket.MSG_PEEK)
+                    if not headers:
+                        got["error"] = "server closed before sending response headers"
+                        return
+                    if b"\r\n\r\n" not in headers:
+                        stopped.wait(0.05)
+                        continue
+                    with conn.getresponse() as reply:
+                        if reply.status != 200:
+                            got["body"] = reply.read(200).decode("utf-8", "replace")
+                        got["status"] = reply.status
+                        if reply.status == 200:
+                            stopped.wait()
+                    return
             finally:
                 conn.close()
         except Exception as e:  # the connection closed below
@@ -130,8 +138,6 @@ def main():
         while "finished" not in got and "error" not in got and time.time() - t0 < a.complete:
             time.sleep(2)
         ok = "finished" in got and '"finish_reason"' in got.get("text", "") and "error" not in got
-        if not ok and local_http:
-            cancel()
         msg = (f"COMPLETED {n} tokens of a {context}-token context in {got['finished'] - t0:.0f}s" if ok else
                f"NOT COMPLETED {n} tokens of a {context}-token context after {time.time() - t0:.0f}s: {got.get('error') or got.get('text', '')[:200] or 'no answer'}")
         print(msg, flush=True)
@@ -141,7 +147,7 @@ def main():
     # Cancel: closing the connection makes the server drop the request; then it must go idle again (no long prefill).
     idle = True
     cancel()
-    if local_http:
+    if reset_local:
         sender.join(timeout=1)
     if admitted:
         t1 = time.time()

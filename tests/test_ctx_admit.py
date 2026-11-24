@@ -39,6 +39,8 @@ class ContextAdmissionTest(unittest.TestCase):
                 try:
                     if not self.rfile.read(1):
                         disconnected.set()
+                except ConnectionResetError:
+                    disconnected.set()
                 finally:
                     active.clear()
 
