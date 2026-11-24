@@ -1,4 +1,4 @@
-name: DevLab Qwen3.6 35B Radeon attention ablation
+name: DevLab Qwen3.6 35B attention fix qualification
 on:
   push:
     branches: [codex/sdk030-qwen36-r9700-recovery]
@@ -7,18 +7,26 @@ permissions:
   contents: read
 jobs:
   qwen36:
-    runs-on: [self-hosted, devlab-dispatch, radeon-r9700]
-    timeout-minutes: 125
+    name: ${{ matrix.device }} Qwen3.6 35B
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - device: radeon-r9700
+            labels: '["self-hosted","devlab-dispatch","radeon-r9700"]'
+          - device: strix-halo
+            labels: '["self-hosted","devlab-dispatch","strix-halo","Linux"]'
+    runs-on: ${{ fromJSON(matrix.labels) }}
+    timeout-minutes: 180
     env:
       SLUG: ggml-org-Qwen3.6-35B-A3B-loom
-      SDK_GPU_KEY: radeon-r9700
+      SDK_GPU_KEY: ${{ matrix.device }}
       POWER_LOG: '1'
-      LOOM_PROFILE_TOKENS: '128'
-      LOOM_PROFILE_PROCESS_IO: '1'
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
         with:
+          fetch-depth: 0
           persist-credentials: false
       - name: Prepare frozen and generated variants
         shell: bash
@@ -28,10 +36,14 @@ jobs:
           export WORK="$work"
           echo "WORK=$WORK" >> "$GITHUB_ENV"
           mkdir -p "$WORK/receipt"
+          git rev-parse HEAD > "$WORK/receipt/generator-revision.txt"
+          python3 skills/loom-kb/kb.py lint
+          python3 fleet/scope_lint.py --base ed6c623eb457137123f2dfe55454b8943ab17a08 --head b4347a68799c83ddb7f44cc5345d9f9da692a687 --local --no-impact --scope-block 'kind: targeted
+          scopes: model/ggml-org-Qwen3.6-35B-A3B-loom, arch/llm/moe/qwen35moe, device/rdna4
+          kernels: g_attention_split'
           python3 fleet/regen.py plan --base codex/sdk030-migration --mode sdk-loom --new-sdk 0.3.0 --gates full --device "$SDK_GPU_KEY" --batch 1 --work "$WORK/plan" --state "$WORK/receipt/state.json" "$SLUG"
-          python3 .github/scripts/ab_jobs.py --device "$SDK_GPU_KEY" --gates full --sdk-ab --old-sdk card --new-sdk 0.3.0 --refs "$WORK/plan/refs_$SDK_GPU_KEY.json" "$SLUG" > "$WORK/receipt/experiment.json"
+          python3 .github/scripts/ab_jobs.py --device "$SDK_GPU_KEY" --reps 6 --gates full --sdk-ab --old-sdk card --new-sdk 0.3.0 --refs "$WORK/plan/refs_$SDK_GPU_KEY.json" "$SLUG" > "$WORK/receipt/experiment.json"
           python3 - <<'PY' >> "$GITHUB_ENV"
-          import copy
           import json
           import os
           from pathlib import Path
@@ -43,18 +55,10 @@ jobs:
           by_name = {variant['name']: variant for variant in job['variants']}
           assert by_name['fun']['sdk'] == 'card' and by_name['fun']['card'] == job['card']
           assert by_name['staging']['sdk'] == '0.3.0' and 'card' not in by_name['staging']
-          pinnd = copy.deepcopy(by_name['funnd'])
-          pinnd.update(name='pinnd', sdk='0.3.0')
-          split = copy.deepcopy(by_name['staging'])
-          split.update(name='split', config={'choices': {'decode.attn.kv_once.d256': False}})
-          job['variants'] = [by_name[name] for name in ('fun', 'staging', 'funnd')] + [split, pinnd]
-          blocks = [('fun', 'staging', 'split'), ('split', 'fun', 'staging'), ('staging', 'split', 'fun')]
-          job['steps'] = [f'qwen36decode:{arm}:{index}' for index, block in enumerate(blocks) for arm in block]
-          job['steps'] += ['profile:funnd:dec32', 'profile:pinnd:dec32', 'func:split', 'ktest:split', 'gates:split:full']
-          path.write_text(json.dumps(plan, indent=2) + '\n')
+          assert not by_name['staging'].get('config'), by_name['staging']
           print('JOB=' + job['name'])
           PY
-      - name: Build the generated variant and run the Radeon comparisons
+      - name: Build the repaired variant and run the device comparison
         run: bash .github/scripts/devlab_perf.sh "$WORK/receipt/experiment.json" "$JOB"
       - name: Save the measured source package and evidence
         if: always() && env.JOB != ''
@@ -63,49 +67,41 @@ jobs:
           set -euo pipefail
           d="$WORK/$JOB"
           cp -r "$d/out" "$WORK/receipt/"
-          if [ -f "$d/split/pkg/model.json" ]; then
-            tar -C "$d/split/pkg" --exclude=parameter --exclude='*.gguf' --exclude='*.safetensors' --exclude=bench -czf "$WORK/receipt/split-control-without-weights.tar.gz" .
+          if [ -f "$d/staging/pkg/model.json" ]; then
+            tar -C "$d/staging/pkg" --exclude=parameter --exclude='*.gguf' --exclude='*.safetensors' --exclude=bench -czf "$WORK/receipt/package-without-weights.tar.gz" .
           fi
       - name: Verify the exact variant identities and completed comparisons
         shell: bash
         run: |
+          set -euo pipefail
+          python3 .github/scripts/strix_ab_compare.py "$WORK/receipt/out" --fun-info "$WORK/receipt/out/info_card.json" --gpu "$SDK_GPU_KEY" --json "$WORK/receipt/comparison.json"
           python3 - <<'PY'
           import json
           import os
           from pathlib import Path
-          from statistics import median
 
-          out = Path(os.environ['WORK']) / 'receipt/out'
+          receipt = Path(os.environ['WORK']) / 'receipt'
+          out = receipt / 'out'
           old = (out / 'programs_sha256_fun.txt').read_text().strip()
           new = (out / 'programs_sha256_staging.txt').read_text().strip()
-          pin = (out / 'programs_sha256_pinnd.txt').read_text().strip()
-          split = (out / 'programs_sha256_split.txt').read_text().strip()
           expected_old = '014ae6cd00d911b8c6e2c984661ed0b390aa78185fae433c502bd36ee1157951'
-          expected_new = 'fbf1f430ca8e42a28ee0e85f9f8246d45dc89e22a5e90308376b9da8b4bd3a2c'
-          assert old == pin == expected_old and new == expected_new and split not in (old, new), (old, new, pin, split)
+          expected_new = '367fe64b24bd638729d365c201eeb3e16cb5b099561d764dcfed7138fa9569f6'
+          assert old == expected_old and new == expected_new, (old, new)
           sdk_versions = [json.loads((out / f'sdk_{arm}.json').read_text())['hrx_loom']
-                          for arm in ('fun', 'pinnd', 'staging', 'split')]
-          assert sdk_versions == ['0.2.0', '0.3.0', '0.3.0', '0.3.0']
-          results = json.loads((out / 'summary.json').read_text())['results']
-          summary = {}
-          for arm in ('fun', 'staging', 'split'):
-              captures = [json.loads((out / f'matched_{arm}-{i}.json').read_text()) for i in range(3)]
-              summary[arm] = {context: [median(sample[context]['decode_tps'] for sample in capture['samples'])
-                                        for capture in captures] for context in ('2k', '32k')}
-              for capture in captures:
-                  control = json.loads((out / f"matched_fun-{capture['session']}.json").read_text())
-                  for current, baseline in zip(capture['samples'], control['samples'], strict=True):
-                      for context in ('2k', '32k'):
-                          assert current[context]['prompt_sha256'] == baseline[context]['prompt_sha256']
-          summary['functions_and_gates'] = {key: results.get(key) for key in ('func:split', 'ktest:split', 'gates:split:full')}
-          summary['profiles'] = {arm: (out / f'profile_{arm}_dec32.json').is_file() for arm in ('funnd', 'pinnd')}
-          (out / 'recovery-summary.json').write_text(json.dumps(summary, indent=2) + '\n')
-          print(summary)
+                          for arm in ('fun', 'staging')]
+          assert sdk_versions == ['0.2.0', '0.3.0']
+          comparison = json.loads((receipt / 'comparison.json').read_text())
+          assert len(comparison['metrics']) == 9
+          assert not comparison['degraded_runner'], comparison['degraded_runner']
+          assert set(comparison['gate_status'].values()) == {'PASS'}, comparison['gate_status']
+          assert comparison['text']['status'] == 'MATCH', comparison['text']
+          failures = {name: row for name, row in comparison['metrics'].items() if row['status'] != 'PASS'}
+          assert not failures, failures
           PY
       - uses: actions/upload-artifact@v4
         if: always() && env.WORK != ''
         with:
-          name: sdk030-qwen36-r9700-attention-ablation
+          name: sdk030-${{ matrix.device }}-ggml-org-Qwen3.6-35B-A3B-loom-repaired
           path: ${{ env.WORK }}/receipt
           if-no-files-found: error
           retention-days: 30
