@@ -106,7 +106,7 @@ sharing, a gathered table counted in full, or a wrong expert count. Fix that bef
 setting targets.
 
 **Devices.** `--device` selects the hardware preset (`roofline.DEVICES`); `--bw` / `--flops` still override it (an override is labelled `override`).
-llama.cpp's MMQ prefill uses int8 WMMA (twice the f16 rate), so on prefill it can approach or pass an f16 ceiling. `make_info.py roofline --device` takes the same names and records the preset's name on the card.
+llama.cpp's MMQ prefill uses int8 WMMA: on gfx11 (Strix Halo, RDNA 3/3.5) iu8 WMMA runs at the SAME rate as f16 (measured, DevLab kbench run 44642983266), so the f16 ceiling holds for every engine there; on gfx12 (R9700) iu8 is twice the f16 rate, so llama.cpp's prefill can approach or pass an f16 ceiling. `make_info.py roofline --device` takes the same names and records the preset's name on the card.
 
 | `--device` | GPU | bw (streaming) | flops (dense f16 WMMA) |
 |---|---|---|---|
