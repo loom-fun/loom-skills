@@ -1,0 +1,128 @@
+name: Ornith 1.5 122B grouped Q4_K numerical oracle proof
+on:
+  push:
+    branches: [codex/sdk030-ornith-122b-oracle]
+    paths: [.github/workflows/sdk030-ornith-122b-oracle.yml]
+permissions:
+  contents: read
+jobs:
+  verify:
+    name: ${{ matrix.device }} ${{ matrix.slug }}
+    strategy:
+      max-parallel: 2
+      fail-fast: false
+      matrix:
+        include:
+          - slug: bartowski-Ornith-1.5-122B-loom
+            device: strix-halo
+            labels: '["self-hosted","devlab-dispatch","strix-halo","Linux"]'
+    runs-on: ${{ fromJSON(matrix.labels) }}
+    timeout-minutes: 240
+    env:
+      SLUG: ${{ matrix.slug }}
+      SDK_GPU_KEY: ${{ matrix.device }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 3adfe7b7b6e68f753042e9f89b318e29a6088579
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Plan from the accepted production revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          export WORK="$(dirname "$GITHUB_WORKSPACE")/sdk030-wave-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$SDK_GPU_KEY-$SLUG"
+          mkdir -p "$WORK/receipt"
+          echo "WORK=$WORK" >> "$GITHUB_ENV"
+          python3 fleet/regen.py plan --base 4c28b772a8f22f121b3925788dae14b26c58511b --mode sdk-loom --new-sdk 0.3.0 --gates full --device "$SDK_GPU_KEY" --batch 1 --work "$WORK/plan" --state "$WORK/receipt/state.json" "$SLUG"
+          python3 .github/scripts/ab_jobs.py --device "$SDK_GPU_KEY" --gates full --sdk-ab --old-sdk card --new-sdk 0.3.0 --refs "$WORK/plan/refs_$SDK_GPU_KEY.json" "$SLUG" > "$WORK/receipt/experiment.json"
+          python3 - <<'PY' >> "$GITHUB_ENV"
+          import json,os
+          from pathlib import Path
+          work=Path(os.environ['WORK'])
+          plan=json.loads((work/'receipt/experiment.json').read_text())
+          frozen=json.loads(Path('skills/loom-migrate/versions/v0.2.0-to-v0.3.0-production.json').read_text())
+          job,=plan['jobs']
+          repo='loom-fun/'+os.environ['SLUG']
+          assert job['card']==repo+'@'+frozen[repo],job['card']
+          assert frozen[repo]=='549484e582abe6c5014b27d76a82fc5f63c7c45f',frozen[repo]
+          assert job.get('sdk',plan.get('sdk'))=='0.3.0'
+          variants={v['name']:v for v in job['variants']}
+          assert variants['fun']['sdk']=='card' and variants['fun']['card']==job['card']
+          assert variants['staging']['sdk']=='0.3.0' and 'card' not in variants['staging']
+          job['steps']=['ktest:staging','ktest:fun']
+          (work/'receipt/experiment.json').write_text(json.dumps(plan, indent=2))
+          print('JOB='+job['name'])
+          PY
+      - name: Use the grouped kernel's F16 numerical oracle
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+
+          path = Path("skills/loom-port-llm/starter/make_kernel_tests.py")
+          body = path.read_text(encoding="utf-8")
+          old = '''    def exp_deq(name, e):
+                  tt = T[name]; return dequantize(np.asarray(tt.data)[e], tt.tensor_type).reshape(int(tt.shape[1]), int(tt.shape[0])).astype(np.float64)
+          '''
+          new = '''    def exp_deq(name, e):
+                  tensor = T[name]
+                  data = np.asarray(tensor.data)[e]
+                  shape = int(tensor.shape[1]), int(tensor.shape[0])
+                  if tensor.tensor_type.name != "Q4_K":
+                      return dequantize(data, tensor.tensor_type).reshape(shape).astype(np.float64)
+
+                  # The grouped Q4_K WMMA kernels round scale and minimum before the fused F16 multiply-add.
+                  # The ordinary GGUF dequantizer computes in F32 and gives a different oracle under cancellation.
+                  from gguf.quants import Q4_K
+
+                  blocks = np.ascontiguousarray(data).reshape(-1, 144)
+                  scale = blocks[:, :2].copy().view("<f2").astype(np.float32)
+                  minimum = blocks[:, 2:4].copy().view("<f2").astype(np.float32)
+                  scale_code, minimum_code = Q4_K.get_scale_min(blocks[:, 4:16])
+                  scale = (scale * scale_code).astype(np.float16).astype(np.float64)
+                  minimum = (minimum * minimum_code).astype(np.float16).astype(np.float64)
+                  packed = blocks[:, 16:].reshape(-1, 4, 32)
+                  codes = np.empty((len(blocks), 8, 32), dtype=np.uint8)
+                  codes[:, 0::2] = packed & 15
+                  codes[:, 1::2] = packed >> 4
+                  weights = codes * scale[:, :, None] - minimum[:, :, None]
+                  return weights.astype(np.float16).reshape(shape).astype(np.float64)
+          '''
+          if body.count(old) != 1:
+              raise ValueError("the grouped test oracle differs from the reviewed source")
+          path.write_text(body.replace(old, new), encoding="utf-8")
+          PY
+          git diff --check
+          git diff -- skills/loom-port-llm/starter/make_kernel_tests.py | tee "$WORK/receipt/oracle.patch"
+      - name: Check both immutable programs with the exact-arithmetic fixture
+        run: bash .github/scripts/devlab_perf.sh "$WORK/receipt/experiment.json" "$JOB"
+      - name: Save the matched kernel evidence
+        if: always() && env.JOB != ''
+        shell: bash
+        run: cp -r "$WORK/$JOB/out" "$WORK/receipt/"
+      - name: Verify the corrected case and exact programs
+        shell: bash
+        run: |
+          set -euo pipefail
+          out="$WORK/receipt/out"
+          test "$(cat "$out/programs_sha256_staging.txt")" = 'a8da3018af8e8c67168b4028fe399750692672ad6bb07352260251358ee33f3f'
+          test "$(cat "$out/programs_sha256_fun.txt")" = '35c52a2e72e9d46a9d3bb71ef8615b71111acf009677789d7c8177113ce1edd9'
+          grep -x 'PASS moe_gemm_12' "$out/ktest_fun.log"
+          grep -x 'PASS moe_gemm_12' "$out/ktest_staging.log"
+          grep -F '"ktest:staging": "PASS (121/121 passed; 2 skipped)"' "$out/summary.json"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sdk030-${{ matrix.device }}-${{ matrix.slug }}
+          path: ${{ env.WORK }}/receipt
+          retention-days: 30
+      - name: Release job disk
+        if: always()
+        shell: bash
+        run: |
+          if [ "${WORK:-}" = "$(dirname "$GITHUB_WORKSPACE")/sdk030-wave-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$SDK_GPU_KEY-$SLUG" ]; then rm -rf -- "$WORK"; fi
+
