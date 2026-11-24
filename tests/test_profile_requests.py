@@ -26,7 +26,8 @@ class ProfileRequests(unittest.TestCase):
             if kwargs.get('on_token'):
                 for arrival in (1.0, 1.02, 4.02):
                     kwargs['on_token'](arrival)
-            return dict(status=200, prompt_tokens=33406 if tokens == 128 else 32, tokens=tokens, ttft=.2,
+            prompt_tokens = {128: 33406, 256: 2218}.get(tokens, 32)
+            return dict(status=200, prompt_tokens=prompt_tokens, tokens=tokens, ttft=.2,
                         decode_tps=40, total=8, text='fixture', finish='length')
 
         counters = iter({'draft_proposed_tokens': value} for value in (3, 9, 15))
@@ -90,6 +91,14 @@ class ProfileRequests(unittest.TestCase):
         self.assertEqual(request['reply_sha256'], hashlib.sha256(b'fixture').hexdigest())
         self.assertEqual(request['counters'], dict(completed_epochs=99, prefill_tokens=33406,
                                                   decode_tokens=128, draft_accepted_inputs=62))
+
+    def test_2k_replay_matches_standard_short_prompt_and_output_cap(self):
+        nonce = '1795473830.4460852'
+        calls, result = self.run_profile(scenario=f'replay2k-{nonce}')
+        prompt = f'[{nonce} ctx] Write a long, detailed essay discussing this documentation.\n\ndoc'
+        self.assertEqual(calls[1], (prompt, 256, 300.0))
+        request, = result['requests']
+        self.assertEqual(request['prompt_sha256'], hashlib.sha256(prompt.encode()).hexdigest())
 
 
 @unittest.skipIf(os.name == 'nt', 'DevLab Bash runs on Linux')
