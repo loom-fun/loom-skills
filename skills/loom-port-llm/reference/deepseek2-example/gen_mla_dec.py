@@ -39,6 +39,7 @@ NPF = int(os.environ.get("MLA_DEC_PFN", "9"))   # PF 2: score chunks of the next
 # 1 = part_acc[token][split][512][head] (16 lanes = 16 heads write 64 contiguous bytes per row); g_mla_dcombine follows
 PL = int(os.environ.get("MLA_DEC_PL", "1"))
 HG = int(os.environ.get("MLA_DEC_HG", "1"))
+PH = int(os.environ.get("MLA_DEC_PH", "0"))   # 1 (PL 1, CU > 1): partial O normalized by its own l and stored as f16 (half the partial traffic)
 STI = int(os.environ.get("MLA_DEC_STI", "1" if HG == 2 else "0"))   # V^T staging of each chunk right after its score MMA   # 2: the 32 heads split over 2 workgroups (twice the workgroups, half the serial chain each)
 CU = int(os.environ.get("MLA_DEC_CU", "4"))   # g_mla_dcombine (PL 1): splits whose loads are issued together
 ABL = set(x for x in os.environ.get("MLA_DEC_ABL", "").split(",") if x)
@@ -359,7 +360,25 @@ kernel.def export("g_mla_dsplit") @g_mla_dsplit(%tokens: index) {{
 """) + f"""    %four = index.constant 4 : offset
     %acc_off = index.scale %acc_first, %four : index, offset -> offset
     %acc_view = buffer.view %part_acc[%acc_off] : buffer -> view<128x16xf32, %acc_layout>""")
-    for d in range(8 if "nopart" not in ABL else 0):
+    if PH and "nopart" not in ABL:
+        assert PL == 1
+        a(f"""    %ph_one = scalar.constant 1.0 : f32
+    %ph_l_gt = scalar.cmpf ogt, %l_final, %zero_f : f32
+    %ph_linv = scalar.divf %ph_one, %l_final : f32
+    %ph_inv = scf.select %ph_l_gt, %ph_linv, %zero_f : f32
+    %ph_invv = vector.splat %ph_inv : vector<8xf32>
+    %ph_view = buffer.view %part_acc[%zero] : buffer -> view<[%tokens]x{SMAX}x{KL}x{QH}xf16>""")
+        for d in range(8):
+            a(f"""    %on{d} = vector.mulf %o{d}, %ph_invv : vector<8xf32>
+    %oh{d} = vector.fptrunc %on{d} : vector<8xf32> to vector<8xf16>""")
+            for i in range(8):
+                a(f"""    %phe{d}_{i} = vector.extract %oh{d}[%ex{i}] : vector<8xf16> -> f16
+    %phr{d}_{i}_c = index.constant {16 * d + 2 * i} : index
+    %phr{d}_{i}_b = index.add %vbase, %phr{d}_{i}_c : index
+    %phr{d}_{i}_v = index.add %phr{d}_{i}_b, %lane_half : index
+    %phr{d}_{i} = index.assume %phr{d}_{i}_v [range(%phr{d}_{i}_v, 0, {KL - 1})] : index
+    view.store %phe{d}_{i}, %ph_view[%token, %split, %phr{d}_{i}, %head] : f16, view<[%tokens]x{SMAX}x{KL}x{QH}xf16>""")
+    for d in range(8 if "nopart" not in ABL and not PH else 0):
         a(f"""    vector.fragment.store<result> %o{d}, %acc_view[%vd{d}_o, %c0] shape [%c16, %c16] : vector<8xf32>, view<128x16xf32, %acc_layout>""")
     a(f"""    %q0 = index.cmp eq, %qd, %c0 : index
     %lo_half = index.cmp eq, %lane_half, %c0 : index
@@ -466,7 +485,7 @@ def combine_loops_unrolled(QH, KL, U):
     """the two split loops of combine_pl1, U splits per iteration (loads in flight together; slots past s_eff are read
     in bounds and masked)"""
     ML = f"view<[%tokens]x{SMAX}x{QH}x2xf32>"
-    AV = f"view<[%tokens]x{SMAX}x{KL}x{QH}xf32>"
+    AV = f"view<[%tokens]x{SMAX}x{KL}x{QH}x{'f16' if PH else 'f32'}>"
     t = [f"""    %cU = index.constant {U} : index
     %cUl = index.constant {U - 1} : index
     %smax_l = index.constant {SMAX - 1} : index
@@ -498,7 +517,9 @@ def combine_loops_unrolled(QH, KL, U):
       %bi{i} = index.assume %bi{i}_m [range(%bi{i}_m, 0, {SMAX - 1})] : index
       %ms{i} = view.load %ml_view[%token, %bi{i}, %head, 0] : {ML} -> f32
       %lr{i} = view.load %ml_view[%token, %bi{i}, %head, 1] : {ML} -> f32""" + "".join(f"""
-      %pr{i}_{k} = view.load %acc_view[%token, %bi{i}, %dm{k}, %head] : {AV} -> f32""" for k in range(4)))
+      %pr{i}_{k} = view.load %acc_view[%token, %bi{i}, %dm{k}, %head] : {AV} -> f32""" if not PH else f"""
+      %prh{i}_{k} = view.load %acc_view[%token, %bi{i}, %dm{k}, %head] : {AV} -> f16
+      %pr{i}_{k} = scalar.extf %prh{i}_{k} : f16 to f32""" for k in range(4)))
     d, acc = "%d", "%acc"
     for i in range(U):
         t.append(f"""      %sh{i} = scalar.subf %ms{i}, %maximum : f32
@@ -509,7 +530,7 @@ def combine_loops_unrolled(QH, KL, U):
       %dn{i} = scalar.addf {d}, %wl{i} : f32""" + "".join(f"""
       %pz{i}_{k} = scf.select %vi{i}, %pr{i}_{k}, %zero_f : f32""" for k in range(4)) + f"""
       %part{i} = vector.from_elements %pz{i}_0, %pz{i}_1, %pz{i}_2, %pz{i}_3 : vector<4xf32>
-      %wv{i} = vector.splat %w{i} : vector<4xf32>
+      %wv{i} = vector.splat {"%wl" if PH else "%w"}{i} : vector<4xf32>
       %an{i} = vector.fmaf %wv{i}, %part{i}, {acc} : vector<4xf32>""")
         d, acc = f"%dn{i}", f"%an{i}"
     t.append(f"""      scf.yield {d}, {acc} : f32, vector<4xf32>
@@ -568,7 +589,7 @@ kernel.def export("g_mla_dcombine") @g_mla_dcombine(%tokens: index) {{
     %nblk = index.assume %nblk_value [range(%nblk_value, 1, 16384)] : index
     %s_eff = func.call @g_mla_dsplits(%nblk) : (index) -> (index)
     %ml_view = buffer.view %part_ml[%zero] : buffer -> view<[%tokens]x{SMAX}x{QH}x2xf32>
-    %acc_view = buffer.view %part_acc[%zero] : buffer -> view<[%tokens]x{SMAX}x{KL}x{QH}xf32>
+    %acc_view = buffer.view %part_acc[%zero] : buffer -> view<[%tokens]x{SMAX}x{KL}x{QH}x{'f16' if PH else 'f32'}>
 """ + (combine_loops_unrolled(QH, KL, CU) if CU > 1 else f"""    %maximum = scf.for %s = [%c0 to %s_eff step %c1](%mx = %neg_big : f32) -> (f32) {{
       %bs = index.assume %s [range(%s, 0, {SMAX - 1})] : index
       %ms = view.load %ml_view[%token, %bs, %head, 0] : view<[%tokens]x{SMAX}x{QH}x2xf32> -> f32

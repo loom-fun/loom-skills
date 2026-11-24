@@ -395,13 +395,27 @@
       "gen": "mla_dec/gen_bench.py",
       "gen_variants": [
         "wmma",
-        "hg2",
-        "sti"
+        "wmma+xempty",
+        "ph1",
+        "ph1+xempty",
+        "b8",
+        "b8+xempty",
+        "b16",
+        "ph1+b8",
+        "s16+hg2",
+        "s16+hg2+xempty"
       ],
       "files": [
         "bench_wmma.loom",
-        "bench_hg2.loom",
-        "bench_sti.loom"
+        "bench_wmma+xempty.loom",
+        "bench_ph1.loom",
+        "bench_ph1+xempty.loom",
+        "bench_b8.loom",
+        "bench_b8+xempty.loom",
+        "bench_b16.loom",
+        "bench_ph1+b8.loom",
+        "bench_s16+hg2.loom",
+        "bench_s16+hg2+xempty.loom"
       ],
       "tests": [
         "test.loom"
@@ -413,7 +427,7 @@
         "--profile-final-batch=true"
       ],
       "device": "amdgpu://?completion_spin_ns=4294967295",
-      "repeats": 5,
+      "repeats": 4,
       "case_timing": true
     }
   ]
