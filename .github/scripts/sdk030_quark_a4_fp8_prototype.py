@@ -92,11 +92,24 @@ def _quantize_scaled_rows(kernel):
     return kernel[:start] + code + kernel[end:]
 
 
-def _cover_skinny_fallback(text, layers):
+def _cover_skinny_fallback(text, layers, *, split_gdn):
     advance = re.search(r"^command\.def public target\(@device\) @llm_advance\(", text, re.M)
     assert advance
     start = advance.start()
     end = text.index("\n}\n", start) + 3
+    if split_gdn:
+        command, count = re.subn(
+            r"(scf\.if %gemm \{\n[ ]*kernel\.launch )@g_quant_q8(\[%t, %nH\]\(%t, %nH, %h, %h16q\))",
+            r"\1@g_quark_a4_i8\2", text[start:end],
+        )
+        projections = re.compile(r"^([ ]*)kernel\.launch @g_mv_mxfp4s_k5120_t16_q8\[%nHV, %t\]\([^\n]*(%galpha|%gbeta)\) : [^\n]+$", re.M)
+        command, rounds = projections.subn(
+            lambda m: (f"{m[0]}\n{m[1]}kernel.launch @g_quark_round_bf16[%t, %nHV]"
+                       f"(%t, %nHV, {m[2]}) : [index, index](index, index, buffer)"), command,
+        )
+        assert (count, rounds) == (layers, 2 * layers)
+        library = _kernel("g_quark_a4_i8", OPERAND_I8) + _round_bf16_kernel()
+        return text[:start] + library + command + text[end:]
     pattern = re.compile(
         r"^([ ]*)(kernel\.launch @g_quant_q8\[%t, %nH\]\(%t, %nH, %h, %h16q\) : [^\n]+)\n"
         r"(\1kernel\.launch @g_mv_mxfp4s_k5120_t16_q8\[%nHV, %t\]\([^\n]*%galpha\) : [^\n]+\n"
@@ -118,7 +131,7 @@ def _cover_skinny_fallback(text, layers):
     return text[:start] + library + changed + text[end:]
 
 
-def apply(text, config):
+def apply(text, config, *, split_gdn=False):
     """Radeon-only experiment. Keep the existing group schedules and select the serving variant on DevLab."""
     spec = config["quark"]["global_quant_config"]["input_tensors"]
     assert config["model_id"] == "qwen3.8-27b-mxfp4"
@@ -129,9 +142,15 @@ def apply(text, config):
         _round_fragment_stores)
     text, swiglu_count = _rewrite_kernel(text, "g_gemm_mxfp4s_swiglu_f8_m256_rdna4", _round_swiglu_inputs)
     text, row_count = _rewrite_kernel(text, "g_row_scale_f16_live_lv_f8_rdna4", _quantize_scaled_rows)
-    text, norm_count = _rewrite_kernel(text, "g_post_add_norm_rs_live_lv_f8_rdna4", _quantize_norm_output)
-    assert (store_count, swiglu_count, row_count, norm_count) == (6, 1, 1, 1)
-    text = _cover_skinny_fallback(text, len(config["recurrent_layers"]))
+    if split_gdn:
+        assert "@g_post_add_norm_rs_live_lv_f8_rdna4(" not in text
+        assert "@g_ab_gemm_mxfp4s_store_pair_f8_m256_rdna4(" not in text
+        expected_stores = 5
+    else:
+        text, _ = _rewrite_kernel(text, "g_post_add_norm_rs_live_lv_f8_rdna4", _quantize_norm_output)
+        expected_stores = 6
+    assert (store_count, swiglu_count, row_count) == (expected_stores, 1, 1)
+    text = _cover_skinny_fallback(text, len(config["recurrent_layers"]), split_gdn=split_gdn)
     first_kernel = text.index("\nkernel.def ") + 1
-    print("Quark FP8 candidate fused A4 packing in two producers and BF16 rounding in seven GEMM kernels")
+    print(f"Quark FP8 candidate fused A4 packing and BF16 rounding in {store_count + swiglu_count} GEMM kernels")
     return text[:first_kernel] + activation_codes() + text[first_kernel:]
