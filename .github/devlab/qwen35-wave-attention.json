@@ -1,0 +1,33 @@
+{
+  "sdk": "0.3.0",
+  "repeats": 3,
+  "suites": [
+    {
+      "suite": "qwen35-g8-wave-strix",
+      "runner": "strix",
+      "dir": "flash_strix",
+      "gen": "flash_strix/gen_bench.py",
+      "gen_variants": [
+        "qwen35",
+        "base",
+        "wave0",
+        "wave4",
+        "wave8"
+      ],
+      "files": [
+        "bench.loom",
+        "bench_wave0.loom",
+        "bench_wave4.loom",
+        "bench_wave8.loom"
+      ],
+      "tests": [
+        "test.loom"
+      ],
+      "args": [
+        "--measure=dispatch_complete",
+        "--batch-size=4",
+        "--profile-final-batch=true"
+      ]
+    }
+  ]
+}

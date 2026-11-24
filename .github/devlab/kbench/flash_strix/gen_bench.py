@@ -25,6 +25,7 @@ QH, KVH, D = CFG["heads"], CFG["kv_heads"], CFG["head_dim"]
 QD, R = QH * D, KVH * D
 CTXS = [("8k", 8192), ("32k", 32768)]
 VARIANTS = {   # name -> environment of gen_flash2s.py
+    "wave0": {}, "wave4": {}, "wave8": {},
     "lazy": {"FLASH2_G11": "lazy"}, "kvh": {"FLASH2_G11": "kvh"}, "vtf": {"FLASH2_G11": "vtf"}, "hot": {"FLASH2_G11": "hot"},
     "pf": {"FLASH2_G11": "pf"}, "vp": {"FLASH2_G11": "vp"}, "kt16": {"FLASH2_KT256": "16"},
     "db": {"FLASH2_KT256": "16", "FLASH2_G11": "db"},
@@ -63,6 +64,10 @@ def kvo(name):
 
 def kernel(variant, name):
     """The whole-tile gfx11 kernel text of VARIANT ('' = base), renamed NAME."""
+    if variant.startswith("wave"):
+        sys.path.insert(0, STARTER)
+        from wave_gfx11 import wave_kernel
+        return wave_kernel(CFG, int(variant[4:])).replace('export("g_attention_flash2") @g_attention_flash2(', f'export("{name}") @{name}(')
     env = dict(os.environ, LLM_CONFIG=CONFIG, LOOM_RDNA4="0", FLASH2_OUT=os.path.join(OUT, f".fl_{name}.loom"), **env_of(variant))
     subprocess.run([sys.executable, os.path.join(STARTER, "gen_flash2s.py")], check=True, env=env)
     t = open(env["FLASH2_OUT"]).read(); os.remove(env["FLASH2_OUT"])
