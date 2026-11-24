@@ -1,0 +1,110 @@
+name: Exact-head Inkling knowledge-base and fleet proof
+on:
+  push:
+    branches: [codex/sdk030-special-qualification]
+    paths: [.github/workflows/sdk030-inkling-kb-proof.yml]
+permissions:
+  contents: read
+jobs:
+  verify:
+    name: Check #1370 routes, scope and complete generated fleet
+    runs-on: [self-hosted, devlab-dispatch, strix-halo, Linux]
+    timeout-minutes: 75
+    env:
+      BASE: 02ddced5c08599706fd110c68af9884d0ab0eeeb
+      HEAD_TO_PROVE: 8a8b400cda115d2f41af2d5e7aa3d5445606b36e
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 8a8b400cda115d2f41af2d5e7aa3d5445606b36e
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Record exact sources and verify staged routing inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$HEAD_TO_PROVE"
+          test "$(git rev-parse "$BASE")" = "$BASE"
+          work="$RUNNER_TEMP/inkling-kb-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          mkdir -p "$work/result"
+          echo "WORK=$work" >> "$GITHUB_ENV"
+          printf 'base=%s\nhead=%s\nrunner=%s\n' "$BASE" "$HEAD_TO_PROVE" "$RUNNER_NAME" > "$work/result/identity.txt"
+          git diff --check "$BASE" HEAD
+          git diff --name-only "$BASE" HEAD > "$work/result/paths.txt"
+          if grep -vE '^skills/loom-kb/(arch/llm/moe/inkling2|facet/looped)/' "$work/result/paths.txt"; then exit 1; fi
+          curl -fsSL --retry 3 https://huggingface.co/loom-fun-staging/unsloth-Inkling-2-Mini-loom/resolve/44d754c12601125e34b9d32685c5c01c0bf198cf/llm_config.json -o "$work/strix.json"
+          curl -fsSL --retry 3 https://huggingface.co/loom-fun-staging/unsloth-Inkling-2-Mini-loom-r9700/resolve/072bdc02bfba879ea099b877c3acf29b044aad8f/llm_config.json -o "$work/radeon.json"
+          echo "c9eab78173a39302934deadeb3615cf2738c4dfdb4b5de3b136fcbca456fe544  $work/strix.json" | sha256sum -c | tee "$work/result/config-checks.txt"
+          echo "39e55b112e04f7a1d2ec13ab48df961835e450ad227f50f44ddc3f4567dbca9a  $work/radeon.json" | sha256sum -c | tee -a "$work/result/config-checks.txt"
+      - name: Check KB lint, architecture aliases, facet opt-in and fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          export LOOM_SKILL_DIR="$GITHUB_WORKSPACE/skills/loom-kb"
+          python3 "$LOOM_SKILL_DIR/kb.py" lint | tee "$WORK/result/kb-lint.log"
+          python3 -m unittest discover -s tests -p 'test_kb*.py' -v 2>&1 | tee "$WORK/result/kb-tests.log"
+          python3 - <<'PY'
+          from pathlib import Path
+          import json
+          import os
+          import subprocess
+          import sys
+
+          work = Path(os.environ["WORK"])
+          kb = Path(os.environ["LOOM_SKILL_DIR"]) / "kb.py"
+          stages = (("strix", "inkling2", "strix-halo"), ("radeon", "inkling2_loop", "radeon-r9700"))
+          for label, arch, device in stages:
+              cfg = work / f"{label}.json"
+              doc = json.loads(cfg.read_text())
+              assert (doc["arch"], doc["sdk"]["hrx_loom"]) == (arch, "0.3.0")
+              output = subprocess.check_output([sys.executable, kb, "route", "--config", cfg,
+                                                "--device", device, "--topic", "porting,decode,roofline"], text=True)
+              (work / "result" / f"route-{label}.txt").write_text(output)
+              assert f"arch {arch} -> arch/llm/moe/inkling2" in output
+              assert "facet/looped/README.md" in output and "facet/looped/roofline.md" in output
+              choices = json.loads("\n".join(line[2:] for line in output.split("# resolved choices\n")[1].splitlines()))
+              assert not choices["choices"] and not choices["env"], choices
+
+          for label, doc in (("loop-opt-in", {"arch": "qwen3", "loop": {"count": 3}}),
+                             ("plain-control", {"arch": "qwen3"})):
+              cfg = work / f"{label}.json"
+              cfg.write_text(json.dumps(doc))
+              output = subprocess.check_output([sys.executable, kb, "route", "--config", cfg,
+                                                "--device", "strix-halo", "--topic", "roofline"], text=True)
+              (work / "result" / f"route-{label}.txt").write_text(output)
+              assert ("facet/looped/README.md" in output) == ("loop" in doc), output
+          PY
+      - name: Compare every generated package and lint the declared scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m venv "$WORK/venv"
+          py="$WORK/venv/bin/python"
+          "$py" -m pip install --quiet gguf numpy jinja2 pyyaml tokenizers
+          "$py" fleet/build_fleet.py --ref "$BASE" --own-inputs --out "$WORK/base" --jobs 4 2>&1 | tee "$WORK/result/base.log"
+          "$py" fleet/build_fleet.py --tree "$GITHUB_WORKSPACE" --out "$WORK/head" --jobs 4 2>&1 | tee "$WORK/result/head.log"
+          "$py" fleet/diff_fleet.py "$WORK/base" "$WORK/head" --json "$WORK/result/impact.json" --md "$WORK/result/impact.md"
+          "$py" - <<'PY'
+          from pathlib import Path
+          import json
+          import os
+
+          work = Path(os.environ["WORK"])
+          result = work / "result"
+          report = json.loads((result / "impact.json").read_text())
+          manifest = json.loads(Path("fleet/manifest.json").read_text())["models"]
+          summary = report["summary"]
+          assert summary["models"] == len(manifest)
+          assert summary["touched"] == 0 and summary["untouched"] == len(manifest), summary
+          marker = chr(96) * 3
+          (result / "scope.md").write_text(marker + "loom-scope\nkind: targeted\n"
+                                          "scopes: arch/llm/moe/inkling2, facet/looped\n" + marker + "\n")
+          print(summary)
+          PY
+          "$py" fleet/scope_lint.py --base "$BASE" --head HEAD --pr-body "$WORK/result/scope.md" --impact "$WORK/result/impact.json" --json "$WORK/result/lint.json" --md "$WORK/result/lint.md"
+      - uses: actions/upload-artifact@v4
+        if: always() && env.WORK != ''
+        with:
+          name: inkling-kb-proof
+          path: ${{ env.WORK }}/result
+          retention-days: 30
