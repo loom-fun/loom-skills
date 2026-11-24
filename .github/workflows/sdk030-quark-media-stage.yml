@@ -1,0 +1,174 @@
+name: DevLab Quark scoped media stage qualification
+on:
+  push:
+    branches: [codex/sdk030-quark-r9700-diagnostic]
+    paths: [.github/workflows/sdk030-quark-media-stage.yml]
+permissions:
+  contents: read
+  actions: read
+jobs:
+  qualify:
+    runs-on: [self-hosted, devlab-dispatch, Linux, radeon-r9700]
+    timeout-minutes: 105
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 629d8f8aab61f53c4713b89fd21d26efe83f9e45
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Pin the original text bundle and the verified media command
+        shell: bash
+        run: |
+          set -euo pipefail
+          work=$(mktemp -d "$(dirname "$GITHUB_WORKSPACE")/sdk030-quark-media.XXXXXX")
+          echo "WORK=$work" >> "$GITHUB_ENV"
+          export WORK="$work"
+          mkdir -p "$work/receipt" .github/sdk030-qwen36
+          git show "$GITHUB_SHA":.github/scripts/sdk030_quark_media_stage.py > "$work/receipt/quark_media_stage.py"
+          git rev-parse "$GITHUB_SHA" > "$work/receipt/diagnostic-source.txt"
+          git show c6e32060ece4b58032e0fea1792dc44535a58bff:.github/sdk030-qwen36/matched_decode.py > .github/sdk030-qwen36/matched_decode.py
+          test "$(git hash-object .github/sdk030-qwen36/matched_decode.py)" = d468f4240647263e5b8e0ca31115c99e9d93bf8a
+          api=https://api.github.com/repos/loom-fun/loom-skills/actions/artifacts
+          curl -fsSL -H "Authorization: Bearer $GH_TOKEN" "$api/14953304208/zip" -o "$work/media.zip"
+          echo "5692a130502b1b25c8256a88b2e613a484a267a897068bcb351e74e01f946056  $work/media.zip" | sha256sum -c -
+          unzip -p "$work/media.zip" package-without-weights.tgz > "$work/media.tgz"
+          echo "3d1d7d37ac15fbb58e322f563fde56def7d24737307b23b6b57dfbe9f5bcd2e7  $work/media.tgz" | sha256sum -c -
+          tar -xOzf "$work/media.tgz" program/llm.loom > "$work/media.loom"
+          echo "fa7aa2e3cded5a0c47cc2c2238f472c44bb79848e0c32533b795da20b278dc05  $work/media.loom" | sha256sum -c -
+          curl -fsSL -H "Authorization: Bearer $GH_TOKEN" "$api/14867447364/zip" -o "$work/reference.zip"
+          echo "f34ee47d01b2040dd6f424c340edbbfd6dff58c97370bd2de763cd298a9e0887  $work/reference.zip" | sha256sum -c -
+          unzip -p "$work/reference.zip" out/gates_staging/llama_cache.tgz > .github/sdk030-quark-refs.tgz
+          echo 'd9600b3a1c50087e642fd0f05815d2d0b2ec2fa32dc2890cfa17968752b5f38b  .github/sdk030-quark-refs.tgz' \
+            | sha256sum -c - | tee "$work/receipt/reference-cache.txt"
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          work = Path(os.environ["WORK"])
+          frozen = "loom-fun/amd-Qwen3.8-27B-Quark-AWQ-MXFP4-loom@a999be30c6539c77a030e961748416892b06ac73"
+          settings = {"card": frozen, "cap_pool": 113664, "context": 110592,
+                      "execution": {"context_capacity": 110592, "prefill_capacity": 1024, "rows": 4, "draft_depth": 3},
+                      "sdk": "0.3.0"}
+          paired = (("baseline", "media"), ("media", "baseline"), ("baseline", "media"))
+          experiment = {"name": "quark-media", "card": frozen, "runner": "r9700", "sdk": "0.3.0",
+                        "memory_bytes": 34000000000, "memory_bytes_r9700": 34000000000,
+                        "served_context": 110592, "require_preset_r9700": True, "llama_spec": "matched",
+                        "llamacpp": "b1375", "llamacpp_vulkan": "b12211", "reference_cache": ".github/sdk030-quark-refs.tgz",
+                        "variants": [dict(settings, name=arm) for arm in ("baseline", "media")],
+                        "steps": ["visiononly:media:quick", "mixedmedia:media", "gates:media:full", "ktest:media", "func:media"]
+                                 + [f"matcheddecode:{arm}:{i}" for i, pair in enumerate(paired) for arm in pair]
+                                 + [f"perf:{arm}:1" for pair in paired[:2] for arm in pair]}
+          (work / "receipt/experiment.json").write_text(json.dumps({"jobs": [experiment]}, indent=2) + "\n")
+
+          harness = Path(".github/scripts/devlab_perf.sh")
+          source = harness.read_text()
+          hook = '  # ablation: every kernel.launch in PROGRAM matching REGEX'
+          assert source.count(hook) == 1
+          source = source.replace(hook, r'''  if [ "$v" = media ]; then
+              (
+                cd "$pkg/program" || exit 1
+                printf '%s\n' \
+                  '5df0cab4e88b260e8de20a7b02b1b3d866a9c84aee6c61c0e1f76d0d864eed5f  llm.loom' \
+                  '6c3ef7256bab11094e13621ab23977561cd2f3cb52353bc427b7aab774a205db  prepare.loom' \
+                  '9a95d0488efad06c4f30461127c9512d7c33b2d25e6569d6131382ae9beaec70  control.loom' \
+                  | sha256sum -c -
+              ) || exit 1
+              cp "$pkg/program/llm.loom" "$WORK/original.loom"
+              "$T" "$WORK/receipt/quark_media_stage.py" "$pkg/program" "$WORK/media.loom" || exit 1
+              original_bytes=$(wc -c < "$WORK/original.loom")
+              cmp -n "$original_bytes" "$WORK/original.loom" "$pkg/program/llm.loom" || exit 1
+            fi
+          ''' + hook)
+          hook = '    gates)\n'
+          assert source.count(hook) == 1
+          source = source.replace(hook, r'''    matcheddecode)
+                serve_alone "$p1" || { res[$s]=ERROR; continue; }
+                if "$T" "$here/.github/sdk030-qwen36/matched_decode.py" "$url" "$cardid" "$p2" "$out/matched_$p1-$p2.json"; then
+                  res[$s]=PASS
+                else
+                  res[$s]=FAIL
+                fi;;
+              mixedmedia)
+                serve_alone "$p1" || { res[$s]=ERROR; continue; }
+                PYTHONPATH="$B" "$T" - "$url" "$cardid" "$out/mixed_media.json" <<'MIXED' || { res[$s]=FAIL; continue; }
+          import concurrent.futures
+          import hashlib
+          import json
+          import sys
+          import threading
+          from pathlib import Path
+          from bench_common import stream, thinking_extra
+          from vision_golden import builtin_images, data_url
+
+          url, model, output = sys.argv[1:]
+          image, question = builtin_images()["chart"]
+          visual = [{"type": "image_url", "image_url": {"url": data_url(image)}},
+                    {"type": "text", "text": question}]
+          text = ["What is the capital of France? Answer in one word.",
+                  "What is 27 multiplied by 3? Answer with the integer alone.",
+                  "Which is the largest planet in the Solar System? Answer in one word."]
+          def request(content):
+              reply = stream(url, model, [{"role": "user", "content": content}], 96,
+                             extra=thinking_extra("off"), timeout=120)
+              assert reply["status"] == 200, reply
+              return reply
+
+          alone = [request(item) for item in text]
+          sync = threading.Barrier(4)
+          def concurrent_request(item):
+              sync.wait(timeout=30)
+              return request(item)
+
+          with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+              results = list(pool.map(concurrent_request, [visual, *text]))
+          image_reply = results[0]["text"]
+          summaries = [{"isolated_sha256": hashlib.sha256(a["text"].encode()).hexdigest(),
+                        "concurrent_sha256": hashlib.sha256(b["text"].encode()).hexdigest(),
+                        "same_text": a["text"] == b["text"]} for a, b in zip(alone, results[1:])]
+          Path(output).write_text(json.dumps({"chart": image_reply, "text": summaries}, indent=2) + "\n")
+          assert "tickets closed per day" in image_reply.lower() and "thursday" in image_reply.lower()
+          assert all(row["same_text"] for row in summaries), summaries
+          MIXED
+                res[$s]=PASS;;
+              visiononly|gates)
+                if [ "$kind" = visiononly ]; then
+                  export VISION_ONLY=1 VISION_ARGS='--cases chart,wide'
+                else
+                  unset VISION_ONLY VISION_ARGS
+                fi
+          ''')
+          harness.write_text(source)
+          PY
+          bash -n .github/scripts/devlab_perf.sh
+      - name: Qualify the scoped repair at the original shipping preset
+        shell: bash
+        run: bash .github/scripts/devlab_perf.sh "$WORK/receipt/experiment.json" quark-media
+      - name: Archive program identities and the exact repair package
+        if: always() && env.WORK != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp -r "$WORK/quark-media/out" "$WORK/receipt/"
+          src="$WORK/quark-media/media/pkg"
+          if [ -f "$src/program/llm.loom" ]; then
+            (cd "$src"; shopt -s nullglob; tar -czf "$WORK/receipt/package-without-weights.tgz" program model.json llm_config.json tokenizer.json *.loom)
+            sha256sum "$WORK/receipt/package-without-weights.tgz" > "$WORK/receipt/package-sha256.txt"
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always() && env.WORK != ''
+        with:
+          name: sdk030-quark-media-stage
+          path: ${{ env.WORK }}/receipt
+          if-no-files-found: error
+          retention-days: 30
+      - name: Release job disk
+        if: always() && env.WORK != ''
+        shell: bash
+        run: |
+          case "$WORK" in
+            "$(dirname "$GITHUB_WORKSPACE")"/sdk030-quark-media.*) rm -rf -- "$WORK" ;;
+            *) exit 1 ;;
+          esac
