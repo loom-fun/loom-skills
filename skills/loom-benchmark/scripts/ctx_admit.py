@@ -12,11 +12,16 @@ usage: ctx_admit.py PKG LOOM_URL [--out FILE] [--wait 120] [--tokens N] [--compl
 Prints "ADMITTED n tokens (...)" or "REFUSED n tokens: HTTP ...". Exit status 1 on a refusal or no answer.
 """
 import argparse
+from http.client import HTTPConnection
 import json
 import os
+import select
+import socket
+import struct
 import sys
 import threading
 import time
+from urllib.parse import urlsplit
 
 import requests
 
@@ -45,28 +50,83 @@ def main():
     while len(ids) < n:
         ids = ids + ids
     prompt = P.tok.decode(ids[:n])
+    url = a.url.rstrip("/") + "/v1/chat/completions"
+    endpoint = urlsplit(url)
+    loopback = endpoint.hostname in ("127.0.0.1", "::1", "localhost")
+    proxy = requests.utils.select_proxy(url, requests.utils.get_environ_proxies(url))
+    reset_local = (sys.platform == "linux" and a.complete is None and endpoint.scheme == "http" and loopback
+                   and endpoint.username is None and proxy is None and requests.utils.get_netrc_auth(url) is None)
+    stopped = threading.Event()
     got = {}
+
+    def cancel():
+        stopped.set()
+        response = got.get("response")
+        if response is not None:
+            response.close()
 
     def post():
         try:
-            r = requests.post(a.url + "/v1/chat/completions", stream=True, timeout=a.wait + 600, json={
+            body = {
                 "model": P.model_id, "messages": [{"role": "user", "content": prompt}], "max_tokens": 1,
-                "stream": True, **extra})
-            got["resp"] = r
-            got["status"] = r.status_code
-            if r.status_code != 200:
-                got["body"] = r.text[:200]
-            elif a.complete is not None:
-                got["text"] = "".join(x.decode("utf-8", "replace") for x in r.iter_lines() if x)
-                got["finished"] = time.time()
+                "stream": True, **extra}
+            if stopped.is_set():
+                return
+            if not reset_local:
+                # Requests retains its configured proxies, credentials and certificate trust for remote endpoints.
+                r = requests.post(url, stream=True, timeout=a.wait + 600, json=body)
+                got["response"] = r
+                if stopped.is_set():
+                    r.close()
+                    return
+                if r.status_code != 200:
+                    got["body"] = r.text[:200]
+                got["status"] = r.status_code
+                if r.status_code == 200 and a.complete is not None:
+                    got["text"] = "".join(line.decode("utf-8", "replace") for line in r.iter_lines() if line)
+                    got["finished"] = time.time()
+                return
+            conn = HTTPConnection(endpoint.hostname, endpoint.port, timeout=a.wait)
+            try:
+                conn.connect()
+                if stopped.is_set():
+                    return
+                conn.request("POST", endpoint.path, json.dumps(body).encode(), {"Content-Type": "application/json"})
+                # Loom accepts a TCP FIN as a half-close. An abortive close signals that a local
+                # probe no longer needs the reply, so the server can retire active prefill.
+                conn.sock.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
+                # The worker owns the socket and does not open a buffered response reader until
+                # it has complete headers. Cancellation can then close the connection even if
+                # the server registers the request before sending any headers.
+                while not stopped.is_set():
+                    ready, _, _ = select.select([conn.sock], [], [], 0.05)
+                    if not ready:
+                        continue
+                    headers = conn.sock.recv(65536, socket.MSG_PEEK)
+                    if not headers:
+                        got["error"] = "server closed before sending response headers"
+                        return
+                    if b"\r\n\r\n" not in headers:
+                        stopped.wait(0.05)
+                        continue
+                    with conn.getresponse() as reply:
+                        if reply.status != 200:
+                            got["body"] = reply.read(200).decode("utf-8", "replace")
+                        got["status"] = reply.status
+                        if reply.status == 200:
+                            stopped.wait()
+                    return
+            finally:
+                conn.close()
         except Exception as e:  # the connection closed below
             got.setdefault("error", str(e)[:200])
 
     def active():
         return requests.get(a.url + "/v1/status", timeout=10).json()["data"][0]["loom"]["status"]["active_requests"]
 
-    threading.Thread(target=post, daemon=True).start()
     t0 = time.time()
+    sender = threading.Thread(target=post, daemon=True)
+    sender.start()
     running = False
     while time.time() - t0 < a.wait and "status" not in got and "error" not in got:
         time.sleep(0.5)
@@ -86,8 +146,9 @@ def main():
         sys.exit(0 if ok else 1)
     # Cancel: closing the connection makes the server drop the request; then it must go idle again (no long prefill).
     idle = True
-    if "resp" in got:
-        got["resp"].close()
+    cancel()
+    if reset_local:
+        sender.join(timeout=1)
     if admitted:
         t1 = time.time()
         while active() and time.time() - t1 < 60:

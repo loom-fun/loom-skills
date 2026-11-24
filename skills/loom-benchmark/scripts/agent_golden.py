@@ -15,12 +15,15 @@ Exit status 1 if a rendering, reuse or tool-call check fails or a divergence is 
 """
 import argparse
 import difflib
+from hashlib import sha256
 import json
+import os
+from pathlib import Path
 import sys
 
 import requests
 
-from bench_common import Package, llama_greedy, near_tie, near_tie_at, text_divergence, top_logprobs
+from bench_common import Package, kept_runs, llama_greedy, loom_runs_key, near_tie, near_tie_at, text_divergence, top_logprobs
 
 TOOLS = [
     {"type": "function", "function": {"name": "get_weather", "description": "Current weather for a city.",
@@ -54,6 +57,16 @@ def post(url, body, path="/v1/chat/completions"):
     # Serialized like the template's `tojson` so tool definitions print identically.
     data = json.dumps(body, ensure_ascii=False).encode()
     return requests.post(url + path, data=data, timeout=1800, headers={"Content-Type": "application/json"}).json()
+
+
+def capture_key(pkg, model, inputs):
+    """Bind deferred requests to the runner identity plus the locked package and tokenizer bytes."""
+    root = Path(pkg)
+    programs = sorted(path for path in root.rglob("*") if path.suffix in (".loom", ".vmfb") and path.is_file())
+    files = [root / "model.json.lock", root / "tokenizer.json", *programs]
+    manifest = [(str(path.relative_to(root)), sha256(path.read_bytes()).hexdigest() if path.is_file() else None)
+                for path in files]
+    return loom_runs_key(pkg, model, [inputs, manifest])
 
 
 def near_at(ids, tops, loom_id, k, llama=None, prompt=(), pkg=None):
@@ -216,19 +229,41 @@ def main():
     thinking = None if a.thinking == "default" else a.thinking == "on"
     extra = {} if thinking is None else {"chat_template_kwargs": {"enable_thinking": thinking}}
     msgs = [{"role": "system", "content": "You are a helpful assistant. Use the tools when they help."}]
+    deferred = os.environ.get("LLAMA_DEFER") if a.llama else None
+    pending = Path(deferred) if deferred else None
+    state = Path(deferred + ".loom.json") if deferred else None
+    key = capture_key(a.pkg, P.model_id, [msgs, TASKS, TOOLS, WEATHER, a.thinking, a.max_tokens]) if state else None
+    saved = kept_runs(state, key) if state else None
+    captures = saved["captures"] if saved else []
+    capture_error = False
+    if saved:
+        print("judging the same observed conversation with the newly filled references")
     turns, failures, prev_total, prev_text = [], 0, 0, ""
     prev_prompt, prev_verified = "", 0   # the previous turn's prompt, and how much of its output the golden verified
     prev_ids = []
     for task in TASKS:
         msgs.append({"role": "user", "content": task})
         for step in range(6):
-            r = post(a.url, dict(model=P.model_id, messages=msgs, tools=TOOLS, max_tokens=a.max_tokens, temperature=0, **extra))
+            request = dict(model=P.model_id, messages=msgs, tools=TOOLS, max_tokens=a.max_tokens, temperature=0, **extra)
+            if saved:
+                capture = captures[len(turns)]
+                if capture["request"] != request:
+                    raise ValueError(f"saved agent turn {len(turns)} has different request history")
+                r = capture["response"]
+            else:
+                r = post(a.url, request)
             if "error" in r:
-                print("LOOM ERROR", r["error"]); failures += 1; break
+                print("LOOM ERROR", r["error"]); failures += 1; capture_error = True; break
             ch = r["choices"][0]; m = ch["message"]; u = r["usage"]
             prompt = P.render_messages(msgs, TOOLS, thinking)
             ids = P.ids(prompt)
-            counted = post(a.url, dict(model=P.model_id, messages=msgs, tools=TOOLS, **extra), "/v1/chat/completions/input_tokens")
+            if saved:
+                counted = capture["counted"]
+            else:
+                counted = post(a.url, dict(model=P.model_id, messages=msgs, tools=TOOLS, **extra), "/v1/chat/completions/input_tokens")
+                if state:
+                    # Snapshot the observations before messages is extended with the tool result.
+                    captures.append({"request": json.loads(json.dumps(request)), "response": r, "counted": counted})
             rec = {"task": task[:40], "step": step, "prompt_tokens": counted.get("input_tokens"), "rendered_tokens": len(ids),
                    "cached": u.get("prompt_tokens_details", {}).get("cached_tokens", 0), "completion": u["completion_tokens"],
                    "finish": ch["finish_reason"], "calls": [c["function"]["name"] for c in m.get("tool_calls") or []]}
@@ -288,9 +323,14 @@ def main():
                     calls_ok = False
             rec["calls_ok"] = calls_ok
             raw = None   # the rebuilt output, completed from the golden where the reply can't tell (below)
+            gids = []
             if a.llama:
-                raw = P.raw_from_chat(m, ch["finish_reason"] in ("stop", "tool_calls"), thinking, prompt)
                 g, gids, gtops = llama_greedy(a.llama, ids, max(1, u["completion_tokens"]), P)
+                if not gids:
+                    rec["golden_match"] = False
+                    rec["reference"] = "pending" if g.get("_pending") else "no generated reference tokens"
+            if gids:
+                raw = P.raw_from_chat(m, ch["finish_reason"] in ("stop", "tool_calls"), thinking, prompt)
                 import chat_probe as _cp
                 finished = ch["finish_reason"] in ("stop", "tool_calls")
                 alts = []
@@ -329,6 +369,8 @@ def main():
                         if near_at(gids, gtops, loom_id, k):
                             break
                         _, gids2, cp2 = llama_greedy(a.llama, ids, max(1, u["completion_tokens"]), P, salt)
+                        if not gids2:
+                            continue
                         d2 = text_divergence(P.tok, loom_ids, gids2)
                         rec.setdefault("rerecorded", []).append(d2 and d2[0])
                         if d2 is None:
@@ -371,7 +413,7 @@ def main():
             prev_total = u["prompt_tokens"] + u["completion_tokens"]
             prev_text = prompt + out_text
             prev_prompt, prev_ids = prompt, ids
-            prev_verified = len(out_text) if rec.get("golden_match") else len(out_text) - len(loom_rest) if a.llama else 0
+            prev_verified = len(out_text) if rec.get("golden_match") else len(out_text) - len(loom_rest) if gids else 0
             # loom-serve rejects "reasoning_content": null, so only send it when present.
             msgs.append({"role": "assistant", "content": m.get("content") or "",
                          **({"reasoning_content": m["reasoning_content"]} if m.get("reasoning_content") else {}),
@@ -380,9 +422,20 @@ def main():
                 break
             for c in m["tool_calls"]:
                 msgs.append({"role": "tool", "tool_call_id": c["id"], "content": run_tool(c)})
+    if saved and len(captures) != len(turns):
+        raise ValueError("saved agent conversation contains a different number of turns")
+    if state:
+        if pending.exists() and pending.stat().st_size:
+            if not saved and not capture_error:
+                state.write_text(json.dumps({"key": key, "captures": captures}))
+        else:
+            state.unlink(missing_ok=True)
     print(f"{len(turns)} turns, {failures} failing; final answer: {(msgs[-1].get('content') or '')[:200]!r}")
     if a.out:
-        json.dump({"turns": turns, "messages": msgs}, open(a.out, "w"), indent=1)
+        report = {"turns": turns, "messages": msgs}
+        if state and not capture_error:
+            report["observed_trajectory_sha256"] = sha256(json.dumps(captures, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
+        json.dump(report, open(a.out, "w"), indent=1)
     sys.exit(1 if failures else 0)
 
 
