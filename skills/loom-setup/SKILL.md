@@ -44,9 +44,9 @@ Facts:
 - `loom-fetch --list` shows the release's compatible catalog.
 - **Windows:** run the script from Git Bash; venvs use `Scripts/`. See the `loom` skill's
   Windows section.
-- `ci-latest` / `ci:ARTIFACT_ID` install development wheels from ROCm/hrx-system GitHub
-  Actions artifacts (needs `gh auth status`; artifacts expire after about 90 days; `gh run
-  download` fails on these zips, so the script uses `gh api .../artifacts/<id>/zip`).
+- `ci-latest` installs an unexpired ROCm/hrx-system main-branch development wheel. Use `ci:ARTIFACT_ID`
+  for an explicitly selected build. CI installation needs `gh auth status`. The installer checks the artifact
+  identity, checks the archive SHA-256 when GitHub supplies it, and extracts only the matching release wheel.
 - **NPU:** the Qwen3-Embedding NPU program compiled only with the wheel from hrx-system PR
   2259's CI (artifact 12623044407 at the time): `VENV_NAME=.venv-npu install_loom.sh ~/loom
   ci:12623044407`. If that artifact has expired, look for a newer build whose NPU path compiles.

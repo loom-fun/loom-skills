@@ -4,6 +4,7 @@ import os
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
 HF = "https://huggingface.co"
@@ -20,12 +21,33 @@ def _token():
 TOKEN = _token()
 
 
+def is_hub_url(url):
+    parts = urllib.parse.urlsplit(url)
+    return parts.scheme == "https" and parts.netloc == "huggingface.co"
+
+
+class HubRedirects(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        redirected = super().redirect_request(req, fp, code, msg, headers, newurl)
+        authorization = req.get_header("Authorization")
+        if redirected is not None and authorization and is_hub_url(redirected.full_url):
+            redirected.add_unredirected_header("Authorization", authorization)
+        return redirected
+
+
+OPENER = urllib.request.build_opener(HubRedirects())
+
+
 def fetch(url, tries=5):
     """Bytes at url, or None for a 404/401 (missing file or repo). Retries 429 and transient errors."""
-    req = urllib.request.Request(url, headers={"Authorization": f"Bearer {TOKEN}"} if TOKEN else {})
+    if not is_hub_url(url):
+        raise ValueError("only HTTPS Hugging Face Hub URLs are supported")
+    req = urllib.request.Request(url)
+    if TOKEN:
+        req.add_unredirected_header("Authorization", f"Bearer {TOKEN}")
     for i in range(tries):
         try:
-            with urllib.request.urlopen(req, timeout=60) as r:
+            with OPENER.open(req, timeout=60) as r:
                 return r.read()
         except urllib.error.HTTPError as e:
             if e.code in (401, 403, 404):
