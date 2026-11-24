@@ -2501,25 +2501,6 @@
      print("WARNING: head_dim", head_dim, "is not 64, 128 or 256: the attention kernels support only those")
  if cfg["chat"] is None:
      print("WARNING: no chat block; fill it by hand from tokenizer.chat_template (fields: see chat_probe.py)")
---- a/ktest_more.py
-+++ b/ktest_more.py
-@@ -117,9 +117,14 @@
-     T = 3
-     ys = rng.standard_normal((T, KU, W)).astype(np.float32)
-     wts = rng.random((T, KU)).astype(np.float32)
--    y = (wts[:, :, None].astype(np.float64) * ys).sum(1).astype(np.float32)
-+    y = (wts[:, :, None].astype(np.float64) * ys).sum(1)
-     c = _Case("moe_combine", save)
--    c.launch("g_moe_combine", ["%t"], [c.lit("t", T), c.inp("ys", ys), c.inp("wts", wts), c.out("y", y, close="1.0e-5")])
-+    if "%y_old = view.load %y_view" in k:   # shared experts without a gate (DeepSeek / JoyAI): the combine adds to their output in y
-+        y0 = rng.standard_normal((T, W)).astype(np.float32)
-+        out = c.out("y", (y + y0).astype(np.float32), init=y0, close="1.0e-5")
-+    else:
-+        out = c.out("y", y.astype(np.float32), close="1.0e-5")
-+    c.launch("g_moe_combine", ["%t"], [c.lit("t", T), c.inp("ys", ys), c.inp("wts", wts), out])
-     return c.text()
- 
- 
 --- a/make_kernel_tests.py
 +++ b/make_kernel_tests.py
 @@ -12,6 +12,11 @@
