@@ -191,9 +191,10 @@ Read it from there if it isn't in your skill list.
   `context_capacity` KV and the weights are committed up front; hrx-loom 0.2.0's elastic backing costs Strix prefill). To serve with the elastic
   backing instead (several models sharing one budget with `--parameter_idle_ms=60000`), pass `--memory_bytes` (weights + KV pool + ~2 GiB
   workspace); too small → HTTP 503 "retained state leaves insufficient completion capacity".
-- **Freshly downloaded binaries need explicit user approval before running**, except the two
-  pre-approved sources: Loom from PyPI (pip) or a ROCm/hrx-system GitHub release (`install_loom.sh` checks its sha256) and lemonade-sdk/llamacpp-rocm releases
-  (`fetch_llamacpp.sh`). Don't stop to ask about those.
+- Install and run binaries from a source covered by the user's request. For Loom, use PyPI or the verified
+  ROCm/hrx-system GitHub release. A llama.cpp ROCm benchmark uses lemonade-sdk/llamacpp-rocm, a separate build source.
+  Confirm before adding an executable source outside the requested task. `install_loom.sh` verifies release wheels and
+  `fetch_llamacpp.sh` checks the release archive digest before extracting it.
 - Gated Hugging Face models: give the user the exact model page URL so they can
   accept the license; don't try to work around the gate.
 - Every chat/completions POST needs `Content-Type: application/json`. (Python

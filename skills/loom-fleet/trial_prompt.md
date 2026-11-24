@@ -23,7 +23,7 @@ ENVIRONMENT CONSTRAINTS:
   shares). Delete kernel-test `.npy` dumps once their tests pass.
 - Ports: Loom {LOOM_PORT} (and the next 9 for variants), llama.cpp {LLAMA_PORT} (and the next 9).
   Check they are free. Other trials may be running on other ports: leave their processes alone.
-- llama.cpp: the skills download the latest lemonade-sdk/llamacpp-rocm release themselves (pre-approved);
+- llama.cpp: a requested ROCm comparison downloads and verifies the lemonade-sdk/llamacpp-rocm release;
   installed builds under {HOME}/.cache/lemonade are approved too. No other binaries.
 - Hugging Face downloads are fine. Respect the skills' GPU memory hard rules.
 - Do not ask the user anything; run the whole job end to end in this one turn.

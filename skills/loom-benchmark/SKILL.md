@@ -32,7 +32,7 @@ id from a package built by `loom-port-llm/starter/build.py`.
 does both):
 ```bash
 S="${LOOM_SKILL_DIR}/scripts"
-"$S/fetch_llamacpp.sh"                 # latest lemonade-sdk/llamacpp-rocm for this GPU -> ~/llamacpp-rocm/<tag> (pre-approved, ~25 s)
+"$S/fetch_llamacpp.sh"                 # latest lemonade-sdk/llamacpp-rocm for this GPU -> ~/llamacpp-rocm/<tag>
 "$S/pick_llamacpp.sh" MODEL.gguf 8139 "$HOME"   # every llama-server with libggml-hip.so, benchmarked and ranked
 ```
 The baseline is the top-ranked build (a build choice for local qualification; cards pin one build per backend, and
@@ -52,7 +52,8 @@ is a "not supported" cell with the reason (`baseline.differs`, rendered on the c
 (`reference/methodology.md` rules 1-6).
 
 A weaker baseline inflates every margin you report. Report the chosen build's path and tag.
-lemonade-sdk/llamacpp-rocm releases are pre-approved: download them without asking. Check that
+For a requested ROCm comparison, use the stated build source and record its release tag. Confirm a different
+executable source with the user before running it. The downloader verifies the archive's SHA-256 from GitHub. Check that
 `llama-server --list-devices` shows `ROCm0` (`llamacpp_server.sh` does), because a build missing its
 libraries falls back to CPU silently; `llamacpp_server.sh` also adds lemonade's TheRock runtime libraries
 when a build needs them. Pick the zip that matches the GPU (`gfx1151` = Strix

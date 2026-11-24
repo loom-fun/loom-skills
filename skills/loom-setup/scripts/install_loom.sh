@@ -32,26 +32,66 @@ mkdir -p "$root"; cd "$root"
 venv=${VENV_NAME:-.venv}
 $py -m venv $venv
 $venv/$bin/python -m pip install -q --upgrade pip
-newest() {  # newest unexpired artifact named $1, preferring main and v* tags
+newest() {  # newest unexpired artifact from the upstream main branch
   gh api "repos/ROCm/hrx-system/actions/artifacts?name=$1&per_page=50" \
-    -q '[.artifacts[] | select(.expired | not)] | (map(select(.workflow_run.head_branch == "main" or ((.workflow_run.head_branch // "") | startswith("v")))) + .) | .[0].id'
+    -q '[.artifacts[] | select((.expired | not) and .workflow_run.head_branch == "main" and .workflow_run.repository_id == .workflow_run.head_repository_id)] | .[0].id'
 }
 art=; branch=; sha=; source=pypi
 case "$which" in
   ci-latest|ci:*)
+    artifact_kind=loom-sdk-wheel-linux-Release
+    [ "$win" != 1 ] || artifact_kind=loom-sdk-wheel-windows
     if [ "$which" = ci-latest ]; then
-      if [ $win = 1 ]; then art=$(newest loom-sdk-wheel-windows); else art=$(newest loom-sdk-wheel-linux-Release); fi
+      art=$(newest "$artifact_kind")
+      art=${art%$'\r'}
+      [[ $art =~ ^[0-9]+$ ]] || { echo "no unexpired main SDK wheel artifact found; choose a reviewed artifact by ID" >&2; exit 1; }
     else art=${which#ci:}; fi
-    [ -n "$art" ] && [ "$art" != null ] || { echo "no SDK wheel artifact found"; exit 1; }
+    [[ $art =~ ^[0-9]+$ ]] || { echo "invalid SDK artifact ID" >&2; exit 1; }
     source=ci
-    read -r branch sha < <(gh api repos/ROCm/hrx-system/actions/artifacts/$art -q '.workflow_run.head_branch + " " + .workflow_run.head_sha')
+    read -r artifact_name artifact_expired branch sha digest < <(gh api "repos/ROCm/hrx-system/actions/artifacts/$art" \
+      -q '[.name, .expired, (.workflow_run.head_branch // "unknown"), .workflow_run.head_sha, (.digest // "-")] | @tsv')
+    digest=${digest%$'\r'}
+    [[ $artifact_name == "$artifact_kind" && $artifact_expired == false && $sha =~ ^[0-9a-f]{40}$ ]] || {
+      echo "artifact $art is not an available $artifact_kind SDK wheel" >&2; exit 1;
+    }
     echo "artifact $art ($branch ${sha:0:12})"
-    mkdir -p wheel-$art
-    # `gh run download` trips a path-traversal check on these zips; fetch the zip directly.
-    [ -f wheel-$art/sdk.zip ] || gh api repos/ROCm/hrx-system/actions/artifacts/$art/zip > wheel-$art/sdk.zip
-    unzip -o -q wheel-$art/sdk.zip -d wheel-$art
-    # Some artifacts bundle +asan/+debug/+tracy variants next to the release wheel; take the plain one.
-    whl=$(ls wheel-$art/*.whl | grep -v '+' | head -1);;
+    mkdir -p "wheel-$art"
+    sdk_archive="wheel-$art/sdk.zip"
+    found=$(sha256sum "$sdk_archive" 2>/dev/null | cut -d' ' -f1 || true)
+    if [[ $digest != sha256:"$found" || -z $found ]]; then
+      gh api "repos/ROCm/hrx-system/actions/artifacts/$art/zip" > "$sdk_archive.part"
+      mv -f -- "$sdk_archive.part" "$sdk_archive"
+    fi
+    whl=$("$venv/$bin/python" - "$sdk_archive" "$digest" "$win" <<'PY'
+import hashlib
+from pathlib import Path, PurePosixPath
+import re
+import shutil
+import sys
+from zipfile import ZipFile
+
+archive, expected, windows = Path(sys.argv[1]), sys.argv[2], sys.argv[3] == "1"
+if expected != "-":
+    with archive.open("rb") as stream:
+        actual = "sha256:" + hashlib.file_digest(stream, "sha256").hexdigest()
+    if actual != expected:
+        sys.exit("SDK artifact SHA-256 does not match GitHub metadata")
+platform = r"win_amd64" if windows else r"manylinux_[\w.]+_x86_64"
+name = re.compile(rf"hrx_loom-[0-9][A-Za-z0-9_.!]*-py3-none-{platform}\.whl")
+with ZipFile(archive) as package:
+    wheels = [(item, PurePosixPath(item.filename).name) for item in package.infolist()
+              if name.fullmatch(PurePosixPath(item.filename).name) and not item.is_dir()]
+    if len(wheels) != 1:
+        sys.exit("SDK artifact must contain one plain release wheel for this platform")
+    item, wheel_name = wheels[0]
+    wheel = archive.with_name(wheel_name)
+    temporary = wheel.with_suffix(".whl.part")
+    with package.open(item) as source, temporary.open("wb") as destination:
+        shutil.copyfileobj(source, destination)
+    temporary.replace(wheel)
+sys.stdout.write(wheel.as_posix())
+PY
+    );;
   release:*)
     # A GitHub release of ROCm/hrx-system: the wheel asset, verified against the release's SHA256SUMS. No gh or token.
     source=release; rel=${which#release:}; branch=v$rel

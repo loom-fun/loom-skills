@@ -1,6 +1,6 @@
 #!/bin/bash
 # Everything between "the port serves" and "start optimizing", in one command:
-#   1. fetch_llamacpp.sh (latest lemonade-sdk/llamacpp-rocm, pre-approved) + pick_llamacpp.sh: benchmark
+#   1. fetch_llamacpp.sh (latest verified lemonade-sdk/llamacpp-rocm) + pick_llamacpp.sh: benchmark
 #      it and every llama.cpp ROCm build on the machine -> llamacpp_pick.json
 #   2. llama.cpp baseline, with Loom stopped: perf.py --kind llama (short and --long) and c4_steady
 #      -> perf_log.jsonl. One model at a time: GPU memory is system RAM, so Loom and llama.cpp never
@@ -44,7 +44,7 @@ fi
 
 step "1/5 pick the llama.cpp ROCm baseline build"
 if [ ! -s llamacpp_pick.json ]; then
-  # The latest lemonade-sdk/llamacpp-rocm release always competes (pre-approved download, ~25 s):
+  # The latest verified lemonade-sdk/llamacpp-rocm release competes alongside installed builds:
   # new architectures need recent builds (no installed build knew `flint`).
   newest=$("$S/fetch_llamacpp.sh" "${LLAMACPP_HOME:-$HOME/llamacpp-rocm}" | tail -1) || newest=""
   # SEARCH_ROOT uses colon-separated roots; normalize Windows drive paths first.
