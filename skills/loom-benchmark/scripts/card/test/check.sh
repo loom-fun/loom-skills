@@ -712,10 +712,11 @@ assert len(consistency_checks(r, {}, None)) == 1
 assert len(consistency_checks(r, {r['repo']: dict(ok[r['repo']], memory_bytes=69000000000)}, None)) == 1
 assert len(consistency_checks(r, {r['repo']: dict(ok[r['repo']], llamacpp='b1368')}, None)) == 1
 r['generator'] = g('side')
-assert len(consistency_checks(r, ok, sys.argv[3], lambda c: [{'merged_at': None}])) == 1
-assert len(consistency_checks(r, ok, sys.argv[3], lambda c: [])) == 1
-assert consistency_checks(r, ok, sys.argv[3], lambda c: [{'merged_at': '2026-11-08T00:00:00Z'}]) == []   # squash-merged
-assert consistency_checks(r, ok, sys.argv[3], lambda c: None) == []   # unknown never flags
+unknown_changes = lambda c: None
+assert len(consistency_checks(r, ok, sys.argv[3], lambda c: [{'merged_at': None}], unknown_changes)) == 1
+assert len(consistency_checks(r, ok, sys.argv[3], lambda c: [], unknown_changes)) == 1
+assert consistency_checks(r, ok, sys.argv[3], lambda c: [{'merged_at': '2026-11-08T00:00:00Z'}], unknown_changes) == []   # squash-merged
+assert consistency_checks(r, ok, sys.argv[3], lambda c: None, unknown_changes) == []   # unknown never flags
 from org_status import merged_prs
 def fake(merged):   # GitHub: a refs/pull/N/merge commit is in no PR; its second parent (the PR head) is in the PR
     def get(path):
