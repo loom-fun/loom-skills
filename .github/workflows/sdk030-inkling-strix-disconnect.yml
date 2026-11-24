@@ -1,0 +1,110 @@
+name: Inkling Strix native transport retirement
+on:
+  push:
+    branches: [codex/sdk030-special-qualification]
+    paths: [.github/workflows/sdk030-inkling-strix-disconnect.yml]
+permissions:
+  contents: read
+jobs:
+  verify:
+    name: ${{ matrix.device }} ${{ matrix.slug }}
+    strategy:
+      max-parallel: 2
+      fail-fast: false
+      matrix:
+        include:
+          - slug: unsloth-Inkling-2-Mini-loom
+            device: strix-halo
+            labels: '["self-hosted","devlab-dispatch","strix-halo","Linux"]'
+    runs-on: ${{ fromJSON(matrix.labels) }}
+    timeout-minutes: 240
+    env:
+      SLUG: ${{ matrix.slug }}
+      SDK_GPU_KEY: ${{ matrix.device }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 2b78eebf5c93b8b1d92d86d0fbe20275c674cde2
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Plan from the accepted production revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          export WORK="$(dirname "$GITHUB_WORKSPACE")/sdk030-wave-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$SDK_GPU_KEY-$SLUG"
+          mkdir -p "$WORK/receipt"
+          echo "WORK=$WORK" >> "$GITHUB_ENV"
+          python3 - <<'PY' >> "$GITHUB_ENV"
+          import json, os
+          from pathlib import Path
+          slug = os.environ['SLUG']
+          def job(name, card):
+              return dict(name=name, card='loom-fun-staging/'+card, sdk='0.3.0', variants=[dict(name='staging',sdk='0.3.0')],
+                          steps=[f'disconnect:staging:{mode}' for mode in ('fin','reset','complete')])
+          plan=dict(runner='strix',memory_bytes=33000000000,jobs=[
+              job('inkling','unsloth-Inkling-2-Mini-loom@bd021e649b158e608b389eca9bfed60a0ec2d225'),
+              job('control','unsloth-Qwen3-8B-loom@701b15c229b3e96ea7f4e9da01197e1525c1961f')])
+          out=Path(os.environ['WORK'])/'receipt'
+          (out/'experiment.json').write_text(json.dumps(plan,indent=2))
+          h=Path('.github/scripts/devlab_perf.sh')
+          source=h.read_text()
+          anchor='    ln -sfn "$vcard/parameter" "$pkg/parameter"'
+          assert source.count(anchor)==1
+          import base64
+          (Path(os.environ['WORK'])/'disconnect.py').write_bytes(base64.b64decode('IiIiTWVhc3VyZSByZXF1ZXN0IGNsZWFudXAgYWZ0ZXIgYSBGSU4sIHJlc2V0LCBhbmQgbm9ybWFsIGNvbXBsZXRpb24gb24gRGV2TGFiIExpbnV4LiIiIgoKZnJvbSBoYXNobGliIGltcG9ydCBzaGEyNTYKZnJvbSBodHRwLmNsaWVudCBpbXBvcnQgSFRUUENvbm5lY3Rpb24KaW1wb3J0IGpzb24KZnJvbSBwYXRobGliIGltcG9ydCBQYXRoCmltcG9ydCBzZWxlY3QKaW1wb3J0IHNvY2tldAppbXBvcnQgc3RydWN0CmltcG9ydCBzeXMKaW1wb3J0IHRpbWUKZnJvbSB1cmxsaWIucGFyc2UgaW1wb3J0IHVybHNwbGl0CgppbXBvcnQgcmVxdWVzdHMKCmZyb20gYmVuY2hfY29tbW9uIGltcG9ydCBQYWNrYWdlLCBkb2MKCgpkZWYgbWFpbigpOgogICAgcGtnLCB1cmwsIG1vZGUsIG91dCA9IHN5cy5hcmd2WzE6XQogICAgYXNzZXJ0IG1vZGUgaW4gKCJmaW4iLCAicmVzZXQiLCAiY29tcGxldGUiKQogICAgcGFja2FnZSA9IFBhY2thZ2UocGtnKQogICAgbW9kZWwgPSBqc29uLmxvYWRzKChQYXRoKHBrZykgLyAibW9kZWwuanNvbiIpLnJlYWRfdGV4dCgpKQogICAgcHJlc2V0ID0gbmV4dChpdGVyKG1vZGVsWyJwcmVzZXRzIl0udmFsdWVzKCkpKQogICAgY29udGV4dCA9IHByZXNldFsiZXhlY3V0aW9uIl1bImNvbnRleHRfY2FwYWNpdHkiXQogICAgdG9nZ2xlID0gcGFja2FnZS5jaGF0LmdldCgidGhpbmtpbmciKSA9PSAidG9nZ2xlIgogICAgZXh0cmEgPSB7ImNoYXRfdGVtcGxhdGVfa3dhcmdzIjogeyJlbmFibGVfdGhpbmtpbmciOiBGYWxzZX19IGlmIHRvZ2dsZSBlbHNlIHt9CiAgICBvdmVyaGVhZCA9IGxlbihwYWNrYWdlLmlkcyhwYWNrYWdlLnJlbmRlcl9tZXNzYWdlcyhbeyJyb2xlIjogInVzZXIiLCAiY29udGVudCI6ICJ4In1dLCBOb25lLCBGYWxzZSBpZiB0b2dnbGUgZWxzZSBOb25lKSkpCiAgICBuID0gY29udGV4dCAtIDEgLSBvdmVyaGVhZCAtIDY0CiAgICBpZHMgPSBwYWNrYWdlLmlkcyhkb2MoMzIwMDApKQogICAgd2hpbGUgbGVuKGlkcykgPCBuOgogICAgICAgIGlkcyArPSBpZHMKICAgIHByb21wdCA9IHBhY2thZ2UudG9rLmRlY29kZShpZHNbOm5dKQogICAgYm9keSA9IGpzb24uZHVtcHMoeyJtb2RlbCI6IHBhY2thZ2UubW9kZWxfaWQsICJtZXNzYWdlcyI6IFt7InJvbGUiOiAidXNlciIsICJjb250ZW50IjogcHJvbXB0fV0sCiAgICAgICAgICAgICAgICAgICAgICAgIm1heF90b2tlbnMiOiAxLCAidGVtcGVyYXR1cmUiOiAwLCAic3RyZWFtIjogVHJ1ZSwgKipleHRyYX0pLmVuY29kZSgpCiAgICBlbmRwb2ludCA9IHVybHNwbGl0KHVybCkKICAgIGFzc2VydCBlbmRwb2ludC5zY2hlbWUgPT0gImh0dHAiIGFuZCBlbmRwb2ludC5ob3N0bmFtZSA9PSAiMTI3LjAuMC4xIgogICAgcmVzdWx0ID0geyJtb2RlIjogbW9kZSwgIm1vZGVsIjogcGFja2FnZS5tb2RlbF9pZCwgImNvbnRleHQiOiBjb250ZXh0LCAicmVxdWVzdGVkX3Rva2VucyI6IG4sCiAgICAgICAgICAgICAgInJlcXVlc3Rfc2hhMjU2Ijogc2hhMjU2KGJvZHkpLmhleGRpZ2VzdCgpLCAiYWN0aXZlX29ic2VydmVkX3MiOiBOb25lLCAiY2xvc2VfcyI6IE5vbmUsCiAgICAgICAgICAgICAgImhlYWRlcnNfYmVmb3JlX2Nsb3NlIjogRmFsc2UsICJmaXJzdF9yZXNwb25zZV9zIjogTm9uZSwgImlkbGVfcyI6IE5vbmUsICJzdGF0dXMiOiBbXX0KICAgIGJlZ2luID0gdGltZS5tb25vdG9uaWMoKQogICAgZWxhcHNlZCA9IGxhbWJkYTogcm91bmQodGltZS5tb25vdG9uaWMoKSAtIGJlZ2luLCAzKQogICAgY29ubiA9IEhUVFBDb25uZWN0aW9uKGVuZHBvaW50Lmhvc3RuYW1lLCBlbmRwb2ludC5wb3J0LCB0aW1lb3V0PTMwKQogICAgcmVzcG9uc2UgPSBieXRlYXJyYXkoKQogICAgZGlzY29ubmVjdGVkID0gRmFsc2UKICAgIHRyeToKICAgICAgICBjb25uLnJlcXVlc3QoIlBPU1QiLCAiL3YxL2NoYXQvY29tcGxldGlvbnMiLCBib2R5LCB7IkNvbnRlbnQtVHlwZSI6ICJhcHBsaWNhdGlvbi9qc29uIn0pCiAgICAgICAgcmVzdWx0WyJyZXF1ZXN0X3NlbnRfcyJdID0gZWxhcHNlZCgpCiAgICAgICAgd2hpbGUgZWxhcHNlZCgpIDwgMjQwOgogICAgICAgICAgICBzdGF0dXMgPSByZXF1ZXN0cy5nZXQodXJsICsgIi92MS9zdGF0dXMiLCB0aW1lb3V0PTEwKS5qc29uKClbImRhdGEiXVswXVsibG9vbSJdWyJzdGF0dXMiXQogICAgICAgICAgICBhY3RpdmUgPSBzdGF0dXNbImFjdGl2ZV9yZXF1ZXN0cyJdCiAgICAgICAgICAgIHRpY2sgPSBlbGFwc2VkKCkKICAgICAgICAgICAgcmVhZHkgPSBub3QgZGlzY29ubmVjdGVkIGFuZCBzZWxlY3Quc2VsZWN0KFtjb25uLnNvY2tdLCBbXSwgW10sIDApWzBdCiAgICAgICAgICAgIGlmIHJlYWR5OgogICAgICAgICAgICAgICAgZGF0YSA9IGNvbm4uc29jay5yZWN2KDY1NTM2KQogICAgICAgICAgICAgICAgaWYgZGF0YToKICAgICAgICAgICAgICAgICAgICBpZiByZXN1bHRbImZpcnN0X3Jlc3BvbnNlX3MiXSBpcyBOb25lOgogICAgICAgICAgICAgICAgICAgICAgICByZXN1bHRbImZpcnN0X3Jlc3BvbnNlX3MiXSA9IHRpY2sKICAgICAgICAgICAgICAgICAgICByZXNwb25zZS5leHRlbmQoZGF0YSkKICAgICAgICAgICAgcmVzdWx0WyJzdGF0dXMiXS5hcHBlbmQoW3RpY2ssIHN0YXR1c10pCiAgICAgICAgICAgIGlmIGFjdGl2ZSBhbmQgcmVzdWx0WyJhY3RpdmVfb2JzZXJ2ZWRfcyJdIGlzIE5vbmU6CiAgICAgICAgICAgICAgICByZXN1bHRbImFjdGl2ZV9vYnNlcnZlZF9zIl0gPSB0aWNrCiAgICAgICAgICAgICAgICBpZiBtb2RlICE9ICJjb21wbGV0ZSI6CiAgICAgICAgICAgICAgICAgICAgcmVzdWx0WyJoZWFkZXJzX2JlZm9yZV9jbG9zZSJdID0gYiJcclxuXHJcbiIgaW4gcmVzcG9uc2UKICAgICAgICAgICAgICAgICAgICBpZiBtb2RlID09ICJyZXNldCI6CiAgICAgICAgICAgICAgICAgICAgICAgIGNvbm4uc29jay5zZXRzb2Nrb3B0KHNvY2tldC5TT0xfU09DS0VULCBzb2NrZXQuU09fTElOR0VSLCBzdHJ1Y3QucGFjaygiaWkiLCAxLCAwKSkKICAgICAgICAgICAgICAgICAgICBlbHNlOgogICAgICAgICAgICAgICAgICAgICAgICBjb25uLnNvY2suc2h1dGRvd24oc29ja2V0LlNIVVRfUkRXUikKICAgICAgICAgICAgICAgICAgICBjb25uLmNsb3NlKCkKICAgICAgICAgICAgICAgICAgICBkaXNjb25uZWN0ZWQgPSBUcnVlCiAgICAgICAgICAgICAgICAgICAgcmVzdWx0WyJjbG9zZV9zIl0gPSBlbGFwc2VkKCkKICAgICAgICAgICAgZWxpZiBub3QgYWN0aXZlIGFuZCByZXN1bHRbImFjdGl2ZV9vYnNlcnZlZF9zIl0gaXMgbm90IE5vbmU6CiAgICAgICAgICAgICAgICByZXN1bHRbImlkbGVfcyJdID0gdGljawogICAgICAgICAgICAgICAgaWYgbW9kZSAhPSAiY29tcGxldGUiIG9yIGInImZpbmlzaF9yZWFzb24iJyBpbiByZXNwb25zZToKICAgICAgICAgICAgICAgICAgICBicmVhawogICAgICAgICAgICB0aW1lLnNsZWVwKDAuMjUgaWYgdGljayA8IDEwIGVsc2UgMSkKICAgIGZpbmFsbHk6CiAgICAgICAgY29ubi5jbG9zZSgpCiAgICAgICAgcmVzdWx0WyJyZXNwb25zZSJdID0gcmVzcG9uc2VbOjQwOTZdLmRlY29kZSgidXRmLTgiLCAicmVwbGFjZSIpCiAgICAgICAgUGF0aChvdXQpLndyaXRlX3RleHQoanNvbi5kdW1wcyhyZXN1bHQsIGluZGVudD0yKSArICJcbiIpCgoKaWYgX19uYW1lX18gPT0gIl9fbWFpbl9fIjoKICAgIG1haW4oKQo='))
+          probe='''    disconnect)
+                serve_alone "$p1" || { res[$s]=ERROR; continue; }
+                if PYTHONPATH="$B" "$T" "$WORK/disconnect.py" "$D/$p1/pkg" "$url" "$p2" "$out/$p2.json"; then
+                  curl -fsS "$url/metrics" > "$out/$p2.metrics.txt" || true
+                  res[$s]=CAPTURED
+                else res[$s]=ERROR; fi;;
+              func)'''
+          assert source.count('    func)')==1
+          source=source.replace('    func)',probe)
+          h.write_text(source.replace(anchor,'    rsync -a --exclude=/parameter --exclude=/.git "$vcard/" "$pkg/"\n'+anchor))
+          print('JOB=inkling')
+          PY
+      - name: Capture identical native requests on one Strix runner per package
+        shell: bash
+        run: |
+          set -euo pipefail
+          for job in inkling control; do
+            bash .github/scripts/devlab_perf.sh "$WORK/receipt/experiment.json" "$job"
+          done
+      - name: Preserve cancellation timings, telemetry and checkpoint identity
+        if: always() && env.JOB != ''
+        shell: bash
+        run: |
+          for job in inkling control; do
+            if [ -d "$WORK/$job/out" ]; then cp -r "$WORK/$job/out" "$WORK/receipt/$job"; fi
+          done
+      - name: Check equivalent requests and report prefill and retirement time
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import json, os
+          root=Path(os.environ['WORK'])/'receipt'
+          for job in ('inkling','control'):
+              out=root/job
+              rows=[json.loads((out/f'{mode}.json').read_text()) for mode in ('fin','reset','complete')]
+              assert len({row['request_sha256'] for row in rows})==1, rows
+              assert all(row['active_observed_s'] is not None for row in rows)
+              for row in rows:
+                  print(job,{k:v for k,v in row.items() if k not in ('status','response')},flush=True)
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: inkling-strix-disconnect
+          path: ${{ env.WORK }}/receipt
+          retention-days: 30
+      - name: Release job disk
+        if: always()
+        shell: bash
+        run: |
+          if [ "${WORK:-}" = "$(dirname "$GITHUB_WORKSPACE")/sdk030-wave-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$SDK_GPU_KEY-$SLUG" ]; then rm -rf -- "$WORK"; fi
+
+
+
