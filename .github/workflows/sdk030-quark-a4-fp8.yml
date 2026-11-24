@@ -96,7 +96,7 @@ jobs:
           vision.write_text(source)
           PY
           bash -n .github/scripts/devlab_perf.sh
-      - name: Measure the unchanged chart gate and paired FP8 performance
+      - name: Measure the unchanged chart gate and paired FP8 performance with the GDN fallback
         shell: bash
         run: bash .github/scripts/devlab_perf.sh "$WORK/receipt/experiment.json" quark-a4-fp8
       - name: Archive exact sources and qualification logs
