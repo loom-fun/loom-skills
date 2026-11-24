@@ -14,10 +14,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - slug: lmstudio-community-gemma-4-26B-A4B-it-loom
+          - slug: unsloth-gemma-4-12B-it-loom
             device: radeon-r9700
             labels: '["self-hosted","devlab-dispatch","radeon-r9700"]'
-            correctness: '{"run":45275710722,"job":138046837055,"artifact":14882874001,"digest":"sha256:7dd2d3acd9142d2a8be7dc6352d030fe6ad9eadd409a849c6041026956009d2b","production":"loom-fun/lmstudio-community-gemma-4-26B-A4B-it-loom@eb2bd1117e4a1de4d949b39fb6ac217e7ef35e6a","generator":"3adfe7b7b6e68f753042e9f89b318e29a6088579"}'
+            correctness: '{"run":45275710722,"job":138046837358,"artifact":14884941820,"digest":"sha256:a0d1dbe21497bb079da12a32ec17a5156688370de350491713d51fd728b1862b","production":"loom-fun/unsloth-gemma-4-12B-it-loom@34d4382c23b9357cd46894e7a6b1577aa86cf084","generator":"3adfe7b7b6e68f753042e9f89b318e29a6088579"}'
     runs-on: ${{ fromJSON(matrix.labels) }}
     timeout-minutes: 240
     env:
