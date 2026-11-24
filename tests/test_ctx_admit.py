@@ -1,5 +1,6 @@
 """Exercise native-context admission with a streaming HTTP service."""
 
+from importlib.util import find_spec
 import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -14,6 +15,7 @@ import unittest
 SCRIPT = Path(__file__).resolve().parents[1] / "skills/loom-benchmark/scripts/ctx_admit.py"
 
 
+@unittest.skipUnless(find_spec("requests"), "native admission fixtures require Requests")
 class ContextAdmissionTest(unittest.TestCase):
     def probe(self, mode, wait="3", *args):
         active = threading.Event()
@@ -89,6 +91,7 @@ runpy.run_path(sys.argv[0], run_name="__main__")
                 server.shutdown()
                 thread.join()
 
+    @unittest.skipUnless(sys.platform == "linux", "native TCP reset is supported on Linux")
     def test_cancels_before_response_headers(self):
         result, evidence, disconnected = self.probe("deferred")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -107,6 +110,7 @@ runpy.run_path(sys.argv[0], run_name="__main__")
         self.assertFalse(evidence["admitted"])
         self.assertIn("HTTP 503 insufficient context", evidence["detail"])
 
+    @unittest.skipUnless(sys.platform == "linux", "native TCP reset is supported on Linux")
     def test_timeout_closes_the_request(self):
         result, evidence, disconnected = self.probe("timeout", "0.3")
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)

@@ -2,6 +2,7 @@
 
 import contextlib
 import io
+from importlib.util import find_spec
 import json
 import os
 from pathlib import Path
@@ -13,6 +14,8 @@ from unittest.mock import patch
 
 
 SCRIPTS = Path(__file__).resolve().parents[1] / "skills/loom-benchmark/scripts"
+if not find_spec("requests") or not find_spec("jinja2"):
+    raise unittest.SkipTest("deferred agent fixtures require Requests and Jinja2")
 with patch.object(sys, "path", [str(SCRIPTS), *sys.path]):
     import agent_golden as agent
 
