@@ -22,7 +22,7 @@ HEAD = "amdgpu.target<gfx11-generic> @w32 {subgroup_size = 32}\n\n"
 VARIANTS = {"split": {"MLA_DEC": "split"}, "pl1": {"MLA_DEC_PL": "1"}, "s32": {"MLA_DEC_S": "32"}, "b8": {"MLA_DEC_BMIN": "8"},
             "b2": {"MLA_DEC_BMIN": "2"}, "b1": {"MLA_DEC_BMIN": "1"}, "shslot": {"MOE_SHSLOT": "1"},
             "iq4q8": {"IQ4_Q8": "1"}, "wg1k": {"MV_WG1": "1024"}, "wg256": {"MV_WG1": "256"}, "moer4": {"MOE_R": "4"}, "moer1": {"MOE_R": "1"},
-            "rt1": {"MOE_ROUTE_SPLIT": "0"}, "rt2": {"MOE_ROUTE_FUSE": "0"}, "ropekb": {"MLA_ROPE_KB": "1"}, "dd4": {"MOE_DEDUP": "4"}, "hg2": {"MLA_DEC_HG": "2"}, "rx4": {"MLA_RMSQ_FUSE_T4": "1"}, "rq": {"MV_R": "1536:6144:4,4096:2048:2"}, "w4": {"MV_WG4": "2048"}, "wg128": {"MV_WG1": "128"}, "wg64": {"MV_WG1": "64"}, "sh0": {"MOE_SHSLOT": "0"}, "qadual": {"MLA_QA_DUAL": "1"}, "rmsx": {"MLA_RMSQ_FUSE": "1"},
+            "rt1": {"MOE_ROUTE_SPLIT": "0"}, "rt2": {"MOE_ROUTE_FUSE": "0"}, "ropekb": {"MLA_ROPE_KB": "1"}, "dd4": {"MOE_DEDUP": "4"}, "hg2": {"MLA_DEC_HG": "2"}, "rx4": {"MLA_RMSQ_FUSE_T4": "1"}, "rq": {"MV_R": "1536:6144:4,4096:2048:2"}, "w4": {"MV_WG4": "2048"}, "qin": {"IQ4_Q8": "1", "MV_QIN": "1"}, "iq8": {"IQ4_Q8": "1"}, "wg128": {"MV_WG1": "128"}, "wg64": {"MV_WG1": "64"}, "sh0": {"MOE_SHSLOT": "0"}, "qadual": {"MLA_QA_DUAL": "1"}, "rmsx": {"MLA_RMSQ_FUSE": "1"},
             "dnr1": {"MOE_R_DN": "1"}, "dnr4": {"MOE_R_DN": "4"}, "dnr8": {"MOE_R_DN": "8"}, "dnu2": {"MOE_DN_U": "2"}, "dnu4": {"MOE_DN_U": "4"},
             "old": {"MLA_DEC": "split", "MOE_ROUTE_SPLIT": "0", "MOE_SHSLOT": "0", "MLA_QA_DUAL": "0", "MLA_RMSQ_FUSE": "0", "MV_WG1": "4096"}}
 CTXS = [("short", 300, 1), ("2k", 2048, 1), ("8k", 8192, 1), ("c4", 1024, 4)]   # (tag, context, tokens = streams)
@@ -506,6 +506,45 @@ def dedup_test(lib, rng):
     return "\n".join(ks) + "".join(out)
 
 
+def qin_test(lib_q, lib_i, rng, lib0=""):
+    """MV_QIN (int8 matvec quantizing its f32 activation in registers) against g_quant_q8 + the same matvec reading the
+    quantized copy: equal outputs, q_b shape (K 1536), 1 and 4 tokens."""
+    out, ks = [], []
+    kq = re.search(r'export\("(g_mv_iq4_xs_k1536_q8(?:_r\d+)?)"\)', lib_q).group(1)
+    kq4 = re.search(r'export\("(g_mv_iq4_xs_k1536_t4_q8(?:_r\d+)?)"\)', lib_q).group(1)
+    for lib, pre, names in ((lib_q, "qa_", (kq, kq4)), (lib_i, "qb_", (kq, kq4, "g_quant_q8"))):
+        for k in names:
+            m = re.search(rf'^kernel\.def export\("{k}"\) @{k}\((?:.|\n)*?^\}}\n', lib, re.M)
+            assert m, k
+            ks.append(m.group(0).replace(f'export("{k}") @{k}(', f'export("{pre}{k}") @{pre}{k}('))
+    K, N = 1536, 6144
+    wb = N * K // 256 * 136
+    np.save(os.path.join(OUT, "qi_w.npy"), iq4xs_rand(rng, wb))
+    for T, k in ((1, kq), (4, kq4)):
+        np.save(os.path.join(OUT, f"qi_x{T}.npy"), (rng.standard_normal((T, K)) * 2).astype(np.float32))
+        XT, YT, WT, QT = f"tensor<{T}x{K}xf32>", f"tensor<{T}x{N}xf32>", f"tensor<{wb}xi8>", f"tensor<{T * K * 2}xi8>"
+        out.append(f"""check.case public @qin_t{T} {{
+  %t = check.literal value({T}) : index
+  %n = check.literal value({N}) : index
+  %k = check.literal value({K}) : index
+  %z = check.literal value(0) : i32
+  %x = check.file.read.npy path("qi_x{T}.npy") : {XT}
+  %w = check.file.read.npy path("qi_w.npy") : {WT}
+  %xq = check.generate.fill value(0) : {QT}
+  %y = check.generate.fill value(0.0) : {YT}
+  %y2 = check.generate.fill value(0.0) : {YT}
+  kernel.launch @qb_g_quant_q8[%t, %k](%t, %k, %x, %xq) : [index, index](index, index, {XT}, {QT})
+  kernel.launch @qb_{k}[%n, %t](%n, %t, %z, %xq, %w, %y) : [index, index](index, index, i32, {QT}, {WT}, {YT})
+  kernel.launch @qa_{k}[%n, %t](%n, %t, %z, %x, %w, %y2) : [index, index](index, index, i32, {XT}, {WT}, {YT})
+  check.expect.equal actual(%y2) expected(%y) : {YT}
+  check.return
+}}
+""")
+    have = set(re.findall(r"^func\.def inline @(\w+)\(", lib0, re.M))
+    extra = [m.group(0) for m in re.finditer(r'^func\.def inline @(\w+)\((?:.|\n)*?^\}\n', lib_q, re.M) if m.group(1) not in have]
+    return "".join(extra) + "\n".join(ks) + "".join(out)
+
+
 def shslot_test(lib, rng):
     """the shared expert as a ninth slot (g_moe_gu/dn_..._sh + g_moe_combine_sh) against the separate launches (shared
     swiglu matvec + down matvec into y, routed gu / dn, g_moe_combine accumulating): 2 tokens, 16 experts, IQ4_XS."""
@@ -583,7 +622,8 @@ if __name__ == "__main__" and len(sys.argv) > 2:
     open(os.path.join(OUT, "test.loom"), "w").write(route_test(lib0) + shslot_test(lib0 + cmd0, rng) + qadual_test(lib1, rng)
                                                            + rmsx_test(split_program(program("rmsx"))[0], rng)
                                                            + ropekb_test(split_program(program("ropekb"))[0], rng)
-                                                           + dedup_test(split_program(program("dd4"))[0], rng))
+                                                           + dedup_test(split_program(program("dd4"))[0], rng)
+                                                           + qin_test(split_program(program("qin"))[0], split_program(program("iq8"))[0], rng, lib0))
     for v in sys.argv[3:] or ["base"]:
         if v != "base" and not all(x in VARIANTS for x in v.split("+")):
             raise SystemExit("unknown variant " + v)

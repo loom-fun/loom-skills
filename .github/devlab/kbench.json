@@ -368,13 +368,13 @@
       "gen": "dec_step/gen_bench.py",
       "gen_variants": [
         "base",
-        "rq",
-        "w4"
+        "qin",
+        "iq8"
       ],
       "files": [
         "bench.loom",
-        "bench_rq.loom",
-        "bench_w4.loom"
+        "bench_qin.loom",
+        "bench_iq8.loom"
       ],
       "config": [],
       "args": [
