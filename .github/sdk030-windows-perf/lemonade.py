@@ -124,10 +124,14 @@ def health(server, base):
     raise TimeoutError('Lemonade did not become healthy')
 
 
-def chat(exe, cache, config, label, alias, registry_repo=None):
+def free_port():
     with socket.socket() as sock:
         sock.bind(('127.0.0.1', 0))
-        port = sock.getsockname()[1]
+        return sock.getsockname()[1]
+
+
+def chat(exe, cache, config, label, alias, registry_repo=None):
+    port = free_port()
     base = f'http://127.0.0.1:{port}'
     with (evidence / f'{label}-lemonade.log').open('wb') as log:
         args = [exe, cache, config, '--port', str(port), '--host', '127.0.0.1']
@@ -175,6 +179,46 @@ def chat(exe, cache, config, label, alias, registry_repo=None):
                 server.wait(timeout=15)
 
 
+def direct_flash(backend, card):
+    # Keep runtime diagnostics if the application fails after preparing the model.
+    port = free_port()
+    base = f'http://127.0.0.1:{port}'
+    args = [backend, f'--model={card.parent}', f'--listen=127.0.0.1:{port}',
+            '--device=amdgpu://?completion_spin_ns=4294967295', '--workers=8']
+    with (evidence / 'flash-direct.log').open('wb') as log:
+        server = subprocess.Popen(args, cwd=root, stdout=log, stderr=subprocess.STDOUT)
+        try:
+            for _ in range(480):
+                if server.poll() is not None:
+                    raise RuntimeError(f'loom-serve exited 0x{server.returncode & 0xffffffff:08x}')
+                try:
+                    with urlopen(base + '/v1/status', timeout=3) as result:
+                        status = json.load(result)
+                except (OSError, ValueError):
+                    time.sleep(1)
+                    continue
+                models = status.get('data', [])
+                if not models or models[0]['loom']['registration'] not in ('ready', 'failed'):
+                    time.sleep(1)
+                    continue
+                write('flash-direct-status.json', status)
+                if models[0]['loom']['registration'] == 'failed':
+                    raise RuntimeError('Direct model registration failed')
+                body = {'model': models[0]['id'], 'messages': [{'role': 'user', 'content':
+                        'What is the capital of France? Answer with only the city name.'}],
+                        'temperature': 0, 'max_tokens': 16, 'chat_template_kwargs': {'enable_thinking': False}}
+                request = Request(base + '/v1/chat/completions', data=json.dumps(body).encode(),
+                                  headers={'Content-Type': 'application/json'})
+                with urlopen(request, timeout=180) as response:
+                    write('flash-direct-chat.json', json.load(response))
+                return
+            raise TimeoutError('Direct model registration timed out')
+        finally:
+            if server.poll() is None:
+                server.terminate()
+                server.wait(timeout=15)
+
+
 def run():
     os.environ['HF_HUB_CACHE'] = str(root / 'weights-hf/hub')
     os.environ['HF_HOME'] = str(root / 'weights-hf')
@@ -215,7 +259,14 @@ def run():
     label, alias, repo, revision, *_ = cases[1]
     snap, ref = snapshot(repo, revision)
     before_card = sha(snap / 'model.json')
-    chat(executable, cache, config, label, alias, registry_repo=repo)
+    try:
+        chat(executable, cache, config, label, alias, registry_repo=repo)
+    except (OSError, ValueError, RuntimeError):
+        try:
+            direct_flash(backend, snap / 'model.json')
+        except (OSError, ValueError, RuntimeError) as error:
+            write('flash-direct-error.json', {'error': str(error)})
+        raise
     assert ref.read_text(encoding='utf-8').strip() == revision
     assert sha(snap / 'model.json') == before_card
     assert not (root / 'weights-hf/hub/models--loom-fun--unsloth-Qwen3.8-Flash-Next-loom').exists()
