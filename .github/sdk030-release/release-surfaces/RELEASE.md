@@ -12,6 +12,8 @@ python publish-entry-points.py --apply
 gh workflow run summaries.yml --repo loom-fun/loom-dev --ref main
 ```
 
-The first command checks current content and prints the three expected parents. The apply command uses those parents as compare-and-swap guards and verifies the returned commit bytes and live file digests. Preserve the printed commit receipts. Rerun the helper after any interruption. It skips already verified content and stops on an unreviewed file change. Allow the summary workflow and GitHub Pages deployment to complete, then verify the homepage install line and follow the production and staging catalog links.
+The first command checks current content and shows the planned parents. The organization profile inputs have exact `expected_parent` revisions. The website's `reviewed_at` is a source snapshot. Its data refresh may advance `main` while the reviewed `docs/index.html` bytes stay the same. The helper verifies those exact bytes, then uses the freshly observed website head as the compare-and-swap parent. Production model parents remain pinned in the model release bundle.
+
+The apply command checks the returned commit bytes and live file digests. Preserve its printed commit receipts. Rerun the helper after any interruption. It skips already verified content and stops on an unreviewed file change. Allow the summary workflow and GitHub Pages deployment to complete, then verify the homepage install line and follow the production and staging catalog links.
 
 Read-only preflight matched all three reviewed source preimages. Publishing remains an owner release action. [Release issue](https://github.com/loom-fun/loom-skills/issues/1391)

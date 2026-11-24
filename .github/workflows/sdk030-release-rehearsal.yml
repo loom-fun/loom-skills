@@ -81,7 +81,7 @@ jobs:
           if [[ -f "$inputs/github-release-tag.json" ]]; then
             cp "$inputs/github-release-tag.json" "$evidence/"
           fi
-          if [[ "$("$py" -c 'import json,sys; print(len(json.load(open(sys.argv[1]))))' "$evidence/tag-plan.json")" -ge 58 ]]; then
+          if [[ "$("$py" -c 'import json,sys; print(len(json.load(open(sys.argv[1]))))' "$inputs/pending.json")" == 0 ]]; then
             cd "$evidence"
             manifest_sha="$(sha256sum release/manifest.json | cut -d' ' -f1)"
             tag_sha="$(sha256sum tag-plan.json | cut -d' ' -f1)"

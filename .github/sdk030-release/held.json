@@ -14,33 +14,13 @@
     },
     "production": "loom-fun/amd-Qwen3.8-27B-Quark-AWQ-MXFP4-loom",
     "qualification_run": 45267277683,
+    "qualification_url": "https://github.com/loom-fun/loom-skills/actions/runs/45267277683",
     "reason": "Awaiting a qualified correction for correctness and throughput.",
     "staging": "loom-fun-staging/amd-Qwen3.8-27B-Quark-AWQ-MXFP4-loom",
     "staging_receipt_url": "https://huggingface.co/loom-fun-staging/amd-Qwen3.8-27B-Quark-AWQ-MXFP4-loom/commit/c1eaa0960244132a038235fece80087aac9284a0",
     "staging_revision": "c1eaa0960244132a038235fece80087aac9284a0",
     "target_revision": "a999be30c6539c77a030e961748416892b06ac73",
     "verified_source_files": 22
-  },
-  "unsloth-Inkling-2-Mini-loom": {
-    "current_disposition": "pending qualified repair",
-    "device_keys": [
-      "strix-halo"
-    ],
-    "frozen_production_revision": "4e018e88a3aa9826286c71dfe2f6c905a491659b",
-    "frozen_production_sdk": {
-      "hrx_loom": "0.2.0",
-      "hrx_system_sha": "0cd370f2baaa0cfef47cc23007f1a109906f8a52",
-      "source": "pypi",
-      "wheel_sha256": "5148f9e3a264af400ec4bae38bd7b06bf551d28cc33b7a61d67f7bcefa590438"
-    },
-    "production": "loom-fun/unsloth-Inkling-2-Mini-loom",
-    "qualification_run": null,
-    "reason": "Awaiting a qualified correctness correction on Strix Halo.",
-    "staging": "loom-fun-staging/unsloth-Inkling-2-Mini-loom",
-    "staging_receipt_url": "https://huggingface.co/loom-fun-staging/unsloth-Inkling-2-Mini-loom/commit/bd021e649b158e608b389eca9bfed60a0ec2d225",
-    "staging_revision": "bd021e649b158e608b389eca9bfed60a0ec2d225",
-    "target_revision": "4e018e88a3aa9826286c71dfe2f6c905a491659b",
-    "verified_source_files": 16
   },
   "unsloth-Inkling-2-Mini-loom-r9700": {
     "current_disposition": "out of scope",

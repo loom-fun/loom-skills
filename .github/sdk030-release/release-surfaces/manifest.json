@@ -2,28 +2,28 @@
   {
     "path": "README.md",
     "original_sha256": "487c30088a04d0f08bb96416a3c89dd3167f7fdb7f867c94ce632d3390651700",
-    "parent": "2599af211ba89087cf5c46bec82d31c97f83c63b",
     "candidate_sha256": "b8ce7c0ae2c17138cba5333bcb0d71df370ced0519b8a0df6196ebb88cd2e232",
     "target": "loom-fun/README",
     "candidate": "loom-fun.README.md",
-    "kind": "space"
+    "kind": "space",
+    "expected_parent": "2599af211ba89087cf5c46bec82d31c97f83c63b"
   },
   {
     "path": "README.md",
     "original_sha256": "b35ff28080b6ce0fa281636c9ccbdc4698decbe6ebdf30a7f4fdce7078ea0158",
-    "parent": "b61719cdaadba22b293a99ce40dacc3de057b030",
     "candidate_sha256": "08e520c0d246c81f0911f08d76e97e293b8f9275cfeb5347d079c610696d0e26",
     "target": "loom-fun-staging/README",
     "candidate": "loom-fun-staging.README.md",
-    "kind": "space"
+    "kind": "space",
+    "expected_parent": "b61719cdaadba22b293a99ce40dacc3de057b030"
   },
   {
     "path": "docs/index.html",
     "original_sha256": "16198a8869aeeebc8d256cc4c525a8ff4f489ddc6a698458d8a9392ff51e8d39",
-    "parent": "78559c0320df1d7be8365a71a03347ad22f58bda",
     "candidate_sha256": "754ad9c1ed6a7eaed7406b03a73a8f4d24ef784736cc48f19b9ead2df17c452e",
     "target": "loom-fun/loom-dev",
     "candidate": "loom-dev.index.html",
-    "kind": "github"
+    "kind": "github",
+    "reviewed_at": "78559c0320df1d7be8365a71a03347ad22f58bda"
   }
 ]

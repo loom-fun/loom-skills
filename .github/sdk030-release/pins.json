@@ -135,6 +135,10 @@
     "staging_revision": "d7a55107ffeed49def553693d16e5c0ea4e257fc",
     "target_revision": "0c8e8831544e6625431a8177873fa531e75d0cc0"
   },
+  "unsloth-Inkling-2-Mini-loom": {
+    "staging_revision": "c92a578c4d6849a1e373ac23e144df73e0cf7629",
+    "target_revision": "4e018e88a3aa9826286c71dfe2f6c905a491659b"
+  },
   "unsloth-Llama-3.2-3B-Instruct-loom": {
     "staging_revision": "04f51d2c440c8bf3491128078ee2ffe32f3c7f9a",
     "target_revision": "c6defa4cd5a8764b2cd8d4c14cb81ca0f118a76c"

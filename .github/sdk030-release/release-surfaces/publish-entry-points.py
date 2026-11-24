@@ -68,6 +68,8 @@ def main():
             continue
         if file_sha != item["original_sha256"]:
             raise SystemExit(f"Unreviewed file change at {item['target']}@{head}")
+        if item["kind"] == "space" and head != item["expected_parent"]:
+            raise SystemExit(f"Unreviewed Space head at {item['target']}@{head}")
         plan.append((item, head, candidate))
         print(f"READY {item['target']}@{head} {item['path']}")
     if args.apply:
