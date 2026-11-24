@@ -1,0 +1,53 @@
+[
+  {
+    "gpu": "strix-halo",
+    "slug": "ggml-org-Qwen3-4B-loom",
+    "repo": "loom-fun-staging/ggml-org-Qwen3-4B-loom",
+    "revision": "56db9c8629c4f2fa91b6e397a98b5ecdc68e04b6",
+    "device": "amdgpu://?completion_spin_ns=4294967295",
+    "args": [
+      "--pool_backing=fixed"
+    ],
+    "model_id": "Qwen/Qwen3-4B",
+    "features": {
+      "api": "yes",
+      "audio": "unknown",
+      "concurrency": "yes",
+      "context": "yes",
+      "image_input": "unknown",
+      "max_output_tokens": "yes",
+      "reasoning_effort": "n/a",
+      "sampling": "yes",
+      "speculative_decoding": "yes",
+      "thinking": "yes",
+      "tool_calling": "yes"
+    },
+    "sdk": {
+      "hrx_loom": "0.3.0",
+      "source": "pypi",
+      "hrx_system_sha": "e2c41a720363911c04606ce0f4417e2d55630352",
+      "wheel_sha256": "6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f"
+    },
+    "files": {
+      "info.json": "436507c80824f406247beb718550eb3a33f9958e4d58d633ceb2f93f8433df99",
+      "model.json": "c7f425de2cbf5afe6c1074094afa565d5b508bfce8b2ae6c05f358c3f505c512",
+      "model.json.lock": "e6c74a83468d7d95a191cd1ec650b82f5f2a92a0faf1ce8645601fb55ecce381",
+      "llm_config.json": "7a019b7a81ecb10dc93a79a1faefc11bead877cb7d49f4c92cea384c4f821e42"
+    },
+    "package_serve": null,
+    "published_rows": [
+      "decode",
+      "decode_2k",
+      "decode_32k",
+      "prefill_16k",
+      "prefill_1k",
+      "prefill_2k",
+      "prefill_32k",
+      "prefill_8k",
+      "streams4"
+    ],
+    "preset": "chat",
+    "context_tokens": 40960,
+    "execution_rows": 4
+  }
+]
