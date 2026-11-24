@@ -24,6 +24,7 @@ jobs:
         with:
           python-version: '3.12'
       - name: Verify exact Loom embed library, SDK wheel and model
+        id: prepare
         shell: bash
         run: |
           set -euo pipefail
@@ -82,7 +83,7 @@ jobs:
           for name, (image, question) in inputs.items():
               request = work / f"{name}.json"
               raw = out / f"{name}.f32"
-              request.write_text(json.dumps({"messages": [{"role": "user", "content": [
+              request.write_text(json.dumps({"model": "chat-r9700", "messages": [{"role": "user", "content": [
                   {"type": "image_url", "image_url": {"url": data_url(image)}},
                   {"type": "text", "text": question},
               ]}], "temperature": 0, "max_tokens": 1, "enable_thinking": False, "logits": True}))
@@ -102,6 +103,7 @@ jobs:
           print({name: row["top"][:3] for name, row in rows.items()})
           PY
       - name: Isolate vLLM Quark activation QDQ with the pinned checkpoint
+        if: always() && steps.prepare.outcome == 'success'
         shell: bash
         run: |
           set -euo pipefail
