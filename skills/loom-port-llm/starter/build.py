@@ -11,6 +11,7 @@ parameter/<gguf> (symlink)}. Serve it with
   loom-serve --model=PACKAGE_DIR/model.json '--device=amdgpu://?completion_spin_ns=4294967295' --memory_bytes=... --listen=...
 """
 import argparse
+import ast
 import glob
 import json
 import os
@@ -750,14 +751,21 @@ B = lambda v: "true" if v else "false"
 CALL_FORMATS = {"none": 0, "hermes": 1, "qwen_xml": 2, "glm": 3, "pythonic": 4, "json": 5}   # none: chat-only (patch_no_tools); json: patch_json_chat
 # A chat format the generic control functions can't express (Glimmer's ATEM channels, Gemma 4): the kit
 # ships chat/<call_format>.loom, whose public chat functions replace the generic ones (renamed
-# @generic_<fn>, still callable), and optionally chat/<call_format>_rodata.py (a rodata() returning its
-# string constants). In it, @@HEX_CHAT:<key>@@ is the hex of chat[<key>]; chat.base_call_format (default
+# @generic_<fn>, still callable), and optionally chat/<call_format>_rodata.json with its string constants.
+# In the Loom source, @@HEX_CHAT:<key>@@ is the hex of chat[<key>]; chat.base_call_format (default
 # hermes) is the tool-call format the generic functions use underneath. See reference/glimmer-example.
 # Its lines may hold variants for what the derived chat block says (chat_variants: // @@IF_CHAT:KEY@@ markers).
 # A channel format (Glimmer's ATEM, harmony) builds on templates/control_channels.loom (output_next, parse_tools and
 # helpers over the kit's @ch_ hooks), appended when the kit uses it.
-custom_chat = os.path.join(HERE, "chat", chat["call_format"] + ".loom")
-custom_chat = custom_chat if chat["call_format"] not in CALL_FORMATS and os.path.exists(custom_chat) else None
+call_format = chat["call_format"]
+if not isinstance(call_format, str) or not re.fullmatch(r"[A-Za-z0-9_-]+", call_format):
+    sys.exit("chat.call_format must be a local kit format name")
+chat_dir = os.path.join(os.path.realpath(HERE), "chat")
+custom_chat = None
+if call_format not in CALL_FORMATS:
+    custom_chat = os.path.join(chat_dir, call_format + ".loom")
+    if not os.path.isfile(custom_chat) or os.path.dirname(os.path.realpath(custom_chat)) != chat_dir:
+        sys.exit(f"chat format {call_format!r} has no local kit controller")
 subs = {
     "@@POS_BYTES@@": str(pos_bytes), "@@PLANES@@": str(2 * kv_layers), "@@BLOCK_BYTES@@": str(16 * pos_bytes),
     "@@RECURRENT_BYTES@@": str(recurrent_bytes or 4),
@@ -825,10 +833,34 @@ for name in ("prepare", "control", "storage", "service"):
     if name == "control" and custom_chat:
         for fn in ("chat_begin", "chat_message", "chat_end", "render_tool", "parse_tools", "output_next", "complete_text"):
             text = text.replace(f"func.def public @{fn}(", f"func.def @generic_{fn}(")
-        rodata_py = custom_chat[:-len(".loom")] + "_rodata.py"
-        if os.path.exists(rodata_py):
-            sys.path.insert(0, os.path.dirname(rodata_py))
-            text += "\n" + __import__(os.path.basename(rodata_py)[:-3]).rodata()
+        rodata_base = custom_chat[:-len(".loom")] + "_rodata"
+        rodata_json = rodata_base + ".json"
+        rodata_legacy = rodata_base + ".py"
+        rodata = next((path for path in (rodata_json, rodata_legacy) if os.path.lexists(path)), None)
+        if rodata:
+            if not os.path.isfile(rodata) or os.path.dirname(os.path.realpath(rodata)) != chat_dir:
+                sys.exit("chat constants must be a local kit file")
+            with open(rodata, encoding="utf-8") as source:
+                if rodata == rodata_json:
+                    constants = json.load(source)
+                else:
+                    declarations = [statement.value for statement in ast.parse(source.read(), filename=rodata).body
+                                    if isinstance(statement, ast.Assign) and len(statement.targets) == 1
+                                    and isinstance(statement.targets[0], ast.Name) and statement.targets[0].id == "S"]
+                    try:
+                        constants = ast.literal_eval(declarations[0]) if len(declarations) == 1 else None
+                    except (TypeError, ValueError):
+                        constants = None
+                    if constants is None:
+                        sys.exit("convert the kit's chat constants to a *_rodata.json string mapping")
+            if not isinstance(constants, dict) or any(
+                not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key) or not isinstance(value, str)
+                for key, value in constants.items()
+            ):
+                sys.exit("chat constants must map Loom symbol names to strings")
+            text += "\n" + "\n".join(
+                f'global.rodata.def @{key} = bytes("{hx(value)}")\n' for key, value in constants.items()
+            )
         kit_chat = open(custom_chat, encoding="utf-8").read()
         if "@ch_" in kit_chat:   # a channel format (<|start|>HEADER<|message|>TEXT): templates/control_channels.loom
             text += "\n" + open(os.path.join(HERE, "templates", "control_channels.loom"), encoding="utf-8").read()

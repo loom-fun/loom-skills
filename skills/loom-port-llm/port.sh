@@ -109,42 +109,41 @@ for xf in ${cextra:-}; do
   fi
   "$T" -I "$here/checkpoint_path.py" link "$px" "gguf/$(basename "$xf")" || exit 2
 done
-# Tokenizer: the base model named in the GGUF, else the repo name without -GGUF.
+# Prefer the checkpoint's declared base or its publisher. TOKENIZER_REPO selects another reviewed source.
 tokrepos=$("$T" - "$gguf" "$repo" <<'EOF'
 import re, sys
+from urllib.parse import urlparse
 from gguf import GGUFReader
 r = GGUFReader(sys.argv[1]); out = []
 for k, f in r.fields.items():
     if re.fullmatch(r"general\.base_model\.\d+\.repo_url", k):
-        out.append(f.contents().split("huggingface.co/")[-1].strip("/"))
+        url = urlparse(f.contents())
+        if url.scheme == "https" and url.netloc == "huggingface.co":
+            out.append(url.path.strip("/"))
 repo = sys.argv[2]; base = re.sub(r"[-_.]gguf$", "", repo, flags=re.I)
 # The GGUF repo's model card names its base model (ggml-org/X-GGUF -> Qwen/X) when the GGUF itself doesn't.
 try:
     import json, urllib.request
     bm = (json.load(urllib.request.urlopen(f"https://huggingface.co/api/models/{repo}", timeout=20)).get("cardData") or {}).get("base_model")
-    out += [bm] if isinstance(bm, str) else list(bm or [])
+    out += [bm] if isinstance(bm, str) else bm if isinstance(bm, list) else []
 except Exception:
     pass
 out += [base, repo]
-org, name = base.split("/", 1)
-out += [f"Qwen/{name}", f"{org}/{name}-Instruct"]
-# Not named in the GGUF and not at the guessed repos (flint: RecursiveSI/flint, not unsloth/flint):
-# ask the Hub for repos of the same name, most downloaded first (non-GGUF repos carry tokenizer.json).
-try:
-    import json, urllib.request
-    q = urllib.request.urlopen(f"https://huggingface.co/api/models?search={name}&sort=downloads&limit=10", timeout=20)
-    out += [m["id"] for m in json.load(q) if "gguf" not in m["id"].lower()]
-except Exception:
-    pass
-print(" ".join(dict.fromkeys(out)))
+out.append(base + "-Instruct")
+repo_id = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9][A-Za-z0-9_.-]*")
+print(" ".join(dict.fromkeys(value for value in out if isinstance(value, str) and repo_id.fullmatch(value))))
 EOF
 )
 tokrepos="${ctok:+$ctok }$tokrepos"
+if [ -n "${TOKENIZER_REPO:-}" ]; then
+  [[ $TOKENIZER_REPO =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9][A-Za-z0-9_.-]*$ ]] || { echo "TOKENIZER_REPO must be ORG/REPO" >&2; exit 2; }
+  tokrepos=$TOKENIZER_REPO
+fi
 # A candidate must carry, with the GGUF's ids, the control and user-defined tokens (types 3, 4) its chat template uses:
 # the base model named in a fine-tune's GGUF can lack them (Mellum2 base: <|im_start|>/<|im_end|> are plain text there
 # and loom-serve finds no terminal marker; Qwen3-1.7B-Base: no <think>/<tool_response>, which Loom splits into pieces
-# where llama.cpp sees one token, and diverges at the first generated token). The first candidate that does wins;
-# else the first one found, with a warning. Pure-whitespace tokens (gemma-3's indentation runs) are ordinary
+# where llama.cpp sees one token, and diverges at the first generated token). Use the first matching candidate.
+# Pure-whitespace tokens (gemma-3's indentation runs) are ordinary
 # vocabulary, and the `special` flag is not required: Glimmer and LFM2 keep their markup tokens unflagged on purpose
 # (chat.nonspecial_tokens), which the old flag check rejected.
 tok_ok() {
@@ -159,18 +158,25 @@ print(f"tokenizer: {sys.argv[2]} lacks the template's special tokens {missing[:6
 sys.exit(1 if missing else 0)
 EOF
 }
-mkdir -p tok; rm -rf tok/cand; first=
+mkdir -p tok; rm -rf tok/cand
+tokenizer_found=
 for tr in $tokrepos; do
   "$hf" download "$tr" tokenizer.json --local-dir tok/cand >/dev/null 2>&1 || continue
-  [ -n "$first" ] || { first=$tr; cp tok/cand/tokenizer.json tok/first.json; }
-  if tok_ok tok/cand/tokenizer.json; then mv tok/cand/tokenizer.json tok/tokenizer.json; echo "tokenizer from $tr"; break; fi
+  if tok_ok tok/cand/tokenizer.json; then
+    mv tok/cand/tokenizer.json tok/tokenizer.json
+    echo "tokenizer from $tr"
+    tokenizer_found=1
+    break
+  fi
   echo " ($tr)"; rm -rf tok/cand
 done
-if [ ! -f tok/tokenizer.json ] && [ -n "$first" ]; then
-  mv tok/first.json tok/tokenizer.json; echo "WARNING: no candidate declares the chat template's special tokens; tokenizer from $first"
+rm -rf tok/cand
+if [ -z "$tokenizer_found" ] && [ -z "${TOKENIZER_REPO:-}" ] && [ -f tok/tokenizer.json ] && tok_ok tok/tokenizer.json; then
+  tokenizer_found=1
 fi
-rm -rf tok/cand tok/first.json
-[ -f tok/tokenizer.json ] || { echo "no tokenizer.json found in: $tokrepos (download it from the base model into $work/tok)"; exit 2; }
+[ -n "$tokenizer_found" ] || {
+  echo "no matching tokenizer.json found in: $tokrepos (select a verified tokenizer with TOKENIZER_REPO=ORG/REPO)" >&2; exit 2;
+}
 [ -n "$model_id" ] || model_id=$(echo "$tokrepos" | cut -d' ' -f1)
 
 # A published, gate-passing port of the same architecture (or one sharing building blocks) is the starting point:

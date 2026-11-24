@@ -1,0 +1,10 @@
+{
+ "scope": "facet/looped",
+ "match": {
+  "has": [
+   "loop"
+  ]
+ },
+ "owner": "kb",
+ "choices": []
+}

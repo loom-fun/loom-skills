@@ -91,7 +91,19 @@ def remote_files(api, repo, revision=None):
     return info.sha, out
 
 
+def package_work_dir(work, slug):
+    """Keep a package's disposable work directory under the selected scratch root."""
+    if not re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9_-])?", slug):
+        raise ValueError(f"invalid package slug: {slug!r}")
+    root = os.path.realpath(work)
+    directory = os.path.join(root, slug)
+    if os.path.islink(directory) or os.path.realpath(directory) != directory:
+        raise ValueError(f"package work directory must be a direct child of {root}")
+    return directory
+
+
 def promote(api, slug, work, execute, staging_revision=None, target_revision=None):
+    directory = package_work_dir(work, slug)
     if execute and target_revision is None:
         raise ValueError("execute requires an explicitly reviewed target revision")
     from huggingface_hub import snapshot_download
@@ -113,8 +125,9 @@ def promote(api, slug, work, execute, staging_revision=None, target_revision=Non
             dsha, dfiles = None, {}
             r["target_note"] = f"no {dst}: {type(e).__name__}"
     r["staging_commit"], r["target_commit"] = ssha, dsha
-    out = os.path.join(work, slug, "out")
-    shutil.rmtree(os.path.join(work, slug), ignore_errors=True)
+    out = os.path.join(directory, "out")
+    if os.path.exists(directory):
+        shutil.rmtree(package_work_dir(work, slug))
     snapshot_download(src, revision=ssha, local_dir=out, ignore_patterns=[".gitattributes"])
     shutil.rmtree(os.path.join(out, ".cache"), ignore_errors=True)
     # the org rewrite

@@ -114,6 +114,9 @@ $T -I "$K/make_kernel_tests.py" cfg.json ktest && VENV=~/loom/.venv "$K/run_kern
 # 7. Gates vs llama.cpp - loom-benchmark skill: golden.py/compare.py (short prompts + 1k-32k documents),
 #    agent_golden.py (multi-turn tool calling, rendering, history reuse) and `ctx_admit.py` (the full native context is admitted).
 ```
+
+The automated port looks for a tokenizer from the checkpoint's declared base or its publisher and checks its chat tokens.
+If the model uses another tokenizer, review its source and pass `TOKENIZER_REPO=ORG/REPO` when running `port.sh`.
 After every rebuild, restart the server with `stop.sh` and then `serve.sh`; the
 server does not reload the package (`serve.sh` stops a server whose registration failed).
 

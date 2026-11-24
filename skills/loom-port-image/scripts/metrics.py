@@ -118,13 +118,18 @@ class ClipScorer:
 
 class PickScorer:
     name = "yuvalkirstain/PickScore_v1"
+    revision = "a4e4367c6dfa7288a00c550414478f865b875800"
+    processor_name = "laion/CLIP-ViT-H-14-laion2B-s32B-b79K"
+    processor_revision = "1c2b8495b28150b8a4922ee1c8edee224c284c0c"
 
     def __init__(self, device):
         import torch
         from transformers import AutoModel, AutoProcessor
         self.torch, self.device = torch, device
-        self.processor = AutoProcessor.from_pretrained("laion/CLIP-ViT-H-14-laion2B-s32B-b79K")
-        self.model = AutoModel.from_pretrained(self.name).to(device).eval()
+        self.processor = AutoProcessor.from_pretrained(self.processor_name, revision=self.processor_revision,
+                                                       trust_remote_code=False)
+        self.model = AutoModel.from_pretrained(self.name, revision=self.revision, trust_remote_code=False,
+                                             use_safetensors=True).to(device).eval()
 
     def __call__(self, image, prompt):
         with self.torch.inference_mode():

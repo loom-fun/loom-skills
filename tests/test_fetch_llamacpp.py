@@ -1,4 +1,5 @@
-"""Downloader destination precedence, using cached stub releases and no network."""
+"""Downloader destination and verification behavior with local release fixtures."""
+import hashlib
 import importlib.util
 import json
 import os
@@ -7,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import zipfile
 
 
 SCRIPTS = Path(__file__).resolve().parents[1] / "skills/loom-benchmark/scripts"
@@ -29,11 +31,14 @@ class FetchLlamacppTests(unittest.TestCase):
             server = release / "llama-server"
             server.write_text('#!/bin/sh\necho "ROCm device"\n', encoding="utf-8", newline="\n")
             server.chmod(0o755)
+            digest = "d" * 64
+            (release / ".verified-release").write_text(digest + "\n", encoding="utf-8", newline="\n")
             bindir = root / "bin"
             bindir.mkdir()
             metadata = {"tag_name": tag, "assets": [{
                 "name": f"llama-{'windows' if os.name == 'nt' else 'ubuntu'}-rocm-{gfx}-x64.zip",
                 "browser_download_url": "https://example.invalid/release.zip",
+                "digest": f"sha256:{digest}",
             }]}
             # Fail rather than access the network or download an archive.
             curl = bindir / "curl"
@@ -95,3 +100,54 @@ class FetchLlamacppTests(unittest.TestCase):
     def test_empty_destination_uses_environment_and_keeps_tag_gfx(self):
         self.run_cached("env", override=True, args=("", "custom-tag", "gfx1201"),
                         tag="custom-tag", gfx="gfx1201")
+
+    @unittest.skipIf(os.name == "nt", "the archive fixture contains a POSIX test executable")
+    def test_verified_retry_replaces_legacy_cache_only_after_success(self):
+        with tempfile.TemporaryDirectory(prefix="llamacpp release ") as tmp:
+            root = Path(tmp)
+            dest = root / "cache"
+            release = dest / "build"
+            release.mkdir(parents=True)
+            server = release / "llama-server"
+            server.write_text('#!/bin/sh\necho "legacy build"\n', encoding="utf-8")
+            server.chmod(0o755)
+            archive = root / "fixture.zip"
+            with zipfile.ZipFile(archive, "w") as package:
+                member = zipfile.ZipInfo("llama-server")
+                member.external_attr = 0o100755 << 16
+                package.writestr(member, '#!/bin/sh\necho "ROCm device"\n')
+            expected = hashlib.sha256(archive.read_bytes()).hexdigest()
+            meta_path = root / "meta.json"
+            curl = root / "curl"
+            curl.write_text('#!/bin/sh\nwhile [ "$#" -gt 0 ]; do\n'
+                            '  if [ "$1" = -o ]; then cp "$FIXTURE_ARCHIVE" "$2"; exit; fi\n'
+                            '  shift\ndone\ncat "$RELEASE_META"\n', encoding="utf-8")
+            curl.chmod(0o755)
+            env = dict(os.environ, PATH=f"{root}{os.pathsep}{os.environ['PATH']}",
+                       RELEASE_META=str(meta_path), FIXTURE_ARCHIVE=str(archive),
+                       PY=sys.executable, LLAMACPP_BACKEND="rocm")
+
+            def run(digest):
+                meta_path.write_text(json.dumps({"tag_name": "build", "assets": [{
+                    "name": "llama-ubuntu-rocm-gfx1151-x64.zip", "digest": f"sha256:{digest}",
+                    "browser_download_url": "https://example.invalid/release.zip",
+                }]}), encoding="utf-8")
+                return subprocess.run(["bash", str(SCRIPT), str(dest), "latest", "gfx1151"],
+                                      capture_output=True, text=True, timeout=10, env=env)
+
+            failed = run("0" * 64)
+            self.assertNotEqual(failed.returncode, 0)
+            self.assertIn("sha256", failed.stderr)
+            self.assertIn("legacy build", server.read_text(encoding="utf-8"))
+            self.assertEqual(list(dest.iterdir()), [release])
+
+            success = run(expected)
+            self.assertEqual(success.returncode, 0, success.stderr)
+            self.assertEqual(success.stdout.strip(), str(release))
+            self.assertEqual((release / ".verified-release").read_text().strip(), expected)
+            self.assertEqual((release / "release.sha256").read_text().strip(), expected)
+
+            cached = run(expected)
+            self.assertEqual(cached.returncode, 0, cached.stderr)
+            self.assertEqual(cached.stderr, "")
+            self.assertEqual(list(dest.iterdir()), [release])
