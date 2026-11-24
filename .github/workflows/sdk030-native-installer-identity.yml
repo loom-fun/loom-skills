@@ -2,7 +2,7 @@ name: SDK 0.3 normal Linux and Windows installer identity
 
 on:
   push:
-    branches: [codex/sdk030-native-installer-identity]
+    branches: [codex/sdk030-native-installer-identity, codex/sdk030-native-installer-identity-windows]
     paths:
       - .github/workflows/sdk030-native-installer-identity.yml
       - .github/scripts/sdk030-native-installer-identity.sh
@@ -12,6 +12,7 @@ permissions:
 
 jobs:
   linux:
+    if: github.ref_name == 'codex/sdk030-native-installer-identity'
     runs-on: [Linux, strix-halo, devlab-dispatch]
     timeout-minutes: 25
     steps:
@@ -36,7 +37,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-          fetch-depth: 2
+          fetch-depth: 3
       - name: Verify the ordinary stable-version and explicit release installs in Git Bash
         shell: bash
         run: bash .github/scripts/sdk030-native-installer-identity.sh windows

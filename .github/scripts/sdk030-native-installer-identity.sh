@@ -11,6 +11,11 @@ expected_wheel=6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f
 selections=(0.3.0)
 if [[ "$platform" == windows ]]; then
   runner_scratch=$(cygpath -u "$runner_scratch")
+  native_python_dir=$(cygpath -u 'C:\Program Files\Python312')
+  test -x "$native_python_dir/python.exe"
+  export PATH="$native_python_dir:$PATH"
+  export PYTHON=python
+  "$PYTHON" --version
   bin=Scripts
   expected_wheel=06afbc88370fde741037ebd38dba91c2184cb4d2fbd5cee337720cd494a06752
   selections+=(release:0.3.0)
