@@ -18,7 +18,7 @@ HEAD = "amdgpu.target<gfx11-generic> @w32 {subgroup_size = 32}\n\n"
 QH, D, PB = 32, 576, 1152
 VARIANTS = {"wmma": {}, "s32": {"MLA_DEC_S": "32"}, "s128": {"MLA_DEC_S": "128"}, "b2": {"MLA_DEC_BMIN": "2"}, "b8": {"MLA_DEC_BMIN": "8"},
             "vp4": {"MLA_DEC_VTPAD": "4"}, "s16": {"MLA_DEC_S": "16"}, "s64": {"MLA_DEC_S": "64"}, "b1": {"MLA_DEC_BMIN": "1"}, "b4": {"MLA_DEC_BMIN": "4"}, "b16": {"MLA_DEC_BMIN": "16"},
-            "pf1": {"MLA_DEC_PF": "1"}, "pf2": {"MLA_DEC_PF": "2"}, "pl1": {"MLA_DEC_PL": "1"}, "pl0": {"MLA_DEC_PL": "0"}, "cu1": {"MLA_DEC_CU": "1"}, "cu4": {"MLA_DEC_CU": "4"},
+            "pf1": {"MLA_DEC_PF": "1"}, "pf2": {"MLA_DEC_PF": "2"}, "ql1": {"MLA_DEC_QL": "1"}, "hg2": {"MLA_DEC_HG": "2"}, "ph1": {"MLA_DEC_PH": "1"}, "kl1": {"MLA_DEC_KLDS": "1"}, "qk2": {"MLA_DEC_QK2": "1"}, "sti": {"MLA_DEC_STI": "1"}, "pfn5": {"MLA_DEC_PFN": "5"}, "pl1": {"MLA_DEC_PL": "1"}, "pl0": {"MLA_DEC_PL": "0"}, "cu1": {"MLA_DEC_CU": "1"}, "cu4": {"MLA_DEC_CU": "4"},
             **{"x" + a: {"MLA_DEC_ABL": a} for a in ("empty", "noqk", "nostv", "nopv", "nosx", "nopart")}}   # x*: timing ablations (no tests)
 CASES = [("256", 256, 40, 1), ("1k", 1024, 40, 1), ("2k", 2048, 40, 1), ("8k", 8192, 40, 1), ("32k", 32768, 40, 1), ("131k", 131072, 4, 1), ("c4_8k", 8192, 40, 4)]
 OUT = None
@@ -44,7 +44,9 @@ def kernels(variant, tag):
         sp, co = "g_attention_split", "g_attention_combine"
     else:
         env = {k: v for k, v in os.environ.items() if not k.startswith("MLA_DEC")}
-        env.update({k: v for x in variant.split("+") for k, v in VARIANTS[x].items()})
+        for x in variant.split("+"):
+            for k, v in VARIANTS[x].items():
+                env[k] = env[k] + "," + v if k == "MLA_DEC_ABL" and k in env else v
         code = f"import json,sys; sys.path.insert(0, {kit()!r}); import gen_mla_dec; print(gen_mla_dec.kernels(json.load(open({os.path.join(ROOT, 'skills/loom-port-llm/reference/deepseek2-example/cfg.json')!r}))))"
         t = subprocess.run([sys.executable, "-c", code], check=True, env=env, capture_output=True, text=True).stdout
         i = open(os.path.join(HERE if os.path.exists(os.path.join(HERE, "old_attn.loom")) else OUT, "old_attn.loom")).read()
