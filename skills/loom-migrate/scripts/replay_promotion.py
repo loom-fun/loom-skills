@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """Prepare immutable production package bytes and replay their reviewed manifest."""
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import json
 import os
 import re
 import shutil
+import time
 from pathlib import Path, PurePosixPath
 
 STAGING = "loom-fun-staging"
@@ -58,19 +60,37 @@ def records(pins):
         yield slug, row
 
 
-def snapshot(api, repo, revision):
-    from huggingface_hub import snapshot_download
+def read_hub(operation, repo, *args, **kwargs):
+    for attempt in range(3):
+        try:
+            return operation(repo, *args, token=False, **kwargs)
+        except Exception as error:
+            response = getattr(error, "response", None)
+            if response is None or response.status_code != 429 or attempt == 2:
+                raise
+            reset = re.search(r"(?:^|;)\s*t=(\d+)", response.headers.get("RateLimit", ""))
+            delay = response.headers.get("Retry-After") or (reset[1] if reset else "300")
+            seconds = int(delay) if delay.isdecimal() else 300
+            print(f"Hub read rate limited; retrying {repo} in {seconds + 1} seconds", flush=True)
+            time.sleep(seconds + 1)
 
-    info = api.model_info(repo, revision=revision, files_metadata=True, token=False)
-    require(info.sha == revision and info.siblings, f"{repo}: incorrect or empty revision {revision}")
-    path = Path(snapshot_download(repo, revision=revision, token=False, endpoint=ENDPOINT))
-    content = {}
-    for file in info.siblings:
+
+def model_info(api, repo, **kwargs):
+    return read_hub(api.model_info, repo, **kwargs)
+
+
+def snapshot(api, repo, revision):
+    from huggingface_hub import hf_hub_download
+
+    info = model_info(api, repo, revision=revision, files_metadata=True)
+    require(info.id == repo and info.sha == revision and info.siblings, f"{repo}: incorrect or empty revision {revision}")
+    files = [file for file in info.siblings if file.rfilename != ".gitattributes"]
+    require(files and all(safe_path(file.rfilename) for file in files), f"{repo}: empty package or unsafe path")
+
+    def verify(file):
         name = file.rfilename
-        require(safe_path(name), f"{repo}: invalid path {name}")
-        if name == ".gitattributes":
-            continue
-        local = path / name
+        local = Path(read_hub(hf_hub_download, repo, name, revision=revision, endpoint=ENDPOINT))
+        root = local.parents[len(PurePosixPath(name).parts) - 1]
         size = local.stat().st_size
         sha = digest(local)
         if file.lfs:
@@ -82,12 +102,18 @@ def snapshot(api, repo, revision):
                     git.update(block)
             require(git.hexdigest() == file.blob_id, f"{repo}: corrupt Git blob {name}")
         require(file.size is None or size == file.size, f"{repo}: incorrect size {name}")
-        content[name] = sha
-    return path, content
+        return root, name, sha
+
+    # All paths are already in model_info. Resolve them directly without listing the snapshot again.
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        verified = list(pool.map(verify, files))
+    path = verified[0][0]
+    require(all(root == path for root, _, _ in verified), f"{repo}: inconsistent snapshot cache paths")
+    return path, {name: sha for _, name, sha in verified}
 
 
 def require_head(api, repo, revision):
-    live = api.model_info(repo, revision="main", token=False).sha
+    live = model_info(api, repo, revision="main").sha
     require(live == revision, f"{repo}: main moved from {revision} to {live}")
 
 
@@ -124,6 +150,15 @@ def inspect_refs(name, data, slug):
     if name.endswith(".md") or name.endswith("qualification.json"):
         pinned = rf"{STAGING}/{SLUG}(?:@{REVISION}|/(?:resolve|commit|tree|blob)/{REVISION})(?![0-9a-f])"
         text = re.sub(pinned, "", text)
+    if re.fullmatch(r"sdk-comparison-[a-z0-9-]+\.json", name):
+        proof = json.loads(data)
+        require(pinned_sha(proof.get("production_revision")), f"{slug}: unpinned comparison production source")
+        expected = rf"{STAGING}/{re.escape(slug)}@{REVISION}"
+        for metric in proof["fixed_prompt_replays"].values():
+            arm = metric.get("arms", {}).get("staging", {})
+            if re.fullmatch(expected, arm.get("package", "")):
+                arm.pop("package")
+        text = json.dumps(proof)
     if name == "quick-start-qualification.json" and STAGING in text:
         proof = json.loads(data)
         repo = f"{STAGING}/{slug}"
@@ -141,8 +176,8 @@ def check_image(path, component_hashes, slug, presets, old_revision):
             and comparison["pixels_match"] and comparison["max_abs_channel_diff"] == 0
             and comparison["repo"] == f"{PRODUCTION}/{slug}" and comparison["revision"] == old_revision
             and set(presets) == {comparison["preset"]}, f"{slug}: image qualification does not match release")
+    programs = {name: sha for name, sha in component_hashes.items() if name.endswith(".loom")}
     for version in ("0.2.0", "0.3.0"):
-        programs = {n: h for n, h in component_hashes.items() if n.startswith("program/") and n.endswith(".loom")}
         require(programs and comparison["runs"][version]["programs"] == programs,
                 f"{slug}: image programs differ from {version} qualification")
 
@@ -270,6 +305,7 @@ def replay(api, bundle, manifest_sha, execute, receipt_path):
             commit = api.create_commit(
                 repo, repo_type="model", revision="main", parent_commit=row["target_revision"], token=True,
                 commit_message=f"Promote reviewed package from staging {row['staging_revision']}",
+                commit_description=f"Reviewed promotion manifest SHA256: {manifest_sha}",
                 operations=[CommitOperationAdd(name, bundle / "packages" / slug / name) for name in row["operations"]],
             )
             require(pinned_sha(commit.oid), f"{repo}: missing upload commit; reconcile before retry")

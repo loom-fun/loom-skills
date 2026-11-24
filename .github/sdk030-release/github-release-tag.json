@@ -1,0 +1,10 @@
+{
+  "repository": "loom-fun/loom-skills",
+  "prefix": "sdk0.3.0-u",
+  "observed_refs": [],
+  "candidate": "sdk0.3.0-u0",
+  "target": null,
+  "target_resolution": "The future owner-approved merge commit of SDK integration PR #1366.",
+  "read_endpoint": "https://api.github.com/repos/loom-fun/loom-skills/git/matching-refs/tags/sdk0.3.0-",
+  "disposition": "Deferred until the integration merge and explicit owner approval. Recheck the tag name before creating it. Never force or retarget."
+}

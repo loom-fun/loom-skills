@@ -35,6 +35,8 @@ jobs:
           "$work/verify/bin/python" -m unittest discover -s tests -p test_replay_promotion.py 2>&1 | tee "$work/evidence/replay-tests.log"
       - name: Validate production-form release rows
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           export HF_HUB_CACHE="$REHEARSAL_WORK/hub-cache"
@@ -44,9 +46,40 @@ jobs:
           cp "$inputs"/*.json "$evidence/inputs/"
           cp skills/loom-migrate/scripts/replay_promotion.py "$evidence/"
           cp "$inputs/rehearse.py" "$evidence/"
+          cp "$inputs/promote-reviewed.py" "$evidence/"
           git rev-parse HEAD > "$evidence/source-commit.txt"
+          if [[ -f "$inputs/RELEASE.md" ]]; then cp "$inputs/RELEASE.md" "$evidence/"; fi
+          if [[ -d "$inputs/release-surfaces" ]]; then
+            cp -a "$inputs/release-surfaces" "$evidence/"
+            "$REHEARSAL_WORK/verify/bin/python" "$evidence/release-surfaces/publish-entry-points.py" \
+              | tee "$evidence/release-surfaces-preflight.log"
+          fi
+          inherited=()
+          if [[ -f "$inputs/reuse.json" ]]; then
+            readarray -t reuse < <(jq -r '.run,.artifact,.sha256' "$inputs/reuse.json")
+            [[ "${reuse[0]}" =~ ^[0-9]+$ && "${reuse[1]}" =~ ^[0-9]+$ && "${reuse[2]}" =~ ^[a-f0-9]{64}$ ]]
+            artifact_api="repos/$GITHUB_REPOSITORY/actions/artifacts/${reuse[1]}"
+            gh api "$artifact_api" | jq -e --arg run "${reuse[0]}" --arg hash "sha256:${reuse[2]}" \
+              '.workflow_run.id == ($run | tonumber) and .digest == $hash and .expired == false'
+            gh api "$artifact_api/zip" > "$REHEARSAL_WORK/inherited.zip"
+            printf '%s  %s\n' "${reuse[2]}" "$REHEARSAL_WORK/inherited.zip" | sha256sum --check --status
+            unzip -q "$REHEARSAL_WORK/inherited.zip" -d "$REHEARSAL_WORK/inherited"
+            inherited+=("$REHEARSAL_WORK/inherited")
+          fi
           "$REHEARSAL_WORK/verify/bin/python" "$inputs/rehearse.py" "$inputs" "$REHEARSAL_WORK/rows" \
-            "$evidence" "$REHEARSAL_WORK/sdk/.venv/bin/loom-fetch" | tee "$evidence/devlab.log"
+            "$evidence" "$REHEARSAL_WORK/sdk/.venv/bin/loom-fetch" "${inherited[@]}" | tee "$evidence/devlab.log"
+          if [[ -f "$inputs/github-release-tag.json" ]]; then
+            cp "$inputs/github-release-tag.json" "$evidence/"
+          fi
+          if [[ "$(jq length "$evidence/tag-plan.json")" == 58 ]]; then
+            cd "$evidence"
+            sha256sum release/manifest.json tag-plan.json
+            "$REHEARSAL_WORK/verify/bin/python" promote-reviewed.py \
+              --manifest-sha256 "$(sha256sum release/manifest.json | cut -d' ' -f1)" \
+              --tag-plan-sha256 "$(sha256sum tag-plan.json | cut -d' ' -f1)" \
+              | tee owner-preflight.log
+            find . -type f ! -name archive-files.sha256 -print0 | sort -z | xargs -0 sha256sum > archive-files.sha256
+          fi
           cat "$evidence/review.md" >> "$GITHUB_STEP_SUMMARY"
       - name: Upload reviewed content and evidence
         if: always() && env.REHEARSAL_WORK != ''

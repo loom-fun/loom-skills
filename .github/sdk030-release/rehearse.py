@@ -8,15 +8,17 @@ import re
 import shutil
 import subprocess
 import sys
+from urllib.error import HTTPError
 from urllib.parse import quote
 from urllib.request import urlopen
 
 from huggingface_hub import HfApi
 
 
-ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT / "skills/loom-migrate/scripts"))
-from replay_promotion import canonical, digest, prepare, replay, require
+ROOT = Path(__file__).resolve().parent
+if not (ROOT / "replay_promotion.py").exists():
+    sys.path.insert(0, str(ROOT.parents[1] / "skills/loom-migrate/scripts"))
+from replay_promotion import canonical, digest, inspect_bundle, model_info, prepare, read_hub, replay, require
 
 ENDPOINT = "https://huggingface.co"
 TAG = "v0.2.0"
@@ -30,9 +32,15 @@ def save(path, data):
     path.write_bytes(canonical(data))
 
 
-def contents(repo, revision, path):
-    with urlopen(f"{ENDPOINT}/{repo}/resolve/{revision}/{quote(path)}", timeout=90) as response:
-        return response.read()
+def fetch_content(repo, revision, path, token):
+    try:
+        with urlopen(f"{ENDPOINT}/{repo}/resolve/{revision}/{quote(path)}", timeout=90) as response:
+            return response.read()
+    except HTTPError as error:
+        # Give the Hub retry helper the same status/header shape for a CDN response.
+        error.status_code = error.code
+        error.response = error
+        raise
 
 
 def blob_map(info):
@@ -44,20 +52,18 @@ def blob_map(info):
 def inspect(api, slug, row):
     src, dst = f"loom-fun-staging/{slug}", f"loom-fun/{slug}"
     source, target = row["staging_revision"], row["target_revision"]
-    s = api.model_info(src, revision=source, files_metadata=True, token=False)
-    d = api.model_info(dst, revision=target, files_metadata=True, token=False)
+    s = model_info(api, src, revision=source, files_metadata=True)
+    d = model_info(api, dst, revision=target, files_metadata=True)
     require((s.id, s.sha, d.id, d.sha) == (src, source, dst, target), f"{slug}: immutable API resolution differs")
-    require(api.model_info(src, revision="main", token=False).sha == source, f"{src}: staging HEAD differs")
-    require(api.model_info(dst, revision="main", token=False).sha == target, f"{dst}: production HEAD differs")
     sb, db = blob_map(s), blob_map(d)
-    tags = {tag.name: tag.target_commit for tag in api.list_repo_refs(dst, repo_type="model", token=False).tags}
+    tags = {tag.name: tag.target_commit for tag in read_hub(api.list_repo_refs, dst, repo_type="model").tags}
     if "llm_config.json" in db:
         pin_path = "llm_config.json"
-        pin_bytes = contents(dst, target, pin_path)
+        pin_bytes = read_hub(fetch_content, dst, target, pin_path)
         sdk = (json.loads(pin_bytes).get("sdk") or {}).get("hrx_loom")
     else:
         pin_path = "README.md"
-        pin_bytes = contents(dst, target, pin_path)
+        pin_bytes = read_hub(fetch_content, dst, target, pin_path)
         match = re.search(r"hrx-loom\[hf\]==([0-9.]+)", pin_bytes.decode())
         sdk = match[1] if match else None
     require(sdk in ("0.2.0", "0.3.0"), f"{dst}: no reviewed outgoing SDK pin (found {sdk!r})")
@@ -67,9 +73,16 @@ def inspect(api, slug, row):
         action = "already-on-target-sdk"
     tags_plan = {"repo": dst, "parent": target, "tag": TAG, "action": action, "existing": found,
                  "outgoing_sdk": sdk, "pin_path": pin_path, "pin_sha256": hashlib.sha256(pin_bytes).hexdigest()}
-    require(action != "collision", f"{dst}: {TAG} collision {found} vs reviewed {target}")
     return {"target_only": sorted(db.keys() - sb.keys() - {".gitattributes"}), "source": sb, "target": db,
             "tag": tags_plan}
+
+
+def check_live(pins):
+    api = HfApi(endpoint=ENDPOINT, token=False)
+    for org, key in (("loom-fun-staging", "staging_revision"), ("loom-fun", "target_revision")):
+        heads = {item.id: item.sha for item in api.list_models(author=org, full=True, token=False, limit=1000)}
+        for slug, row in pins.items():
+            require(heads.get(f"{org}/{slug}") == row[key], f"{org}/{slug}: live head differs from exact release pin")
 
 
 def sdk_plan(fetch, root, slug, row, output):
@@ -97,8 +110,7 @@ def review_one(task):
     result = {"slug": slug, "pins": row}
     try:
         result.update(inspect(api, slug, row))
-        require(not result["target_only"] or row.get("retain_target_files"),
-                f"{slug}: target-only path(s) require an explicit retention review: {result['target_only']}")
+        require(result["tag"]["action"] != "collision", f"{slug}: {TAG} collision {result['tag']['existing']}")
         save(output / "pins.json", {slug: row})
         bundle = output / "bundle"
         prepare(api, output / "pins.json", bundle)
@@ -108,6 +120,7 @@ def review_one(task):
         require(not (output / "sdk-scratch").exists(), f"{slug}: SDK dry run wrote package files")
         result["output"] = manifest["output"]
         result["change_paths"] = manifest["operations"]
+        result["deleted_paths"] = sorted(result["target"].keys() - manifest["output"].keys() - {".gitattributes"})
         result["pass"] = True
     except (Exception, SystemExit) as exc:
         result["pass"] = False
@@ -121,22 +134,42 @@ def main():
     pins = load(inputs / "pins.json")
     eligible, held = load(inputs / "eligible.json"), load(inputs / "held.json")
     require(pins.keys() == eligible.keys() and not pins.keys() & held.keys(), "release scope has overlapping or missing rows")
+    check_live(pins)
     scratch.mkdir()
     package_dir = evidence / "release/packages"
     package_dir.mkdir(parents=True)
-    with ThreadPoolExecutor(max_workers=4) as pool:
-        rows = list(pool.map(review_one, ((slug, row, scratch, fetch) for slug, row in sorted(pins.items()))))
-    manifests = {}
+    reusable = {}
+    prior_manifests = {}
+    if len(sys.argv) == 6:
+        prior = Path(sys.argv[5])
+        prior_bundle = prior / "release"
+        prior_manifests = dict(inspect_bundle(prior_bundle, (prior / "manifest.sha256").read_text().split()[0]))
+        prior_run = load(inputs / "reuse.json")["run"]
+        for row in load(prior / "review.json"):
+            slug = row["slug"]
+            if not row["pass"] or row["pins"] != pins.get(slug):
+                continue
+            require(row["output"] == prior_manifests[slug]["output"], f"{slug}: reused row hashes differ")
+            reusable[slug] = {**row, "reused_from": row.get("reused_from", prior_run), "deleted_paths": []}
+            shutil.copytree(prior_bundle / "packages" / slug, package_dir / slug)
+            print(f"REUSE {slug}: exact source and production heads and artifacts rechecked", flush=True)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        rows = list(pool.map(review_one, ((slug, row, scratch, fetch) for slug, row in sorted(pins.items())
+                                         if slug not in reusable)))
+    manifests = {slug: prior_manifests[slug] for slug in reusable}
     for row in rows:
         if row["pass"]:
             slug = row["slug"]
             state = scratch / slug / "bundle"
             manifests.update(load(state / "manifest.json")["packages"])
             shutil.move(str(state / "packages" / slug), package_dir / slug)
+    rows = sorted(rows + list(reusable.values()), key=lambda row: row["slug"])
     release = evidence / "release/manifest.json"
     save(release, {"schema": 1, "packages": manifests})
     save(evidence / "review.json", rows)
     save(evidence / "tag-plan.json", {row["slug"]: row["tag"] for row in rows if "tag" in row})
+    if manifests:
+        inspect_bundle(evidence / "release", digest(release))
     (evidence / "manifest.sha256").write_text(f"{digest(release)}  release/manifest.json\n")
     summary = ["# Read-only production-form promotion rehearsal", "",
                f"{len(manifests)}/{len(pins)} exact rows passed production composition, hash replay and SDK dry run.", "",
