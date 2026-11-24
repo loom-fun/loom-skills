@@ -5,7 +5,7 @@
   "candidate": "sdk0.3.0-u0",
   "integration_pr": "https://github.com/loom-fun/loom-skills/pull/1366",
   "reviewed_integration_head": "53622d66eadc1759e665165d8550d2611cc91ef3",
-  "reviewed_production_tool_source": "a1b69ab0c41dbb81975c958eec5eaefe03507da1",
+  "production_tool_archive_source": "e50c6fe58b25b77e4869a297684eac4d42ed02b0",
   "joyai_port_pr": "https://github.com/loom-fun/loom-skills/pull/1389",
   "joyai_port_main_merge": "d630a7c12a54c057ba7bd495791e31f89c6c2d1f",
   "target": null,
