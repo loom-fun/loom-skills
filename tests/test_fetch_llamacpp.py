@@ -32,7 +32,7 @@ class FetchLlamacppTests(unittest.TestCase):
             server.write_text('#!/bin/sh\necho "ROCm device"\n', encoding="utf-8", newline="\n")
             server.chmod(0o755)
             digest = "d" * 64
-            (release / ".verified-release").write_text(digest + "\n", encoding="utf-8")
+            (release / ".verified-release").write_text(digest + "\n", encoding="utf-8", newline="\n")
             bindir = root / "bin"
             bindir.mkdir()
             metadata = {"tag_name": tag, "assets": [{

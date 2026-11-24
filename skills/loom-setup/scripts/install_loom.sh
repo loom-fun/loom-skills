@@ -43,12 +43,14 @@ case "$which" in
     [ "$win" != 1 ] || artifact_kind=loom-sdk-wheel-windows
     if [ "$which" = ci-latest ]; then
       art=$(newest "$artifact_kind")
+      art=${art%$'\r'}
       [[ $art =~ ^[0-9]+$ ]] || { echo "no unexpired main SDK wheel artifact found; choose a reviewed artifact by ID" >&2; exit 1; }
     else art=${which#ci:}; fi
     [[ $art =~ ^[0-9]+$ ]] || { echo "invalid SDK artifact ID" >&2; exit 1; }
     source=ci
     read -r artifact_name artifact_expired branch sha digest < <(gh api "repos/ROCm/hrx-system/actions/artifacts/$art" \
       -q '[.name, .expired, (.workflow_run.head_branch // "unknown"), .workflow_run.head_sha, (.digest // "-")] | @tsv')
+    digest=${digest%$'\r'}
     [[ $artifact_name == "$artifact_kind" && $artifact_expired == false && $sha =~ ^[0-9a-f]{40}$ ]] || {
       echo "artifact $art is not an available $artifact_kind SDK wheel" >&2; exit 1;
     }
@@ -87,7 +89,7 @@ with ZipFile(archive) as package:
     with package.open(item) as source, temporary.open("wb") as destination:
         shutil.copyfileobj(source, destination)
     temporary.replace(wheel)
-print(wheel.as_posix())
+sys.stdout.write(wheel.as_posix())
 PY
     );;
   release:*)

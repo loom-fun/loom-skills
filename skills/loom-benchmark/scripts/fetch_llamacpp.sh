@@ -40,6 +40,7 @@ else:
         want = f"-{sys.argv[2]}-rocm-{g}-x64.zip"
         a = a or [x for x in d["assets"] if x["name"].endswith(want) and not x["name"].startswith("qualification")]
 print(d["tag_name"], a[0]["browser_download_url"] if a else "", (a[0].get("digest") or "").removeprefix("sha256:") if a else "")' - "$os" "$gfx" "$backend" <<< "$meta")
+digest=${digest%$'\r'}
 [ -n "$url" ] || { echo "release $rtag has no $os $backend $gfx asset" >&2; exit 1; }
 [[ $rtag =~ ^[A-Za-z0-9][A-Za-z0-9_.+-]*$ ]] || { echo "invalid release tag: $rtag" >&2; exit 1; }
 asset=${url##*/}

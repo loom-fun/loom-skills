@@ -37,7 +37,7 @@ loom_test(name="shape", srcs=["kernel.loom"], deps=[":kernel"], variants=VARIANT
             build = self.runner.Build(work)
             declarations = build.package("")
             self.assertEqual(build.files(declarations["lib"]["kernel"]["srcs"], ""),
-                             [(str(root / "kernel.loom"), "kernel.loom")])
+                             [(str((root / "kernel.loom").resolve()), "kernel.loom")])
             self.assertEqual(declarations["test"]["shape"]["profiles"], ["VM_REFERENCE_PROFILE"])
             self.assertEqual(declarations["test"]["shape"]["variants"],
                              {"case0": {"configs": {"n": 0}}, "case1": {"configs": {"n": 1}}})
