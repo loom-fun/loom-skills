@@ -83,6 +83,7 @@ def measure(work, sdk, bench):
     card_features = read(out / "info.json").get("card", {}).get("features", {})
     thinking = card_features.get("thinking", {}).get("value") or {}
     forced_reasoning = isinstance(thinking, dict) and thinking.get("mode") == "always"
+    answer_budget = plan.get("answer_budget", 512 if forced_reasoning else 32)
     expected = plan.get("model_id")
     if expected and expected != model_id:
         raise ValueError(f"Expected {expected}, fetched {model_id}")
@@ -191,7 +192,7 @@ def measure(work, sdk, bench):
             ):
                 response = requests.post(url + "/v1/chat/completions", timeout=90, json={
                     "model": model_id, "messages": [{"role": "user", "content": prompt}],
-                    "temperature": 0, "max_tokens": 512 if forced_reasoning else 32,
+                    "temperature": 0, "max_tokens": answer_budget,
                     "chat_template_kwargs": {"enable_thinking": forced_reasoning},
                 })
                 response.raise_for_status()

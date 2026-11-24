@@ -1,24 +1,24 @@
 [
   {
     "gpu": "strix-halo",
-    "slug": "unsloth-gpt-oss-20b-loom",
-    "repo": "loom-fun-staging/unsloth-gpt-oss-20b-loom",
-    "revision": "b325f82c091ff5f8515af694815169538b74f959",
+    "slug": "unsloth-Inkling-2-Mini-loom",
+    "repo": "loom-fun-staging/unsloth-Inkling-2-Mini-loom",
+    "revision": "44d754c12601125e34b9d32685c5c01c0bf198cf",
     "device": "amdgpu://?completion_spin_ns=4294967295",
     "args": [
       "--pool_backing=fixed"
     ],
-    "model_id": "openai/gpt-oss-20b",
+    "model_id": "Inkling-2-Mini",
     "features": {
       "api": "yes",
-      "audio": "unknown",
+      "audio": "n/a",
       "concurrency": "yes",
       "context": "yes",
-      "image_input": "unknown",
+      "image_input": "no",
       "max_output_tokens": "yes",
       "reasoning_effort": "yes",
-      "sampling": "yes",
-      "speculative_decoding": "n/a",
+      "sampling": "no",
+      "speculative_decoding": "yes",
       "thinking": "yes",
       "tool_calling": "yes"
     },
@@ -29,10 +29,10 @@
       "wheel_sha256": "6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f"
     },
     "files": {
-      "info.json": "9aeeba5d3301ab48db17674187ef7bc6f2451f91a58adb0dbe17f14e41b553ac",
-      "model.json": "2b0c9f77bcd2727478dd41f7c9422e9f2c4456c6e29a7c1da693172f0794c548",
-      "model.json.lock": "d39acafb9bad4b6fcea23fb5710b8b14849a15ea6b8a730571dc00a18267cc27",
-      "llm_config.json": "26741c38018f88d7642b6f0f95d584043e2399ef4028764a49a20db394c4479f"
+      "info.json": "98b75cc73c3b2edcaf547b174238deb9fad665ab5cd28f07893b85c548852845",
+      "model.json": "384039ebd9a67ed5ec5e94bb895a1731d5ebbb78dbee864c370819a7a1b93f2e",
+      "model.json.lock": "79ed20d4ebcbb79a79228304bda0780e983d2fa6527f752a3c7614ff99fdf565",
+      "llm_config.json": "c9eab78173a39302934deadeb3615cf2738c4dfdb4b5de3b136fcbca456fe544"
     },
     "package_serve": null,
     "published_rows": [
@@ -47,10 +47,11 @@
       "streams4"
     ],
     "preset": "chat",
-    "context_tokens": 131072,
+    "context_tokens": 262144,
     "execution_rows": 4,
     "focus": [
       "functional"
-    ]
+    ],
+    "answer_budget": 512
   }
 ]
