@@ -166,3 +166,24 @@ class ReplayPromotionTests(unittest.TestCase):
 
     def test_only_immutable_provenance_is_accepted(self):
         check_provenance(self)
+
+    def test_image_refresh_accepts_only_reviewed_readme_changes(self):
+        slug = "xinntao-Real-ESRGAN-x4plus-loom"
+        original = {"README.md": "1" * 64, "program/upscale.loom": "2" * 64, ".gitattributes": "3" * 64}
+        target = {**original, "README.md": "4" * 64}
+        source = {**target, "README.md": "5" * 64}
+        refresh = {"reference_revision": "c" * 40, "reference_readme_sha256": original["README.md"],
+                   "target_readme_sha256": target["README.md"], "staging_readme_sha256": source["README.md"]}
+        row = {"staging_revision": STAGE, "target_revision": TARGET, "image_readme_refresh": refresh}
+        self.assertEqual(list(promotion.records({slug: row})), [(slug, row)])
+        with self.assertRaisesRegex(ValueError, "invalid image README refresh"):
+            list(promotion.records({SLUG: row}))
+        with self.assertRaisesRegex(ValueError, "invalid image README refresh"):
+            list(promotion.records({slug: {**row, "image_readme_refresh": {**refresh, "reference_revision": "main"}}}))
+        promotion.check_image_readme_refresh(slug, refresh, source, target, original)
+        for drifted in ({**target, "program/upscale.loom": "6" * 64}, {**target, ".gitattributes": "7" * 64},
+                        {**target, "new-file": "8" * 64}):
+            with self.assertRaisesRegex(ValueError, "changed outside README.md"):
+                promotion.check_image_readme_refresh(slug, refresh, source, drifted, original)
+        with self.assertRaisesRegex(ValueError, "README identities differ"):
+            promotion.check_image_readme_refresh(slug, refresh, {**source, "README.md": "9" * 64}, target, original)
