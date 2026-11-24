@@ -128,7 +128,9 @@ def apply(text, config):
     spec = config["quark"]["global_quant_config"]["input_tensors"]
     assert (spec["dtype"], spec["group_size"], spec["scale_calculation_mode"]) == ("fp4", 32, "even")
     assert config["model_id"] == "qwen3.8-27b-mxfp4"
-    start = text.index("command.def public @llm_advance(")
+    advance = re.search(r"^command\.def public (?:target\(@\w+\) )?@llm_advance\(", text, re.M)
+    assert advance, "no emitted llm_advance command"
+    start = advance.start()
     end = text.index("\n}\n", start) + len("\n}\n")
     command = text[start:end]
     assert "g_gemm_mxfp4s_store_m128" in command
