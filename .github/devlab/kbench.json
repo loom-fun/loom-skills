@@ -6,26 +6,26 @@
    "dir": "mla_xpf",
    "gen": "mla_xpf/gen_bench.py",
    "gen_variants": [
-    "base",
     "x",
-    "xf",
-    "xq4f",
-    "xdf",
-    "xd",
-    "anox",
-    "anosm",
-    "anoxsm"
+    "sv",
+    "sp",
+    "sk",
+    "spv",
+    "skp",
+    "anobar",
+    "anofrag",
+    "aboth"
    ],
    "files": [
-    "bench.loom",
     "bench_x.loom",
-    "bench_xf.loom",
-    "bench_xq4f.loom",
-    "bench_xdf.loom",
-    "bench_xd.loom",
-    "bench_anox.loom",
-    "bench_anosm.loom",
-    "bench_anoxsm.loom"
+    "bench_sv.loom",
+    "bench_sp.loom",
+    "bench_sk.loom",
+    "bench_spv.loom",
+    "bench_skp.loom",
+    "bench_anobar.loom",
+    "bench_anofrag.loom",
+    "bench_aboth.loom"
    ],
    "tests": [
     "test.loom"

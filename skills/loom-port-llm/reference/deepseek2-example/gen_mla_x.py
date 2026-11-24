@@ -785,10 +785,15 @@ kernel.def export("g_mla_xflash") @g_mla_xflash(%count_buffer: buffer) {{
     %vr{d}_v = index.add %vd{d}, %lane_col : index
     %vr{d} = index.assume %vr{d}_v [range(%vr{d}_v, 0, 127)] : index""")
     TR = set(t for t in os.environ.get("MLA_XF_T", "").split(",") if t)   # xflash trims (see xflash docstring)
-    assert TR <= {"diag", "fma", "lazy"}, TR
+    assert TR <= {"diag", "fma", "lazy", "u2"}, TR
     diag, fma, lazy = "diag" in TR, "fma" in TR, "lazy" in TR
+    u2 = "u2" in TR   # two 32-key blocks per loop step (the second clamped to the last block and fully masked past the end)
+    assert not (u2 and (diag or not lds))
     ABL = set(t for t in os.environ.get("MLA_XF_ABL", "").split(",") if t)   # kbench ablations (wrong results): nores, nox, nosm
-    assert ABL <= {"nores", "nox", "nosm"}, ABL
+    assert ABL <= {"nores", "nox", "nosm", "nobar", "nofrag"}, ABL
+    SRC = set(t for t in os.environ.get("MLA_XF_SRC", "").split(",") if t) if lds else set()   # fragments read from global, not LDS
+    assert SRC <= {"kg", "pg", "vg"}, SRC   # kg: K nope chunks, pg: K rope (k_pe) chunks, vg: V^T
+    bar = "" if "nobar" in ABL else "      kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)"
     TY = ", ".join(["vector<8xf32>"] * 8)
     if fma or lazy:
         a(f"""    %scale_s = scalar.constant {scale * 1.4426950408889634!r} : f32
@@ -821,19 +826,25 @@ kernel.def export("g_mla_xflash") @g_mla_xflash(%count_buffer: buffer) {{
       %sk_rp = index.assume %sk_rp_v [range(%sk_rp_v, 0, {XCAP - 1})] : index
       %sv_c_v = index.add %sk_base, %st_vh : index
       %sv_c = index.assume %sv_c_v [range(%sv_c_v, 0, {XCAP - 16}), multiple_of(%sv_c_v, 16)] : index
-      scf.if %stager {{
-      %gk0 = vector.load %xk_view[%sk_r0, %st_kc0] : view<{XCAP}x128xf16> -> vector<16xf16>
-      %gk1 = vector.load %xk_view[%sk_r1, %st_kc0] : view<{XCAP}x128xf16> -> vector<16xf16>
-      %gkp = vector.load %pe_view[%sk_rp, %st_pc] : view<{XCAP}x64xf16> -> vector<16xf16>
-      %gv0 = vector.load %vt_view[%st_vd0, %st_vh] : view<128x32xf16> -> vector<16xf16>
-      %gv1 = vector.load %vt_view[%st_vd1, %st_vh] : view<128x32xf16> -> vector<16xf16>
-      vector.store %gk0, %ks_view[%st_kk0, %st_kc0] : vector<16xf16>, view<32x200xf16>
-      vector.store %gk1, %ks_view[%st_kk1, %st_kc0] : vector<16xf16>, view<32x200xf16>
-      vector.store %gkp, %ks_view[%st_pk, %st_pc_l] : vector<16xf16>, view<32x200xf16>
-      vector.store %gv0, %vs_view[%st_vd0, %st_vh] : vector<16xf16>, view<128x40xf16>
-      vector.store %gv1, %vs_view[%st_vd1, %st_vh] : vector<16xf16>, view<128x40xf16>
-      }}
-      kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+      scf.if %stager {{""")
+            if "kg" not in SRC:
+                a(f"""      %gk0 = vector.load %xk_view[%sk_r0, %st_kc0] : view<{XCAP}x128xf16> -> vector<16xf16>
+      %gk1 = vector.load %xk_view[%sk_r1, %st_kc0] : view<{XCAP}x128xf16> -> vector<16xf16>""")
+            if "pg" not in SRC:
+                a(f"""      %gkp = vector.load %pe_view[%sk_rp, %st_pc] : view<{XCAP}x64xf16> -> vector<16xf16>""")
+            if "vg" not in SRC:
+                a(f"""      %gv0 = vector.load %vt_view[%st_vd0, %st_vh] : view<128x32xf16> -> vector<16xf16>
+      %gv1 = vector.load %vt_view[%st_vd1, %st_vh] : view<128x32xf16> -> vector<16xf16>""")
+            if "kg" not in SRC:
+                a(f"""      vector.store %gk0, %ks_view[%st_kk0, %st_kc0] : vector<16xf16>, view<32x200xf16>
+      vector.store %gk1, %ks_view[%st_kk1, %st_kc0] : vector<16xf16>, view<32x200xf16>""")
+            if "pg" not in SRC:
+                a(f"""      vector.store %gkp, %ks_view[%st_pk, %st_pc_l] : vector<16xf16>, view<32x200xf16>""")
+            if "vg" not in SRC:
+                a(f"""      vector.store %gv0, %vs_view[%st_vd0, %st_vh] : vector<16xf16>, view<128x40xf16>
+      vector.store %gv1, %vs_view[%st_vd1, %st_vh] : vector<16xf16>, view<128x40xf16>""")
+            a(f"""      }}
+{bar}
       // a wave past its causal range (or without a tile) runs the block anyway: every key is masked, so its state stays
       // (alpha = 1, p = 0); no branch keeps the accumulators from being duplicated across it""")
         for hh in range(2):
@@ -847,7 +858,9 @@ kernel.def export("g_mla_xflash") @g_mla_xflash(%count_buffer: buffer) {{
       %lr{hh} = index.assume %lr{hh}_v [range(%lr{hh}_v, 0, 31)] : index""")
             prev = "%init"
             for c in range(NCH):
-                if lds:
+                if "nofrag" in ABL and c > 0:
+                    pass
+                elif lds and not ((c < 8 and "kg" in SRC) or (c >= 8 and "pg" in SRC)):
                     a(f"""      %kr{hh}_{c} = vector.load %ks_view[%lr{hh}, {16 * c}] : view<32x200xf16> -> vector<16xf16>""")
                 elif c < 8:
                     a(f"""      %kr{hh}_{c} = vector.load %xk_view[%xr{hh}, {16 * c}] : view<{XCAP}x128xf16> -> vector<16xf16>""")
@@ -858,7 +871,8 @@ kernel.def export("g_mla_xflash") @g_mla_xflash(%count_buffer: buffer) {{
                     qf = f"%qlf{hh}_{c}"
                     a(f"""      %qlr{hh}_{c} = vector.load %ql_view[%ql_r, {16 * (c - (NCH - QL))}] : view<{QW * 16}x{QLW}xf16> -> vector<16xf16>
       {qf} = vector.fragment<rhs> %qlr{hh}_{c} shape [%c16, %c16] : vector<16xf16>""")
-                a(f"""      %kfr{hh}_{c} = vector.fragment<lhs> %kr{hh}_{c} shape [%c16, %c16] : vector<16xf16>
+                kreg = f"%kr{hh}_0" if ("nofrag" in ABL and c > 0) else f"%kr{hh}_{c}"
+                a(f"""      %kfr{hh}_{c} = vector.fragment<lhs> {kreg} shape [%c16, %c16] : vector<16xf16>
       %s{hh}_{c} = vector.mma %kfr{hh}_{c}, {qf}, {prev} : vector<16xf16>, vector<16xf16>, vector<8xf32>""")
                 prev = f"%s{hh}_{c}"
             raw = f"%s{hh}_{NCH - 1}"
@@ -941,13 +955,15 @@ kernel.def export("g_mla_xflash") @g_mla_xflash(%count_buffer: buffer) {{
                     a(f"""      %os{d} = vector.mulf %a{d}, %alpha_v : vector<8xf32>""")
             cur = f"%os{d}" if "nores" not in ABL or lazy else f"%a{d}"
             for hh in range(2):
-                a(f"""      %vl{d}_{hh} = vector.load %vs_view[%vr{d}, {16 * hh}] : view<128x40xf16> -> vector<16xf16>""" if lds else f"""      %vl{d}_{hh} = vector.load %vt_view[%vr{d}, {16 * hh}] : view<128x32xf16> -> vector<16xf16>""")
+                if not ("nofrag" in ABL and d > 0):
+                    a(f"""      %vl{d}_{hh} = vector.load %vs_view[%vr{d}, {16 * hh}] : view<128x40xf16> -> vector<16xf16>""" if lds and "vg" not in SRC else f"""      %vl{d}_{hh} = vector.load %vt_view[%vr{d}, {16 * hh}] : view<128x32xf16> -> vector<16xf16>""")
+                vreg = f"%vl0_{hh}" if ("nofrag" in ABL and d > 0) else f"%vl{d}_{hh}"
                 a(f"""
-      %vf{d}_{hh} = vector.fragment<lhs> %vl{d}_{hh} shape [%c16, %c16] : vector<16xf16>
+      %vf{d}_{hh} = vector.fragment<lhs> {vreg} shape [%c16, %c16] : vector<16xf16>
       %an{d}_{hh} = vector.mma %vf{d}_{hh}, %pt{hh}, {cur} : vector<16xf16>, vector<16xf16>, vector<8xf32>""")
                 cur = f"%an{d}_{hh}"
-        if lds:
-            a("      kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)")
+        if lds and bar:
+            a(bar)
         a(f"""      scf.yield %m_new, %l_new, {", ".join(f"%an{d}_1" for d in range(8))} : f32, f32, {TY}
     }}""")
 
@@ -959,6 +975,36 @@ kernel.def export("g_mla_xflash") @g_mla_xflash(%count_buffer: buffer) {{
         acc2 = ", ".join(f"%a{d} = %od{d} : vector<8xf32>" for d in range(8))
         a(f"""    %m_final, %l_final, {", ".join(f"%o{d}" for d in range(8))} = scf.for %b = [%nfull to {nb} step %c1](%m = %m_d : f32, %l = %l_d : f32, {acc2}) -> (f32, f32, {TY}) {{""")
         body(True, "")
+    elif u2:
+        a(f"""    %c_m1 = scalar.constant -1 : i32
+    %qneg_v = vector.splat %c_m1 : vector<8xi32>
+    %nb_last = index.sub {nb}, %c1 : index
+    %nb1 = index.add {nb}, %c1 : index
+    %nhalf = index.div %nb1, %c2 : index
+    %m_final, %l_final, {", ".join(f"%o{d}" for d in range(8))} = scf.for %bb = [%c0 to %nhalf step %c1](%m = %neg_big : f32, %l = %zero_f : f32, {acc}) -> (f32, f32, {TY}) {{
+      %b = index.mul %bb, %c2 : index""")
+        n0 = len(A)
+        body(True, "")
+        first = A[n0:]
+        del A[n0:]
+        y = first.pop()   # the yield
+        A.extend(first)
+        second = "\n".join(first + [y])
+        import re
+        defs = set()
+        for line in second.split("\n"):
+            if " = " in line and line.strip().startswith("%"):
+                defs.update(re.findall(r"%[\w]+", line.split(" = ")[0]))
+        for d_ in sorted(defs, key=len, reverse=True):
+            second = re.sub(re.escape(d_) + r"(?![\w])", d_ + "_q2", second)
+        carried = {"%m": "%m_new", "%l": "%l_new", "%b": "%b2", "%qpos_v": "%qpos_v2", **{f"%a{d}": f"%an{d}_1" for d in range(8)}}
+        for k_, v_ in carried.items():
+            second = re.sub(re.escape(k_) + r"(?![\w])", v_, second)
+        a(f"""      %b2_v = index.add %b, %c1 : index
+      %b2_in = index.cmp ult, %b2_v, {nb} : index
+      %b2 = index.min %b2_v, %nb_last : index
+      %qpos_v2 = scf.select %b2_in, %qpos_v, %qneg_v : vector<8xi32>""")
+        a(second)
     else:
         a(f"""    %m_final, %l_final, {", ".join(f"%o{d}" for d in range(8))} = scf.for %b = [%c0 to {nb} step %c1](%m = %neg_big : f32, %l = %zero_f : f32, {acc}) -> (f32, f32, {TY}) {{""")
         body(True, "")

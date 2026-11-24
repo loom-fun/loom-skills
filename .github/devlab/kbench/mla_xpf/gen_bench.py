@@ -28,8 +28,11 @@ VARIANTS = {"x": {}, "xg": {"MLA_XF": "global"},   # x: LDS-staged flash (defaul
             # lc lane: xflash trims (gen_mla_x MLA_XF_T / MLA_XF_QL) and timing-only ablations (MLA_XF_ABL, wrong results)
             "xf": {"MLA_XF_T": "fma"}, "xq4": {"MLA_XF_QL": "4"}, "xq4f": {"MLA_XF_QL": "4", "MLA_XF_T": "fma"},
             "xdf": {"MLA_XF_QL": "4", "MLA_XF_T": "diag,fma"}, "xd": {"MLA_XF_T": "diag"},
-            "anox": {"MLA_XF_ABL": "nox"}, "anosm": {"MLA_XF_ABL": "nosm"}, "anoxsm": {"MLA_XF_ABL": "nox,nosm"}}
-TIMING_ONLY = {"anox", "anosm", "anoxsm"}   # g_mla_xexp fault bisection   # small-scratch twins for the staged tests
+            "anox": {"MLA_XF_ABL": "nox"}, "anosm": {"MLA_XF_ABL": "nosm"}, "anoxsm": {"MLA_XF_ABL": "nox,nosm"},
+            "sv": {"MLA_XF_SRC": "vg"}, "sp": {"MLA_XF_SRC": "pg"}, "sk": {"MLA_XF_SRC": "kg"}, "spv": {"MLA_XF_SRC": "pg,vg"},
+            "skp": {"MLA_XF_SRC": "kg,pg"}, "anobar": {"MLA_XF_ABL": "nobar"}, "anofrag": {"MLA_XF_ABL": "nofrag"},
+            "aboth": {"MLA_XF_ABL": "nofrag,nobar"}}
+TIMING_ONLY = {"anox", "anosm", "anoxsm", "anobar", "anofrag", "aboth"}   # g_mla_xexp fault bisection   # small-scratch twins for the staged tests
 
 
 def set_xcap(variant):
