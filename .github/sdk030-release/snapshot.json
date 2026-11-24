@@ -1,7 +1,7 @@
 {
-  "captured_utc": "2026-11-24T18:01:36.767170+00:00",
-  "eligible": 58,
+  "captured_utc": "2026-11-24T18:30:18.307775+00:00",
+  "eligible": 59,
   "excluded": 2,
-  "pending": 1,
+  "pending": 0,
   "production_parents_verified": 60
 }

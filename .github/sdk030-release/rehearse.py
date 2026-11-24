@@ -228,6 +228,9 @@ def main():
                        f"[parent](https://huggingface.co/loom-fun/{slug}/tree/{prod}) | "
                        f"{len(row.get('change_paths', []))} | {len(row.get('deleted_paths', []))} | "
                        f"{row.get('tag', {}).get('action', 'unverified')} | {result} |")
+    for slug, row in eligible.items():
+        if row.get("qualification_note"):
+            summary.extend(("", f"**{slug}** — {row['qualification_note']} [Qualification]({row['qualification_url']})"))
     (evidence / "review.md").write_text("\n".join(summary) + "\n")
     require(len(manifests) == len(pins), "one or more packages require a targeted repair")
 

@@ -625,6 +625,27 @@
     "target_revision": "ed544f633706e706da5098bd5f2fd3c1579921ac",
     "verified_source_files": 15
   },
+  "jdopensource-JoyAI-LLM-Flash-loom": {
+    "device_keys": [
+      "strix-halo"
+    ],
+    "frozen_production_revision": "cb7861a81dbb586782044145ebb11f8cd48d8c8e",
+    "frozen_production_sdk": {
+      "hrx_loom": "0.2.0",
+      "hrx_system_sha": "0cd370f2baaa0cfef47cc23007f1a109906f8a52",
+      "source": "pypi",
+      "wheel_sha256": "5148f9e3a264af400ec4bae38bd7b06bf551d28cc33b7a61d67f7bcefa590438"
+    },
+    "production": "loom-fun/jdopensource-JoyAI-LLM-Flash-loom",
+    "qualification_note": "Native admission succeeded for 130,969 of 131,072 tokens. The server did not cancel within 60 seconds. The previous staged qualification also recorded this behavior. Lead accepted the candidate with this disclosure.",
+    "qualification_run": 45429530814,
+    "qualification_url": "https://github.com/loom-fun/loom-skills/actions/runs/45429530814",
+    "staging": "loom-fun-staging/jdopensource-JoyAI-LLM-Flash-loom",
+    "staging_receipt_url": "https://huggingface.co/loom-fun-staging/jdopensource-JoyAI-LLM-Flash-loom/commit/364e26fac2a4c45293c3e002bab80a4c1b42fc72",
+    "staging_revision": "364e26fac2a4c45293c3e002bab80a4c1b42fc72",
+    "target_revision": "b4787e7927e3863b612b50c13c69207efaa7806e",
+    "verified_source_files": 16
+  },
   "lmstudio-community-Ornith-1.0-35B-loom": {
     "device_keys": [
       "radeon-r9700",

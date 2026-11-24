@@ -119,6 +119,10 @@
     "staging_revision": "844e1a1100459bf32bffaf3d53fd491266c21b9a",
     "target_revision": "ed544f633706e706da5098bd5f2fd3c1579921ac"
   },
+  "jdopensource-JoyAI-LLM-Flash-loom": {
+    "staging_revision": "364e26fac2a4c45293c3e002bab80a4c1b42fc72",
+    "target_revision": "b4787e7927e3863b612b50c13c69207efaa7806e"
+  },
   "lmstudio-community-Ornith-1.0-35B-loom": {
     "staging_revision": "a16e13988f98fcfa0ea89a49215365ed080b3cd0",
     "target_revision": "70e56c1cc62e13fda963337500228fded6ffdb9d"
