@@ -1,0 +1,55 @@
+[
+  {
+    "gpu": "strix-halo",
+    "slug": "jdopensource-JoyAI-LLM-Flash-loom",
+    "repo": "loom-fun-staging/jdopensource-JoyAI-LLM-Flash-loom",
+    "revision": "364e26fac2a4c45293c3e002bab80a4c1b42fc72",
+    "device": "amdgpu://?completion_spin_ns=4294967295",
+    "args": [
+      "--pool_backing=fixed"
+    ],
+    "model_id": "jdopensource/JoyAI-LLM-Flash",
+    "features": {
+      "api": "yes",
+      "audio": "unknown",
+      "concurrency": "yes",
+      "context": "yes",
+      "image_input": "unknown",
+      "max_output_tokens": "yes",
+      "reasoning_effort": "n/a",
+      "sampling": "yes",
+      "speculative_decoding": "n/a",
+      "thinking": "n/a",
+      "tool_calling": "yes"
+    },
+    "sdk": {
+      "hrx_loom": "0.3.0",
+      "source": "pypi",
+      "hrx_system_sha": "e2c41a720363911c04606ce0f4417e2d55630352",
+      "wheel_sha256": "6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f"
+    },
+    "files": {
+      "info.json": "62040e5d5099820578f090b0a7d190b4f13ff979c419d488bb7dd3391445d4ea",
+      "model.json": "c7767d6f9ba61a0e20bd88b2429bc897668f6f217ee302aa25e03b945bb63d52",
+      "model.json.lock": "706f40b63c8eac871b6e9126dd68676deb69dca5df0d8823f7f9bd25ac496ea3",
+      "llm_config.json": "d81c2e915dc7fc715f8e91fe6a2351765fbaaa59d3f11455718853f76d7dff58"
+    },
+    "package_serve": null,
+    "published_rows": [
+      "decode",
+      "decode_2k",
+      "decode_32k",
+      "prefill_16k",
+      "prefill_1k",
+      "prefill_2k",
+      "prefill_32k",
+      "prefill_8k",
+      "streams4"
+    ],
+    "preset": "chat",
+    "context_tokens": 131072,
+    "execution_rows": 4,
+    "measured_programs_sha256": "ded93bd916d2b4aaad1731cb5c6bb1feb832a68323c5ebffa47e2af9d3869bde",
+    "historical_revision": "1c3c331fcfdb784eabe03231b9a4ee6ba44c11ff"
+  }
+]
