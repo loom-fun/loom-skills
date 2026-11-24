@@ -50,7 +50,7 @@ jobs:
           wheel="$work/hrx_loom-0.3.0-py3-none-manylinux_2_39_x86_64.whl"
           "$work/sdk/bin/python" -m pip download --no-deps --dest "$work" hrx-loom==0.3.0
           echo "6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f  $wheel" | sha256sum -c - | tee "$work/out/sdk-wheel.txt"
-          "$work/sdk/bin/python" -m pip install "$wheel[hf]" numpy pillow gguf requests tokenizers
+          "$work/sdk/bin/python" -m pip install "$wheel[hf]" numpy pillow gguf requests tokenizers jinja2
           "$work/sdk/bin/loom-fetch" "$CARD" --output="$work/package" --no-input
       - name: Capture Loom’s active first-token logits and image token layout
         shell: bash
@@ -111,7 +111,7 @@ jobs:
           "$server" --install
           eval "$("$server" --env)"
           export PATH="$HOME/.local/bin:$PATH"
-          uv pip install --python "$VLLM_VENV/bin/python" tokenizers requests
+          uv pip install --python "$VLLM_VENV/bin/python" tokenizers requests jinja2
           "$VLLM_VENV/bin/python" .github/scripts/sdk030_quark_activation_control.py "$WORK/toolkit" "$WORK/package" "$WORK/projector" "$WORK/out/vllm-a4-control.json" 2>&1 | tee "$WORK/out/vllm-a4-control.log"
       - uses: actions/upload-artifact@v4
         if: always() && env.WORK != ''
