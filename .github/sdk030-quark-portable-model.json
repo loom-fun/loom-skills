@@ -1,0 +1,136 @@
+{
+  "schema_version": 1,
+  "model": {
+    "id": "qwen3.8-27b-mxfp4",
+    "name": "Qwen3.8-27B-Quark-AWQ-MXFP4 (Loom port, safetensors)"
+  },
+  "programs": {
+    "source": {
+      "inputs": [
+        {
+          "path": "program/prepare.loom",
+          "data": [
+            "weights.loom",
+            "vision_weights.loom",
+            "llm_config.json"
+          ]
+        },
+        "program/control.loom",
+        "program/storage.loom",
+        "program/service.loom",
+        "program/vision_prepare.loom",
+        "program/vision_control.loom"
+      ],
+      "libraries": [
+        "program/llm.loom",
+        "program/vision_stages.loom",
+        "program/vision_encoder.loom"
+      ]
+    },
+    "source-original": {
+      "inputs": [
+        {
+          "path": "program/original/prepare.loom",
+          "data": [
+            "weights.loom",
+            "vision_weights.loom",
+            "llm_config.json"
+          ]
+        },
+        "program/original/control.loom",
+        "program/storage.loom",
+        "program/service.loom",
+        "program/vision_prepare.loom",
+        "program/vision_control.loom"
+      ],
+      "libraries": [
+        "program/original/llm.loom",
+        "program/vision_stages.loom",
+        "program/vision_encoder.loom"
+      ]
+    }
+  },
+  "services": {
+    "chat": {
+      "kind": "text",
+      "version": 1,
+      "components": {
+        "image": {
+          "version": 1
+        }
+      }
+    }
+  },
+  "variants": {
+    "gguf": {
+      "services": {
+        "chat": {
+          "programs": [
+            "source",
+            "source-original"
+          ],
+          "config": {
+            "llm.card": true,
+            "llm.logits": false
+          },
+          "parameters": {
+            "model": {
+              "files": [
+                {
+                  "path": "parameter/model.safetensors",
+                  "format": "safetensors",
+                  "origin": "@checkpoint/model.safetensors"
+                }
+              ]
+            },
+            "vision": {
+              "files": [
+                {
+                  "path": "parameter/model.safetensors",
+                  "format": "safetensors",
+                  "origin": "@checkpoint/model.safetensors"
+                }
+              ]
+            }
+          },
+          "tokenizers": {
+            "text": "tokenizer.json"
+          }
+        }
+      }
+    }
+  },
+  "presets": {
+    "chat": {
+      "service": "chat",
+      "variant": "gguf",
+      "programs": "source-original",
+      "execution": {
+        "rows": 4,
+        "context_capacity": 262144,
+        "prefill_capacity": 1024,
+        "max_tokens": 4096,
+        "draft_depth": 3
+      }
+    },
+    "chat-r9700": {
+      "service": "chat",
+      "variant": "gguf",
+      "programs": "source",
+      "execution": {
+        "rows": 4,
+        "context_capacity": 110592,
+        "prefill_capacity": 1024,
+        "max_tokens": 4096,
+        "draft_depth": 3
+      }
+    }
+  },
+  "origins": {
+    "checkpoint": {
+      "kind": "hf",
+      "repository": "amd/Qwen3.8-27B-Quark-AWQ-MXFP4",
+      "revision": "93245f7c00f1a8964b66a97c6e02e2fd09080be4"
+    }
+  }
+}
