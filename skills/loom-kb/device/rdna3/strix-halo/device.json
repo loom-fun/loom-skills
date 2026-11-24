@@ -39,6 +39,10 @@
           "85w": {
             "label": "85 W",
             "flops": 43800000000000.0,
+            "valu": 6000000000000.0,
+            "valu_dual": 8960000000000.0,
+            "trans": 1440000000000.0,
+            "valu_note": "MEASURED register-only VALU loops (devlab-kbench valu_peak, runs 45297669703 and 45298241435, 2.3-2.6 GHz at 85 W), in lane-instructions/s: single-issue full-rate ops 6.0e12 (v_and_b32/v_or_b32 6.07e12, v_pk_mul_f16 6.00e12 = 1.2e13 f16 values/s); VOPD dual issue of f32 ops 8.96e12 (v_fmaak_f32 with constant operands; v_mul_f32 8.09e12); 3-VGPR-source FMAs are slower (v_fma_f32 3.3e12, v_pk_fma_f16 1.8e12), so the format-aware decode counts use pk_add + pk_mul, not pk_fma; trans: v_exp_f32 1.44e12/s, overlapped with the VALU. Spec: 40 CU x 64 lanes x 2.9 GHz = 7.4e12 single issue",
             "note": "BIOS balanced, the DevLab Strix Halo runners' mode (cards are measured there): socket power settles at 85 W after a ~5 s boost; register-only random-f16 WMMA (kbench wmma_peak) 43.8 TFLOP/s on DevLab run 44642983266 (local 42.6 at 2.29 GHz); see prefill.md 'WMMA peak'"
           },
           "123w": {

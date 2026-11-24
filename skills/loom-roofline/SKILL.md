@@ -94,11 +94,22 @@ Per metric it then prints a row:
 | Column | Meaning |
 |---|---|
 | ceiling | Hardware roofline. Decode: the device bandwidth (Strix Halo 228 GB/s, measured) ÷ (weights + KV read per token). Prefill: the device's dense f16 WMMA rate **at a power mode** (`--power`; Strix Halo default 85 W: 43.8 TFLOP/s sustained, see Power modes below) ÷ (2·params + causal attention flops) per token; prefill rows print `@ 85 W`. c4: 4 tokens per weight pass. For MoE, the 4 tokens route to their own experts, so those weights are read for each token. |
+| format | **Format-aware ceiling** (`ceiling_format` in roofline.json): every cost any engine must pay for this model and weight format on this device, none that is a software inefficiency. Per op, time = max(matrix, vector ALU, memory), summed: WMMA flops in 16-row tiles (an MoE expert's expected `ceil(r/16)*16` rows), the format's minimum weight decode once per weight touched per pass (cheapest of f16 WMMA, int8 WMMA with scales on the partial sums, VALU dot), softmax 2 ops + 1 exp per score, elementwise minimum, and the bytes that must move (weights touched: the distinct experts of the pass; K/V once; each layer's activations once). Prefill passes are `--chunk` tokens (4096). Rates are microbenchmarked peaks (device.json power mode `valu`, `valu_dual`, `trans`: devlab-kbench `valu_peak`), never our kernels' counts. `bound` is the term that bound most of the time (per op and per term in roofline.json `format`). **This is the bar for goals ("70 % of roofline" means of this one)**; `ceiling` stays as the first-order reference. |
+| +padding | Prefill only: the format-aware ceiling with loom-serve's power-of-two epoch shapes (an SDK property, not hardware). |
 | eff | llama.cpp's fraction of the ceiling. **This, not Loom, decides how big the win can be.** At eff 0.75, the most Loom can gain is about 1.3×. At eff 0.15, 3–6× is on the table, and such results are routinely reported for new architectures, MoE and prefill. |
 | TARGET | ceiling × the **best efficiency a Loom port has actually reached** on this hardware (`EFF` in the script; sources in the loom-kb `roofline` topic (`kb.py route --topic roofline`)). Realistic by construction. |
 | margin | TARGET ÷ llama.cpp − 1. Reported as is, with no cap and no label. |
 | stretch | ceiling × `STRETCH`: what the known but not yet built levers should give (GEMM efficiency already seen in isolation, small-op fusion, batched expert gather). |
 | at-ceiling | Under 3 % headroom: llama.cpp is near the roofline. Target parity and spend runner time elsewhere. |
+
+**What the format-aware ceiling shows.** On Strix Halo the per-weight decode of any GGUF format, paid once per pass, is
+small next to the WMMA time of a 2k+ prefill pass (JoyAI IQ4_XS: ~10-20 ms of VALU vs ~300 ms of matrix at 2k), so the
+format-aware prefill ceiling sits near the first-order one there; it is tighter where a pass is short (MoE prefill at 1k:
+every expert is read for fewer tokens, memory-bound) and with padding. A prefill far below it is software: GEMM efficiency,
+per-tile re-decode, launch gaps. MLA prefill takes the cheapest of absorbed, expanded (re-expanding prefix keys) and
+expanded with the earlier passes' expanded K/V kept, so at long context it can sit slightly above the first-order ceiling,
+which counts kv_b both per token and per key. Not computed with a drafting gain (`--draft-tune`) or on presets without
+measured VALU rates (`-`).
 
 **Sanity-check the model before trusting it.** If llama.cpp's `eff` is above about
 0.95 on any metric, the roofline undercounts. Check for a missed sliding window, KV
