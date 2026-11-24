@@ -23,7 +23,7 @@ XCAP = 131072
 QW = 4
 VARIANTS = {"x": {}, "xg": {"MLA_XF": "global"},   # x: LDS-staged flash (default); xg: fragments straight from the scratch
             "xe8": {"MLA_XE_NT": "8"}, "xel": {"MLA_XE_LDS": "1"}, "x8": {"MLA_XQ": "8"}, "x2q": {"MLA_XQ": "2"}, "xg8": {"MLA_XF": "global", "MLA_XQ": "8"},   # 8 query tiles (waves) per workgroup
-            "xt": {"MLA_X_TAIL": "1"},   # x + the run's tail block on the expanded path (case tC)
+            "xt": {"MLA_X_TAIL": "1"}, "xr": {"MLA_XQ_REV": "1"},   # xr: quad list latest-first   # x + the run's tail block on the expanded path (case tC)
             "t": {"MLA_XCAP": "4096"}, "tg": {"MLA_XCAP": "4096", "MLA_XF": "global"},
             **{f"e{d}": {"MLA_XCAP": "4096", "MLA_XE_DBG": str(d)} for d in (1, 2, 3, 4, 8, 12, 15)}}   # g_mla_xexp fault bisection   # small-scratch twins for the staged tests
 
@@ -31,8 +31,12 @@ VARIANTS = {"x": {}, "xg": {"MLA_XF": "global"},   # x: LDS-staged flash (defaul
 TAIL = False
 
 
+REV = False
+
+
 def set_xcap(variant):
-    global XCAP, QW, TAIL
+    global XCAP, QW, TAIL, REV
+    REV = any(VARIANTS.get(x, {}).get("MLA_XQ_REV") == "1" for x in variant.split("+"))
     TAIL = any(VARIANTS.get(x, {}).get("MLA_X_TAIL") == "1" for x in variant.split("+"))
     QW = int(next((VARIANTS[x]["MLA_XQ"] for x in variant.split("+") if x in VARIANTS and "MLA_XQ" in VARIANTS[x]), 4))
     XCAP = int(next((VARIANTS[x]["MLA_XCAP"] for x in variant.split("+") if x in VARIANTS and "MLA_XCAP" in VARIANTS[x]), 131072))
@@ -229,6 +233,8 @@ def xlists(info, tiles, xmin=16):
             for tok, _, _ in sg:
                 out[1 + nc] = tok; nc += 1
     out[0] = nc
+    if REV:
+        xq = xq[::-1]
     return out, np.array(xq, np.int32).reshape(-1, 4), np.array(xb, np.int32).reshape(-1, 4)
 
 

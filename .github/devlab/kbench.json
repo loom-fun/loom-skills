@@ -6,12 +6,12 @@
       "dir": "mla_xpf",
       "gen": "mla_xpf/gen_bench.py",
       "gen_variants": [
-        "x",
-        "x+xt"
+        "x+xt",
+        "x+xt+xr"
       ],
       "files": [
-        "bench_x.loom",
-        "bench_x_xt.loom"
+        "bench_x_xt.loom",
+        "bench_x_xt_xr.loom"
       ],
       "tests": [
         "test.loom"
