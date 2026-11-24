@@ -1,0 +1,7 @@
+{
+ "scope": "arch/llm/moe/deepseek2",
+ "match": {"arch": ["deepseek2"]},
+ "owner": "kb",
+ "facets": ["moe"],
+ "choices": []
+}

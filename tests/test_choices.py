@@ -90,7 +90,7 @@ class Inventory(unittest.TestCase):
             if c.devices:
                 self.assertTrue(set(c.devices) <= {"rdna3", "rdna4"}, c.key)
             if c.kits:
-                self.assertTrue(set(c.kits) <= {"gemma4", "lfm2moe", "flint", "glimmer", "gpt-oss", "qwen4exp", "flint-moe"}, c.key)
+                self.assertTrue(set(c.kits) <= {"gemma4", "lfm2moe", "flint", "glimmer", "gpt-oss", "qwen4exp", "flint-moe", "deepseek2"}, c.key)
 
     def test_legacy_equals_the_generators_default(self):
         """The registry's legacy value is what the generators do when the variable is unset."""

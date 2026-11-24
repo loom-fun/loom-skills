@@ -1,0 +1,40 @@
+{
+ "scope": "model/jdopensource-JoyAI-LLM-Flash-loom",
+ "match": {
+  "slug": [
+   "jdopensource-JoyAI-LLM-Flash-loom"
+  ]
+ },
+ "owner": "kb",
+ "choices": [
+  {
+   "when": {},
+   "set": {
+    "prefill.gemm.iq4_native": true,
+    "prefill.gemm.iq4_f16lut": true,
+    "prefill.gemm.iq4_g32": true,
+    "prefill.gemm.m256_g32": true,
+    "prefill.gemm.m256_f16o": true,
+    "prefill.gemm.prune": true,
+    "prefill.gemm.t64_g32": true,
+    "moe.prefill.cw": "1",
+    "moe.prefill.cw_swap": true,
+    "mla.prefill.bmm2": "vbm",
+    "mla.prefill.bmm_live": true
+   },
+   "evidence": "JoyAI pfgemm lane (PR #1361), DevLab Strix Halo vs the card cb7861a8, ABBA prefill tok/s at 1151 / 2207 tokens: base 1294 / 1239; IQ4_XS inline dequant + T64_G32 1435 / 1356; + column-wave MoE GEMMs (cw + swap) 1562 / 1406; + MLA_BMM2=vbm 1580 / 1451 (run 45251424551); + MLA_BMM_LIVE 1642 / 1513 (run 45261202924); decode unchanged (77-80). Kernel tests 74/74; gates:dev PASS (run 45265317064)."
+  },
+  {
+   "when": {},
+   "set": {
+    "prefill.attn.list_live": true,
+    "mla.prefill.x_tail": true,
+    "prefill.gemm.m128_n": "768",
+    "moe.prefill.cw_dq": true,
+    "moe.prefill.cw_zs": true,
+    "moe.prefill.ys16": true
+   },
+   "evidence": "JoyAI pf2 lane (PR #1378), DevLab Strix Halo, ABBA prefill tok/s at 1151 / 2207 tokens: base 2072 / 2225 (run 45299823018); + ATTN_LIST_LIVE 2250 / 2490; + MLA_X_TAIL 2305 / 2553 (run 45304980060); + GEMM_M128_N=768 +1.2 %; + MOE_CW_DQ/ZS 2324 / 2570; + MOE_YS16 2385 / 2635 (run 45315824142). Gates dev PASS (runs 45304980060, 45315824142)."
+  }
+ ]
+}

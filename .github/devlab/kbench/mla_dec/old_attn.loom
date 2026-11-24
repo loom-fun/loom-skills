@@ -1,0 +1,375 @@
+func.def inline @g_kv_offset(%origins: buffer, %row: index, %position: index, %blocks: index, %plane: index, %pool: index) -> (offset) {
+  %c1 = index.constant 1 : index
+  %c16 = index.constant 16 : index
+  %record_stride = index.constant 40 : offset
+  %position_bytes = index.constant 1152 : offset
+  %bounded_row = index.assume %row [range(%row, 0, 2147483646)] : index
+  %bounded_position = index.assume %position [range(%position, 0, 262143)] : index
+  %record_offset = index.scale %bounded_row, %record_stride : index, offset -> offset
+  %records = buffer.view %origins[%record_offset] : buffer -> view<5xi64>
+  %map64 = view.load %records[4] : view<5xi64> -> i64
+  %map_bound = scalar.assume %map64 [range(%map64, 0, 9223372036854775807)] : i64
+  %map_origin = index.cast %map_bound : i64 to offset
+  %page_value = index.div %bounded_position, %c16 : index
+  %last = index.sub %blocks, %c1 : index
+  %page = index.assume %page_value [range(%page_value, 0, %last), lt(%page_value, %blocks)] : index
+  %map = buffer.view %origins[%map_origin] : buffer -> view<[%blocks]xi32>
+  %physical32 = view.load %map[%page] : view<[%blocks]xi32> -> i32
+  %bounded_physical = scalar.assume %physical32 [range(%physical32, 0, 134217727)] : i32
+  %physical = index.cast %bounded_physical : i32 to index
+  %page_base = index.mul %physical, %c16 : index
+  %within = index.rem %bounded_position, %c16 : index
+  %slot = index.add %page_base, %within : index
+  %plane_slot = index.madd %plane, %pool, %slot : index
+  %bytes = index.scale %plane_slot, %position_bytes : index, offset -> offset
+  func.return %bytes : offset
+}
+
+func.def inline @g_split_count(%visible: index) -> (index) {
+  %c1 = index.constant 1 : index
+  %c127 = index.constant 31 : index
+  %c128 = index.constant 32 : index
+  %cmax = index.constant 64 : index
+  %padded = index.add %visible, %c127 : index
+  %target = index.div %padded, %c128 : index
+  %capped = index.min %target, %cmax : index
+  %count_value = index.max %capped, %c1 : index
+  %count = index.assume %count_value [range(%count_value, 1, 64)] : index
+  func.return %count : index
+}
+
+kernel.def export("g_attention_split") @g_attention_split(%tokens: index) {
+  %c1 = index.constant 1 : index
+  %ckvh = index.constant 1 : index
+  %cS = index.constant 64 : index
+  %clanes = index.constant 1024 : index
+  kernel.launch.config workgroups(%tokens, %ckvh, %cS) workgroup_size(%clanes, %c1, %c1) : index
+} launch(%tokens_arg: index, %layer_arg: index, %sliding: i32, %context_arg: index, %pool_arg: index, %q: buffer, %info: buffer, %origins: buffer, %arena: buffer, %part_acc: buffer, %part_ml: buffer) {
+  %tokens = index.assume %tokens_arg [range(%tokens_arg, 1, 8192)] : index
+  %layer = index.assume %layer_arg [range(%layer_arg, 0, 51)] : index
+  %context = index.assume %context_arg [range(%context_arg, 16, 262144)] : index
+  %pool = index.assume %pool_arg [range(%pool_arg, 16, 2147483584)] : index
+  %token_id = kernel.workgroup.id<x> : index
+  %token = index.assume %token_id [lt(%token_id, %tokens)] : index
+  %kv_id = kernel.workgroup.id<y> : index
+  %kv_head = index.assume %kv_id [range(%kv_id, 0, 0)] : index
+  %split_id = kernel.workgroup.id<z> : index
+  %split = index.assume %split_id [range(%split_id, 0, 63)] : index
+  %wave_id = kernel.subgroup.id : index
+  %wave = index.assume %wave_id [range(%wave_id, 0, 31)] : index
+  %lane_id = kernel.subgroup.lane.id : index
+  %lane = index.assume %lane_id [range(%lane_id, 0, 31)] : index
+  %zero = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c15 = index.constant 15 : index
+  %c16 = index.constant 16 : index
+  %window = index.constant 262144 : index
+  %window_less = index.constant 262143 : index
+  %c0_i32 = scalar.constant 0 : i32
+  %cU = index.constant 4 : index
+  %c0u = index.constant 0 : index
+  %c1u = index.constant 1 : index
+  %c2u = index.constant 2 : index
+  %c3u = index.constant 3 : index
+  %ad16 = scalar.constant 16 : i32
+  %adi16 = index.constant 16 : index
+  %aq16 = index.div %lane, %adi16 : index
+  %ar16_2 = index.constant 2 : index
+  %arm16 = index.rem %aq16, %ar16_2 : index
+  %ab16 = index.cmp ne, %arm16, %c0 : index
+  %ad8 = scalar.constant 8 : i32
+  %adi8 = index.constant 8 : index
+  %aq8 = index.div %lane, %adi8 : index
+  %ar8_2 = index.constant 2 : index
+  %arm8 = index.rem %aq8, %ar8_2 : index
+  %ab8 = index.cmp ne, %arm8, %c0 : index
+  %ad4 = scalar.constant 4 : i32
+  %adi4 = index.constant 4 : index
+  %aq4 = index.div %lane, %adi4 : index
+  %ar4_2 = index.constant 2 : index
+  %arm4 = index.rem %aq4, %ar4_2 : index
+  %ab4 = index.cmp ne, %arm4, %c0 : index
+  %ad2 = scalar.constant 2 : i32
+  %adi2 = index.constant 2 : index
+  %aq2 = index.div %lane, %adi2 : index
+  %ar2_2 = index.constant 2 : index
+  %arm2 = index.rem %aq2, %ar2_2 : index
+  %ab2 = index.cmp ne, %arm2, %c0 : index
+  %ad1 = scalar.constant 1 : i32
+  %adi1 = index.constant 1 : index
+  %aq1 = index.div %lane, %adi1 : index
+  %ar1_2 = index.constant 2 : index
+  %arm1 = index.rem %aq1, %ar1_2 : index
+  %ab1 = index.cmp ne, %arm1, %c0 : index
+  %aw32 = scalar.constant 32 : i32
+  %zero_f = scalar.constant 0.0 : f32
+  %neg_big = scalar.constant -3.0e38 : f32
+  %cg = index.constant 32 : index
+  %head = index.madd %kv_head, %cg, %wave : index
+  %bounded_head = index.assume %head [range(%head, 0, 31)] : index
+  %info_view = buffer.view %info[%zero] : buffer -> view<[%tokens]x4xi32>
+  %row32 = view.load %info_view[%token, 0] : view<[%tokens]x4xi32> -> i32
+  %position32 = view.load %info_view[%token, 1] : view<[%tokens]x4xi32> -> i32
+  %live32 = view.load %info_view[%token, 2] : view<[%tokens]x4xi32> -> i32
+  %needed = scalar.constant true : i1
+  %live_token = scalar.cmpi ne, %live32, %c0_i32 : i32
+  %live = scalar.andi %live_token, %needed : i1
+  scf.if %live {
+    %row_bound = scalar.assume %row32 [range(%row32, 0, 2147483646)] : i32
+    %row = index.cast %row_bound : i32 to index
+    %position_bound = scalar.assume %position32 [range(%position32, 0, 262143)] : i32
+    %position = index.cast %position_bound : i32 to index
+    %padded = index.add %context, %c15 : index
+    %blocks = index.div %padded, %c16 : index
+    %k_plane = index.add %layer, %c0 : index
+    %v_plane = index.add %k_plane, %c1 : index
+    // V of a position sits one plane (pool positions x 512 bytes) after its K.
+    %position_bytes_v = index.constant 0 : offset
+    %plane_stride = index.scale %pool, %position_bytes_v : index, offset -> offset
+    %is_sliding = scalar.cmpi ne, %sliding, %c0_i32 : i32
+    %far = index.cmp uge, %position, %window : index
+    %use_window = scalar.andi %is_sliding, %far : i1
+    %window_start = index.sub %position, %window_less : index
+    %window_low = scf.select %use_window, %window_start, %c0 : index
+    %end = index.add %position, %c1 : index
+    %visible_value = index.sub %end, %window_low : index
+    %visible = index.assume %visible_value [range(%visible_value, 1, 262144)] : index
+    %s_eff = func.call @g_split_count(%visible) : (index) -> (index)
+    %active_split = index.cmp ult, %split, %s_eff : index
+    scf.if %active_split {
+    %s_less = index.sub %s_eff, %c1 : index
+    %per_padded = index.add %visible, %s_less : index
+    %per = index.div %per_padded, %s_eff : index
+    %start_raw = index.mul %split, %per : index
+    %start = index.min %start_raw, %visible : index
+    %stop_raw = index.add %start_raw, %per : index
+    %stop = index.min %stop_raw, %visible : index
+    %q_view = buffer.view %q[%zero] : buffer -> view<[%tokens]x32x32x18xf32>
+    %q_raw = vector.load %q_view[%token, %bounded_head, %lane, %c0] : view<[%tokens]x32x32x18xf32> -> vector<18xf32>
+    %scale = scalar.constant 0.07216878364870323 : f32
+    %scale_v = vector.splat %scale : vector<18xf32>
+    %q4 = vector.mulf %q_raw, %scale_v : vector<18xf32>
+    %zero4 = vector.splat %zero_f : vector<18xf32>
+    %lo_abs = index.add %window_low, %start : index
+    %hi_abs = index.add %window_low, %stop : index
+    %lo_q = index.div %lo_abs, %cU : index
+    %lo_al = index.mul %lo_q, %cU : index
+    %m_final, %l_final, %acc_final = scf.for %j = [%lo_al to %hi_abs step %cU](%m = %neg_big : f32, %l = %zero_f : f32, %acc = %zero4 : vector<18xf32>) -> (f32, f32, vector<18xf32>) {
+      %kb_off = func.call @g_kv_offset(%origins, %row, %j, %blocks, %k_plane, %pool) : (buffer, index, index, index, index, index) -> (offset)
+      %key0_raw = index.add %j, %c0u : index
+      %okl0 = index.cmp uge, %key0_raw, %lo_abs : index
+      %okh0 = index.cmp ult, %key0_raw, %hi_abs : index
+      %ok0 = scalar.andi %okl0, %okh0 : i1
+      %kd0 = index.constant 0 : offset
+      %ko0 = index.add %kb_off, %kd0 : offset
+      %kc0 = buffer.view %arena[%ko0] : buffer -> view<1x32x18xf16>
+      %kh0 = vector.load %kc0[%kv_head, %lane, %c0] : view<1x32x18xf16> -> vector<18xf16>
+      %k0 = vector.extf %kh0 : vector<18xf16> to vector<18xf32>
+      %vo0 = index.add %ko0, %plane_stride : offset
+      %vc0 = buffer.view %arena[%vo0] : buffer -> view<1x32x18xf16>
+      %vh0 = vector.load %vc0[%kv_head, %lane, %c0] : view<1x32x18xf16> -> vector<18xf16>
+      %v0 = vector.extf %vh0 : vector<18xf16> to vector<18xf32>
+      %key1_raw = index.add %j, %c1u : index
+      %okl1 = index.cmp uge, %key1_raw, %lo_abs : index
+      %okh1 = index.cmp ult, %key1_raw, %hi_abs : index
+      %ok1 = scalar.andi %okl1, %okh1 : i1
+      %kd1 = index.constant 1152 : offset
+      %ko1 = index.add %kb_off, %kd1 : offset
+      %kc1 = buffer.view %arena[%ko1] : buffer -> view<1x32x18xf16>
+      %kh1 = vector.load %kc1[%kv_head, %lane, %c0] : view<1x32x18xf16> -> vector<18xf16>
+      %k1 = vector.extf %kh1 : vector<18xf16> to vector<18xf32>
+      %vo1 = index.add %ko1, %plane_stride : offset
+      %vc1 = buffer.view %arena[%vo1] : buffer -> view<1x32x18xf16>
+      %vh1 = vector.load %vc1[%kv_head, %lane, %c0] : view<1x32x18xf16> -> vector<18xf16>
+      %v1 = vector.extf %vh1 : vector<18xf16> to vector<18xf32>
+      %key2_raw = index.add %j, %c2u : index
+      %okl2 = index.cmp uge, %key2_raw, %lo_abs : index
+      %okh2 = index.cmp ult, %key2_raw, %hi_abs : index
+      %ok2 = scalar.andi %okl2, %okh2 : i1
+      %kd2 = index.constant 2304 : offset
+      %ko2 = index.add %kb_off, %kd2 : offset
+      %kc2 = buffer.view %arena[%ko2] : buffer -> view<1x32x18xf16>
+      %kh2 = vector.load %kc2[%kv_head, %lane, %c0] : view<1x32x18xf16> -> vector<18xf16>
+      %k2 = vector.extf %kh2 : vector<18xf16> to vector<18xf32>
+      %vo2 = index.add %ko2, %plane_stride : offset
+      %vc2 = buffer.view %arena[%vo2] : buffer -> view<1x32x18xf16>
+      %vh2 = vector.load %vc2[%kv_head, %lane, %c0] : view<1x32x18xf16> -> vector<18xf16>
+      %v2 = vector.extf %vh2 : vector<18xf16> to vector<18xf32>
+      %key3_raw = index.add %j, %c3u : index
+      %okl3 = index.cmp uge, %key3_raw, %lo_abs : index
+      %okh3 = index.cmp ult, %key3_raw, %hi_abs : index
+      %ok3 = scalar.andi %okl3, %okh3 : i1
+      %kd3 = index.constant 3456 : offset
+      %ko3 = index.add %kb_off, %kd3 : offset
+      %kc3 = buffer.view %arena[%ko3] : buffer -> view<1x32x18xf16>
+      %kh3 = vector.load %kc3[%kv_head, %lane, %c0] : view<1x32x18xf16> -> vector<18xf16>
+      %k3 = vector.extf %kh3 : vector<18xf16> to vector<18xf32>
+      %vo3 = index.add %ko3, %plane_stride : offset
+      %vc3 = buffer.view %arena[%vo3] : buffer -> view<1x32x18xf16>
+      %vh3 = vector.load %vc3[%kv_head, %lane, %c0] : view<1x32x18xf16> -> vector<18xf16>
+      %v3 = vector.extf %vh3 : vector<18xf16> to vector<18xf32>
+      %prod0 = vector.mulf %q4, %k0 : vector<18xf32>
+      %part0 = vector.reduce<addf> %prod0, %zero_f : vector<18xf32>, f32
+      %prod1 = vector.mulf %q4, %k1 : vector<18xf32>
+      %part1 = vector.reduce<addf> %prod1, %zero_f : vector<18xf32>, f32
+      %prod2 = vector.mulf %q4, %k2 : vector<18xf32>
+      %part2 = vector.reduce<addf> %prod2, %zero_f : vector<18xf32>, f32
+      %prod3 = vector.mulf %q4, %k3 : vector<18xf32>
+      %part3 = vector.reduce<addf> %prod3, %zero_f : vector<18xf32>, f32
+      %ar16_0s = scf.select %ab16, %part0, %part2 : f32
+      %ar16_0k = scf.select %ab16, %part2, %part0 : f32
+      %ar16_0r, %ar16_0u = kernel.subgroup.shuffle<xor> %ar16_0s, %ad16, %aw32 : f32, i32, i32
+      %ar16_0 = scalar.addf %ar16_0k, %ar16_0r : f32
+      %ar16_1s = scf.select %ab16, %part1, %part3 : f32
+      %ar16_1k = scf.select %ab16, %part3, %part1 : f32
+      %ar16_1r, %ar16_1u = kernel.subgroup.shuffle<xor> %ar16_1s, %ad16, %aw32 : f32, i32, i32
+      %ar16_1 = scalar.addf %ar16_1k, %ar16_1r : f32
+      %ar8_0s = scf.select %ab8, %ar16_0, %ar16_1 : f32
+      %ar8_0k = scf.select %ab8, %ar16_1, %ar16_0 : f32
+      %ar8_0r, %ar8_0u = kernel.subgroup.shuffle<xor> %ar8_0s, %ad8, %aw32 : f32, i32, i32
+      %ar8_0 = scalar.addf %ar8_0k, %ar8_0r : f32
+      %ar4pr, %ar4pu = kernel.subgroup.shuffle<xor> %ar8_0, %ad4, %aw32 : f32, i32, i32
+      %ar4p = scalar.addf %ar8_0, %ar4pr : f32
+      %ar2pr, %ar2pu = kernel.subgroup.shuffle<xor> %ar4p, %ad2, %aw32 : f32, i32, i32
+      %ar2p = scalar.addf %ar4p, %ar2pr : f32
+      %ar1pr, %ar1pu = kernel.subgroup.shuffle<xor> %ar2p, %ad1, %aw32 : f32, i32, i32
+      %ar1p = scalar.addf %ar2p, %ar1pr : f32
+      %arg8_0r, %arg8_0u = kernel.subgroup.shuffle<xor> %ar1p, %ad8, %aw32 : f32, i32, i32
+      %arg8_0l = scf.select %ab8, %arg8_0r, %ar1p : f32
+      %arg8_0h = scf.select %ab8, %ar1p, %arg8_0r : f32
+      %arg16_0r, %arg16_0u = kernel.subgroup.shuffle<xor> %arg8_0l, %ad16, %aw32 : f32, i32, i32
+      %arg16_0l = scf.select %ab16, %arg16_0r, %arg8_0l : f32
+      %arg16_0h = scf.select %ab16, %arg8_0l, %arg16_0r : f32
+      %arg16_1r, %arg16_1u = kernel.subgroup.shuffle<xor> %arg8_0h, %ad16, %aw32 : f32, i32, i32
+      %arg16_1l = scf.select %ab16, %arg16_1r, %arg8_0h : f32
+      %arg16_1h = scf.select %ab16, %arg8_0h, %arg16_1r : f32
+      %sr0 = scalar.addf %arg16_0l, %zero_f : f32
+      %sr1 = scalar.addf %arg16_1l, %zero_f : f32
+      %sr2 = scalar.addf %arg16_0h, %zero_f : f32
+      %sr3 = scalar.addf %arg16_1h, %zero_f : f32
+      %s0 = scf.select %ok0, %sr0, %neg_big : f32
+      %s1 = scf.select %ok1, %sr1, %neg_big : f32
+      %s2 = scf.select %ok2, %sr2, %neg_big : f32
+      %s3 = scf.select %ok3, %sr3, %neg_big : f32
+      %mx0 = scalar.maxnumf %m, %s0 : f32
+      %mx1 = scalar.maxnumf %mx0, %s1 : f32
+      %mx2 = scalar.maxnumf %mx1, %s2 : f32
+      %mx3 = scalar.maxnumf %mx2, %s3 : f32
+      %m_shift = scalar.subf %m, %mx3 : f32
+      %alpha = scalar.expf<afn> %m_shift : f32
+      %l_scaled = scalar.mulf %l, %alpha : f32
+      %alpha_v = vector.splat %alpha : vector<18xf32>
+      %acc_s = vector.mulf %acc, %alpha_v : vector<18xf32>
+      %d0 = scalar.subf %s0, %mx3 : f32
+      %p0 = scalar.expf<afn> %d0 : f32
+      %la0 = scalar.addf %l_scaled, %p0 : f32
+      %pv0 = vector.splat %p0 : vector<18xf32>
+      %aa0 = vector.fmaf %pv0, %v0, %acc_s : vector<18xf32>
+      %d1 = scalar.subf %s1, %mx3 : f32
+      %p1 = scalar.expf<afn> %d1 : f32
+      %la1 = scalar.addf %la0, %p1 : f32
+      %pv1 = vector.splat %p1 : vector<18xf32>
+      %aa1 = vector.fmaf %pv1, %v1, %aa0 : vector<18xf32>
+      %d2 = scalar.subf %s2, %mx3 : f32
+      %p2 = scalar.expf<afn> %d2 : f32
+      %la2 = scalar.addf %la1, %p2 : f32
+      %pv2 = vector.splat %p2 : vector<18xf32>
+      %aa2 = vector.fmaf %pv2, %v2, %aa1 : vector<18xf32>
+      %d3 = scalar.subf %s3, %mx3 : f32
+      %p3 = scalar.expf<afn> %d3 : f32
+      %la3 = scalar.addf %la2, %p3 : f32
+      %pv3 = vector.splat %p3 : vector<18xf32>
+      %aa3 = vector.fmaf %pv3, %v3, %aa2 : vector<18xf32>
+      scf.yield %mx3, %la3, %aa3 : f32, f32, vector<18xf32>
+    }
+
+    %acc_view = buffer.view %part_acc[%zero] : buffer -> view<[%tokens]x32x64x32x18xf32>
+    vector.store %acc_final, %acc_view[%token, %bounded_head, %split, %lane, %c0] : vector<18xf32>, view<[%tokens]x32x64x32x18xf32>
+    %first = index.cmp eq, %lane, %c0 : index
+    scf.if %first {
+      %ml_view = buffer.view %part_ml[%zero] : buffer -> view<[%tokens]x32x64x2xf32>
+      view.store %m_final, %ml_view[%token, %bounded_head, %split, 0] : f32, view<[%tokens]x32x64x2xf32>
+      view.store %l_final, %ml_view[%token, %bounded_head, %split, 1] : f32, view<[%tokens]x32x64x2xf32>
+    }
+    }
+  }
+  kernel.return
+}
+
+kernel.def export("g_attention_combine") @g_attention_combine(%tokens: index) {
+  %c1 = index.constant 1 : index
+  %c32 = index.constant 32 : index
+  %cqh = index.constant 32 : index
+  kernel.launch.config workgroups(%tokens, %cqh, %c1) workgroup_size(%c32, %c1, %c1) : index
+} launch(%tokens_arg: index, %sliding: i32, %info: buffer, %part_acc: buffer, %part_ml: buffer, %gate: buffer, %out: buffer) {
+  %tokens = index.assume %tokens_arg [range(%tokens_arg, 1, 8192)] : index
+  %token_id = kernel.workgroup.id<x> : index
+  %token = index.assume %token_id [lt(%token_id, %tokens)] : index
+  %head_id = kernel.workgroup.id<y> : index
+  %head = index.assume %head_id [range(%head_id, 0, 31)] : index
+  %lane_id = kernel.workitem.id<x> : index
+  %lane = index.assume %lane_id [range(%lane_id, 0, 31)] : index
+  %zero = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %cSc = index.constant 64 : index
+  %c0_i32 = scalar.constant 0 : i32
+  %zero_f = scalar.constant 0.0 : f32
+  %neg_big = scalar.constant -3.0e38 : f32
+  %zero4 = vector.splat %zero_f : vector<18xf32>
+  %info_view = buffer.view %info[%zero] : buffer -> view<[%tokens]x4xi32>
+  %live32 = view.load %info_view[%token, 2] : view<[%tokens]x4xi32> -> i32
+  %live = scalar.cmpi ne, %live32, %c0_i32 : i32
+  %needed = scalar.constant true : i1
+  %out_view = buffer.view %out[%zero] : buffer -> view<[%tokens]x32x32x18xf32>
+  scf.if %needed {
+  scf.if %live {
+    %position32 = view.load %info_view[%token, 1] : view<[%tokens]x4xi32> -> i32
+    %position_bound = scalar.assume %position32 [range(%position32, 0, 262143)] : i32
+    %position = index.cast %position_bound : i32 to index
+    %window = index.constant 262144 : index
+    %window_less = index.constant 262143 : index
+    %is_sliding = scalar.cmpi ne, %sliding, %c0_i32 : i32
+    %far = index.cmp uge, %position, %window : index
+    %use_window = scalar.andi %is_sliding, %far : i1
+    %window_start = index.sub %position, %window_less : index
+    %window_low = scf.select %use_window, %window_start, %c0 : index
+    %end = index.add %position, %c1 : index
+    %visible_value = index.sub %end, %window_low : index
+    %visible = index.assume %visible_value [range(%visible_value, 1, 262144)] : index
+    %s_eff = func.call @g_split_count(%visible) : (index) -> (index)
+    %ml_view = buffer.view %part_ml[%zero] : buffer -> view<[%tokens]x32x64x2xf32>
+    %acc_view = buffer.view %part_acc[%zero] : buffer -> view<[%tokens]x32x64x32x18xf32>
+    %maximum = scf.for %s = [%c0 to %s_eff step %c1](%mx = %neg_big : f32) -> (f32) {
+      %bs = index.assume %s [range(%s, 0, 63)] : index
+      %ms = view.load %ml_view[%token, %head, %bs, 0] : view<[%tokens]x32x64x2xf32> -> f32
+      %next = scalar.maxnumf %mx, %ms : f32
+      scf.yield %next : f32
+    }
+    %den, %total = scf.for %s = [%c0 to %s_eff step %c1](%d = %zero_f : f32, %acc = %zero4 : vector<18xf32>) -> (f32, vector<18xf32>) {
+      %bs = index.assume %s [range(%s, 0, 63)] : index
+      %ms = view.load %ml_view[%token, %head, %bs, 0] : view<[%tokens]x32x64x2xf32> -> f32
+      %ls = view.load %ml_view[%token, %head, %bs, 1] : view<[%tokens]x32x64x2xf32> -> f32
+      %shift = scalar.subf %ms, %maximum : f32
+      %w = scalar.expf<afn> %shift : f32
+      %wl = scalar.mulf %w, %ls : f32
+      %d_next = scalar.addf %d, %wl : f32
+      %part = vector.load %acc_view[%token, %head, %bs, %lane, %c0] : view<[%tokens]x32x64x32x18xf32> -> vector<18xf32>
+      %w_v = vector.splat %w : vector<18xf32>
+      %acc_next = vector.fmaf %w_v, %part, %acc : vector<18xf32>
+      scf.yield %d_next, %acc_next : f32, vector<18xf32>
+    }
+    %one = scalar.constant 1.0 : f32
+    %inv = scalar.divf %one, %den : f32
+    %inv_v = vector.splat %inv : vector<18xf32>
+    %attended = vector.mulf %total, %inv_v : vector<18xf32>
+    %result = vector.addf %attended, %zero4 : vector<18xf32>
+    vector.store %result, %out_view[%token, %head, %lane, %c0] : vector<18xf32>, view<[%tokens]x32x32x18xf32>
+  } else {
+    vector.store %zero4, %out_view[%token, %head, %lane, %c0] : vector<18xf32>, view<[%tokens]x32x32x18xf32>
+  }
+  }
+  kernel.return
+}
