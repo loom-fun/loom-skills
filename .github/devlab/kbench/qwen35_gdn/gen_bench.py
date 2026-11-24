@@ -22,16 +22,22 @@ head = "amdgpu.target<gfx11-generic> @w32 {subgroup_size = 32}\n"
 all_kernels = gdn.gdn_kernels(cfg, cfg["rms_eps"])
 base = re.search(r'^kernel\.def export\("g_gdn_recurrence_pf"\).*?^\}\s*$', all_kernels, re.M|re.S).group().strip()
 guard = "    %publish = func.call @g_gdn_publish(%metadata, %spans, %span) : (buffer, index, index) -> (i1)\n    scf.if %publish {\n"
-exact = "exact" in sys.argv[3:]
+schedule = "schedule" in sys.argv[3:]
+exact = schedule or "exact" in sys.argv[3:]
 modes = {"base":base}
 for cn in (() if exact else (16,32)):
     modes[f"cn{cn}"] = chunk_kernel(geom,layers,layer_bytes,guard,"\n    }",arch="rdna3",cn=cn).replace("g_gdn_chunk","g_gdn_recurrence_pf")
 
-if exact:
+if exact and not schedule:
     for cols in (2, 8):
         assert gdn._row_fits(dk, dv, 8, cols)
         source = gdn._recurrence_rows(geom, layers, layer_bytes, 8, cols, guard, "\n    }", "long")
         modes[f"cols{cols}"] = source.replace("g_gdn_recurrence", "g_gdn_recurrence_pf")
+
+if schedule:
+    from exact_schedule import wave_interleave, precalc_body, precompute, add_precompute_cases
+    modes.update({"il2":wave_interleave(base,2), "il4":wave_interleave(base),
+                  "factors":precalc_body(base), "factors_il4":wave_interleave(precalc_body(base))})
 
 def case(tokens, continued, verify):
     rng = np.random.default_rng(tokens + continued)
@@ -99,6 +105,9 @@ benchmark = case(4096,False,False)+"\n"+case(2048,True,False)
 checks = case(97,True,True)+"\n"+case(128,False,True)
 for name, kernel in modes.items():
     module = head+gdn.SLOT+"\n"+kernel+"\n"
-    (out/("bench.loom" if name=="base" else f"bench_{name}.loom")).write_text(module+benchmark)
+    packed = name.startswith("factors")
+    if packed:
+        module += precompute
+    (out/("bench.loom" if name=="base" else f"bench_{name}.loom")).write_text(module+(add_precompute_cases(benchmark) if packed else benchmark))
     reference = base.replace("g_gdn_recurrence_pf", "reference") if exact else ""
-    (out/f"test_{name}.loom").write_text(module+reference+"\n"+checks)
+    (out/f"test_{name}.loom").write_text(module+reference+"\n"+(add_precompute_cases(checks) if packed else checks))
