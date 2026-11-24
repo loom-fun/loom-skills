@@ -12,7 +12,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - slug: unsloth-Qwen3.5-9B-loom
+          - slug: unsloth-Qwen3.5-4B-loom
             device: radeon-r9700
             labels: '["self-hosted","devlab-dispatch","radeon-r9700"]'
     runs-on: ${{ fromJSON(matrix.labels) }}
@@ -20,8 +20,8 @@ jobs:
     env:
       SLUG: ${{ matrix.slug }}
       SDK_GPU_KEY: ${{ matrix.device }}
-      FROZEN_REVISION: 331114c19f4c4cbeb40ffac290659dbc8be7936c
-      FROZEN_PROGRAMS: 4af7b6503c9a3219279ef9997dab7fe22287f491ad5ef89ae374741b5352d4d2
+      FROZEN_REVISION: 64bf40259117d99f3e6a9f43b7e80fb030300697
+      FROZEN_PROGRAMS: 6a47f53f1466bb7cad142b6b2874ccf9c5ee8b96aa77490155252e5d8d7c8f62
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
