@@ -50,7 +50,7 @@ jobs:
                      "execution": execution, "build_args": ["--memory-gib", "4096"], "build": build,
                      "require_preset_r9700": False}
           experiment = {"name": "quark-a4", "card": production, "runner": "r9700", "sdk": "0.3.0",
-                        "memory_bytes_r9700": 34000000000, "require_preset_r9700": True,
+                        "memory_bytes": 34000000000, "memory_bytes_r9700": 34000000000, "require_preset_r9700": True,
                         "reference_cache": ".github/sdk030-quark-refs.tgz",
                         "variants": [dict(variant, name=name) for name in ("half", "a4")],
                         "steps": ["gates:half:quick", "gates:a4:quick"]}
@@ -62,6 +62,7 @@ jobs:
           assert source.count(hook) == 1
           source = source.replace(hook, '''  if [ "$v" = a4 ]; then
               sha256sum "$pkg/program/llm.loom" > "$WORK/receipt/source-before-a4.txt"
+              cp "$pkg/program/llm.loom" "$WORK/receipt/a4-before.loom"
               "$T" - "$WORK/receipt" "$pkg" <<'PATCH_GEN' || exit 1
           import json
           from pathlib import Path
@@ -77,6 +78,7 @@ jobs:
           path.write_text(modified)
           PATCH_GEN
               grep -Fq 'kernel.launch @g_quark_a4_f16[' "$pkg/program/llm.loom" || exit 1
+              cp "$pkg/program/llm.loom" "$WORK/receipt/a4-after.loom"
             fi
           ''' + hook)
           hook = '      nref1=$("$T" "$B/reference_cache.py" count "$D/$p1/bench"'
