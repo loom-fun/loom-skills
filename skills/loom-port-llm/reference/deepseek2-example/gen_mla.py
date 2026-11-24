@@ -13,6 +13,7 @@ Per layer (llama.cpp src/models/deepseek2.cpp, is_mla path), x = attn_norm(h):
 RoPE is llama.cpp's NORM type (pairs 2p, 2p+1) on the rope dims. Every kernel takes any token count (decode and prefill).
 """
 import math
+import os
 
 ROWS_PER_WG = 256   # lanes per workgroup of the batched per-head matvec
 
@@ -401,5 +402,180 @@ def kernels(cfg, eps, theta, layers, FMT, SB, row_bytes, kb_fmts, vb_fmts):
     return (rms_q(cfg, eps) + rope_store(cfg, eps, theta, layers)
             + "".join(bmv(f"g_mla_kb_{f}", f, NOPE, KL, QH, QB, D, FMT[f], SB[f], row_bytes(f, NOPE)) for f in kb_fmts)
             + "".join(bmv(f"g_mla_vb_{f}", f, KL, VD, QH, D, VD, FMT[f], SB[f], row_bytes(f, KL)) for f in vb_fmts)
-            + "".join(bmm(f"g_mla_kbm_{f}", f, NOPE, KL, QH, QB, D, FMT[f], SB[f], row_bytes(f, NOPE)) for f in kb_fmts)
-            + "".join(bmm(f"g_mla_vbm_{f}", f, KL, VD, QH, D, VD, FMT[f], SB[f], row_bytes(f, KL)) for f in vb_fmts))
+            + "".join(_bmm("kbm")(f"g_mla_kbm_{f}", f, NOPE, KL, QH, QB, D, FMT[f], SB[f], row_bytes(f, NOPE)) for f in kb_fmts)
+            + "".join(_bmm("vbm")(f"g_mla_vbm_{f}", f, KL, VD, QH, D, VD, FMT[f], SB[f], row_bytes(f, KL)) for f in vb_fmts))
+
+
+def _bmm(kind=None):
+    f = _bmm0(kind)
+    if os.environ.get("MLA_BMM_LIVE", "0") not in ("", "0"):
+        return lambda *a, **k: bmm_live(f(*a, **k))
+    return f
+
+
+def _bmm0(kind=None):
+    """MLA_BMM2: 1 = bmm2 for both products, or a list (kbm,vbm). kbench joyai_mla (run 45234212231): vbm -28 % (1k) / -13 % (4k),
+    kbm +16 % / tie, so the useful setting is MLA_BMM2=vbm."""
+    v = os.environ.get("MLA_BMM2", "0").strip()
+    return bmm2 if v not in ("", "0") and (v == "1" or kind is None or kind in v.split(",")) else bmm
+
+
+def bmm2(name, fmt, K, N, H, XH, YH, FMT, SB, row_bytes, TT=4):
+    """MLA_BMM2 (choice mla.prefill.bmm2): bmm() with the activations staged once per workgroup. Workgroup = (128 rows (all
+    of them when N = 128), head, 64 tokens), 8 waves of 16 rows; per 128-K chunk the 64 tokens' activations are converted to f16
+    into LDS once and every wave's A fragments come from there (bmm() made each of its 4 waves re-read the f32 rows from
+    memory, and N/64 workgroups re-read them again). Same values and K order as bmm(): bit-identical."""
+    RW = min(N, 128)
+    KC = min(K, 128)
+    assert K % KC == 0 and N % RW == 0 and XH % 16 == 0 and KC % 32 == 0
+    NW = RW // 16
+    NT = NW * 32
+    gpb = SB // 32
+    LD = KC + 8
+    per = 64 * KC // NT            # f32 values staged per thread per chunk
+    assert per % 16 == 0
+    T = [f"""
+// MLA per-head WMMA product {name} (bmm2: shared f16 activation stage): {H} heads x [{N} x {K}] {fmt}.
+kernel.def export("{name}") @{name}(%tokens: index) {{
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  %cnt = index.constant {NT} : index
+  %rblocks = index.constant {N // RW} : index
+  %heads = index.constant {H} : index
+  %tblocks = index.div %tokens, %c64 : index
+  kernel.launch.config workgroups(%rblocks, %heads, %tblocks) workgroup_size(%cnt, %c1, %c1) : index
+}} launch(%tokens_arg: index, %x: buffer, %w: buffer, %y: buffer) {{
+  %tokens = index.assume %tokens_arg [range(%tokens_arg, 64, 8192), multiple_of(%tokens_arg, 64)] : index
+  %rb_id = kernel.workgroup.id<x> : index
+  %rblk = index.assume %rb_id [range(%rb_id, 0, {N // RW - 1})] : index
+  %h_id = kernel.workgroup.id<y> : index
+  %head = index.assume %h_id [range(%h_id, 0, {H - 1})] : index
+  %c64 = index.constant 64 : index
+  %tblocks = index.div %tokens, %c64 : index
+  %tb_id = kernel.workgroup.id<z> : index
+  %tblk = index.assume %tb_id [lt(%tb_id, %tblocks)] : index
+  %wi_id = kernel.workitem.id<x> : index
+  %wi = index.assume %wi_id [range(%wi_id, 0, {NT - 1})] : index
+  %wave_id = kernel.subgroup.id : index
+  %wave = index.assume %wave_id [range(%wave_id, 0, {NW - 1})] : index
+  %lane_id = kernel.subgroup.lane.id : index
+  %lane = index.assume %lane_id [range(%lane_id, 0, 31)] : index
+  %zero = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c16 = index.constant 16 : index
+  %cn = index.constant {N} : index
+  %cgpb = index.constant {gpb} : index
+  %crw = index.constant {RW} : index
+  %col_v = index.rem %lane, %c16 : index
+  %col = index.assume %col_v [range(%col_v, 0, 15)] : index
+  %wrow = index.mul %wave, %c16 : index
+  %rblk_base = index.mul %rblk, %crw : index
+  %r0 = index.add %rblk_base, %wrow : index
+  %r_v = index.add %r0, %col : index
+  %r = index.assume %r_v [range(%r_v, 0, {N - 1})] : index
+  %hrow = index.madd %head, %cn, %r : index
+  %row_bytes = index.constant {row_bytes} : offset
+  %block_bytes = index.constant {FMT} : offset
+  %ro = index.scale %hrow, %row_bytes : index, offset -> offset
+  %t0 = index.mul %tblk, %c64 : index
+  %x_view = buffer.view %x[%zero] : buffer -> view<[%tokens]x{H}x{XH // 16}x16xf32>
+  %st_bytes = index.constant {64 * LD * 2} : offset
+  %st = buffer.alloca<workgroup> align(16) %st_bytes : buffer
+  %st_view = buffer.view %st[%zero] : buffer -> view<64x{LD}xf16>
+  %cper = index.constant {per} : index
+  %cpr = index.constant {KC // per} : index
+  %s_tok_l = index.div %wi, %cpr : index
+  %s_q = index.rem %wi, %cpr : index
+  %s_col = index.mul %s_q, %cper : index
+  %s_tok_v = index.add %t0, %s_tok_l : index
+  %s_tok = index.assume %s_tok_v [lt(%s_tok_v, %tokens)] : index
+  %zero8 = vector.splatf 0.0 : vector<8xf32>
+  %init = vector.fragment<init> %zero8 shape [%c16, %c16] : vector<8xf32>
+  %chunks = index.constant {K // KC} : index"""]
+    accs = ", ".join(f"%a{j} = %init : vector<8xf32>" for j in range(TT))
+    T.append(f"""  {", ".join(f"%o{j}" for j in range(TT))} = scf.for %ch = [%c0 to %chunks step %c1]({accs}) -> ({", ".join(["vector<8xf32>"] * TT)}) {{
+    %ckc = index.constant {KC} : index
+    %kc0 = index.mul %ch, %ckc : index
+    %s_k = index.add %kc0, %s_col : index
+    %s_k16 = index.div %s_k, %c16 : index""")
+    for i in range(per // 16):
+        T.append(f"""    %s_ki{i} = index.add %s_k16, %c{i if i < 3 else 0}{'' if i < 3 else ''} : index""" if i < 3 else
+                 f"""    %s_kc{i} = index.constant {i} : index\n    %s_ki{i} = index.add %s_k16, %s_kc{i} : index""")
+        T.append(f"""    %s_kb{i} = index.assume %s_ki{i} [range(%s_ki{i}, 0, {XH // 16 - 1})] : index
+    %s_x{i} = vector.load %x_view[%s_tok, %head, %s_kb{i}, %c0] : view<[%tokens]x{H}x{XH // 16}x16xf32> -> vector<16xf32>
+    %s_h{i} = vector.fptrunc %s_x{i} : vector<16xf32> to vector<16xf16>
+    %s_ci{i} = index.constant {16 * i} : index
+    %s_c{i} = index.add %s_col, %s_ci{i} : index
+    vector.store %s_h{i}, %st_view[%s_tok_l, %s_c{i}] : vector<16xf16>, view<64x{LD}xf16>""")
+    T.append("    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)")
+    cur = {j: f"%a{j}" for j in range(TT)}
+    for g in range(KC // 32):
+        T.append(f"""    %cg{g} = index.constant {g} : index
+    %g4_{g} = index.constant {KC // 32} : index
+    %gq{g} = index.mul %ch, %g4_{g} : index
+    %gi{g} = index.add %gq{g}, %cg{g} : index
+    %gb{g} = index.assume %gi{g} [range(%gi{g}, 0, {K // 32 - 1})] : index
+    %blk{g} = index.div %gb{g}, %cgpb : index
+    %within{g} = index.rem %gb{g}, %cgpb : index
+    %ba{g} = index.scale %blk{g}, %block_bytes : index, offset -> offset
+    %origin{g} = index.add %ro, %ba{g} : offset
+    %wv{g} = func.call @g_{fmt}_values(%w, %origin{g}, %within{g}) : (buffer, offset, index) -> (vector<32xf32>)
+    %wlo{g} = vector.slice %wv{g}[0] : vector<32xf32> -> vector<16xf32>
+    %whi{g} = vector.slice %wv{g}[16] : vector<32xf32> -> vector<16xf32>
+    %wlo_h{g} = vector.fptrunc %wlo{g} : vector<16xf32> to vector<16xf16>
+    %whi_h{g} = vector.fptrunc %whi{g} : vector<16xf32> to vector<16xf16>
+    %b0_{g} = vector.fragment<rhs> %wlo_h{g} shape [%c16, %c16] : vector<16xf16>
+    %b1_{g} = vector.fragment<rhs> %whi_h{g} shape [%c16, %c16] : vector<16xf16>""")
+        for kk in range(2):
+            T.append(f"    %fc{g}{kk} = index.constant {g * 32 + kk * 16} : index")
+            for j in range(TT):
+                T.append(f"""    %fr{g}{kk}{j} = index.constant {16 * j} : index
+    %af{g}{kk}{j} = vector.fragment.load<lhs> %st_view[%fr{g}{kk}{j}, %fc{g}{kk}] shape [%c16, %c16] : view<64x{LD}xf16> -> vector<16xf16>
+    %m{g}{kk}{j} = vector.mma %af{g}{kk}{j}, %b{kk}_{g}, {cur[j]} : vector<16xf16>, vector<16xf16>, vector<8xf32>""")
+                cur[j] = f"%m{g}{kk}{j}"
+    T.append(f"""    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+    scf.yield {", ".join(cur[j] for j in range(TT))} : {", ".join(["vector<8xf32>"] * TT)}
+  }}
+  %cyt = index.constant {H * YH} : index
+  %y_layout = encoding.layout.strided [%cyt, %c1] : encoding<layout>
+  %cyh = index.constant {YH} : index
+  %four = index.constant 4 : offset
+  %hcol = index.mul %head, %cyh : index
+  %hr0 = index.add %hcol, %r0 : index""")
+    for j in range(TT):
+        T.append(f"""  %tj{j}c = index.constant {16 * j} : index
+  %tj{j}a = index.add %t0, %tj{j}c : index
+  %yt{j} = index.mul %tj{j}a, %cyt : index
+  %ye{j} = index.add %yt{j}, %hr0 : index
+  %yo{j} = index.scale %ye{j}, %four : index, offset -> offset
+  %yv{j} = buffer.view %y[%yo{j}] : buffer -> view<16x16xf32, %y_layout>
+  vector.fragment.store<result> %o{j}, %yv{j}[%c0, %c0] shape [%c16, %c16] : vector<8xf32>, view<16x16xf32, %y_layout>""")
+    T.append("  kernel.return\n}\n")
+    return "\n".join(T)
+
+
+def bmm_live(text):
+    """MLA_BMM_LIVE (choice mla.prefill.bmm_live): a bmm/bmm2 kernel given the epoch's %info skips 64-token blocks that are all
+    padding (padding is the epoch's tail: the block's first token has info word 2 = 0, a workgroup-uniform test; an epoch runs at the next power-of-two shape, so a 1151-token prompt pads 897 rows of a 2048
+    epoch). Live tokens get the same values; padding rows of the output are not written (flash and v_b of padding queries are
+    never read: their row scales are 0)."""
+    a = "launch(%tokens_arg: index, %x: buffer, %w: buffer, %y: buffer) {"
+    assert text.count(a) == 1
+    text = text.replace(a, "launch(%tokens_arg: index, %x: buffer, %w: buffer, %y: buffer, %info: buffer) {")
+    a = "  %tblk = index.assume %tb_id [lt(%tb_id, %tblocks)] : index\n"
+    assert text.count(a) == 1
+    text = text.replace(a, a + """  %lv_zero = index.constant 0 : offset
+  %lv_view = buffer.view %info[%lv_zero] : buffer -> view<[%tokens]x4xi32>
+  %lv_c64 = index.constant 64 : index
+  %lv_t0 = index.mul %tblk, %lv_c64 : index
+  %lv_a = index.assume %lv_t0 [lt(%lv_t0, %tokens)] : index
+  %lv_w = view.load %lv_view[%lv_a, 2] : view<[%tokens]x4xi32> -> i32
+  %lv_dead = scalar.constant 0 : i32
+  %lv_live = scalar.cmpi ne, %lv_w, %lv_dead : i32
+  scf.if %lv_live {
+""")
+    a = "  kernel.return\n}\n"
+    assert text.count(a) == 1
+    return text.replace(a, "  }\n" + a)
