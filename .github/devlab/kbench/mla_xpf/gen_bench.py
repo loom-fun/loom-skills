@@ -24,7 +24,12 @@ QW = 4
 VARIANTS = {"x": {}, "xg": {"MLA_XF": "global"},   # x: LDS-staged flash (default); xg: fragments straight from the scratch
             "xe8": {"MLA_XE_NT": "8"}, "xel": {"MLA_XE_LDS": "1"}, "x8": {"MLA_XQ": "8"}, "x2q": {"MLA_XQ": "2"}, "xg8": {"MLA_XF": "global", "MLA_XQ": "8"},   # 8 query tiles (waves) per workgroup
             "t": {"MLA_XCAP": "4096"}, "tg": {"MLA_XCAP": "4096", "MLA_XF": "global"},
-            **{f"e{d}": {"MLA_XCAP": "4096", "MLA_XE_DBG": str(d)} for d in (1, 2, 3, 4, 8, 12, 15)}}   # g_mla_xexp fault bisection   # small-scratch twins for the staged tests
+            **{f"e{d}": {"MLA_XCAP": "4096", "MLA_XE_DBG": str(d)} for d in (1, 2, 3, 4, 8, 12, 15)},
+            # lc lane: xflash trims (gen_mla_x MLA_XF_T / MLA_XF_QL) and timing-only ablations (MLA_XF_ABL, wrong results)
+            "xf": {"MLA_XF_T": "fma"}, "xq4": {"MLA_XF_QL": "4"}, "xq4f": {"MLA_XF_QL": "4", "MLA_XF_T": "fma"},
+            "xdf": {"MLA_XF_QL": "4", "MLA_XF_T": "diag,fma"}, "xd": {"MLA_XF_T": "diag"},
+            "anox": {"MLA_XF_ABL": "nox"}, "anosm": {"MLA_XF_ABL": "nosm"}, "anoxsm": {"MLA_XF_ABL": "nox,nosm"}}
+TIMING_ONLY = {"anox", "anosm", "anoxsm"}   # g_mla_xexp fault bisection   # small-scratch twins for the staged tests
 
 
 def set_xcap(variant):
@@ -348,7 +353,7 @@ def tests(variants, kbd, vbd):
         expanded = np.zeros(t, bool)
         for tok, nt, _, _ in xq:
             expanded[tok:tok + 16 * nt] = True
-        for v in variants:
+        for v in [v for v in variants if v not in TIMING_ONLY]:
             set_xcap(v)
             after, xq, xb = xlists(inp["info"], tiles)
             s = f"{name}{v.replace('+', '')}"

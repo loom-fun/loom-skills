@@ -697,13 +697,24 @@ kernel.def export("g_mla_xflash") @g_mla_xflash(%count_buffer: buffer) {{
     %qtok = index.assume %qtok_v [lt(%qtok_v, %tokens)] : index
     %qb_view = buffer.view %qb[%zero] : buffer -> view<[%tokens]x{QH}x{QB}xf32>
     %q_view = buffer.view %q[%zero] : buffer -> view<[%tokens]x{QH}x{QD}xf32>""")
+    QL = int(os.environ.get("MLA_XF_QL", "0")) if lds else 0   # the last QL 16-dim Q chunks live in workgroup memory, not VGPRs
+    QLW = 16 * QL + 8
+    if QL:
+        a(f"""    %ql_bytes = index.constant {QW * 16 * QLW * 2} : offset
+    %ql_tile = buffer.alloca<workgroup> align(16) %ql_bytes : buffer
+    %ql_view = buffer.view %ql_tile[%zero] : buffer -> view<{QW * 16}x{QLW}xf16>
+    %ql_r_v = index.add %w16, %lane_col : index
+    %ql_r = index.assume %ql_r_v [range(%ql_r_v, 0, {QW * 16 - 1})] : index""")
     for c in range(NCH):
         if c < 8:
             a(f"""    %qraw{c} = vector.load %qb_view[%qtok, %head, {16 * c}] : view<[%tokens]x{QH}x{QB}xf32> -> vector<16xf32>""")
         else:
             a(f"""    %qraw{c} = vector.load %q_view[%qtok, %head, {512 + 16 * (c - 8)}] : view<[%tokens]x{QH}x{QD}xf32> -> vector<16xf32>""")
-        a(f"""    %qh{c} = vector.fptrunc %qraw{c} : vector<16xf32> to vector<16xf16>
-    %qf{c} = vector.fragment<rhs> %qh{c} shape [%c16, %c16] : vector<16xf16>""")
+        a(f"""    %qh{c} = vector.fptrunc %qraw{c} : vector<16xf32> to vector<16xf16>""")
+        if c >= NCH - QL:
+            a(f"""    vector.store %qh{c}, %ql_view[%ql_r, {16 * (c - (NCH - QL))}] : vector<16xf16>, view<{QW * 16}x{QLW}xf16>""")
+        else:
+            a(f"""    %qf{c} = vector.fragment<rhs> %qh{c} shape [%c16, %c16] : vector<16xf16>""")
     a(f"""    %two = index.constant 2 : offset
     %hk_e = index.mul %head, %cxcap : index
     %hk_e2 = index.mul %hk_e, %c128 : index
@@ -773,18 +784,35 @@ kernel.def export("g_mla_xflash") @g_mla_xflash(%count_buffer: buffer) {{
         a(f"""    %vd{d} = index.constant {16 * d} : index
     %vr{d}_v = index.add %vd{d}, %lane_col : index
     %vr{d} = index.assume %vr{d}_v [range(%vr{d}_v, 0, 127)] : index""")
-    acc = ", ".join(f"%a{d} = %init : vector<8xf32>" for d in range(8))
+    TR = set(t for t in os.environ.get("MLA_XF_T", "").split(",") if t)   # xflash trims (see xflash docstring)
+    assert TR <= {"diag", "fma", "lazy"}, TR
+    diag, fma, lazy = "diag" in TR, "fma" in TR, "lazy" in TR
+    ABL = set(t for t in os.environ.get("MLA_XF_ABL", "").split(",") if t)   # kbench ablations (wrong results): nores, nox, nosm
+    assert ABL <= {"nores", "nox", "nosm"}, ABL
     TY = ", ".join(["vector<8xf32>"] * 8)
-    a(f"""    %m_final, %l_final, {", ".join(f"%o{d}" for d in range(8))} = scf.for %b = [%c0 to {"%nblk_q" if lds else "%nblk"} step %c1](%m = %neg_big : f32, %l = %zero_f : f32, {acc}) -> (f32, f32, {TY}) {{
-      %kf = index.mul %b, %c32 : index
+    if fma or lazy:
+        a(f"""    %scale_s = scalar.constant {scale * 1.4426950408889634!r} : f32
+    %lazy_tau = scalar.constant 8.0 : f32
+    %one_f = scalar.constant 1.0 : f32""")
+    if diag:   # blocks whose 32 keys all precede the quad's first query: no causal mask (every wave sees every key)
+        a(f"""    %tok_q0 = index.assume %tok_f [range(%tok_f, 0, 8176), lt(%tok_f, %tokens)] : index
+    %pq0_32 = view.load %info_view[%tok_q0, 1] : view<[%tokens]x4xi32> -> i32
+    %pq0_b = scalar.assume %pq0_32 [range(%pq0_32, 0, 262128)] : i32
+    %pq0 = index.cast %pq0_b : i32 to index
+    %pq0_1 = index.add %pq0, %c1 : index
+    %nfull_v = index.div %pq0_1, %c32 : index
+    %nfull = index.min %nfull_v, {"%nblk_q" if lds else "%nblk"} : index""")
+
+    def body(masked, sfx):
+        a(f"""      %kf = index.mul %b, %c32 : index
       %vb_pos = index.add %base, %kf : index
       %vb_i = index.div %vb_pos, %c32 : index
       %vb_e = index.add %hv_b, %vb_i : index
       %vb_e2 = index.mul %vb_e, %c4096v : index
       %vb_o = index.scale %vb_e2, %two : index, offset -> offset
       %vt_view = buffer.view %xv[%vb_o] : buffer -> view<128x32xf16>""")
-    if lds:
-        a(f"""      %sk_base = index.add %base, %kf : index
+        if lds:
+            a(f"""      %sk_base = index.add %base, %kf : index
       %sk_r0_v = index.add %sk_base, %st_kk0 : index
       %sk_r0 = index.assume %sk_r0_v [range(%sk_r0_v, 0, {XCAP - 1})] : index
       %sk_r1_v = index.add %sk_base, %st_kk1 : index
@@ -808,8 +836,8 @@ kernel.def export("g_mla_xflash") @g_mla_xflash(%count_buffer: buffer) {{
       kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
       // a wave past its causal range (or without a tile) runs the block anyway: every key is masked, so its state stays
       // (alpha = 1, p = 0); no branch keeps the accumulators from being duplicated across it""")
-    for hh in range(2):
-        a(f"""      %kh{hh}_o = index.constant {16 * hh} : index
+        for hh in range(2):
+            a(f"""      %kh{hh}_o = index.constant {16 * hh} : index
       %kf{hh} = index.add %kf, %kh{hh}_o : index
       %xr{hh}_a = index.add %base, %kf{hh} : index
       %xr{hh}_b = index.add %xr{hh}_a, %lane_col : index
@@ -817,67 +845,123 @@ kernel.def export("g_mla_xflash") @g_mla_xflash(%count_buffer: buffer) {{
       %xc{hh} = index.assume %xr{hh}_a [range(%xr{hh}_a, 0, {XCAP - 16}), multiple_of(%xr{hh}_a, 16)] : index
       %lr{hh}_v = index.add %kh{hh}_o, %lane_col : index
       %lr{hh} = index.assume %lr{hh}_v [range(%lr{hh}_v, 0, 31)] : index""")
-        prev = "%init"
-        for c in range(NCH):
-            if lds:
-                a(f"""      %kr{hh}_{c} = vector.load %ks_view[%lr{hh}, {16 * c}] : view<32x200xf16> -> vector<16xf16>""")
-            elif c < 8:
-                a(f"""      %kr{hh}_{c} = vector.load %xk_view[%xr{hh}, {16 * c}] : view<{XCAP}x128xf16> -> vector<16xf16>""")
+            prev = "%init"
+            for c in range(NCH):
+                if lds:
+                    a(f"""      %kr{hh}_{c} = vector.load %ks_view[%lr{hh}, {16 * c}] : view<32x200xf16> -> vector<16xf16>""")
+                elif c < 8:
+                    a(f"""      %kr{hh}_{c} = vector.load %xk_view[%xr{hh}, {16 * c}] : view<{XCAP}x128xf16> -> vector<16xf16>""")
+                else:
+                    a(f"""      %kr{hh}_{c} = vector.load %pe_view[%xr{hh}, {16 * (c - 8)}] : view<{XCAP}x64xf16> -> vector<16xf16>""")
+                qf = f"%qf{c}"
+                if c >= NCH - QL:
+                    qf = f"%qlf{hh}_{c}"
+                    a(f"""      %qlr{hh}_{c} = vector.load %ql_view[%ql_r, {16 * (c - (NCH - QL))}] : view<{QW * 16}x{QLW}xf16> -> vector<16xf16>
+      {qf} = vector.fragment<rhs> %qlr{hh}_{c} shape [%c16, %c16] : vector<16xf16>""")
+                a(f"""      %kfr{hh}_{c} = vector.fragment<lhs> %kr{hh}_{c} shape [%c16, %c16] : vector<16xf16>
+      %s{hh}_{c} = vector.mma %kfr{hh}_{c}, {qf}, {prev} : vector<16xf16>, vector<16xf16>, vector<8xf32>""")
+                prev = f"%s{hh}_{c}"
+            raw = f"%s{hh}_{NCH - 1}"
+            if fma or lazy:   # max over raw scores (scale > 0), scaled once as a scalar
+                src = raw
             else:
-                a(f"""      %kr{hh}_{c} = vector.load %pe_view[%xr{hh}, {16 * (c - 8)}] : view<{XCAP}x64xf16> -> vector<16xf16>""")
-            a(f"""      %kfr{hh}_{c} = vector.fragment<lhs> %kr{hh}_{c} shape [%c16, %c16] : vector<16xf16>
-      %s{hh}_{c} = vector.mma %kfr{hh}_{c}, %qf{c}, {prev} : vector<16xf16>, vector<16xf16>, vector<8xf32>""")
-            prev = f"%s{hh}_{c}"
-        a(f"""      %sc{hh} = vector.mulf %s{hh}_{NCH - 1}, %scale_v : vector<8xf32>
-      %kf{hh}_32 = index.cast %kf{hh} : index to i32
+                a(f"""      %sc{hh} = vector.mulf {raw}, %scale_v : vector<8xf32>""")
+                src = f"%sc{hh}"
+            if masked:
+                a(f"""      %kf{hh}_32 = index.cast %kf{hh} : index to i32
       %kb{hh}_v = vector.splat %kf{hh}_32 : vector<8xi32>
       %kpos{hh} = vector.addi %kb{hh}_v, %row_off : vector<8xi32>
       %valid{hh} = vector.cmpi sle, %kpos{hh}, %qpos_v : vector<8xi32> -> vector<8xi1>
-      %masked{hh} = vector.select %valid{hh}, %sc{hh}, %neg_v : vector<8xf32>
-      %lmax{hh} = vector.reduce<maxnumf> %masked{hh}, %neg_big : vector<8xf32>, f32""")
-    a(f"""      %lmax = scalar.maxnumf %lmax0, %lmax1 : f32
+      %masked{hh} = vector.select %valid{hh}, {src}, %neg_v : vector<8xf32>""")
+                src = f"%masked{hh}"
+            a(f"""      %lmax{hh} = vector.reduce<maxnumf> {src}, %neg_big : vector<8xf32>, f32""")
+        a(f"""      %lmax = scalar.maxnumf %lmax0, %lmax1 : f32
       %omax, %omax_u = kernel.subgroup.shuffle<xor> %lmax, %exchange, %width : f32, i32, i32
-      %tmax = scalar.maxnumf %lmax, %omax : f32
-      %m_new = scalar.maxnumf %m, %tmax : f32
+      %tmax{"_r" if (fma or lazy) else ""} = scalar.maxnumf %lmax, %omax : f32""")
+        if fma or lazy:
+            a("      %tmax = scalar.mulf %tmax_r, %scale_s : f32")
+        if lazy:   # FA4-style: keep the running max unless some query of the wave grew by more than tau (2^8 headroom in P)
+            os_ = ", ".join(f"%os{d}" for d in range(8))
+            a(f"""      %m_tau = scalar.addf %m, %lazy_tau : f32
+      %lz_need = scalar.cmpf ogt, %tmax, %m_tau : f32
+      %lz_any = kernel.subgroup.vote.any %lz_need : i1
+      %m_new, %alpha, {os_} = scf.if %lz_any -> (f32, f32, {TY}) {{
+        %lm_n = scalar.maxnumf %m, %tmax : f32
+        %lm_shift = scalar.subf %m, %lm_n : f32
+        %lalpha = scalar.exp2f<afn> %lm_shift : f32
+        %lalpha_v = vector.splat %lalpha : vector<8xf32>""")
+            for d in range(8):
+                a(f"""        %lzs{d} = vector.mulf %a{d}, %lalpha_v : vector<8xf32>""")
+            a(f"""        scf.yield %lm_n, %lalpha, {", ".join(f"%lzs{d}" for d in range(8))} : f32, f32, {TY}
+      }} else {{
+        scf.yield %m, %one_f, {", ".join(f"%a{d}" for d in range(8))} : f32, f32, {TY}
+      }}
+      %m_new_v = vector.splat %m_new : vector<8xf32>""")
+        else:
+            a(f"""      %m_new = scalar.maxnumf %m, %tmax : f32
       %m_shift = scalar.subf %m, %m_new : f32
       %alpha = scalar.exp2f<afn> %m_shift : f32
       %m_new_v = vector.splat %m_new : vector<8xf32>""")
-    for hh in range(2):
-        a(f"""      %sh{hh} = vector.subf %masked{hh}, %m_new_v : vector<8xf32>
-      %pe{hh} = vector.exp2f<afn> %sh{hh} : vector<8xf32>
-      %p{hh} = vector.select %valid{hh}, %pe{hh}, %zero8 : vector<8xf32>
-      %ls{hh} = vector.reduce<addf> %p{hh}, %zero_f : vector<8xf32>, f32""")
-        for i in range(8):
-            a(f"""      %pi{hh}_{i} = vector.extract %p{hh}[%ex{i}] : vector<8xf32> -> f32
+        if fma or lazy:
+            a("      %m_neg = scalar.negf %m_new : f32\n      %m_neg_v = vector.splat %m_neg : vector<8xf32>")
+        for hh in range(2):
+            if fma or lazy:
+                a(f"""      %sh{hh} = vector.fmaf %s{hh}_{NCH - 1}, %scale_v, %m_neg_v : vector<8xf32>""")
+            else:
+                a(f"""      %sh{hh} = vector.subf {"%masked" if masked else "%sc"}{hh}, %m_new_v : vector<8xf32>""")
+            a(f"""      %pe{hh} = vector.exp2f<afn> %sh{hh} : vector<8xf32>""")
+            pn = f"%s{hh}_{NCH - 1}" if "nosm" in ABL else (f"%p{hh}" if masked else f"%pe{hh}")
+            if masked and "nosm" not in ABL:
+                a(f"""      %p{hh} = vector.select %valid{hh}, %pe{hh}, %zero8 : vector<8xf32>""")
+            a(f"""      %ls{hh} = vector.reduce<addf> {pn}, %zero_f : vector<8xf32>, f32""")
+            for i in (range(8) if "nox" not in ABL else ()):
+                a(f"""      %pi{hh}_{i} = vector.extract {pn}[%ex{i}] : vector<8xf32> -> f32
       %po{hh}_{i}, %pu{hh}_{i} = kernel.subgroup.shuffle<xor> %pi{hh}_{i}, %exchange, %width : f32, i32, i32""")
-        a(f"""      %partner{hh} = vector.from_elements {", ".join(f"%po{hh}_{i}" for i in range(8))} : vector<8xf32>
-      %even{hh} = scf.select %hi_half, %partner{hh}, %p{hh} : vector<8xf32>
-      %odd{hh} = scf.select %hi_half, %p{hh}, %partner{hh} : vector<8xf32>
+            if "nox" in ABL:
+                a(f"""      %pt{hh}_f = vector.interleave<0> {pn}, {pn} : vector<8xf32>, vector<8xf32> -> vector<16xf32>
+      %pt{hh}_h = vector.fptrunc %pt{hh}_f : vector<16xf32> to vector<16xf16>
+      %pt{hh} = vector.fragment<rhs> %pt{hh}_h shape [%c16, %c16] : vector<16xf16>""")
+                continue
+            a(f"""      %partner{hh} = vector.from_elements {", ".join(f"%po{hh}_{i}" for i in range(8))} : vector<8xf32>
+      %even{hh} = scf.select %hi_half, %partner{hh}, {pn} : vector<8xf32>
+      %odd{hh} = scf.select %hi_half, {pn}, %partner{hh} : vector<8xf32>
       %pt{hh}_f = vector.interleave<0> %even{hh}, %odd{hh} : vector<8xf32>, vector<8xf32> -> vector<16xf32>
       %pt{hh}_h = vector.fptrunc %pt{hh}_f : vector<16xf32> to vector<16xf16>
       %pt{hh} = vector.fragment<rhs> %pt{hh}_h shape [%c16, %c16] : vector<16xf16>""")
-    a(f"""      %ls = scalar.addf %ls0, %ls1 : f32
+        a(f"""      %ls = scalar.addf %ls0, %ls1 : f32
       %osum, %osum_u = kernel.subgroup.shuffle<xor> %ls, %exchange, %width : f32, i32, i32
       %tsum = scalar.addf %ls, %osum : f32
       %l_scaled = scalar.mulf %l, %alpha : f32
-      %l_new = scalar.addf %l_scaled, %tsum : f32
-      %alpha_v = vector.splat %alpha : vector<8xf32>""")
-    for d in range(8):
-        a(f"""      %os{d} = vector.mulf %a{d}, %alpha_v : vector<8xf32>""")
-        cur = f"%os{d}"
-        for hh in range(2):
-            a(f"""      %vl{d}_{hh} = vector.load %vs_view[%vr{d}, {16 * hh}] : view<128x40xf16> -> vector<16xf16>""" if lds else f"""      %vl{d}_{hh} = vector.load %vt_view[%vr{d}, {16 * hh}] : view<128x32xf16> -> vector<16xf16>""")
-            a(f"""
+      %l_new = scalar.addf %l_scaled, %tsum : f32""")
+        if not lazy:
+            a("      %alpha_v = vector.splat %alpha : vector<8xf32>")
+        for d in range(8):
+            if not lazy:
+                if "nores" not in ABL:
+                    a(f"""      %os{d} = vector.mulf %a{d}, %alpha_v : vector<8xf32>""")
+            cur = f"%os{d}" if "nores" not in ABL or lazy else f"%a{d}"
+            for hh in range(2):
+                a(f"""      %vl{d}_{hh} = vector.load %vs_view[%vr{d}, {16 * hh}] : view<128x40xf16> -> vector<16xf16>""" if lds else f"""      %vl{d}_{hh} = vector.load %vt_view[%vr{d}, {16 * hh}] : view<128x32xf16> -> vector<16xf16>""")
+                a(f"""
       %vf{d}_{hh} = vector.fragment<lhs> %vl{d}_{hh} shape [%c16, %c16] : vector<16xf16>
       %an{d}_{hh} = vector.mma %vf{d}_{hh}, %pt{hh}, {cur} : vector<16xf16>, vector<16xf16>, vector<8xf32>""")
-            cur = f"%an{d}_{hh}"
-    if lds:
-        a(f"""      kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
-      scf.yield %m_new, %l_new, {", ".join(f"%an{d}_1" for d in range(8))} : f32, f32, {TY}
-    }}""")
-    else:
+                cur = f"%an{d}_{hh}"
+        if lds:
+            a("      kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)")
         a(f"""      scf.yield %m_new, %l_new, {", ".join(f"%an{d}_1" for d in range(8))} : f32, f32, {TY}
     }}""")
+
+    acc = ", ".join(f"%a{d} = %init : vector<8xf32>" for d in range(8))
+    nb = "%nblk_q" if lds else "%nblk"
+    if diag:
+        a(f"""    %m_d, %l_d, {", ".join(f"%od{d}" for d in range(8))} = scf.for %b = [%c0 to %nfull step %c1](%m = %neg_big : f32, %l = %zero_f : f32, {acc}) -> (f32, f32, {TY}) {{""")
+        body(False, "")
+        acc2 = ", ".join(f"%a{d} = %od{d} : vector<8xf32>" for d in range(8))
+        a(f"""    %m_final, %l_final, {", ".join(f"%o{d}" for d in range(8))} = scf.for %b = [%nfull to {nb} step %c1](%m = %m_d : f32, %l = %l_d : f32, {acc2}) -> (f32, f32, {TY}) {{""")
+        body(True, "")
+    else:
+        a(f"""    %m_final, %l_final, {", ".join(f"%o{d}" for d in range(8))} = scf.for %b = [%c0 to {nb} step %c1](%m = %neg_big : f32, %l = %zero_f : f32, {acc}) -> (f32, f32, {TY}) {{""")
+        body(True, "")
     a(f"""{chr(10) + "    scf.if %mine {" if lds else ""}
     %one = scalar.constant 1.0 : f32
     %inv = scalar.divf %one, %l_final : f32
