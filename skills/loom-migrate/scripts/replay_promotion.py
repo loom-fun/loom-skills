@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """Prepare immutable production package bytes and replay their reviewed manifest."""
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import json
 import os
 import re
 import shutil
+import time
 from pathlib import Path, PurePosixPath
 
 STAGING = "loom-fun-staging"
@@ -58,19 +60,37 @@ def records(pins):
         yield slug, row
 
 
-def snapshot(api, repo, revision):
-    from huggingface_hub import snapshot_download
+def read_hub(operation, repo, *args, **kwargs):
+    for attempt in range(3):
+        try:
+            return operation(repo, *args, token=False, **kwargs)
+        except Exception as error:
+            response = getattr(error, "response", None)
+            if response is None or response.status_code != 429 or attempt == 2:
+                raise
+            reset = re.search(r"(?:^|;)\s*t=(\d+)", response.headers.get("RateLimit", ""))
+            delay = response.headers.get("Retry-After") or (reset[1] if reset else "300")
+            seconds = int(delay) if delay.isdecimal() else 300
+            print(f"Hub read rate limited; retrying {repo} in {seconds + 1} seconds", flush=True)
+            time.sleep(seconds + 1)
 
-    info = api.model_info(repo, revision=revision, files_metadata=True, token=False)
-    require(info.sha == revision and info.siblings, f"{repo}: incorrect or empty revision {revision}")
-    path = Path(snapshot_download(repo, revision=revision, token=False, endpoint=ENDPOINT))
-    content = {}
-    for file in info.siblings:
+
+def model_info(api, repo, **kwargs):
+    return read_hub(api.model_info, repo, **kwargs)
+
+
+def snapshot(api, repo, revision):
+    from huggingface_hub import hf_hub_download
+
+    info = model_info(api, repo, revision=revision, files_metadata=True)
+    require(info.id == repo and info.sha == revision and info.siblings, f"{repo}: incorrect or empty revision {revision}")
+    files = [file for file in info.siblings if file.rfilename != ".gitattributes"]
+    require(files and all(safe_path(file.rfilename) for file in files), f"{repo}: empty package or unsafe path")
+
+    def verify(file):
         name = file.rfilename
-        require(safe_path(name), f"{repo}: invalid path {name}")
-        if name == ".gitattributes":
-            continue
-        local = path / name
+        local = Path(read_hub(hf_hub_download, repo, name, revision=revision, endpoint=ENDPOINT))
+        root = local.parents[len(PurePosixPath(name).parts) - 1]
         size = local.stat().st_size
         sha = digest(local)
         if file.lfs:
@@ -82,12 +102,18 @@ def snapshot(api, repo, revision):
                     git.update(block)
             require(git.hexdigest() == file.blob_id, f"{repo}: corrupt Git blob {name}")
         require(file.size is None or size == file.size, f"{repo}: incorrect size {name}")
-        content[name] = sha
-    return path, content
+        return root, name, sha
+
+    # All paths are already in model_info. Resolve them directly without listing the snapshot again.
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        verified = list(pool.map(verify, files))
+    path = verified[0][0]
+    require(all(root == path for root, _, _ in verified), f"{repo}: inconsistent snapshot cache paths")
+    return path, {name: sha for _, name, sha in verified}
 
 
 def require_head(api, repo, revision):
-    live = api.model_info(repo, revision="main", token=False).sha
+    live = model_info(api, repo, revision="main").sha
     require(live == revision, f"{repo}: main moved from {revision} to {live}")
 
 
