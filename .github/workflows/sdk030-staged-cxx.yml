@@ -1,4 +1,4 @@
-name: DevLab Gufo normal build and staged C++ model proof
+name: DevLab Gufo Nix builds and staged C++ model proof
 on:
   push:
     branches: [codex/sdk030-consumer-devlab]
@@ -26,7 +26,7 @@ jobs:
           mkdir "$work/out"
           hostname > "$work/out/runner.txt"
           awk '/MemAvailable/ { print; if ($2 < 107421875) exit 1 }' /proc/meminfo | tee "$work/out/memavailable.txt"
-      - name: Build the ordinary Gufo runtime target and both staged model probes
+      - name: Build both pinned Nix runtimes and run the staged model probes
         shell: bash
         run: bash .github/sdk030-staged-cxx/run.sh
       - uses: actions/upload-artifact@v4
