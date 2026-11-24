@@ -18,7 +18,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - name: Verify the exact draft and serve both packages with scoped lab configuration
+      - name: Verify the exact draft and serve the registered staged alias
         shell: bash
         run: |
           set -euo pipefail

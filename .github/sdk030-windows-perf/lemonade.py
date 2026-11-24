@@ -34,8 +34,8 @@ previous_exe = ('e2d926f1ad37efd6a340ad52ee674516fc2186a268637b53bc9412378fecbb4
 cases = (
     ('legacy', 'Qwen3-0.6B-Loom', 'loom-fun/unsloth-Qwen3-0.6B-loom',
      '564d578f4e487c6fbabd84915439f873651b5953', 'chat', 1),
-    ('flash', 'Qwen3.8-Flash-Next-Loom', 'loom-fun-staging/unsloth-Qwen3.8-Flash-Next-loom',
-     '473e5815cedcf3117fcac905c27ed3434f9fe836', 'vision-mtp', 2),
+    ('flash', 'user.FlashNextStage', 'loom-fun-staging/unsloth-Qwen3.8-Flash-Next-loom',
+     '7d27c03e6450de529a4bf7d76118a8170b2ac1aa', 'vision-mtp', 2),
 )
 
 
@@ -54,8 +54,7 @@ def download(url, path, timeout=100):
 
 
 def snapshot(repo, revision):
-    logical = repo.replace('loom-fun-staging/', 'loom-fun/')
-    location = root / 'lemon-hf' / ('models--' + logical.replace('/', '--'))
+    location = root / 'weights-hf/hub' / ('models--' + repo.replace('/', '--'))
     return location / 'snapshots' / revision, location / 'refs/main'
 
 
@@ -79,9 +78,13 @@ def prepare():
                             f'--output={target}', '--materialize=share', '--no-input'],
                            check=True, stdout=log, stderr=subprocess.STDOUT, timeout=2700)
         base = f'https://huggingface.co/{repo}/resolve/{revision}'
-        download(base + '/info.json', target / 'info.json')
-        if not (target / 'model.json.lock').exists():
-            download(base + '/model.json.lock', target / 'model.json.lock')
+        # Keep upstream metadata paired with its lock. The ready directory also
+        # contains every parameter and source file verified by loom-fetch.
+        for name in ('model.json', 'model.json.lock', 'info.json'):
+            path = target / name
+            temporary = target / (name + '.raw')
+            download(base + '/' + name, temporary)
+            temporary.replace(path)
         card = json.loads((target / 'model.json').read_text(encoding='utf-8'))
         service = card['presets'][preset]['service']
         assert card['services'][service]['version'] == abi
@@ -91,9 +94,18 @@ def prepare():
             from card_lib import programs_sha256
             assert programs_sha256(target) == 'c0cf0958949af15430bb8791eb167e8108a5a374f3f5aa3828eb55f0d88ac920'
         snap, ref = snapshot(repo, revision)
-        snap.parent.mkdir(parents=True)
-        target.rename(snap)
-        ref.parent.mkdir()
+        snap.mkdir(parents=True, exist_ok=True)
+        for source in target.rglob('*'):
+            if not source.is_file():
+                continue
+            dest = snap / source.relative_to(target)
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            if dest.exists():
+                continue
+            os.link(source.resolve(), dest)
+        for name in ('model.json', 'model.json.lock', 'info.json'):
+            assert sha(snap / name) == sha(target / name), name
+        ref.parent.mkdir(exist_ok=True)
         ref.write_text(revision + '\n', encoding='utf-8')
         records[label] = {'alias': alias, 'repo': repo, 'revision': revision, 'controller_abi': abi,
                           'model_sha256': sha(snap / 'model.json')}
@@ -112,7 +124,7 @@ def health(server, base):
     raise TimeoutError('Lemonade did not become healthy')
 
 
-def chat(exe, cache, config, label, alias):
+def chat(exe, cache, config, label, alias, registry_repo=None):
     with socket.socket() as sock:
         sock.bind(('127.0.0.1', 0))
         port = sock.getsockname()[1]
@@ -123,6 +135,20 @@ def chat(exe, cache, config, label, alias):
                                   start_new_session=not windows)
         try:
             write(f'{label}-health.json', health(server, base))
+            if registry_repo:
+                definition = {'model_name': alias, 'checkpoint': registry_repo,
+                              'recipe': 'loom', 'source': 'huggingface'}
+                registration = Request(base + '/api/v1/models/register',
+                                       data=json.dumps(definition).encode(),
+                                       headers={'Content-Type': 'application/json'})
+                try:
+                    with urlopen(registration, timeout=60) as reply:
+                        registered = json.load(reply)
+                except HTTPError as error:
+                    (evidence / f'{label}-register-error.json').write_bytes(error.read())
+                    raise
+                write(f'{label}-registration.json', registered)
+                assert registered['canonical_model_name'] == alias, registered
             body = {'model': alias, 'messages': [{'role': 'user', 'content':
                      'What is the capital of France? Answer with only the city name. /no_think'}],
                     'temperature': 0, 'max_tokens': 48, 'chat_template_kwargs': {'enable_thinking': False}}
@@ -150,7 +176,7 @@ def chat(exe, cache, config, label, alias):
 
 
 def run():
-    os.environ['HF_HUB_CACHE'] = str(root / 'lemon-hf')
+    os.environ['HF_HUB_CACHE'] = str(root / 'weights-hf/hub')
     os.environ['HF_HOME'] = str(root / 'weights-hf')
     draft = root / 'draft'
     assert (draft / 'draft-head.txt').read_text().strip() == os.environ['LEMONADE_REVISION']
@@ -186,11 +212,14 @@ def run():
     libraries = {name: sha(install / name) for name in runtime_files}
     write('same-version-upgrade.json', {'version': (install / 'version.txt').read_text().strip(),
                                       'before': before, 'after': installed_exe, 'libraries': libraries})
-    flash_config = {'websocket_port': 0, 'disable_model_filtering': True}
-    config_file.write_text(json.dumps(flash_config), encoding='utf-8')
-    write('flash-test-config.json', flash_config)
-    label, alias, *_ = cases[1]
-    chat(executable, cache, config, label, alias)
+    label, alias, repo, revision, *_ = cases[1]
+    snap, ref = snapshot(repo, revision)
+    before_card = sha(snap / 'model.json')
+    chat(executable, cache, config, label, alias, registry_repo=repo)
+    assert ref.read_text(encoding='utf-8').strip() == revision
+    assert sha(snap / 'model.json') == before_card
+    assert not (root / 'weights-hf/hub/models--loom-fun--unsloth-Qwen3.8-Flash-Next-loom').exists()
+    write('flash-loaded-revision.json', {'repo': repo, 'revision': revision, 'model_sha256': before_card})
     assert sha(backend) == installed_exe
 
 

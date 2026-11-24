@@ -9,43 +9,6 @@ permissions:
 env:
   LEMONADE_REVISION: c183d72227b88bb7e32745c58b5a78178064ad34
 jobs:
-  build:
-    runs-on: windows-latest
-    timeout-minutes: 75
-    defaults:
-      run:
-        shell: pwsh
-        working-directory: lemonade
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          repository: lemonade-sdk/lemonade
-          ref: ${{ env.LEMONADE_REVISION }}
-          path: lemonade
-          persist-credentials: false
-      - name: Build and test exact Lemonade Windows draft
-        run: |
-          $ErrorActionPreference = 'Stop'
-          if ((git rev-parse HEAD) -ne $env:LEMONADE_REVISION) { throw 'Lemonade revision mismatch' }
-          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
-          $preset = if ((& $vswhere -latest -property catalog_productLineVersion) -eq '18') { 'vs18' } else { 'windows' }
-          cmake --preset $preset -DBUILD_WEB_APP=OFF
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          cmake --build build --config Release --target test_loom_contract test_install_atomicity embeddable -- /m:2
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          ctest --test-dir build -C Release --output-on-failure --no-tests=error -R '^(LoomContractTest|InstallAtomicityTest)$'
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $archives = @(Get-ChildItem build -Filter 'lemonade-embeddable-*-windows-x64.zip' -File)
-          if ($archives.Count -ne 1) { throw 'Expected one qualified embeddable ZIP' }
-          $env:LEMONADE_REVISION | Set-Content 'build/draft-head.txt' -Encoding ascii
-          (Get-FileHash $archives[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant() | Set-Content 'build/draft-build-sha256.txt' -Encoding ascii
-      - uses: actions/upload-artifact@v4
-        with:
-          name: lemonade-windows-draft
-          path: |
-            lemonade/build/lemonade-embeddable-*-windows-x64.zip
-            lemonade/build/draft-head.txt
-            lemonade/build/draft-build-sha256.txt
   native:
     runs-on: [windows, strix-halo, devlab-dispatch]
     timeout-minutes: 115
@@ -56,7 +19,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - name: Materialize immutable test packages while the Windows build runs
+      - name: Materialize stage with its own repository and shared origin cache
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
@@ -73,27 +36,13 @@ jobs:
           } | ConvertTo-Json -Depth 4 | Set-Content (Join-Path $out 'machine.json') -Encoding UTF8
           python .github/sdk030-windows-perf/lemonade.py prepare "$scratch" "$out"
           if ($LASTEXITCODE -ne 0) { throw 'Could not prepare pinned test packages' }
-      - name: Wait for the built same-run application artifact
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $headers = @{ Authorization = "Bearer $env:GH_TOKEN"; Accept = 'application/vnd.github+json' }
-          $api = "https://api.github.com/repos/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"
-          $end = (Get-Date).AddMinutes(38)
-          while ((Get-Date) -lt $end) {
-            $artifacts = (Invoke-RestMethod "$api/artifacts" -Headers $headers -TimeoutSec 25).artifacts
-            if ($artifacts | Where-Object { $_.name -eq 'lemonade-windows-draft' -and !$_.expired }) { exit 0 }
-            $build = (Invoke-RestMethod "$api/jobs" -Headers $headers -TimeoutSec 25).jobs | Where-Object name -eq 'build'
-            if ($build.status -eq 'completed' -and $build.conclusion -ne 'success') { throw 'The Windows build failed' }
-            Start-Sleep -Seconds 25
-          }
-          throw 'The exact Windows application build did not upload before the timeout'
       - uses: actions/download-artifact@v4
         with:
           name: lemonade-windows-draft
+          run-id: 45442674793
+          github-token: ${{ github.token }}
           path: ${{ env.WINPERF_SCRATCH }}/draft
-      - name: Upgrade an existing install and serve both packages with scoped lab configuration
+      - name: Upgrade an existing install and serve the registered staged alias
         run: |
           $ErrorActionPreference = 'Stop'
           python .github/sdk030-windows-perf/lemonade.py run "$env:WINPERF_SCRATCH" "$env:GITHUB_WORKSPACE/windows-lemonade-evidence"
