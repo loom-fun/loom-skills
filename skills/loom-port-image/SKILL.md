@@ -108,13 +108,14 @@ loom-serve --version
 9. **Card.** `scripts/stage_hf.py` turns the hrx-loom-library card into a self-contained
    package (motifs copied under `library/motif/`, Bazel archive program set dropped, checkpoint
    origins kept). Write `README.md` and `REPORT.md` from `reference/card-template.md`
-   (performance and accuracy, best value per column in bold). Stage and qualify in new directories:
+   (performance and accuracy, best value per column in bold). With the public hrx-loom 0.3.0
+   release, stage and qualify in new directories using the default fetch setting:
 
    ```bash
    STAGED="$PWD/staged-z-image"
    MATERIALIZED="$PWD/materialized-z-image"
    python3 "${LOOM_SKILL_DIR}/scripts/stage_hf.py" "$CATALOG_CARD" "$STAGED"
-   loom-fetch "$STAGED/model.json" --preset=image --materialize=share --output="$MATERIALIZED" --no-input
+   loom-fetch "$STAGED/model.json" --preset=image --output="$MATERIALIZED" --no-input
    loom-serve --device=amdgpu --model="$MATERIALIZED/model.json" --listen=127.0.0.1:8211
    ```
 

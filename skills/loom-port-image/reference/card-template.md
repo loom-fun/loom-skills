@@ -31,8 +31,13 @@ publisher's repository at a revision, and `loom-fetch` downloads them from there
 2. `# <Model> for AMD Loom` and one paragraph: what the package is, which checkpoint, which
    endpoint, which device it was tested on.
 3. `## Quick start`: "Open your GPU and copy its commands." and one `<details>` block per tested
-   GPU with the tested SDK pin, `loom-fetch huggingface:loom-fun/<repo>:<preset>@<revision> --materialize=copy --output=<dir>`
-   and `loom-serve`. One line for other GPUs the SDK supports: they can run it and have not been tested.
+   GPU with the tested SDK pin, `loom-fetch huggingface:loom-fun/<repo>:<preset>@<revision> --output=<dir>`
+   and `loom-serve`. Use this default fetch setting for a qualified public hrx-loom 0.3.0
+   PyPI or release pin. Keep `--materialize=copy` in the command for other pins or when the
+   output directory needs independent copies of its assets. See the
+   [Loom Setup fetch guide](../../loom-setup/SKILL.md#2-fetch-a-catalog-model) for how default
+   materialization uses filesystem links and falls back to copies. One line for other GPUs
+   the SDK supports: they can run it and have not been tested.
 4. `## Send a request`: one request to `/v1/images/generations` with `seed` and `response_format: b64_json`.
 5. `## Performance vs stable-diffusion.cpp`, `### <GPU> (<gfx>)`. One line with the size, steps
    and guidance, then three tables:
@@ -79,6 +84,8 @@ publisher's repository at a revision, and `loom-fetch` downloads them from there
 
 - Fetch the staged repository with `loom-fetch` into a clean directory and run `image_check` on it;
   date that run in the Correctness footnote.
+- See the [SDK 0.3.0 DevLab comparison](https://github.com/loom-fun/loom-skills/actions/runs/45425749984)
+  for the full fetched manifests and image requests from the three published image presets.
 - Check every link resolves, including the hrx-loom-library card link once its pull request merges.
 - Check every bold value is the best in its column, and that each table row names what it
   measured (backend, build, weights, timing boundary).
