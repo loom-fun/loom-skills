@@ -1332,7 +1332,7 @@
  """)
 -    return "\n".join(L)
 +    t = "\n".join(L).replace("TOKS", "%atot" if shared else "%tokens")
-+    U = int(_os.environ.get("MOE_DN_U", "4")) if mode == "dn" and shared else 1   # c4 +2.2 % (devlab-perf 45271518634)
++    U = int(_os.environ.get("MOE_DN_U", "1")) if mode == "dn" and shared else 1   # 4: c4 +2.4 % but decode -7 % (devlab-perf 45301191381)
 +    return unroll_rows(t, U, R) if U > 1 else t
 +
 +
