@@ -1,0 +1,109 @@
+name: Ornith 1.5 122B grouped Q4_K fixture integration proof
+on:
+  push:
+    branches: [codex/sdk030-ornith-122b-fixture]
+    paths: [.github/workflows/sdk030-ornith-122b-fixture.yml]
+permissions:
+  contents: read
+jobs:
+  verify:
+    name: ${{ matrix.device }} ${{ matrix.slug }}
+    strategy:
+      max-parallel: 2
+      fail-fast: false
+      matrix:
+        include:
+          - slug: bartowski-Ornith-1.5-122B-loom
+            device: strix-halo
+            labels: '["self-hosted","devlab-dispatch","strix-halo","Linux"]'
+    runs-on: ${{ fromJSON(matrix.labels) }}
+    timeout-minutes: 240
+    env:
+      SLUG: ${{ matrix.slug }}
+      SDK_GPU_KEY: ${{ matrix.device }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 47b5ebef096020c0e65b7d45548a9c5b4885d60c
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Plan from the accepted production revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          export WORK="$(dirname "$GITHUB_WORKSPACE")/sdk030-wave-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$SDK_GPU_KEY-$SLUG"
+          mkdir -p "$WORK/receipt"
+          echo "WORK=$WORK" >> "$GITHUB_ENV"
+          python3 fleet/regen.py plan --base 4c28b772a8f22f121b3925788dae14b26c58511b --mode sdk-loom --new-sdk 0.3.0 --gates full --device "$SDK_GPU_KEY" --batch 1 --work "$WORK/plan" --state "$WORK/receipt/state.json" "$SLUG"
+          python3 .github/scripts/ab_jobs.py --device "$SDK_GPU_KEY" --gates full --sdk-ab --old-sdk card --new-sdk 0.3.0 --refs "$WORK/plan/refs_$SDK_GPU_KEY.json" "$SLUG" > "$WORK/receipt/experiment.json"
+          python3 - <<'PY' >> "$GITHUB_ENV"
+          import json,os
+          from pathlib import Path
+          work=Path(os.environ['WORK'])
+          plan=json.loads((work/'receipt/experiment.json').read_text())
+          frozen=json.loads(Path('skills/loom-migrate/versions/v0.2.0-to-v0.3.0-production.json').read_text())
+          job,=plan['jobs']
+          repo='loom-fun/'+os.environ['SLUG']
+          assert job['card']==repo+'@'+frozen[repo],job['card']
+          assert frozen[repo]=='549484e582abe6c5014b27d76a82fc5f63c7c45f',frozen[repo]
+          assert job.get('sdk',plan.get('sdk'))=='0.3.0'
+          variants={v['name']:v for v in job['variants']}
+          assert variants['fun']['sdk']=='card' and variants['fun']['card']==job['card']
+          assert variants['staging']['sdk']=='0.3.0' and 'card' not in variants['staging']
+          job['steps']=['ktest:staging']
+          job['variants']=[v for v in job['variants'] if v['name']=='staging']
+          (work/'receipt/experiment.json').write_text(json.dumps(plan, indent=2))
+          print('JOB='+job['name'])
+          PY
+      - name: Verify the packed counterexample and fixture contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m venv "$WORK/unit-venv"
+          "$WORK/unit-venv/bin/python" -m pip install --quiet numpy gguf
+          "$WORK/unit-venv/bin/python" -m unittest discover -s tests -p 'test_moe*.py' -v 2>&1 | tee "$WORK/receipt/unit-tests.log"
+          git diff --check 1af069c021cbdf3f10cd815a521fb2422768ba7b HEAD
+          cat > "$WORK/fixture-scope.md" <<'EOF'
+          # Ornith 1.5 122B grouped Q4_K test reference
+
+          ```loom-scope
+          kind: architecture
+          scopes: [model/bartowski-Ornith-1.5-122B-loom]
+          kernels: []
+          ```
+
+          The grouped GEMM numerical fixture for the frozen Ornith 122B Q4_K_M checkpoint rounds the per-group scale and minimum to FP16 before its reference multiply-add. The candidate checks retain their existing tensors, dimensions, assertions, and tolerances. The change touches test fixture code and its regression test.
+
+          The original 0.2.0 and 0.3.0 runs reported the same two discrepancies in `moe_gemm_12`. Correcting the oracle made that case pass on the exact 0.3.0 candidate and produced 121 passing cases with two skips. The extra SDK 0.2.0 control in the focused run stopped at missing attention entry points before executing its cases. [Original 0.2.0 evidence](https://github.com/loom-fun/loom-skills/actions/runs/44088653570/job/134057765599) · [Matched 0.3.0 evidence](https://github.com/loom-fun/loom-skills/actions/runs/45278043938/job/138054853191) · [Corrected fixture evidence](https://github.com/loom-fun/loom-skills/actions/runs/45295808591/job/138115754367)
+          EOF
+          python3 fleet/scope_lint.py --base 1af069c021cbdf3f10cd815a521fb2422768ba7b --head HEAD --pr-body "$WORK/fixture-scope.md" --json "$WORK/receipt/scope-lint.json"
+      - name: Run all kernel cases for the exact SDK 0.3.0 candidate
+        run: bash .github/scripts/devlab_perf.sh "$WORK/receipt/experiment.json" "$JOB"
+      - name: Save the kernel and source evidence
+        if: always() && env.JOB != ''
+        shell: bash
+        run: |
+          if [ -d "$WORK/$JOB/out" ]; then cp -r "$WORK/$JOB/out" "$WORK/receipt/"; fi
+          git rev-parse HEAD > "$WORK/receipt/checkout.txt"
+          git ls-tree HEAD skills/loom-port-llm/starter/ktest_more.py skills/loom-port-llm/starter/make_kernel_tests.py tests/test_moe_grouped_q4_k.py > "$WORK/receipt/source-blobs.txt"
+      - name: Verify corrected case and measured program digest
+        shell: bash
+        run: |
+          set -euo pipefail
+          out="$WORK/receipt/out"
+          test "$(cat "$out/programs_sha256_staging.txt")" = 'a8da3018af8e8c67168b4028fe399750692672ad6bb07352260251358ee33f3f'
+          grep -x 'PASS moe_gemm_12' "$out/ktest_staging.log"
+          grep -F '"ktest:staging": "PASS (121/121 passed; 2 skipped)"' "$out/summary.json"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sdk030-${{ matrix.device }}-${{ matrix.slug }}
+          path: ${{ env.WORK }}/receipt
+          retention-days: 30
+      - name: Release job disk
+        if: always()
+        shell: bash
+        run: |
+          if [ "${WORK:-}" = "$(dirname "$GITHUB_WORKSPACE")/sdk030-wave-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$SDK_GPU_KEY-$SLUG" ]; then rm -rf -- "$WORK"; fi
+
