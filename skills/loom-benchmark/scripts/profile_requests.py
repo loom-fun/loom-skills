@@ -4,7 +4,7 @@ so its per-kernel statistics cover exactly this script's requests (plus one tiny
 
 usage: profile_requests.py URL MODEL SCENARIO [--reps K] [--depth D] [--tokens N]
   probe   one tiny request (is the statistics output there at all?)
-  pf2k / pf8k   K fresh-nonce prompts of ~2000 / ~8000 tokens, max_tokens 2 (prefill only)
+  pf2k / pf8k / pf32k   K fresh-nonce prompts of ~2000 / ~8000 / ~32000 tokens, max_tokens 2 (prefill only)
   dec     one essay request (short prompt), N (default 400) tokens: a drafted decode, the counters give its verify steps
 Prints one JSON line: scenario, requests (prompt/completion tokens, ttft, decode tok/s), draft counter deltas."""
 import argparse
@@ -15,10 +15,12 @@ import time
 
 from bench_common import doc, server_draft_counters, stream, thinking_extra
 
+PREFILL_LENGTHS = {"pf2k": 2000, "pf8k": 8000, "pf32k": 32000}
+
 ap = argparse.ArgumentParser()
 ap.add_argument("url")
 ap.add_argument("model")
-ap.add_argument("scenario", choices=["probe", "pf2k", "pf8k", "dec"])
+ap.add_argument("scenario", choices=["probe", *PREFILL_LENGTHS, "dec"])
 ap.add_argument("--reps", type=int, default=3)
 ap.add_argument("--tokens", type=int, default=int(os.environ.get("LOOM_PROFILE_TOKENS", "400")))
 ap.add_argument("--literal-decode", action="store_true", default=os.environ.get("LOOM_PROFILE_LITERAL_DECODE") == "1",
@@ -92,8 +94,8 @@ if a.scenario != "probe":
     if a.perf_warmup:
         out["warmup_draft"] = {k: before.get(k, 0) - before_warmup.get(k, 0) for k in before}
     reqs = []
-    if a.scenario in ("pf2k", "pf8k"):
-        n = 2000 if a.scenario == "pf2k" else 8000
+    if a.scenario in PREFILL_LENGTHS:
+        n = PREFILL_LENGTHS[a.scenario]
         for i in range(a.reps):
             reqs.append(go(f"[{nonce} {i}] Summarize this documentation in one sentence.\n\n" + doc(n), 2))
     else:

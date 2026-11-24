@@ -5,18 +5,16 @@
   "llama_spec": "matched",
   "jobs": [
     {
-      "name": "qwen35-r9700-staged-profile",
-      "runner": "r9700",
-      "require_preset_r9700": true,
-      "served_context": 84992,
-      "memory_bytes_r9700": 34000000000,
+      "name": "qwen35-strix-staged-profile",
+      "runner": "strix",
+      "served_context": 262144,
       "repeat_rows": 3,
       "variants": [
         {"name": "staged"},
         {"name": "nodraft", "execution": {"draft_depth": 0}}
       ],
       "steps": [
-        "profile:staged:pf2k,pf8k,dec",
+        "profile:staged:pf2k,pf8k,pf32k,dec",
         "perf:staged:1", "perf:staged:1:long",
         "perf:staged:1:long", "perf:staged:1",
         "perf:staged:1", "perf:staged:1:long",
