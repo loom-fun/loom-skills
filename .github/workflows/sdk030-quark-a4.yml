@@ -1,0 +1,122 @@
+name: DevLab Quark A4 prefill experiment
+on:
+  push:
+    branches: [codex/sdk030-quark-r9700-diagnostic]
+    paths: [.github/workflows/sdk030-quark-a4.yml]
+permissions:
+  contents: read
+  actions: read
+jobs:
+  a4:
+    runs-on: [self-hosted, devlab-dispatch, Linux, radeon-r9700]
+    timeout-minutes: 45
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VISION_ONLY: '1'
+      VISION_ARGS: --cases chart,chart_pre,wide
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 629d8f8aab61f53c4713b89fd21d26efe83f9e45
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Prepare a Quark-only source variant and lock the normal vision reference
+        shell: bash
+        run: |
+          set -euo pipefail
+          work=$(mktemp -d "$(dirname "$GITHUB_WORKSPACE")/sdk030-quark-a4.XXXXXX")
+          echo "WORK=$work" >> "$GITHUB_ENV"
+          export WORK="$work"
+          mkdir -p "$work/receipt"
+          git show "$GITHUB_SHA":.github/scripts/sdk030_quark_a4_prototype.py > "$work/receipt/quark_a4_prefill_prototype.py"
+          git rev-parse "$GITHUB_SHA" > "$work/receipt/diagnostic-source.txt"
+          curl -fsSL -H "Authorization: Bearer $GH_TOKEN" \
+            'https://api.github.com/repos/loom-fun/loom-skills/actions/artifacts/14944250839/zip' \
+            -o "$work/original.zip"
+          echo "875d7b88ad5247e4dcbbf816d8f058ab462d946c7d1ba8b6412c3f0c5e8e9bf7  $work/original.zip" | sha256sum -c -
+          unzip -p "$work/original.zip" out/gates_chart/llama_cache.tgz > .github/sdk030-quark-refs.tgz
+          echo '56bc7cbad90299414ce8c6e05898fc4907a8aa8a6ff797f5c5eec09a462cff03  .github/sdk030-quark-refs.tgz' \
+            | sha256sum -c - | tee "$work/receipt/reference-cache.txt"
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          work = Path(os.environ["WORK"])
+          production = "loom-fun/amd-Qwen3.8-27B-Quark-AWQ-MXFP4-loom@a999be30c6539c77a030e961748416892b06ac73"
+          build = dict.fromkeys(("GEMM_MXFP4S_F8", "POST_ADD_ROW_SCALE", "GDN_NORM_RS", "SILU_MUL_RS"), "0")
+          execution = {"context_capacity": 32768, "prefill_capacity": 1024, "rows": 4, "draft_depth": 0}
+          variant = {"sdk": "0.3.0", "ref": "4c28b772a8f22f121b3925788dae14b26c58511b", "context": 32768,
+                     "execution": execution, "build_args": ["--memory-gib", "4096"], "build": build,
+                     "require_preset_r9700": False}
+          experiment = {"name": "quark-a4", "card": production, "runner": "r9700", "sdk": "0.3.0",
+                        "memory_bytes_r9700": 34000000000, "require_preset_r9700": True,
+                        "reference_cache": ".github/sdk030-quark-refs.tgz",
+                        "variants": [dict(variant, name=name) for name in ("half", "a4")],
+                        "steps": ["gates:half:quick", "gates:a4:quick"]}
+          (work / "receipt/experiment.json").write_text(json.dumps({"jobs": [experiment]}, indent=2) + "\n")
+
+          harness = Path(".github/scripts/devlab_perf.sh")
+          source = harness.read_text()
+          hook = '    extra=$(qv "$v" '
+          assert source.count(hook) == 1
+          source = source.replace(hook, '''    if [ "$v" = a4 ]; then
+                cp "$WORK/receipt/quark_a4_prefill_prototype.py" "${KIT[$v]}/quark_a4_prefill_prototype.py"
+                "$T" - "${KIT[$v]}/gen_llm.py" <<'PATCH_GEN'
+          from pathlib import Path
+          import sys
+          path = Path(sys.argv[1])
+          source = path.read_text()
+          hook = '    out = os.path.join(out_dir, "model.loom")\n'
+          assert source.count(hook) == 1
+          source = source.replace(hook, '    from quark_a4_prefill_prototype import apply\n    text = apply(text, CFG)\n' + hook)
+          path.write_text(source)
+          PATCH_GEN
+              fi
+          ''' + hook)
+          hook = '      nref1=$("$T" "$B/reference_cache.py" count "$D/$p1/bench"'
+          assert source.count(hook) == 1
+          source = source.replace(hook, '''      cp "$D/$p1/bench/vision_golden.json" "$out/gates_$p1/" 2>/dev/null || true
+                cp "$D/$p1/pkg/llm_config.json" "$out/gates_$p1/"
+          ''' + hook)
+          harness.write_text(source)
+
+          vision = Path("skills/loom-benchmark/scripts/vision_golden.py")
+          source = vision.read_text()
+          hook = '    out["chart"] = (im, "What is the title of this chart, and which day has the tallest bar?")\n'
+          assert source.count(hook) == 1
+          source = source.replace(hook, hook + '''    pre = im.resize((800, 512), Image.Resampling.BICUBIC)
+              out["chart_pre"] = (pre, out["chart"][1])
+          ''')
+          vision.write_text(source)
+          PY
+          bash -n .github/scripts/devlab_perf.sh
+      - name: Measure the original chart gate and passing control on both arms
+        shell: bash
+        run: bash .github/scripts/devlab_perf.sh "$WORK/receipt/experiment.json" quark-a4
+      - name: Preserve measurements and check the reference identity
+        if: always() && env.WORK != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp -r "$WORK/quark-a4/out" "$WORK/receipt/"
+          for variant in half a4; do
+            sha256sum "$WORK/quark-a4/$variant/pkg/program/llm.loom" >> "$WORK/receipt/llm-source-digests.txt"
+            grep '^VISION_RESULT ' "$WORK/receipt/out/gates_$variant/gates_vision.log"
+            cat "$WORK/receipt/out/gates_$variant/reference_cache.txt"
+          done
+      - uses: actions/upload-artifact@v4
+        if: always() && env.WORK != ''
+        with:
+          name: sdk030-quark-a4-prefill
+          path: ${{ env.WORK }}/receipt
+          if-no-files-found: error
+          retention-days: 30
+      - name: Release job disk
+        if: always() && env.WORK != ''
+        shell: bash
+        run: |
+          case "$WORK" in
+            "$(dirname "$GITHUB_WORKSPACE")"/sdk030-quark-a4.*) rm -rf -- "$WORK" ;;
+            *) exit 1 ;;
+          esac
