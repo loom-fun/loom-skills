@@ -3428,9 +3428,20 @@ cases = [add_partial(c) for c in cases]
 # (identical on gfx11 and gfx12, DevLab runs 43522159314 / 43525204171); a wrong fragment layout is off by 100 %.
 if cfg.get("moe") and os.environ.get("MOE_TESTS", "1") == "1" and os.environ.get("MOE_GEMM_TESTS", "1") == "1" \
         and not cfg["moe"].get("gate_up_fused") and not cfg["moe"].get("expert_bias") and cfg["moe"].get("act") != "swiglu_oai":
+    from ktest_more import grouped_q4_k_f16
+
     M7 = cfg["moe"]; E7, KU7, FE7 = M7["experts"], M7["used"], M7["ffn"]
+    ornith_q4_k = (cfg.get("arch") == "qwen35moe"
+                   and os.path.basename(cfg.get("gguf") or "") == "Ornith-1.5-122B-Q4_K_M-00001-of-00002.gguf")
     def exp_deq(name, e):
-        tt = T[name]; return dequantize(np.asarray(tt.data)[e], tt.tensor_type).reshape(int(tt.shape[1]), int(tt.shape[0])).astype(np.float64)
+        tensor = T[name]
+        data = np.asarray(tensor.data)[e]
+        # The grouped kernel rounds both Q4_K coefficients before the fused operation.
+        if ornith_q4_k and tensor.tensor_type.name == "Q4_K":
+            weights = grouped_q4_k_f16(data)
+        else:
+            weights = dequantize(data, tensor.tensor_type)
+        return weights.reshape(int(tensor.shape[1]), int(tensor.shape[0])).astype(np.float64)
     seen7 = set()
     for li in range(M7["leading_dense"], cfg["layers"]):
         b = f"blk.{li}."; fd = T[b + "ffn_down_exps.weight"].tensor_type.name.lower()
