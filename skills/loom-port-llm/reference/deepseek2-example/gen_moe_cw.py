@@ -22,6 +22,10 @@ SWAP = os.environ.get("MOE_CW_SWAP", "0") not in ("", "0")
 # MOE_CW_F16O=1 (numerics-moving): gate/up stores the swiglu activations as f16 with row scale 1 straight into the down GEMM's
 # input (g_row_scale_f16_tiles goes) and down multiplies by no inverse scale (scale 1).
 F16O = os.environ.get("MOE_CW_F16O", "0") not in ("", "0")
+# MOE_YS16=1 (numerics-moving): the down GEMM stores its expert rows (ys_sorted) as f16 and g_moe_combine_sorted16 reads them:
+# at a 1k-2k chunk the grouped GEMMs are bound by DRAM traffic and ys_sorted (assignments x hidden f32) is written and read
+# once each per layer (2 x 144 MB at 2197 tokens)
+YS16 = os.environ.get("MOE_YS16", "0") not in ("", "0")
 # MOE_CW_DQ=1 (needs SWAP): cheaper half-group dequant, bit-identical to SWAP: the lane's nibble half by a per-lane shift (no select),
 # codebook byte u = kvalue + 128 interleaved with 0x64 (f16 1024 + u), one pk_add of -1152 (exact: kvalue) and one pk_mul by f16(dl)
 # (round(kvalue * dl), the value fma(u, dl, -128 dl) rounds to) instead of uitofp + pk_fma (pk_fma issues at ~1/3 the pk_mul rate).
@@ -289,7 +293,7 @@ def grouped_gemm_cw(fmt, mode, N, K, E, KU, tile=64):
   %tile_first = index.madd %row_origin, %n, %out_origin : index
   %four = index.constant 4 : offset
   %two_b = index.constant 2 : offset''')
-    YT = "f16" if F16O and sw else "f32"
+    YT = "f16" if (F16O and sw) or (YS16 and not sw) else "f32"
     L.append(f"  %tile_offset = index.scale %tile_first, %{'two_b' if YT == 'f16' else 'four'} : index, offset -> offset")
     L.append(f"  %y_view = buffer.view %y[%tile_offset] : buffer -> view<64x{TN}x{YT}, %y_layout>")
 
