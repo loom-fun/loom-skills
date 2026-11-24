@@ -214,10 +214,9 @@ if [ "$irc" = 0 ] && [ "$ref" != off ] && [ -s reference.json ] && [ -f cfg.json
     echo "the reference's chat block does not match this template (chat_verify.log)"
   fi
 fi
-# Still failing and the kit is an example of this architecture with its own reviewed cfg.json (no category A package to
-# take it from): its chat block, verified against THIS model's template, replaces the derived one (deepseek2: JoyAI's
-# call_lead / assistant_suffix are not derivable).
-if [ "$irc" = 0 ] && [ -n "${ex:-}" ] && [ -f "$here/reference/$ex-example/cfg.json" ] && [ -f cfg.json ] \
+# The deepseek2 example supplies JoyAI's call_lead and assistant_suffix when derivation cannot recover them.
+# Verify that reviewed block against this model's template before using it.
+if [ "$irc" = 0 ] && [ "${ex:-}" = deepseek2 ] && [ -f "$here/reference/$ex-example/cfg.json" ] && [ -f cfg.json ] \
    && grep -q "^chat FAIL\|not derivable\|WARNING: no chat block" inspect.log && ! grep -q "Traceback$hd" inspect.log; then
   cp cfg.json cfg.derived.json
   "$T" - "$here/reference/$ex-example/cfg.json" <<'EOF'

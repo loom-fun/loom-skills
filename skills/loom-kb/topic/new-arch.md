@@ -30,7 +30,7 @@ The expensive path. Keep it short:
    | NoPE pattern, GLM-style stop tokens (sinks, SWA and MoE from the starter) | `flint` (built on lfm2moe in ~12 min; its MoE and sinks are now the starter's) |
    | OpenAI harmony channel format, reasoning effort (sinks, SWA, YaRN, biases, MXFP4 MoE from the starter) | `gpt-oss` |
    | channel chat formats (ATEM), norm RoPE, NoPE | `glimmer` |
-   | DeepSeek-V2/V3-style MLA (absorbed latent attention, one 576-value cache row), sigmoid+bias MoE, IQ4_XS experts | `deepseek2` |
+   | JoyAI's 32-head MLA layout (absorbed latent attention, one 576-value cache row), sigmoid+bias MoE, IQ4_XS experts | `deepseek2` |
 
    `loom-optimize/reference/flint-moe-example/` holds one more MoE idea (bucketed grouped GEMM), not
    a base. The starter's `chat_probe.py` covers hermes, qwen_xml, glm and pythonic (LFM2) tool calls, and tool
