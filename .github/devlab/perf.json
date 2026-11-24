@@ -6,22 +6,28 @@
   "llama_spec": "--spec-type draft-dflash --spec-draft-model {hf:ggml-org/Qwen3.6-35B-A3B-GGUF@52f9f9b8052fb9c8b69bba4a95eda0f319ac3d2a/dflash-Qwen3.6-35B-A3B-Q8_0.gguf#fdc58dc581a1f5826383528660ebe7687fd187d9c18bab87e587661af546155c} --spec-draft-n-max 7 -ngld 99",
   "jobs": [
     {
-      "name": "qwen35-strix-staged-profile",
+      "name": "qwen35-strix-chunk-screen",
       "runner": "strix",
       "served_context": 262144,
       "repeat_rows": 3,
       "variants": [
-        {"name": "staged"},
-        {"name": "nodraft", "execution": {"draft_depth": 0}}
+        {
+          "name": "staged"
+        },
+        {
+          "execution": {
+            "prefill_capacity": 8192
+          },
+          "name": "chunk8k"
+        }
       ],
       "steps": [
-        "profile:staged:pf2k,pf8k,pf32k,dec",
-        "perf:staged:1", "perf:staged:1:long",
-        "perf:staged:1:long", "perf:staged:1",
-        "perf:staged:1", "perf:staged:1:long",
-        "c4:nodraft",
-        "llama@rocm.np1:1", "llama@rocm.np1:1:long",
-        "llamac4@rocm.nodraft"
+        "perf:staged:1:long",
+        "perf:chunk8k:1:long",
+        "perf:chunk8k:1:long",
+        "perf:staged:1:long",
+        "perf:staged:1",
+        "perf:chunk8k:1"
       ]
     }
   ]
