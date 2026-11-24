@@ -2448,7 +2448,7 @@
      print(f"WARNING: arch {arch!r} is unknown to the starter: rope_type '{cfg['rope_type']}' is a guess (neox pairs d/d+D/2, "
            "norm pairs 2d/2d+1; llama4-style models are norm). Check llama.cpp's src/models/<arch>.cpp (LLAMA_ROPE_TYPE_*) "
            "before trusting a golden FAIL or PASS")
-@@ -149,6 +149,29 @@
+@@ -149,6 +149,31 @@
      if arch in ("mellum",) and cfg["sliding_layers"]:
          cfg["rope_scaling_swa"] = "none"
      print("rope scaling:", cfg["rope_scaling"], "(global layers only)" if cfg.get("rope_scaling_swa") else "")
@@ -2472,9 +2472,11 @@
 +    cfg["rope_dims"] = _kr
 +    cfg["head_dim"] = _kl + _kr      # absorbed key (and cache row) width
 +    cfg["kv_heads"] = 1
-+    if not cfg["mla"]["q_lora"] or "blk.0.attn_k_b.weight" not in tensors:
-+        print("WARNING: unsupported MLA layout: needs q_lora (attn_q_a/attn_q_b) and split attn_k_b / attn_v_b (agent port)")
++    if not cfg["mla"]["q_lora"] or not {"blk.0.attn_k_b.weight", "blk.0.attn_v_b.weight"} <= tensors.keys():
++        raise SystemExit("unsupported deepseek2 MLA layout: requires q_lora and separate attn_k_b and attn_v_b tensors")
 +    print("MLA:", cfg["mla"])
++elif arch == "deepseek2":
++    raise SystemExit("unsupported deepseek2 MLA layout: requires kv_lora and an attn_kv_a_mqa projection")
  # The FFN's pre-norm stored as post_attention_norm (gpt-oss: attn_post_norm normalizes ffn_inp; no ffn_norm and no
  # Gemma-style post_ffw_norm): it is the FFN norm, not a post-attention norm.
  if ("blk.0.ffn_norm.weight" not in tensors and "blk.0.post_attention_norm.weight" in tensors

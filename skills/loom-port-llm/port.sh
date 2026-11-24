@@ -289,17 +289,23 @@ if [ -n "${CONTEXT_LENGTH:-}" ] && [ -f cfg.json ]; then
 fi
 
 step "3/6 build"
-# The package slug (its loom-fun repo name: ORG-NAME-loom from the GGUF repo ORG/NAME[-GGUF]; SLUG=... overrides) goes into
-# cfg.json, so every build from it (this one, qualify.sh / finalize.sh rebuilds) applies the knowledge base's model node
-# model/<slug> (tuned generator choices): without it build.py matched no model node and dropped them (JoyAI, Nov 23).
+# Automatically select the measured JoyAI variant. For another port, preserve the existing slug or opt in with SLUG=.
 "$T" - "${SLUG:-}" "$repo" <<'PY'
-import json, re, sys
+import json, os, sys
 c = json.load(open("cfg.json", encoding="utf-8"))
-if sys.argv[1] or not c.get("slug"):
-    o, _, n = sys.argv[2].partition("/")
-    c["slug"] = sys.argv[1] or (f"{o}-{re.sub(r'-GGUF$', '', n, flags=re.I)}-loom" if n else "")
+previous = c.copy()
+if sys.argv[1]:
+    c["slug"] = sys.argv[1]
+elif (c.get("arch") == "deepseek2" and sys.argv[2].lower() == "jdopensource/joyai-llm-flash-gguf"
+      and os.path.basename(c.get("gguf") or "") == "JoyAI-LLM-Flash-IQ4_XS.gguf"):
+    if not c.get("slug"):
+        c["slug"] = "jdopensource-JoyAI-LLM-Flash-loom"
+    if c["slug"] == "jdopensource-JoyAI-LLM-Flash-loom":
+        c.setdefault("prefill_capacity", 8192)
+if c != previous:
     json.dump(c, open("cfg.json", "w", encoding="utf-8"), indent=1, ensure_ascii=False)
-print(f"package slug: {c['slug']}")
+if c.get("slug"):
+    print(f"package slug: {c['slug']}")
 PY
 "$T" "$K/build.py" cfg.json pkg --tokenizer tok/tokenizer.json --model-id "$model_id" --memory-gib "$mem_gib" $([ -n "$catalog" ] && case "${SPEC:-on}" in off|OFF|0) echo --draft none;; esac) | tee build.log
 [ "${PIPESTATUS[0]}" = 0 ] || { echo "STOP: build.py failed (build.log)"; exit 4; }

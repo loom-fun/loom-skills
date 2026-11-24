@@ -26,7 +26,16 @@ def flash_on():
 
 
 def geometry(cfg):
-    m = cfg["mla"]
+    m = cfg.get("mla") or {}
+    required = {"kv_lora": 512, "rope_dims": 64, "nope_dims": 128, "v_dims": 128}
+    got = {name: m.get(name) for name in required}
+    q_lora = m.get("q_lora", 0)
+    if (cfg.get("heads") != 32 or got != required or not isinstance(q_lora, int) or q_lora <= 0
+            or q_lora % 256 or cfg.get("sliding_layers")):
+        raise ValueError("unsupported deepseek2 MLA geometry: expected 32 query heads, "
+                         f"{required}, a positive q_lora divisible by 256, and no sliding layers; "
+                         f"received heads={cfg.get('heads')}, {got}, q_lora={q_lora}, "
+                         f"sliding_layers={cfg.get('sliding_layers')}")
     return dict(QH=cfg["heads"], QL=m["q_lora"], KL=m["kv_lora"], RD=m["rope_dims"], NOPE=m["nope_dims"],
                 VD=m["v_dims"], D=m["kv_lora"] + m["rope_dims"], QB=m["nope_dims"] + m["rope_dims"])
 

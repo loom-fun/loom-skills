@@ -957,6 +957,32 @@
     }
    }
   },
+  "jdopensource-JoyAI-LLM-Flash-loom": {
+   "staging": {
+    "repo": "loom-fun-staging/jdopensource-JoyAI-LLM-Flash-loom",
+    "revision": "1c3c331fcfdb784eabe03231b9a4ee6ba44c11ff"
+   },
+   "model_id": "jdopensource/JoyAI-LLM-Flash",
+   "kit": "deepseek2",
+   "arch": "deepseek2",
+   "build": {
+    "preset": "chat",
+    "context": 131072,
+    "prefill": 8192,
+    "rows": 4,
+    "max_tokens": 4096
+   },
+   "files": {
+    "JoyAI-LLM-Flash-IQ4_XS.gguf": {
+     "origin": "checkpoint",
+     "repo": "jdopensource/JoyAI-LLM-Flash-GGUF",
+     "revision": "f995fe33074210c0ce6707ac087bdb5fa77c60e7",
+     "path": "JoyAI-LLM-Flash-IQ4_XS.gguf",
+     "size": 26411919200,
+     "dump": "jdopensource-JoyAI-LLM-Flash-loom/gguf/JoyAI-LLM-Flash-IQ4_XS.gguf.json.gz"
+    }
+   }
+  },
   "lmstudio-community-Ornith-1.0-35B-loom": {
    "staging": {
     "repo": "loom-fun-staging/lmstudio-community-Ornith-1.0-35B-loom",

@@ -198,7 +198,7 @@ _DA = dict(kernels=["g_attention_split", "g_attention_combine"], rows=ROWS_DECOD
 CHOICE("decode.attn.full_blocks", "bool", False, "ATTN_FULL_BLOCKS", per_target=True, devices=["rdna4"],
        kernels=["g_attention_split_rdna4"], rows=ROWS_DECODE + ROWS_STREAMS, from_pr="1145",
        doc="Ordinary paged hd64 decode: bypass per-key masks on fully visible blocks; unsigned edge predicates preserve arithmetic.")
-CHOICE("decode.attn.unroll", "int", 16, "ATTN_UNROLL", doc="Keys per decode-attention block.", **_DA)
+CHOICE("decode.attn.unroll", "int", 16, "ATTN_UNROLL", kit_legacy={"deepseek2": 4}, doc="Keys per decode-attention block.", **_DA)
 CHOICE("decode.attn.butterfly", "bool", True, "ATTN_BFLY", doc="A block's key scores in one butterfly all-reduce.", **_DA)
 CHOICE("decode.attn.paged", "bool", True, "ATTN_PAGED", doc="16-aligned key blocks, one page lookup each.", **_DA)
 CHOICE("decode.attn.ilp", "int", 1, "ATTN_ILP", doc="Independent softmax chains per block (2, 4: no gain on Qwen3.8-27B at 32k).", **_DA)
@@ -241,7 +241,7 @@ CHOICE("decode.mv.head_chunk", "int", 16, "MV_CHUNK", kernels=["g_head_mv*"], ro
 CHOICE("decode.head.butterfly_perm", "bool", True, "HEAD_BFLY_PERM", kernels=["g_head_mv*"], rows=ROWS_DECODE + ROWS_STREAMS,
        doc="Butterfly permutation in the head matvec.")
 CHOICE("decode.mv.adapt", "bool", True, "MV_ADAPT", doc="Halve R while a matvec grid is under-filled (False: R=16).", **_MV)
-CHOICE("decode.mv.wg1", "int", 4096, "MV_WG1", doc="Workgroup target of 1-token matvecs.", **_MV)
+CHOICE("decode.mv.wg1", "int", 4096, "MV_WG1", kit_legacy={"deepseek2": 256}, doc="Workgroup target of 1-token matvecs.", **_MV)
 CHOICE("decode.mv.wg4", "int", 128, "MV_WG4", doc="Workgroup target of 4-token matvecs. Setting it makes 1- and 4-token rounding "
        "differ (consistency.py fails): record it in the report.", **_MV)
 CHOICE("decode.mv.wg_long", "int", 640, "MV_WG_LONG", doc="Workgroup target of 1-token matvecs with K >= 8192.", **_MV)
@@ -578,6 +578,71 @@ CHOICE("moe.route.prefill_wm", "bool", False, "MOE_ROUTE_WM", kernels=["g_moe_ro
            "-49 % in isolation, but +56 % end to end (run 45309456312: 2.2 vs 1.4 ms per 2197-token layer): off.")
 CHOICE("mla.prefill.xq_rev", "bool", False, "MLA_XQ_REV", kernels=["g_mla_xlist"], **_DS2P,
        doc="Expanded quad list latest-first. kbench mla_xpf run 45309654317: xflash 4k chunk +73 %: off.")
+
+# The reference kit's remaining generator settings retain their shipped defaults. Debug-only ablations belong below.
+_MLA_DECODE = dict(kits=["deepseek2"], rows=ROWS_DECODE + ROWS_STREAMS, kernels=["g_mla_dsplit", "g_mla_dcombine"])
+for _key, _type, _default, _env, _doc in (
+    ("kernel", "str", "wmma", "MLA_DEC", "Select the WMMA decode kernel or use listed attention."),
+    ("max_splits", "int", 32, "MLA_DEC_S", "Maximum score splits per token."),
+    ("min_blocks", "int", 2, "MLA_DEC_BMIN", "Minimum number of 16-key blocks per split."),
+    ("q_lds", "int", 0, "MLA_DEC_QL", "Keep query fragments in local data share."),
+    ("prefetch", "int", 0, "MLA_DEC_PF", "Decode prefetch depth and mode."),
+    ("prefetch_chunks", "int", 9, "MLA_DEC_PFN", "Number of next-block score chunks to prefetch."),
+    ("partials_layout", "int", 1, "MLA_DEC_PL", "Transpose partial output by head for contiguous stores."),
+    ("head_groups", "int", 1, "MLA_DEC_HG", "Split heads across workgroups."),
+    ("partial_f16", "int", 0, "MLA_DEC_PH", "Store normalized partial outputs in FP16."),
+    ("k_lds", "int", 0, "MLA_DEC_KLDS", "Double-buffer key blocks in local data share."),
+    ("qk_chains", "int", 0, "MLA_DEC_QK2", "Split the score accumulation into two chains."),
+    ("combine_unroll", "int", 4, "MLA_DEC_CU", "Issue combine loads for multiple splits together."),
+):
+    CHOICE(f"mla.decode.{_key}", _type, _default, _env, doc=_doc, **_MLA_DECODE)
+CHOICE("mla.decode.stage_v", "int", None, "MLA_DEC_STI", dynamic=True,
+       doc="Stage each value chunk immediately after its score computation; defaults on with two head groups.", **_MLA_DECODE)
+CHOICE("mla.decode.value_padding", "int", None, "MLA_DEC_VTPAD", dynamic=True,
+       doc="Pad staged value rows by two elements with LDS queries and eight otherwise.", **_MLA_DECODE)
+
+_MLA_PREFILL = dict(kits=["deepseek2"], rows=ROWS_PREFILL, kernels=["g_mla_x*", "g_attention_flash2*"])
+for _key, _type, _default, _env, _doc in (
+    ("flash", "bool", True, "MLA_FLASH", "Use flash attention for eligible prefill runs."),
+    ("expanded", "bool", True, "MLA_X", "Expand eligible long prefill segments before flash attention."),
+    ("expanded_capacity", "int", 131072, "MLA_XCAP", "Maximum expanded scratch positions in an epoch."),
+    ("expand_min_tiles", "int", 16, "MLA_X_MIN_TILES", "Minimum whole query tiles in an expanded segment."),
+    ("expand_min_keys", "int", 1024, "MLA_X_MIN_KEYS", "Minimum keys for an expanded segment."),
+    ("query_tiles", "int", 4, "MLA_XQ", "Query tiles assigned to an expanded flash workgroup."),
+    ("expand_lds", "int", 1, "MLA_XE_LDS", "Stage expanded key and value tiles in local data share."),
+    ("expand_token_tiles", "int", 4, "MLA_XE_NT", "Expanded token tiles per workgroup."),
+    ("expanded_flash", "str", "lds", "MLA_XF", "Select the expanded flash attention implementation."),
+    ("expanded_query_lds", "int", 0, "MLA_XF_QL", "Keep expanded flash query fragments in local data share."),
+    ("expanded_transforms", "str", "", "MLA_XF_T", "Enable listed expanded flash kernel scheduling transforms."),
+    ("expanded_source", "str", "", "MLA_XF_SRC", "Stage selected expanded flash input fragments by source."),
+    ("cap_partials", "bool", True, "PACC_CAP", "Allocate large split-K partials for live listed tokens."),
+):
+    CHOICE(f"mla.prefill.{_key}", _type, _default, _env, doc=_doc, **_MLA_PREFILL)
+CHOICE("mla.prefill.flash_head_groups", "int", None, "FLASH2_NG_MLA", dynamic=True,
+       doc="Query-head groups per MLA flash workgroup; defaults to a quarter of the attention group size.", **_MLA_PREFILL)
+
+_MLA_FRONT = dict(kits=["deepseek2"], rows=ROWS_DECODE + ROWS_PREFILL, kernels=["g_mla_*", "g_mv_*"])
+CHOICE("mla.projections.dual", "bool", True, "MLA_QA_DUAL", doc="Compute query and KV input projections in one launch.", **_MLA_FRONT)
+CHOICE("mla.projections.rms_q", "bool", True, "MLA_RMSQ_FUSE", doc="Fuse query rank normalization with its producer.", **_MLA_FRONT)
+CHOICE("mla.projections.rms_q_t4", "bool", False, "MLA_RMSQ_FUSE_T4", doc="Enable fused query rank normalization in four-token groups.", **_MLA_FRONT)
+CHOICE("mla.projections.rope_k", "bool", True, "MLA_ROPE_KB", doc="Fuse rotary embedding with the key projection.", **_MLA_FRONT)
+CHOICE("mla.projections.quantize_input", "bool", False, "MV_QIN", doc="Quantize matvec inputs in registers.", **_MLA_FRONT)
+CHOICE("mla.projections.matvec_rows", "str", "", "MV_R", doc="Override matvec rows for explicit K:N shapes.", **_MLA_FRONT)
+
+_DS2_MOE = dict(kits=["deepseek2"], rows=ROWS_DECODE + ROWS_PREFILL + ROWS_STREAMS, kernels=["g_moe_*"])
+for _key, _type, _default, _env, _doc in (
+    ("cw_pair", "bool", False, "MOE_CW_PAIR", "Pair column-wave expert tiles."),
+    ("cw_prefetch", "bool", False, "MOE_CW_PF2", "Prefetch column-wave expert inputs."),
+    ("cw_wave_split", "bool", False, "MOE_CW_WS", "Select the wave-split grouped expert kernel."),
+    ("deduplicate", "bool", False, "MOE_DEDUP", "Reuse duplicate expert paths in decode."),
+    ("down_unroll", "bool", True, "MOE_DN_U", "Unroll the expert down projection."),
+    ("route_fused", "bool", True, "MOE_ROUTE_FUSE", "Fuse router stages."),
+    ("route_split", "bool", True, "MOE_ROUTE_SPLIT", "Use the split router kernel where eligible."),
+    ("shared_slot", "bool", True, "MOE_SHSLOT", "Include the shared expert in a separate router slot."),
+):
+    CHOICE(f"mla.moe.{_key}", _type, _default, _env, doc=_doc, **_DS2_MOE)
+CHOICE("mla.moe.down_rows", "int", None, "MOE_R_DN", dynamic=True,
+       doc="Rows per workgroup for the shared-slot down projection; the generator defaults to four.", **_DS2_MOE)
 CHOICE("moe.prefill.n_fastest", "str", "swiglu,store", "MOE_N_FASTEST", kit_legacy={"lfm2moe": "1"},
        doc="Grouped-GEMM modes with output-column tiles fastest (Qwen3.6-35B-A3B prefill +74 % at 1k; lfm2moe +24-30 %). The "
            "lfm2moe kit reads 1/0 and MOE_N_FASTEST_MODES.", **_MO)
@@ -733,6 +798,7 @@ NOT("credential of the Hugging Face range reads (inspect_safetensors.py), never 
 NOT("catalog build switch: hand-written catalog packages are exempt from resolution (build.py hands over before it)", "VISION")
 NOT("provenance of a snapshot build (the stamp records it), not a model choice", "LOOM_SKILLS_COMMIT")
 NOT("profiling ablation or debug switch, never part of a published build", "FLASH2_ABL", "DBG_NO_FLASH", "DBG_NO_GEMM")
+NOT("deepseek2 kernel benchmarks that omit computation or write debug data", "MLA_DEC_ABL", "MLA_XE_DBG", "MLA_XF_ABL", "MOE_CW_NODQ", "MOE_ROUTE_NOTOPK")
 
 
 def registered_env():
