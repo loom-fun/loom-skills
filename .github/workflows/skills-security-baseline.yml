@@ -1,0 +1,43 @@
+name: Public Skills install security baseline
+
+on:
+  push:
+    branches: [codex/skills-security-probe]
+    paths:
+      - .github/workflows/skills-security-baseline.yml
+      - .github/scripts/skills-security-baseline.sh
+
+permissions:
+  contents: read
+
+jobs:
+  baseline:
+    runs-on: [self-hosted, devlab-dispatch, Linux, strix-halo]
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Run the public install in a disposable container
+        shell: bash
+        env:
+          NODE_IMAGE: docker.io/library/node@sha256:6b33b0be1647d1a577f9cebb6c8fc2587cc02c98c9956af8d0289df1791a3d10
+        run: |
+          set -euo pipefail
+          command -v docker
+          evidence="$(mktemp -d "$RUNNER_TEMP/skills-install-${GITHUB_RUN_ID}-XXXXXX")"
+          chmod 0777 "$evidence"
+          echo "SKILLS_AUDIT_EVIDENCE=$evidence" >> "$GITHUB_ENV"
+          docker pull "$NODE_IMAGE"
+          docker run --rm -i --cap-drop=ALL --security-opt no-new-privileges \
+            --read-only --tmpfs /root:rw,nosuid,nodev --tmpfs /tmp:rw,nosuid,nodev \
+            --mount "type=bind,source=$evidence,target=/evidence" \
+            --env GIT_CONFIG_NOSYSTEM=1 --env npm_config_yes=true \
+            --env TERM=xterm --env LC_ALL=C.UTF-8 \
+            "$NODE_IMAGE" bash -s -- < .github/scripts/skills-security-baseline.sh
+      - uses: actions/upload-artifact@v4
+        if: always() && env.SKILLS_AUDIT_EVIDENCE != ''
+        with:
+          name: skills-installer-baseline
+          path: ${{ env.SKILLS_AUDIT_EVIDENCE }}
+          retention-days: 14
