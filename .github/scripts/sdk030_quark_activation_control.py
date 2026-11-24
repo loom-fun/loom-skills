@@ -39,6 +39,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("toolkit", type=Path)
     parser.add_argument("package", type=Path)
+    parser.add_argument("projector", type=Path)
     parser.add_argument("output", type=Path)
     args = parser.parse_args()
     sys.path.insert(0, str(args.toolkit.resolve() / "skills/loom-benchmark/scripts"))
@@ -46,7 +47,10 @@ def main():
     from vision_golden import builtin_images, data_url, reference_body
     from vllm_shim import VllmEngine, completion_response, parse_request
 
+    import numpy as np
+    import torch
     from PIL import Image
+    from vllm import SamplingParams
 
     pkg = Package(str(args.package.resolve()))
     fixtures = builtin_images()
@@ -57,7 +61,7 @@ def main():
         "wide": fixtures["wide"],
     }
     engine = VllmEngine(CHECKPOINT, 16384, REVISION, images=2,
-                        extra={"enforce_eager": True, "mm_processor_cache_gb": 0})
+                        extra={"enforce_eager": True, "mm_processor_cache_gb": 0, "enable_mm_embeds": True})
     props = engine.props()
     assert props["version"] == "0.18.0" and props["quantization"] == "quark", props
 
@@ -71,6 +75,21 @@ def main():
             result[name] = completion_response(ids, scores, text, top, count)
         return result
 
+    def use_projection(filename):
+        file = args.projector / filename
+        data = np.load(file, allow_pickle=False)
+        assert data.shape == (400, 5120) and np.isfinite(data).all(), (file, data.shape)
+        payload, _, _, _ = parse_request(reference_body(pkg, data_url(chart), chart_prompt, 32))
+        payload["multi_modal_data"] = {
+            "image": {"image_embeds": torch.from_numpy(data), "image_grid_thw": torch.tensor([[1, 32, 50]])}
+        }
+        reply, = engine.llm.generate([payload], SamplingParams(temperature=0, max_tokens=32, logprobs=12, seed=0),
+                                     use_tqdm=False)
+        row = reply.outputs[0]
+        scores = [{token: (item.logprob, item.decoded_token or "") for token, item in position.items()}
+                  for position in row.logprobs]
+        return completion_response(row.token_ids, scores, row.text, 12, len(reply.prompt_token_ids))
+
     before = measure()
     disabled = engine.llm.apply_model(lambda model: set_activation_mode(model, False))
     after = measure()
@@ -79,6 +98,11 @@ def main():
     assert disabled == restored_layers and len(disabled) == 1
     result = {"reference": props, "modified_text_linear_layers": disabled[0],
               "stock_qdq": before, "without_activation_qdq": after, "restored_stock_qdq": restored}
+    args.output.write_text(json.dumps(result, indent=2) + "\n")
+    result["stock_with_external_projector"] = {
+        "loom": use_projection("chart-loom-projection.npy"),
+        "transformers_bf16": use_projection("chart-torch.bfloat16_identical_loom_pixels.npy"),
+    }
     args.output.write_text(json.dumps(result, indent=2) + "\n")
     for arm, variants in (("stock", before), ("no_activation_qdq", after), ("restored", restored)):
         for name, request in variants.items():
