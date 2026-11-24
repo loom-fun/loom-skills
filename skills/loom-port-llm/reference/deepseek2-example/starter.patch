@@ -467,7 +467,45 @@
  FALLBACK = r"""
  // Prefill attention work lists, built once per epoch from the token info. A token's path depends only on its own
  // run (a run of one row's consecutive positions), never on where the epoch packs it or where the scheduler cut the
-@@ -5088,10 +5203,16 @@
+@@ -4213,13 +4328,13 @@
+     %long = func.call @g_run_qualifies(%info, %tokens, %token) : (buffer, index, index) -> (i1)
+     %short = scalar.xori %long, %true : i1
+     scf.if %short {
+-      %slot32 = view.atomic.rmw<addi> %c1_i32, %scratch_view[%c256_slot] {ordering = relaxed, scope = workgroup} : i32, view<260xi32> -> i32
++LIVE_OPEN      %slot32 = view.atomic.rmw<addi> %c1_i32, %scratch_view[%c256_slot] {ordering = relaxed, scope = workgroup} : i32, view<260xi32> -> i32
+       %slot_bound = scalar.assume %slot32 [range(%slot32, 0, 8191)] : i32
+       %slot_value = index.cast %slot_bound : i32 to index
+       %slot = index.assume %slot_value [lt(%slot_value, %tokens)] : index
+       %token32 = index.cast %token : index to i32
+       view.store %token32, %list_view[%slot] : i32, view<[%tokens]xi32>
+-    } else {
++LIVE_CLOSE    } else {
+       %block_start = func.call @g_block_starts(%info, %tokens, %token) : (buffer, index, index) -> (i1)
+       %whole = func.call @g_tile_starts(%info, %tokens, %token) : (buffer, index, index) -> (i1)
+       %part = scalar.xori %whole, %true : i1
+@@ -4248,6 +4363,21 @@
+ }
+ """
+ 
++# ATTN_LIST_LIVE=1: padding (dead) tokens stay off the listed split-K fallback. A padded epoch (e.g. a 2197-token prompt in
++# the 4096 shape) otherwise listed every dead token: g16_attention_combine_listed then wrote a zero output row (32 heads x
++# 576 f32 = 74 KB) per dead token per layer (~9 % of a 2k prefill's device time). Dead rows' outputs are never read by a
++# live row (every consumer is row-local and the k_b / v_b / norm / MoE kernels skip or ignore dead rows).
++LIST_LIVE = os.environ.get("ATTN_LIST_LIVE", "0") == "1"
++FALLBACK = FALLBACK.replace("LIVE_OPEN", """      %lv32 = view.load %info_view[%token, %c2] : view<[%tokens]x4xi32> -> i32
++      %lv_on = scalar.cmpi ne, %lv32, %c0_i32 : i32
++      scf.if %lv_on {
++""" if LIST_LIVE else "").replace("LIVE_CLOSE", "      }\n" if LIST_LIVE else "")
++
++
++def _route_tg():
++    import gen_moe
++    return gen_moe.ROUTE_TG
++
+ 
+ CHUNKS = (V + 127) // 128
+ LOGITS_DEF = ("// Load-time capability (card config llm.logits, default off): export the logits rows of flagged spans (g_logits_export).\n"
+@@ -5088,10 +5218,16 @@
  
  USED_MV = set()      # (fmt, K, swiglu, TG) default-row (R=16) decode matrix-vector kernels the model launches
  USED_MV_R = set()    # (fmt, K, swiglu, R, TG) adaptive-row variants
@@ -484,7 +522,7 @@
  from mv_rows import pick_r, iq_r  # noqa: E402  (shared with make_kernel_tests.py)
  
  
-@@ -5160,9 +5281,17 @@
+@@ -5160,9 +5296,17 @@
      import re as _re
      pat = _re.compile(r"(scf\.if (%\w+) \{\s*kernel\.launch @g_row_scale_f16\[[^\]]*\]\((%\w+), (%\w+), (%\w+), (%\w+), (%\w+)\) : \[index\]\(index, index, buffer, buffer, buffer\)\s*\})")
      read = set(_re.findall(r"kernel\.launch @(?:g_mv_\w*_q8\w*|g_moe_gu_\w*_q8_k\w*)\[[^\]]*\]\([^,]+, [^,]+, [^,]+, (%\w+),", program))
@@ -503,7 +541,7 @@
              return m.group(1)
          return (m.group(1) + f" else {{\n    kernel.launch @g_quant_q8[{rows}, {width}]({rows}, {width}, {x}, {x16}q) : [index, index](index, index, buffer, buffer)\n  }}")
      program = pat.sub(sub, program)
-@@ -5287,10 +5416,22 @@
+@@ -5287,10 +5431,22 @@
  
  
  MOE_R = _moe_rows_per_workgroup()
@@ -526,7 +564,7 @@
  USED_MOEQ = set()   # (fmt, K, N, mode) of the int8 expert matvecs; USED_MOEF: the f32 ones (USED_MOE: the grouped GEMMs)
  USED_MOEF = set()
  
-@@ -5298,7 +5439,7 @@
+@@ -5298,7 +5454,7 @@
  def moe_iq(gu, fd, x):
      """Whether this layer's decode expert matvecs take int8 activations (needs the router input as %h: its h16q)."""
      return (ACT_Q8 and MOE_Q8 and x == "%h" and "+" not in gu and gu in IQ_FMTS and fd in IQ_FMTS
@@ -535,7 +573,7 @@
              and H // 32 <= 1024 and MOE["ffn"] // 32 <= 1024 and not MOE.get("expert_bias"))
  
  
-@@ -5307,6 +5448,13 @@
+@@ -5307,6 +5463,13 @@
      """Shared experts (dense swiglu FFN of width FS, stored into y; with SHGATE scaled per token by
      sigmoid(h . ffn_gate_inp_shexp) inside the combine), then the routed experts (moe_routed) added into y."""
      T = []
@@ -549,7 +587,7 @@
      if FS:
          T += [par("w_gsh", "ffn_gate_shexp"), par("w_ush", "ffn_up_shexp"), par("w_dsh", "ffn_down_shexp")]
          fsg = fmt_of(nm("ffn_gate_shexp"))
-@@ -5321,7 +5469,32 @@
+@@ -5321,7 +5484,32 @@
      return "".join(T) + moe_routed(i, b)
  
  
@@ -583,10 +621,11 @@
      """Layer i's routed experts on input buffer X (prefill: its f16 copy %h16/%s_h, made here when X is not %h), the
      router reading RX: router -> per-assignment gate/up (swiglu) and down -> weighted combine into OUT (added to it
      when the layer has shared experts, scaled by the shared gate with SHGATE). cfg.moe gate_up_fused: one
-@@ -5371,17 +5544,32 @@
+@@ -5370,18 +5558,33 @@
+ """ + ("" if fused else f"""  %wue_{i} = command.parameter %weights, "{un}" : view<{su}xi8>
  """) + f"""  %wde_{i} = command.parameter %weights, "{b}ffn_down_exps.weight" : view<{sd}xi8>
    scf.if %gemm {{
-     kernel.launch @g_moe_route_tr_live[%t](%t, {rx}, %router_{i}, {bias}, %ids, %wts, %info) : [index](index, buffer, view<{E * H}x{rty}>, {bias_ty}, buffer, buffer, buffer)
+-    kernel.launch @g_moe_route_tr_live[%t](%t, {rx}, %router_{i}, {bias}, %ids, %wts, %info) : [index](index, buffer, view<{E * H}x{rty}>, {bias_ty}, buffer, buffer, buffer)
 -{wsc}    kernel.launch @g_moe_bucket[%t](%t, %max_tiles, %info, %ids, %tile_info, %rowmap, %pos) : [index](index, index, buffer, buffer, buffer, buffer, buffer)
 -{x16}    kernel.launch @g_moe_ggu_{gun}_k{H}[%max_rows, %nFE](%max_rows, %nH, %nFE, %t, %tile_info, %rowmap, %h16, %s_h, %wge_{i}, {wu}{gu_b}, %act_sorted) : [index, index](index, index, index, index, buffer, buffer, buffer, buffer, view<{sg}xi8>, view<{su}xi8>{gu_bt}, buffer)
 -    kernel.launch @g_row_scale_f16_tiles[%max_rows](%max_rows, %nFE, %act_sorted, %s_rows, %act16, %tile_info) : [index](index, index, buffer, buffer, buffer, buffer)
@@ -595,6 +634,7 @@
 -  }} else {{
 -    kernel.launch @g_moe_route[%t](%t, {rx}, %router_{i}, {bias}, %ids, %wts) : [index](index, buffer, view<{E * H}x{rty}>, {bias_ty}, buffer, buffer)
 -{wsc}{hq}    kernel.launch @g_moe_gu_{gun}{q8}_k{H}_r{R}[%nFE, %ta](%nFE, %ta, %ids, {xa}, %wge_{i}, {wu}{gu_b}, %act) : [index, index](index, index, buffer, buffer, view<{sg}xi8>, view<{su}xi8>{gu_bt}, buffer)
++    kernel.launch @{"g_moe_route_tg_live" if _route_tg() else "g_moe_route_tr_live"}[%t](%t, {rx}, %router_{i}, {bias}, %ids, %wts, %info) : [index](index, buffer, view<{E * H}x{rty}>, {bias_ty}, buffer, buffer, buffer)
 +{wsc}{x16}""" + "".join((f"""    {pre}scf.if %moe128 {{
 +""" if t128 else "") + f"""    {pre}kernel.launch @g_moe_bucket{t128}[%t](%t, %max_tiles{t128}, %info, %ids, %tile_info, %rowmap, %pos) : [index](index, index, buffer, buffer, buffer, buffer, buffer)
 +    {pre}kernel.launch @g_moe_ggu{t128}_{gun}_k{H}[%max_rows{t128}, %nFE](%max_rows{t128}, %nH, %nFE, %t, %tile_info, %rowmap, %h16, %s_h, %wge_{i}, {wu}{gu_b}, %act_sorted) : [index, index](index, index, index, index, buffer, buffer, buffer, buffer, view<{sg}xi8>, view<{su}xi8>{gu_bt}, buffer)
@@ -624,7 +664,7 @@
  """
  
  
-@@ -5396,11 +5584,14 @@
+@@ -5396,11 +5599,14 @@
    %ids_size = index.scale %t, %ids_bytes : index, offset -> offset
    %ids = buffer.alloca<global> align(256) %ids_size : buffer
    %wts = buffer.alloca<global> align(256) %ids_size : buffer
@@ -641,7 +681,7 @@
    %ys_size = index.scale %t, %ys_bytes : index, offset -> offset
    %ys = buffer.alloca<global> align(256) %ys_size : buffer
    %c64m = index.constant 64 : index
-@@ -5408,24 +5599,32 @@
+@@ -5408,24 +5614,32 @@
    %ta_tiles = index.div %ta, %c64m : index
    %max_tiles = index.add %ta_tiles, %cEm : index
    %max_rows = index.mul %max_tiles, %c64m : index
@@ -680,7 +720,16 @@
    %ys_sorted = buffer.alloca<global> align(256) %yss_size : buffer
  """ + ("""  %sg_size = index.scale %t, %b4 : index, offset -> offset
    %sg = buffer.alloca<global> align(256) %sg_size : buffer
-@@ -5447,6 +5646,10 @@
+@@ -5438,6 +5652,8 @@
+     rty = TENS[f"blk.{MOE['leading_dense']}.ffn_gate_inp.weight"]["type"]
+     a = (H, MOE["experts"], MOE["used"], MOE["gating"], MOE["norm_weights"], MOE["probs_bias"] or MOE.get("router_bias", False), rty)
+     parts = [GM.route(*a, scale=MOE.get("scale", 1.0)), GM.route_prefill_live(*a, scale=MOE.get("scale", 1.0)), GM.row_scale_tiles(row_scale)]
++    if GM.ROUTE_TG:   # MOE_ROUTE_TG=1: the tiled prefill router (gen_moe.route_prefill_tg) replaces g_moe_route_tr_live
++        parts[1] = GM.route_prefill_tg(*a, scale=MOE.get("scale", 1.0))
+     # gate/up activation: silu (default) or gpt-oss's clamped swiglu (cfg moe.act, alpha and limit from llama.cpp)
+     act = ("swiglu_oai", MOE.get("swiglu_alpha", 1.702), MOE.get("swiglu_limit", 7.0)) if MOE.get("act") == "swiglu_oai" else None
+     xb = dict(bias=True, act=act) if MOE.get("expert_bias") else dict(act=act) if act else {}
+@@ -5447,6 +5663,10 @@
          mv = GM.expert_mv(fmt, K, N, MOE["experts"], MOE["used"], MOE_R, mode, fused=bool(MOE.get("gate_up_fused")) and mode == "gu", iq=iqf, **xb)
          # GEGLU experts: the expert matvec's scalar silu, the grouped GEMM's vector silu, as gelu-tanh
          parts.append(mv.replace("    %silu = scalar.siluf<afn> %t0 : f32\n", gelu_scalar("silu", "t0", "    ") + "\n") if GELU else mv)
@@ -691,7 +740,7 @@
      comb, comb_s = GM.combine(H, MOE["used"], acc=bool(FS)), GM.combine_sorted(H, MOE["used"], acc=bool(FS))
      if SHGATE:
          comb, comb_s = GM.shared_gated(comb), GM.shared_gated(comb_s)
-@@ -5458,6 +5661,10 @@
+@@ -5458,6 +5678,10 @@
          gg = GM.grouped_gemm(fmt, "swiglu" if mode == "gu" else "store", N, K, MOE["experts"], MOE["used"], gemm_fn,
                               fused=bool(MOE.get("gate_up_fused")) and mode == "gu", **xb)
          parts.append(gelu_vectors(gg) if GELU else gg)
@@ -702,7 +751,7 @@
      return "".join(parts)
  
  
-@@ -5977,6 +6184,139 @@
+@@ -5977,6 +6201,139 @@
      return (head + sizes + "  scf.if %outsel {\n" + gather + comp + scatter + "  } else {\n" + tail + "  }\n")
  
  
@@ -842,7 +891,7 @@
  MODEL_PARTS = {}   # model() records its pieces here for the speculative-decoding programs (draft/gen_draft.py)
  
  
-@@ -6094,9 +6434,9 @@
+@@ -6094,9 +6451,9 @@
    %c_never = index.constant 1000000 : index
    %c128 = index.constant 128 : index
    %prefill_shape = index.cmp uge, %t, {"%c_never" if os.environ.get("NO_GEMM") else "%c64"} : index
@@ -854,7 +903,7 @@
    %pml_pre = index.constant {QH * 16 * 2 * 4} : offset
    %pacc_bytes = scf.select %prefill_shape, %pacc_pre, %pacc_dec : offset
    %pml_bytes = scf.select %prefill_shape, %pml_pre, %pml_dec : offset
-@@ -6157,6 +6497,16 @@
+@@ -6157,6 +6514,16 @@
          L_.append(f"  %nC = index.constant {g['C']} : index\n  %nVD = index.constant {g['VD']} : index\n  %nHV = index.constant {g['HV']} : index\n")
      if not QK_NORM:
          L_.append("  %no_norm = buffer.alloca<global> align(256) %row_bytes : buffer\n")
@@ -871,7 +920,7 @@
      if MOE:   # its own part: the MTP drafter programs reuse the prologue (all parts but the last), MoE layer included
          L_.append("\n" + moe_alloc())
      L_.append(f"""{"" if MOE else chr(10)}  kernel.launch @g_token_info[%t](%t, %spans, %metadata, %info) : [index](index, index, buffer, buffer)
-@@ -6169,7 +6519,7 @@
+@@ -6169,7 +6536,7 @@
    scf.if %gemm {{
      kernel.launch @g_attention_fallback_list[%t](%t, %info, %flash_tiles, %fallback_list, %fallback_count) : [index](index, buffer, buffer, buffer, buffer)
    }}
@@ -880,7 +929,7 @@
    %first_norm = command.parameter %weights, "blk.0.attn_norm.weight" : view<{H}xf32>
    kernel.launch @g_embed[%t](%t, %tokens{", %metadata, %info" if VISION else ""}, %embedding, %first_norm, %x, %h) : [index](index, buffer{", buffer, buffer" if VISION else ""}, view<{esize}xi8>, view<{H}xf32>, buffer, buffer)
    %output_norm = command.parameter %weights, "output_norm.weight" : view<{H}xf32>
-@@ -6195,11 +6545,13 @@
+@@ -6195,11 +6562,13 @@
              T.append(par("sinks", "attn_sinks", f"view<{QH}xf32>"))
          if i in RECUR:
              T.append(gdn_layer(i, b, nm, sz, par))
@@ -895,7 +944,7 @@
              pass
          elif GATE and not FUSED_Q:
              T.append(par("wg", "attn_gate"))
-@@ -6215,7 +6567,7 @@
+@@ -6215,7 +6584,7 @@
          # same format and size: one dual-weight launch at 8/16 tokens (PAIR_PROJ)
          same = lambda a, b: fmt_of(nm(a)) == fmt_of(nm(b)) and sz(a) == sz(b)
          qg = GATE and not FUSED_Q and not HEAD_GATE and not QKV_FUSED and i not in RECUR and same("attn_q", "attn_gate") and PAIR_PROJ in ("1", "qg")
@@ -904,7 +953,7 @@
              pass
          elif QKV_FUSED:
              T.append("  " + lin(fmt_of(nm("attn_qkv")), "%h", "%s_h", f"%wqkv_{i}", sz("attn_qkv"), "%qkv", "%nH", "%nQKV", H) + "\n")
-@@ -6224,7 +6576,7 @@
+@@ -6224,7 +6593,7 @@
              T.append("  " + lin2(fmt_of(nm("attn_q")), "%h", "%s_h", f"%wq_{i}", f"%wg_{i}", sz("attn_q"), "%q", "%gate", "%nH", "%nQ", H) + "\n")
          else:
              T.append("  " + lin(fmt_of(nm("attn_q")), "%h", "%s_h", f"%wq_{i}", sz("attn_q"), "%q", "%nH", nq, H) + "\n")
@@ -913,7 +962,7 @@
            pass
          elif same("attn_k", "attn_v") and PAIR_PROJ in ("1", "kv"):
            T.append("  " + lin2(fmt_of(nm("attn_k")), "%h", "%s_h", f"%wk_{i}", f"%wv_{i}", sz("attn_k"), "%k", "%v", "%nH", "%nKV", H) + "\n")
-@@ -6239,7 +6591,7 @@
+@@ -6239,7 +6608,7 @@
          qn, kn = (f"%q_norm_{i}", f"%k_norm_{i}") if QK_NORM else ("%no_norm", "%no_norm")
          gate, gty = (f"%sinks_{i}", f"view<{QH}xf32>") if SINKS else (gate0, "buffer")
          nty = f"view<{D}xf32>" if QK_NORM else "buffer"
@@ -922,7 +971,7 @@
            rope_k = "g_qk_rope_store_swa" if SWA_ROPE and i in sliding else "g_qk_rope_store"
            T.append(f"""  kernel.launch @{rope_k}[%t](%t, %layer_{i}, %rope_{i}, %context, %pool, %q, %k, %v, {qn}, {kn}, %info, %origins, %arena{", %metadata, %tokens" if MROPE else ""}{bias_args}) : [index](index, index, i32, index, index, buffer, buffer, buffer, {nty}, {nty}, buffer, buffer, buffer{", buffer, buffer" if MROPE else ""}{bias_types})
    scf.if %gemm {{
-@@ -6255,7 +6607,7 @@
+@@ -6255,7 +6624,7 @@
    }}
  """)
  
@@ -931,7 +980,7 @@
            T.append("  " + lin(fmt_of(nm("attn_output")), "%o", "%s_o", f"%wo_{i}", sz("attn_output"), "%y", nq, "%nH", qd) + "\n")
            if OUT_BIAS:   # attention output projection bias (gpt-oss attn_output.bias)
              T.append(f'  %bo_{i} = command.parameter %weights, "{b}attn_output.bias" : view<{H}xf32>\n'
-@@ -6457,7 +6809,7 @@
+@@ -6457,7 +6826,7 @@
          from gen_mxfp4s import mxfp4s_icodes as _mx_icodes
          COMMON += _mx_icodes()
      if USED_MVQ or USED_MOEQ or PH_ONLY:   # ACT_Q8: int8-activation matvecs, their weight-code helpers and g_quant_q8
@@ -940,7 +989,7 @@
              COMMON += IQ4_ICODES
          COMMON += ICODES + "".join(mv(fmt, K, R=R, TG=TG, swiglu=sw == 1, pair=sw == 2, suffix=f"_r{R}" if R != 16 else "", iq=True)
                                     for fmt, K, sw, R, TG in sorted(USED_MVQ))
-@@ -6515,8 +6867,21 @@
+@@ -6515,8 +6884,21 @@
              parts.append(mv(fmt, K, TG=TG, swiglu=sw))
      for fmt, K, sw, R, TG in sorted(USED_MV_R):
          parts.append(mv(fmt, K, R=R, TG=TG, swiglu=sw, suffix=f"_r{R}"))
@@ -963,7 +1012,7 @@
      if FUSED_Q:
          parts.append(split_qgate(QH, D))
      if SWA_ROPE:
-@@ -6567,8 +6932,9 @@
+@@ -6567,8 +6949,9 @@
      parts.append(open(os.path.join(here, "tile_uniform.loom")).read())
      if not NO_FLASH:
          flash2 = os.path.join(out_dir, "flash2.loom")
@@ -991,16 +1040,205 @@
  GATE_NAME = {1: "softmax(logits)", 2: "sigmoid(logit)", 3: "logit"}   # llama.cpp's expert_gating_func values
  # gating 3 (SOFTMAX_WEIGHT): `bias` is the router's own bias (ffn_gate_inp.bias, added to the logits before the top-k)
  # and the k weights are a softmax over the k picked logits.
-@@ -500,7 +502,7 @@
+@@ -500,7 +502,196 @@
      return "\n" + text
  
  
 -def row_scale_tiles(row_scale):
++ROUTE_TG = __import__("os").environ.get("MOE_ROUTE_TG", "0") == "1"
++TG_T = 32     # tokens per g_moe_route_tg_live workgroup
++TG_K = 256    # hidden values staged per LDS chunk
++
++
++def route_prefill_tg(H, E, KU, gating, norm, bias, wty="f32", scale=1.0):
++    """g_moe_route_tg_live (MOE_ROUTE_TG=1): the prefill router as a register-tiled f32 GEMM. Workgroup = TG_T tokens x all
++    E experts (E / 32 waves, lane = one expert), the tokens' h rows staged in LDS TG_K values at a time; every lane keeps
++    TG_T accumulators (its expert's logit for each token) and reads its expert's router row straight from global/L2 (16 B
++    per 4 hidden values), the tokens' values as LDS broadcasts. The router weights are read once per TG_T tokens (8x fewer
++    times than g_moe_route_tr's 4 tokens), and each lane sums its logit sequentially over h (f32 FMA; g_moe_route_tr sums
++    per-lane strided parts and a subgroup tree: the logits differ in the last bits). Then g_moe_route_tr's top-k on the
++    logits in LDS, wave w taking tokens w, w + 8, ... Workgroups whose tokens are all padding do nothing."""
++    assert gating in (1, 2) and E == 256 and H % TG_K == 0 and wty in ("f32", "bf16"), (gating, E, H, wty)
++    base = route_prefill(H, E, KU, gating, norm, bias, wty, scale)
++    TR = int(__import__("re").search(r"%cTR = index.constant (\d+) : index", base).group(1))
++    a = base.index("  %c0_i32r = scalar.constant 0 : i32\n")
++    b = base.rindex("  kernel.return\n}\n")
++    topk = base[a:b]
++    NW = E // 32
++    for x, y in ((f"view<{TR}x{E}xf32>", f"view<{TG_T}x{E}xf32>"), ("%wave_tok = index.cmp ult, %wave, %cTR : index", "%wave_tok = index.cmp ult, %wv_r, %cTT : index"),
++                 (f"%r = index.assume %wave [range(%wave, 0, {TR - 1})] : index", f"%r = index.assume %wv_r [range(%wv_r, 0, {TG_T - 1})] : index")):
++        assert topk.count(x) >= 1, x
++        topk = topk.replace(x, y)
++    assert "%wave" not in topk.replace("%wave_tok", ""), "top-k text uses %wave elsewhere"
++    # dead tokens (info word 2 = 0) store nothing: g_moe_bucket never reads them
++    sl = "    %store_lane = scalar.andi %first, %tok_live : i1\n"
++    assert topk.count(sl) == 1
++    topk = topk.replace(sl, """    %tl_w = view.load %info_view[%token, 2] : view<[%tokens]x4xi32> -> i32
++    %tl_l = scalar.cmpi ne, %tl_w, %dead : i32
++    %tl_a = scalar.andi %tok_live, %tl_l : i1
++    %store_lane = scalar.andi %first, %tl_a : i1
++""")
++    topk = "\n".join("  " + l if l else l for l in topk.split("\n"))
++    NKC = H // TG_K
++    wl = (f"""        %wraw = vector.load %w_view[%e, %kq, %c0] : view<{E}x{H // 4}x4xbf16> -> vector<4xbf16>
++        %wv = vector.extf %wraw : vector<4xbf16> to vector<4xf32>""" if wty == "bf16" else
++          f"""        %wv = vector.load %w_view[%e, %kq, %c0] : view<{E}x{H // 4}x4x{wty}> -> vector<4xf32>""")
++    acc_in = ", ".join(f"%a{r} = %ain{r} : f32" for r in range(TG_T))
++    acc_in0 = ", ".join(f"%ain{r} = %zero_f : f32" for r in range(TG_T))
++    acc_ty = ", ".join(["f32"] * TG_T)
++    outs = ", ".join(f"%o{r}" for r in range(TG_T))
++    outs2 = ", ".join(f"%q{r}" for r in range(TG_T))
++    fma = []
++    for r4 in range(TG_T // 4):
++        for j in range(4):
++            fma.append(f"""          %xb{r4}_{j} = vector.load %xs_view[%kk{j}, {4 * r4}] : view<{TG_K}x{TG_T + 4}xf32> -> vector<4xf32>""")
++    for r in range(TG_T):
++        prev = f"%a{r}"
++        for j in range(4):
++            fma.append(f"""          %xe{r}_{j} = vector.extract %xb{r // 4}_{j}[{r % 4}] : vector<4xf32> -> f32
++          %f{r}_{j} = scalar.fmaf %we{j}, %xe{r}_{j}, {prev} : f32""")
++            prev = f"%f{r}_{j}"
++    nxt = ", ".join(f"%f{r}_3" for r in range(TG_T))
++    stores = "".join(f"""  view.store %q{r}, %lg_view[{r}, %e] : f32, view<{TG_T}x{E}xf32>
++""" for r in range(TG_T))
++    return f"""
++// Router (prefill, tiled): {TG_T} tokens x {E} experts per workgroup, lane = expert, sequential f32 sums over h; then top {KU}.
++kernel.def export("g_moe_route_tg_live") @g_moe_route_tg_live(%tokens: index) {{
++  %c1 = index.constant 1 : index
++  %cthreads = index.constant {E} : index
++  %cpad = index.constant {TG_T - 1} : index
++  %cTT = index.constant {TG_T} : index
++  %padded = index.add %tokens, %cpad : index
++  %groups = index.div %padded, %cTT : index
++  kernel.launch.config workgroups(%groups, %c1, %c1) workgroup_size(%cthreads, %c1, %c1) : index
++}} launch(%tokens_arg: index, %x: buffer, %w: buffer, %b: buffer, %ids: buffer, %wts: buffer, %info: buffer) {{
++  %tokens = index.assume %tokens_arg [range(%tokens_arg, 1, 8192)] : index
++  %group_id = kernel.workgroup.id<x> : index
++  %wave_id = kernel.subgroup.id : index
++  %wave = index.assume %wave_id [range(%wave_id, 0, {NW - 1})] : index
++  %lane_id = kernel.subgroup.lane.id : index
++  %lane = index.assume %lane_id [range(%lane_id, 0, 31)] : index
++  %tid0 = kernel.workitem.id<x> : index
++  %tid = index.assume %tid0 [range(%tid0, 0, {E - 1})] : index
++  %zero = index.constant 0 : offset
++  %c0 = index.constant 0 : index
++  %c1 = index.constant 1 : index
++  %ci0 = index.constant 0 : index
++  %ci1 = index.constant 1 : index
++  %ci2 = index.constant 2 : index
++  %ci3 = index.constant 3 : index
++  %c4 = index.constant 4 : index
++  %c8 = index.constant 8 : index
++  %c32 = index.constant 32 : index
++  %cE = index.constant {E} : index
++  %cTT = index.constant {TG_T} : index
++  %cTK = index.constant {TG_K} : index
++  %zero_f = scalar.constant 0.0 : f32
++  %first = index.cmp eq, %lane, %c0 : index
++  %token0 = index.mul %group_id, %cTT : index
++  %info_view = buffer.view %info[%zero] : buffer -> view<[%tokens]x4xi32>
++  %dead = scalar.constant 0 : i32
++  // live tokens in this workgroup: lane l < {TG_T} of wave 0 checks token0 + l (a subgroup OR, then broadcast in LDS)
++  %ls_bytes = index.constant 16 : offset
++  %ls = buffer.alloca<workgroup> align(16) %ls_bytes : buffer
++  %ls_view = buffer.view %ls[%zero] : buffer -> view<4xi32>
++  %w0 = index.cmp eq, %wave, %c0 : index
++  scf.if %w0 {{
++    %t_v = index.add %token0, %lane : index
++    %t_in = index.cmp ult, %t_v, %tokens : index
++    %t_c = scf.select %t_in, %t_v, %c0 : index
++    %t_b = index.assume %t_c [lt(%t_c, %tokens)] : index
++    %lw = view.load %info_view[%t_b, 2] : view<[%tokens]x4xi32> -> i32
++    %lv = scalar.cmpi ne, %lw, %dead : i32
++    %la = scalar.andi %lv, %t_in : i1
++    %one = scalar.constant 1 : i32
++    %li = scf.select %la, %one, %dead : i32
++    %any = kernel.subgroup.reduce<maxsi> %li : i32
++    scf.if %first {{
++      view.store %any, %ls_view[%c0] : i32, view<4xi32>
++    }}
++  }}
++  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
++  %any_w = view.load %ls_view[%c0] : view<4xi32> -> i32
++  %live_wg = scalar.cmpi ne, %any_w, %dead : i32
++  scf.if %live_wg {{
++  %w_view = buffer.view %w[%zero] : buffer -> view<{E}x{H // 4}x4x{wty}>
++  %x4_view = buffer.view %x[%zero] : buffer -> view<[%tokens]x{H // 4}x4xf32>
++  %xs_bytes = index.constant {TG_K * (TG_T + 4) * 4} : offset
++  %xs = buffer.alloca<workgroup> align(16) %xs_bytes : buffer
++  %xs_view = buffer.view %xs[%zero] : buffer -> view<{TG_K}x{TG_T + 4}xf32>
++  %cKQ = index.constant {TG_K // 4} : index
++  %cstage4 = index.constant {TG_K * TG_T // 4} : index
++  %zero4 = vector.splatf 0.0 : vector<4xf32>
++  %e = index.madd %wave, %c32, %lane : index
++  %cNKC = index.constant {NKC} : index
++  %cthr = index.constant {E} : index
++  {outs} = scf.for %kc = [%c0 to %cNKC step %c1]({acc_in0}) -> ({acc_ty}) {{
++    // stage h[token0 .. +{TG_T}][kc*{TG_K} .. +{TG_K}] transposed into xs[k][token] (row stride {TG_T + 4}: 16-B aligned rows);
++    // thread i loads 4 consecutive values of token i / {TG_K // 4} (coalesced 16-B loads)
++    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
++    %kq_base = index.mul %kc, %cKQ : index
++    scf.for %i = [%tid to %cstage4 step %cthr] {{
++      %st_t = index.div %i, %cKQ : index
++      %st_tb = index.assume %st_t [range(%st_t, 0, {TG_T - 1})] : index
++      %st_q = index.rem %i, %cKQ : index
++      %st_qb = index.assume %st_q [range(%st_q, 0, {TG_K // 4 - 1})] : index
++      %tok_v = index.add %token0, %st_tb : index
++      %tok_in = index.cmp ult, %tok_v, %tokens : index
++      %tok_c = scf.select %tok_in, %tok_v, %c0 : index
++      %tok = index.assume %tok_c [lt(%tok_c, %tokens)] : index
++      %gq_v = index.add %kq_base, %st_qb : index
++      %gq = index.assume %gq_v [range(%gq_v, 0, {H // 4 - 1})] : index
++      %xv4 = vector.load %x4_view[%tok, %gq, %c0] : view<[%tokens]x{H // 4}x4xf32> -> vector<4xf32>
++      %xz4 = scf.select %tok_in, %xv4, %zero4 : vector<4xf32>
++      %xz4_0 = vector.extract %xz4[0] : vector<4xf32> -> f32
++      %st_k0 = index.madd %st_qb, %c4, %ci0 : index
++      %st_k0b = index.assume %st_k0 [range(%st_k0, 0, {TG_K - 1})] : index
++      view.store %xz4_0, %xs_view[%st_k0b, %st_tb] : f32, view<{TG_K}x{TG_T + 4}xf32>
++      %xz4_1 = vector.extract %xz4[1] : vector<4xf32> -> f32
++      %st_k1 = index.madd %st_qb, %c4, %ci1 : index
++      %st_k1b = index.assume %st_k1 [range(%st_k1, 0, {TG_K - 1})] : index
++      view.store %xz4_1, %xs_view[%st_k1b, %st_tb] : f32, view<{TG_K}x{TG_T + 4}xf32>
++      %xz4_2 = vector.extract %xz4[2] : vector<4xf32> -> f32
++      %st_k2 = index.madd %st_qb, %c4, %ci2 : index
++      %st_k2b = index.assume %st_k2 [range(%st_k2, 0, {TG_K - 1})] : index
++      view.store %xz4_2, %xs_view[%st_k2b, %st_tb] : f32, view<{TG_K}x{TG_T + 4}xf32>
++      %xz4_3 = vector.extract %xz4[3] : vector<4xf32> -> f32
++      %st_k3 = index.madd %st_qb, %c4, %ci3 : index
++      %st_k3b = index.assume %st_k3 [range(%st_k3, 0, {TG_K - 1})] : index
++      view.store %xz4_3, %xs_view[%st_k3b, %st_tb] : f32, view<{TG_K}x{TG_T + 4}xf32>
++    }}
++    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
++    %kq0 = index.add %kq_base, %c0 : index
++    {outs2} = scf.for %q = [%c0 to %cKQ step %c1]({acc_in}) -> ({acc_ty}) {{
++      %kq_v = index.add %kq0, %q : index
++      %kq = index.assume %kq_v [range(%kq_v, 0, {H // 4 - 1})] : index
++{wl}
++""" + "".join(f"""      %we{j} = vector.extract %wv[{j}] : vector<4xf32> -> f32
++      %kk{j}_v = index.madd %q, %c4, %ci{j} : index
++      %kk{j} = index.assume %kk{j}_v [range(%kk{j}_v, 0, {TG_K - 1})] : index
++""" for j in range(4)) + "\n".join(fma) + f"""
++      scf.yield {nxt} : {acc_ty}
++    }}
++    scf.yield {outs2} : {acc_ty}
++  }}
++  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
++  %lg_view = buffer.view %xs[%zero] : buffer -> view<{TG_T}x{E}xf32>
++""" + "".join(f"  view.store %o{r}, %lg_view[{r}, %e] : f32, view<{TG_T}x{E}xf32>\n" for r in range(TG_T)) + f"""  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
++  scf.for %rr = [%c0 to %c4 step %c1] {{
++  %wv_r = index.madd %rr, %c8, %wave : index
++{topk}  }}
++  }}
++  kernel.return
++}}
++"""
++
++
 +def row_scale_tiles(row_scale, tile=None):
      """g_row_scale_f16_tiles: the starter's g_row_scale_f16 over the bucketed expert rows (max_tiles x 64), skipping
      the rows of unused tiles (tile_info expert < 0; g_moe_gdn skips those tiles). max_tiles is sized for the worst
      case (t*KU/64 + E tiles), so most of them are unused."""
-@@ -509,11 +511,12 @@
+@@ -509,11 +700,12 @@
          nonlocal text
          assert text.count(a) == 1, a
          text = text.replace(a, b)
@@ -1015,7 +1253,7 @@
    %rt_tiles = index.div %rows, %rt_c64 : index
    %rt_tile_v = index.div %row, %rt_c64 : index
    %rt_tile = index.assume %rt_tile_v [lt(%rt_tile_v, %rt_tiles)] : index
-@@ -528,11 +531,80 @@
+@@ -528,11 +720,80 @@
  
  
  def route(H, E, KU, gating, norm, bias, wty="f32", scale=1.0):
@@ -1025,9 +1263,8 @@
 +    Plus the split decode router (MOE_ROUTE_SPLIT, route_split): g_moe_route_lg + g_moe_route_tk."""
 +    d = route_decode(H, E, KU, gating, norm, bias, wty, scale)
 +    return d + route_split(d, H, E, wty) + route_prefill(H, E, KU, gating, norm, bias, wty, scale)
- 
- 
--def expert_mv(fmt, K, N, E, KU, R, mode, fused=False, bias=False, act=None, iq=None):
++
++
 +def route_split(text, H, E, wty="f32"):
 +    """The decode router in two launches (bit-identical outputs): g_moe_route_lg(tokens, x, w, lg): workgroup (token,
 +    8 experts), wave = one expert, lane l sums the 32-value groups l, l + 32, ... in order and a subgroup reduction
@@ -1093,13 +1330,14 @@
 +  %lg_view = buffer.view %lgg[%lg_off] : buffer -> view<{E}xf32>
 +""" + t[j:]
 +    return lg + t
-+
-+
+ 
+ 
+-def expert_mv(fmt, K, N, E, KU, R, mode, fused=False, bias=False, act=None, iq=None):
 +def expert_mv(fmt, K, N, E, KU, R, mode, fused=False, bias=False, act=None, iq=None, shared=False):
      """mode 'gu': act[a] = silu(Wg[e] x[a/KU]) * Wu[e] x[a/KU]; mode 'dn': ys[a] = Wd[e] x[a].
      fmt "GATE+UP" ('gu'): gate and up weights in different formats, each with its own strides and dequant.
      fused ('gu'): one gate_up tensor passed as both weights, expert e's N gate rows then its N up rows.
-@@ -540,8 +612,13 @@
+@@ -540,8 +801,13 @@
      act: the gate/up activation (see act_scalar).
      iq: (iq_decode, iq_dot, iq_load) of gen_llm (ACT_Q8): the activation is read as int8 codes + (scale, code sum) written by
      g_quant_q8 (layout: rows x groups x 32 int8, then rows x groups x (d, sum)) and contracted with the weight codes by
@@ -1114,7 +1352,7 @@
      assert iq is None or (not fmt2 and not bias), "int8 expert matvecs: one weight format, no biases"
      groups = K // 32
      lanes = (groups + 31) // 32 * 32
-@@ -549,24 +626,40 @@
+@@ -549,24 +815,40 @@
      rb = row_bytes(fmt, K)
      eb = rb * N
      nw = 2 if mode == "gu" else 1
@@ -1161,7 +1399,7 @@
    %workitem_id = kernel.workitem.id<x> : index
    %workitem = index.assume %workitem_id [range(%workitem_id, 0, {lanes - 1})] : index
    %wave_id = kernel.subgroup.id : index
-@@ -587,16 +680,26 @@
+@@ -587,16 +869,26 @@
    %c0_i32 = scalar.constant 0 : i32
    %cE1_i32 = scalar.constant {E - 1} : i32
    %ids_view = buffer.view %ids[%zero] : buffer -> view<[%tokens]xi32>
@@ -1191,7 +1429,7 @@
      else:
          L.append("  %xr = index.assume %a [lt(%a, %tokens)] : index")
      xview = (f"""  %xq_view = buffer.view %x[%zero] : buffer -> view<[{xrows}]x{groups}x8xi32>
-@@ -671,6 +774,24 @@
+@@ -671,6 +963,24 @@
      %qm{wi} = scalar.mulf %mn{wi}, %xs : f32
      %qs{wi} = scalar.mulf %qd{wi}, %sc{wi} : f32
      %d{wi} = scalar.subf %qs{wi}, %qm{wi} : f32""")
@@ -1216,7 +1454,7 @@
          elif fold:
              L.append(f"""    %wv{wi} = scf.if %ok -> (vector<32xf32>) {{
        %v = func.call @g_{fw}_values(%{w}, {o}, {within}) : (buffer, offset, index) -> (vector<32xf32>)
-@@ -719,12 +840,35 @@
+@@ -719,12 +1029,35 @@
      else:
          L.append(f"    %value = scalar.addf {t0}, %zero_f : f32")
      L.append("""    %out_row = index.add %row_base, %rr : index
@@ -1254,7 +1492,7 @@
  
  
  def combine(H, KU, acc=False):
-@@ -762,6 +906,46 @@
+@@ -762,6 +1095,46 @@
  """
  
  
@@ -1301,7 +1539,7 @@
  def shared_gated(text):
      """A combine kernel (combine / combine_sorted with acc=True) that scales the shared experts' output already in y
      by the token's gate sg[t] (g_moe_shared_gate) before adding the routed experts: y = sg * y + sum_k w_k ys_k."""
-@@ -826,9 +1010,16 @@
+@@ -826,9 +1199,16 @@
  TILE = 64
  
  
@@ -1320,7 +1558,7 @@
      return f"""
  kernel.def export("g_moe_bucket") @g_moe_bucket(%tokens: index) {{
    %c1 = index.constant 1 : index
-@@ -843,12 +1034,12 @@
+@@ -843,12 +1223,12 @@
    %c0 = index.constant 0 : index
    %c1 = index.constant 1 : index
    %cKU = index.constant {KU} : index
@@ -1336,7 +1574,7 @@
    %minus_one = scalar.constant -1 : i32
    %cEm1 = scalar.constant {E - 1} : i32
    %cE = index.constant {E} : index
-@@ -1130,6 +1321,11 @@
+@@ -1130,6 +1510,11 @@
      fused (swiglu): one gate_up tensor as both weights (expert_mv's layout).
      bias / act: as expert_mv (per-expert output biases, the gate/up activation)."""
      import gen_gemm
@@ -1348,7 +1586,7 @@
      fmt, _, fmt2 = fmt.partition("+")
      rb = N and (K // SB[fmt] * FMT[fmt])
      eb = rb * N
-@@ -1228,6 +1424,78 @@
+@@ -1228,6 +1613,78 @@
      return text + "\n" + gen_gemm_rdna4.twin(text) if gen_gemm_rdna4.enabled() else text   # the gfx12 twin K_rdna4 beside K
  
  
@@ -1583,7 +1821,50 @@
                and H // 32 <= 1024 and FE // 32 <= 1024 and not EB)   # gen_llm.moe_iq
          # gen_llm.moe_iq also needs the router input as the experts' input (gemma4's experts read %h2): the package says which it built
          MQ = MQ and (_pkg_llm_text() is None or f'"g_moe_gu_{gun}_q8_k{H}_' in _pkg_llm_text())
-@@ -3689,7 +3705,7 @@
+@@ -3307,10 +3323,24 @@
+         SGA, SGT = ("%sg, ", f"tensor<{t}xf32>, ") if SHG else ("", "")
+         GUB, GUBT = (", %bg, %bu", f", tensor<{E_ * FE}xf32>, tensor<{E_ * FE}xf32>") if EB else ("", "")
+         DNB, DNBT = (", %bd", f", tensor<{E_ * H}xf32>") if EB else ("", "")
++        import gen_moe as _gm   # MOE_ROUTE_TG: the tiled prefill router replaces g_moe_route_tr_live (same outputs up to f32 sum order)
++        ROUTE_NAME = "g_moe_route_tg_live" if _gm.ROUTE_TG else "g_moe_route_tr_live"
++        def tg_chain(t):
++            if not _gm.ROUTE_TG:
++                return ""
++            return f"""  %ids_g = check.generate.fill value(0) : tensor<{t}x{KU}xi32>
++  %wts_g = check.generate.fill value(0.0) : tensor<{t}x{KU}xf32>
++  kernel.launch @g_moe_route_tg_live[%t](%t, %h, %wr, %b, %ids_g, %wts_g, %info_l) : [index](index, tensor<{t}x{H}xf32>, {wr_t}, tensor<{E_}xf32>, tensor<{t}x{KU}xi32>, tensor<{t}x{KU}xf32>, tensor<{t}x4xi32>)
++  %eids_g = check.file.read.npy path("{tag}_ids_g.npy") : tensor<{t}x{KU}xi32>
++  %ewts_g = check.file.read.npy path("{tag}_wts_g.npy") : tensor<{t}x{KU}xf32>
++  check.expect.equal actual(%ids_g) expected(%eids_g) : tensor<{t}x{KU}xi32>
++  check.expect.close actual(%wts_g) expected(%ewts_g) atol(1.0e-5) rtol(1.0e-4) nan(different) : tensor<{t}x{KU}xf32>
++"""
+         # decode chain: 6 tokens (> the prefill router's tokens per workgroup: a full group plus a partial one)
+         t = 6; ids, wts = chain(t, "")
+         SGT = f"tensor<{t}xf32>, " if SHG else ""
+         info_l = np.zeros((t, 4), np.int32); info_l[:, 2] = 1; info_l[2, 2] = 0; info_l[4:, 2] = 0
++        save(tag + "_ids_g", np.where(info_l[:, 2:3] == 0, 0, ids).astype(np.int32)); save(tag + "_wts_g", np.where(info_l[:, 2:3] == 0, 0, wts).astype(np.float32))
+         save(tag + "_info", info_l); save(tag + "_ids_l", np.where(np.arange(t)[:, None] >= 4, 0, ids).astype(np.int32))
+         save(tag + "_wts_l", np.where(np.arange(t)[:, None] >= 4, 0, wts).astype(np.float32))
+         cases.append(f"""check.case public @moe_chain_{li} {{
+@@ -3328,7 +3358,7 @@
+   kernel.launch @g_moe_route_tr_live[%t](%t, %h, %wr, %b, %ids_l, %wts_l, %info_l) : [index](index, tensor<{t}x{H}xf32>, {wr_t}, tensor<{E_}xf32>, tensor<{t}x{KU}xi32>, tensor<{t}x{KU}xf32>, tensor<{t}x4xi32>)
+   check.expect.equal actual(%ids_l) expected(%eids_l) : tensor<{t}x{KU}xi32>
+   check.expect.close actual(%wts_l) expected(%ewts_l) atol(1.0e-5) rtol(1.0e-4) nan(different) : tensor<{t}x{KU}xf32>
+-{wsc(t)}{gudn(t)}
++{tg_chain(t)}{wsc(t)}{gudn(t)}
+   kernel.launch @g_moe_combine[%t](%t, %ys, %wts, {SGA}%y) : [index](index, tensor<{t * KU}x{H}xf32>, tensor<{t}x{KU}xf32>, {SGT}tensor<{t}x{H}xf32>)
+   check.expect.equal actual(%ids) expected(%eids) : tensor<{t}x{KU}xi32>
+   check.expect.equal actual(%ids_tr) expected(%eids) : tensor<{t}x{KU}xi32>
+@@ -3357,7 +3387,7 @@
+   %act16 = check.generate.fill value(0.0) : tensor<{mr}x{FE}xf16>
+   %ys_sorted = check.generate.fill value(0.0) : tensor<{mr}x{H}xf32>
+   kernel.launch @g_row_scale_f16[%t](%t, %nH, %h, %s_h, %h16) : [index](index, index, tensor<{t}x{H}xf32>, tensor<{t}x2xf32>, tensor<{t}x{H}xf16>)
+-  kernel.launch @g_moe_route_tr_live[%t](%t, %h, %wr, %b, %ids, %wts, %info) : [index](index, tensor<{t}x{H}xf32>, {wr_t}, tensor<{E_}xf32>, tensor<{t}x{KU}xi32>, tensor<{t}x{KU}xf32>, tensor<{t}x4xi32>)
++  kernel.launch @{ROUTE_NAME}[%t](%t, %h, %wr, %b, %ids, %wts, %info) : [index](index, tensor<{t}x{H}xf32>, {wr_t}, tensor<{E_}xf32>, tensor<{t}x{KU}xi32>, tensor<{t}x{KU}xf32>, tensor<{t}x4xi32>)
+ {wsc(t)}  kernel.launch @g_moe_bucket[%t](%t, %max_tiles, %info, %ids, %tile_info, %rowmap, %pos) : [index](index, index, tensor<{t}x4xi32>, tensor<{t}x{KU}xi32>, tensor<{mt}x2xi32>, tensor<{mr}xi32>, tensor<{ta}xi32>)
+   kernel.launch @g_moe_ggu_{gun}_k{H}[%max_rows, %nFE](%max_rows, %nH, %nFE, %t, %tile_info, %rowmap, %h16, %s_h, %wg, %wu{GUB}, %act_sorted) : [index, index](index, index, index, index, tensor<{mt}x2xi32>, tensor<{mr}xi32>, tensor<{t}x{H}xf16>, tensor<{t}x2xf32>, {gt}, {ut}{GUBT}, tensor<{mr}x{FE}xf32>)
+   kernel.launch @g_row_scale_f16_tiles[%max_rows](%max_rows, %nFE, %act_sorted, %s_rows, %act16, %tile_info) : [index](index, index, tensor<{mr}x{FE}xf32>, tensor<{mr}x2xf32>, tensor<{mr}x{FE}xf16>, tensor<{mt}x2xi32>)
+@@ -3689,7 +3719,7 @@
  
      def rule(n):
          return iq_r(n, K, tg, sw) if q8 else pick_r(n, K, tg)
