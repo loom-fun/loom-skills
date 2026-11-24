@@ -324,13 +324,13 @@ class Resolution(unittest.TestCase):
         self.assertEqual(d256("rdna4", slug="m"), {})
         self.assertEqual(d256("rdna3", "rdna4", slug="other"), {"ATTN_GQA_D256": "0"})
 
-    def test_real_kb_d7_model_rule_is_gfx12_only(self):
-        """The real knowledge base: the Qwen3.6-35B-A3B package keeps the K/V-once decode body on gfx12 (D7 costs it R9700 decode_2k)."""
+    def test_qwen36_35b_uses_qualified_split_attention_on_both_targets(self):
+        """The SDK 0.3 Radeon rule and the existing Strix rule both select split attention."""
         slug = "ggml-org-Qwen3.6-35B-A3B-loom"
         r = resolve.resolve_full(moe35(), ("rdna3", "rdna4"), KB, draft="dflash", slug=slug)
-        self.assertEqual({k: v for k, v in r["env"].items() if "GQA_D256" in k}, {"ATTN_GQA_D256": "0", "ATTN_GQA_D256__RDNA4": "1"})
+        self.assertEqual({k: v for k, v in r["env"].items() if "GQA_D256" in k}, {"ATTN_GQA_D256": "0"})
         self.assertEqual(resolve.resolve(moe35(), ("rdna3",), KB, draft="dflash", slug=slug)["env"], {"ATTN_GQA_D256": "0"})
-        self.assertEqual(resolve.resolve(moe35(), ("rdna4",), KB, draft="dflash", slug=slug)["env"], {})
+        self.assertEqual(resolve.resolve(moe35(), ("rdna4",), KB, draft="dflash", slug=slug)["env"], {"ATTN_GQA_D256": "0"})
         self.assertEqual(resolve.resolve(moe35(), ("rdna3", "rdna4"), KB, draft="dflash", slug="unsloth-Qwen3.5-35B-A3B-loom")["env"], {"ATTN_GQA_D256": "0"})
 
     def test_attn_rules_twin_reads_its_own_variable(self):
