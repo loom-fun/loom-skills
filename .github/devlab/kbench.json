@@ -361,6 +361,31 @@
       ],
       "device": "amdgpu://?completion_spin_ns=4294967295",
       "repeats": 3
+    },
+    {
+      "suite": "valu_peak",
+      "dir": "valu_peak",
+      "gen": "valu_peak/gen_valu.py",
+      "gen_variants": [
+        "base",
+        "f16_pk_fma",
+        "i32_and_or",
+        "f32_exp"
+      ],
+      "files": [
+        "bench.loom",
+        "bench_f16_pk_fma.loom",
+        "bench_i32_and_or.loom",
+        "bench_f32_exp.loom"
+      ],
+      "config": [],
+      "args": [
+        "--measure=dispatch_complete",
+        "--batch-size=8",
+        "--profile-final-batch=true"
+      ],
+      "device": "amdgpu://?completion_spin_ns=4294967295",
+      "repeats": 3
     }
   ]
 }
