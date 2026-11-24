@@ -1,0 +1,32 @@
+{
+  "sdk": "0.3.0",
+  "repeats": 3,
+  "suites": [
+    {
+      "runner": "strix",
+      "case_timing": true,
+      "args": [
+        "--measure=dispatch_complete",
+        "--batch-size=4",
+        "--profile-final-batch=true"
+      ],
+      "suite": "qwen35-packed-f16-strix",
+      "tests": [
+        "test_pack.loom",
+        "test_packdb.loom",
+        "test_packxg.loom"
+      ],
+      "dir": "qwen35_dense",
+      "gen": "qwen35_dense/gen_bench.py",
+      "files": [
+        "bench.loom",
+        "bench_pack.loom",
+        "bench_packdb.loom",
+        "bench_packxg.loom"
+      ],
+      "gen_variants": [
+        "packed"
+      ]
+    }
+  ]
+}
