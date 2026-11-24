@@ -1,0 +1,120 @@
+name: JoyAI combined source and port scope proof
+on:
+  push:
+    branches: [codex/sdk030-joyai-combined-proof]
+    paths: [.github/workflows/sdk030-joyai-combined-proof.yml]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: [self-hosted, devlab-dispatch, Linux]
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 2ff9ef2de96f7ca21b6d7a9b59bad412cc91698f
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Prepare exact sources and SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          work="$(dirname "$GITHUB_WORKSPACE")/sdk030-joyai-combined-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          mkdir -p "$work/receipt"
+          printf 'WORK=%s\n' "$work" >> "$GITHUB_ENV"
+          git worktree add --detach "$work/main" 6facf9ad6acd3252746ab941da73dd4da7543710
+          git worktree add --detach "$work/pull" 9adca4fc5893aa71e2e8be18aa2b7bb9fc96a28b
+          git rev-list --parents -n 1 HEAD > "$work/receipt/source.txt"
+          git rev-parse 'HEAD^{tree}' >> "$work/receipt/source.txt"
+          sdk=$(LOOM_VERSION=0.3.0 bash skills/loom-setup/scripts/ensure_sdk.sh "$work/loom" "" 2> "$work/receipt/install.log")
+          printf 'LOOM_ROOT=%s\n' "$sdk" >> "$GITHUB_ENV"
+          cp "$sdk/loom-install.json" "$work/receipt/sdk.json"
+      - name: Prove fleet impact on the combined tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          py="$LOOM_ROOT/.tools/bin/python"
+          "$py" "$WORK/main/fleet/build_fleet.py" --tree "$WORK/main" --jobs 8 --out "$WORK/control" > "$WORK/receipt/fleet-control.log" 2>&1
+          "$py" fleet/build_fleet.py --tree . --jobs 8 --out "$WORK/combined" > "$WORK/receipt/fleet-combined.log" 2>&1
+          "$py" fleet/diff_fleet.py "$WORK/control" "$WORK/combined" --json "$WORK/receipt/impact.json" --md "$WORK/receipt/impact.md"
+          "$py" - "$WORK/receipt/impact.json" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          report = json.loads(Path(sys.argv[1]).read_text())
+          assert set(report["models"]) == {"jdopensource-JoyAI-LLM-Flash-loom"}, report["models"].keys()
+          PY
+      - name: Compare normal port outputs from the exact source pairs
+        shell: bash
+        run: |
+          set -euo pipefail
+          py="$LOOM_ROOT/.tools/bin/python"
+          joy=jdopensource-JoyAI-LLM-Flash-loom
+          qwen=unsloth-Qwen3-0.6B-loom
+          "$py" fleet/build_fleet.py --tree . --rdna4 0 --slugs "$joy,$qwen" --keep-work --out "$WORK/fixtures" > "$WORK/receipt/port-fixtures.log" 2>&1
+          port_model() {
+            local tree=$1 slug=$2 repo=$3 label=$4
+            local inputs="$WORK/fixtures/_work/$slug" dest="$WORK/$label"
+            mkdir -p "$dest/gguf" "$dest/tok"
+            for file in "$inputs"/*.gguf; do ln -s "$file" "$dest/gguf/$(basename "$file")"; done
+            cp "$inputs/tokenizer_min.json" "$dest/tok/tokenizer.json"
+            "$py" - "$inputs/cfg.json" "$dest/cfg.json" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          cfg = json.loads(Path(sys.argv[1]).read_text())
+          cfg["gguf"] = "gguf/" + Path(cfg["gguf"]).name
+          cfg.pop("slug", None)
+          cfg.pop("prefill_capacity", None)
+          Path(sys.argv[2]).write_text(json.dumps(cfg, indent=1))
+          PY
+            local kit="$tree/skills/loom-port-llm/starter"
+            if [ "$slug" = "$joy" ]; then
+              kit="$dest/kit"
+              bash "$tree/skills/loom-port-llm/reference/apply_example.sh" deepseek2 "$kit" > "$WORK/receipt/$label-kit.log" 2>&1
+            fi
+            FROM=build STOP_AFTER=build KIT="$kit" bash "$tree/skills/loom-port-llm/port.sh" "$repo" "$dest" 8160 4096 "$repo" > "$WORK/receipt/$label.log" 2>&1
+          }
+          port_model "$WORK/pull" "$joy" jdopensource/JoyAI-LLM-Flash-GGUF joy-pr
+          port_model "$GITHUB_WORKSPACE" "$joy" jdopensource/JoyAI-LLM-Flash-GGUF joy-combined
+          port_model "$WORK/main" "$qwen" unsloth/Qwen3-0.6B-GGUF qwen-main
+          port_model "$GITHUB_WORKSPACE" "$qwen" unsloth/Qwen3-0.6B-GGUF qwen-combined
+          "$py" - <<'PY' > "$WORK/receipt/port-equivalence.json"
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          root = Path(os.environ["WORK"])
+          def result(label):
+              pkg = root / label / "pkg"
+              config = json.loads((pkg / "llm_config.json").read_text())
+              code = {p.relative_to(pkg).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest() for p in pkg.rglob("*.loom")}
+              model = json.loads((pkg / "model.json").read_text())
+              return {"slug": config.get("slug"), "choices": config.get("resolved"), "model": model, "programs": code}
+          joy = result("joy-combined")
+          qwen = result("qwen-combined")
+          assert joy == result("joy-pr"), "combined JoyAI changes package execution or compiled programs"
+          assert qwen == result("qwen-main"), "combined non-target changes package execution or compiled programs"
+          assert joy["slug"] == "jdopensource-JoyAI-LLM-Flash-loom" and qwen["slug"] is None
+          assert joy["model"]["presets"]["chat"]["execution"]["prefill_capacity"] == 8192
+          assert joy["choices"]["env"]["MOE_CW_DQ"] == "1"
+          print(json.dumps({"joyai": joy, "qwen": qwen, "exact": True}, indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always() && env.WORK != ''
+        with:
+          name: joyai-combined-source
+          path: ${{ env.WORK }}/receipt
+          retention-days: 30
+      - name: Release job paths
+        if: always() && env.WORK != ''
+        shell: bash
+        run: |
+          if [ "$WORK" = "$(dirname "$GITHUB_WORKSPACE")/sdk030-joyai-combined-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" ]; then
+            git worktree remove --force "$WORK/main" || true
+            git worktree remove --force "$WORK/pull" || true
+            rm -rf -- "$WORK"
+          fi
