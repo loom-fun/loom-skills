@@ -9,7 +9,7 @@
  },
  "jobs": [
   {
-   "name": "joyai-decode3",
+   "name": "joyai-decode4",
    "variants": [
     {
      "name": "base",
@@ -17,38 +17,28 @@
      "ref": "origin/joyai-combined"
     },
     {
-     "name": "dec2",
+     "name": "dec3",
      "build": {}
     },
     {
-     "name": "u1",
+     "name": "hg2",
      "build": {
-      "MOE_DN_U": "1"
-     }
-    },
-    {
-     "name": "rf0",
-     "build": {
-      "MOE_ROUTE_FUSE": "0"
+      "MLA_DEC_HG": "2"
      }
     }
    ],
    "steps": [
     "perf:base:1",
-    "perf:dec2:1",
-    "perf:u1:1",
-    "perf:rf0:1",
-    "perf:rf0:1",
-    "perf:u1:1",
-    "perf:dec2:1",
+    "perf:dec3:1",
+    "perf:hg2:1",
+    "perf:hg2:1",
+    "perf:dec3:1",
     "perf:base:1",
-    "c4:dec2",
-    "c4:u1",
-    "c4:u1",
-    "c4:dec2",
-    "perf:dec2:1:ctx",
-    "perf:base:1:ctx",
-    "gates:dec2:dev"
+    "perf:dec3:1:ctx",
+    "perf:hg2:1:ctx",
+    "c4:dec3",
+    "c4:base",
+    "llamac4"
    ]
   }
  ]

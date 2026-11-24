@@ -368,11 +368,11 @@
       "gen": "dec_step/gen_bench.py",
       "gen_variants": [
         "base",
-        "dd4"
+        "hg2"
       ],
       "files": [
         "bench.loom",
-        "bench_dd4.loom"
+        "bench_hg2.loom"
       ],
       "config": [],
       "args": [
@@ -393,15 +393,13 @@
       "gen": "mla_dec/gen_bench.py",
       "gen_variants": [
         "wmma",
-        "ql1",
-        "ql1+pf2",
-        "ql1+pf2+pfn5"
+        "hg2",
+        "sti"
       ],
       "files": [
         "bench_wmma.loom",
-        "bench_ql1.loom",
-        "bench_ql1+pf2.loom",
-        "bench_ql1+pf2+pfn5.loom"
+        "bench_hg2.loom",
+        "bench_sti.loom"
       ],
       "tests": [
         "test.loom"
