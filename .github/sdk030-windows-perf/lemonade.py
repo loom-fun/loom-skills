@@ -170,6 +170,8 @@ def run():
     install = cache / 'bin/loom/hrx'
     install.mkdir(parents=True)
     config.mkdir()
+    config_file = config / 'config.json'
+    config_file.write_text(json.dumps({'websocket_port': 0}), encoding='utf-8')
     backend = install / ('loom-serve' + suffix)
     with zipfile.ZipFile(root / standalone) as bundle:
         backend.write_bytes(bundle.read(backend.name))
@@ -184,6 +186,9 @@ def run():
     libraries = {name: sha(install / name) for name in runtime_files}
     write('same-version-upgrade.json', {'version': (install / 'version.txt').read_text().strip(),
                                       'before': before, 'after': installed_exe, 'libraries': libraries})
+    flash_config = {'websocket_port': 0, 'disable_model_filtering': True}
+    config_file.write_text(json.dumps(flash_config), encoding='utf-8')
+    write('flash-test-config.json', flash_config)
     label, alias, *_ = cases[1]
     chat(executable, cache, config, label, alias)
     assert sha(backend) == installed_exe

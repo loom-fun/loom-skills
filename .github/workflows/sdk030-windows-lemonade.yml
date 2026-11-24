@@ -7,7 +7,7 @@ permissions:
   contents: read
   actions: read
 env:
-  LEMONADE_REVISION: 891c067d787ad9d4c493c340651fbaf963a8f3e3
+  LEMONADE_REVISION: c183d72227b88bb7e32745c58b5a78178064ad34
 jobs:
   build:
     runs-on: windows-latest
@@ -93,7 +93,7 @@ jobs:
         with:
           name: lemonade-windows-draft
           path: ${{ env.WINPERF_SCRATCH }}/draft
-      - name: Upgrade an existing installation and serve both packages through Lemonade
+      - name: Upgrade an existing install and serve both packages with scoped lab configuration
         run: |
           $ErrorActionPreference = 'Stop'
           python .github/sdk030-windows-perf/lemonade.py run "$env:WINPERF_SCRATCH" "$env:GITHUB_WORKSPACE/windows-lemonade-evidence"

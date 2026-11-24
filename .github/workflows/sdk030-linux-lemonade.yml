@@ -18,7 +18,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - name: Build the exact draft while fetching the locked packages
+      - name: Verify the exact draft and serve both packages with scoped lab configuration
         shell: bash
         run: |
           set -euo pipefail
