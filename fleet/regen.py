@@ -79,6 +79,8 @@ for p in (HERE, CARD, os.path.join(ROOT, "skills", "loom-kb"), os.path.join(ROOT
     if p not in sys.path:
         sys.path.insert(0, p)
 import card_lib  # noqa: E402
+import make_info  # noqa: E402
+from draft_telemetry import DEPTH_COUNTED_PROPOSAL_SDKS  # noqa: E402
 import promote_check  # noqa: E402
 import sample_lib  # noqa: E402
 import sdk_package  # noqa: E402
@@ -2270,6 +2272,43 @@ def admission(d):
             "detail": ca.get("detail"), "warnings": warn, "log": logf}
 
 
+def acceptance_evidence(directory, device, view):
+    """Compare the same decode rows in the old card and the new perf session, in one unit."""
+    old_metrics = card_lib.card_metrics(view) if view else {}
+    old = {k: m["acceptance"] for k, (m, _) in old_metrics.items()
+           if k in card_lib.SESSION_ACCEPTANCE_ROWS and m.get("acceptance") is not None}
+    rows = []
+    if directory and os.path.isfile(os.path.join(directory, "perf_staging.jsonl")):
+        rows = make_info.perf_rows(os.path.join(directory, "perf_staging.jsonl"), "loom")
+    pp, _ = make_info.session_values(rows, make_info.per_pass_samples)
+    shares, _ = make_info.session_values(rows, make_info.acceptance_samples)
+    depth = None
+    if directory and all(os.path.isfile(os.path.join(directory, f)) for f in ("model_staging.json", "llm_config.json")):
+        presets = sdk_package.load(os.path.join(directory, "model_staging.json"))["presets"]
+        first = next(iter(presets))
+        suffix = card_lib.GPUS[device].get("preset_suffix", "")
+        execution = presets.get(first + suffix, presets[first]).get("execution", {})
+        spec = card_lib.drafter_setting(sdk_package.load(os.path.join(directory, "llm_config.json")), execution)
+        depth = spec[1] if spec else None
+    samples = pp or shares
+    current = {k: statistics.median(v) for k, v in samples.items()}
+    unit = "accepted_per_pass" if pp else "share"
+    result = {"unit": unit, "old": None, "new": None, "per_row": current,
+              "required": bool(old or samples or depth or "spec_acceptance" in old_metrics)}
+    if not result["required"]:
+        return result
+    if current:
+        result["new"] = round(statistics.median(current.values()), 3)
+    if old and (not pp or depth):
+        sessions = view["performance"]["sessions"]
+        # Only the old SDK that counted depth proposals on every verification supports this conversion.
+        if not pp or all(card_lib.source_sdk(view, sessions[old_metrics[k][1]]["source"]) in DEPTH_COUNTED_PROPOSAL_SDKS for k in old):
+            result["old"] = round(round(statistics.median(old.values()), 3) * (depth if pp else 1), 3)
+    if set(old) != set(current) or (pp and shares):
+        result["incomparable"] = "decode rows or reported units differ"
+    return result
+
+
 def device_evidence(st, e, info_cache):
     """sdk-evidence/1 entry of one collected sweep job (notes/evidence_schema.md)"""
     d = e.get("dir")
@@ -2288,7 +2327,7 @@ def device_evidence(st, e, info_cache):
     cmp = sdk_package.load(e["cmp"]) if e.get("cmp") and os.path.isfile(e["cmp"]) else {}
     m = cmp.get("metrics") or {}
     old_ref = e.get("old") or e.get("source_card")
-    old_rows, session = {}, None
+    old_rows, session, view = {}, None, None
     if old_ref:
         if old_ref not in info_cache:
             repo, _, rev = old_ref.partition("@")
@@ -2299,10 +2338,10 @@ def device_evidence(st, e, info_cache):
             old_rows[k] = row.get("loom")
             if k == "decode":
                 session = {key: sessions[i].get(key) for key in ("date", "source", "programs_sha256")}
-    acc = cmp.get("acceptance") or {}
-    new_acc = [x["new"] for x in acc.values() if x.get("new") is not None]
+    acceptance = acceptance_evidence(d, e["device"], view)
+    old_rows["spec_acceptance"] = acceptance["old"]
     new_rows = {k: (m.get(k) or {}).get("new") for k in EVIDENCE_ROWS if k != "spec_acceptance"}
-    new_rows["spec_acceptance"] = round(statistics.median(new_acc), 4) if new_acc else None
+    new_rows["spec_acceptance"] = acceptance["new"]
     ev["old"] = {"session": session, "rows": {k: old_rows.get(k) for k in EVIDENCE_ROWS}}
     ev["new"] = {"rows": new_rows}
     ev["delta_pct"] = {k: round((new_rows[k] / old_rows[k] - 1) * 100, 1) for k in EVIDENCE_ROWS
@@ -2312,9 +2351,13 @@ def device_evidence(st, e, info_cache):
     if e.get("confirmed_by"):
         ev["confirmed_by"] = e["confirmed_by"]
     exact = {k: (m.get(k) or {}).get("new_vs_card") for k in ev["delta_pct"]}
+    if acceptance["old"] and acceptance["new"] is not None and not acceptance.get("incomparable"):
+        ratio = acceptance["new"] / acceptance["old"]
+        exact["spec_acceptance"] = ratio
+        ev["delta_pct"]["spec_acceptance"] = round((ratio - 1) * 100, 4)
     ev["regressions"] = []
     for k in sorted(ev["delta_pct"]):
-        if not exact.get(k) or exact[k] - 1 >= -SDK_REGRESSION:
+        if exact.get(k) is None or exact[k] - 1 >= -SDK_REGRESSION:
             continue
         c = ev["confirmed"].get(k)
         expl = explanations(st.d, e["slug"]).get("card", {}).get(e["device"], {}).get(k)   # a root cause written for it (regen.py explain)
@@ -2336,8 +2379,7 @@ def device_evidence(st, e, info_cache):
     ev["func"] = next((v[:120] for k, v in summ.items() if k.startswith("func:")), None)
     ev["admission"] = admission(d)
     raw = sorted(os.path.basename(f) for f in glob.glob(os.path.join(d or "", "metrics_staging_*.txt")))
-    ev["spec_acceptance"] = {"old": old_rows.get("spec_acceptance"), "new": new_rows["spec_acceptance"], "per_row": {k: x.get("new") for k, x in acc.items()},
-                             "raw": raw}
+    ev["spec_acceptance"] = dict(acceptance, raw=raw)
     return ev
 
 

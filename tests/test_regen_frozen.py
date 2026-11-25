@@ -40,6 +40,26 @@ def facts(repo, rev, cache):
             "features": ["draft"], "sdk": {"hrx_loom": "0.2.0"}}
 
 
+class AcceptanceEvidence(unittest.TestCase):
+    def test_perf_session_per_pass_uses_old_decode_row_and_device_depth(self):
+        view = {"performance": {"sessions": [{"source": "old", "metrics": {
+            "decode": {"acceptance": 0.5}, "spec_acceptance": {"loom": 0.8}}}]},
+                "sources": {"old": {"hrx_loom": {"hrx_loom": "0.2.0"}}}}
+        with tempfile.TemporaryDirectory() as d:
+            def write(name, doc):
+                with open(os.path.join(d, name), "w") as f:
+                    json.dump(doc, f)
+            write("model_staging.json", {"presets": {"chat": {"execution": {}}, "chat-r9700": {"execution": {"draft_depth": 2}}}})
+            write("llm_config.json", {"draft": {"depth": 3}})
+            write("perf_staging.jsonl", {"label": "fun", "accepted_per_pass": {"decode_tps": 0.9}})
+            result = regen.acceptance_evidence(d, "radeon-r9700", view)
+            self.assertEqual((result["old"], result["new"], result["unit"]), (1, 0.9, "accepted_per_pass"))
+            del view["performance"]["sessions"][0]["metrics"]["decode"]
+            result = regen.acceptance_evidence(d, "radeon-r9700", view)
+            self.assertIsNone(result["old"])
+            self.assertTrue(result["incomparable"])
+
+
 class VersionGeneric(unittest.TestCase):
     def test_newest_verified_release_is_the_default_target(self):
         self.assertEqual(regen.SDK_NEW, max(regen.VERIFIED_RELEASES, key=regen.version_key))
