@@ -1,46 +1,562 @@
 {
- "_comment": "R9700 per-model measurement (r9700_jobs.py): one job per model on one R9700 runner; loom-fun-staging card, llama.cpp ROCm b1375 + Vulkan b12211 with the matched drafting, reduced-context models served at served_context. Does not fit: none",
+ "_comment": "R9700 A/B (ab_jobs.py): per model one job on one R9700 runner, old package (fun) vs new package (staging), served as the new card's R9700 Quick start, same prompts and settings; compare with strix_ab_compare.py. Does not fit: none Frozen programs (--programs production): staging = the published package at its pinned revision on hrx-loom 0.3.0, fun = the same package on card; nothing is built, the programs hash is checked before measuring.",
  "runner": "r9700",
  "memory_bytes": 34000000000,
  "llama_spec": "matched",
  "jobs": [
   {
-   "name": "unsloth-qwen3-0-6b-loom",
-   "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
+   "llama_kv_rocm": 36864,
+   "name": "rab-ggml-org-laguna-xs-2-1-loom-r2",
+   "runner": "r9700",
+   "repeat_rows": 3,
+   "card": "loom-fun/ggml-org-Laguna-XS-2.1-loom@640cfee4a72a1336888459ba83948d5d74ab9f44",
+   "memory_bytes_r9700": 34000000000,
+   "served_context": 24576,
    "kit": null,
    "llamacpp": "b1375",
    "llamacpp_vulkan": "b12211",
-   "memory_bytes_r9700": 17000000000,
    "variants": [
     {
-     "name": "card",
-     "build": {}
+     "context": 24576,
+     "execution": {
+      "context_capacity": 24576,
+      "pool_capacity": 24576
+     },
+     "sdk": "card",
+     "programs_sha256": "3681776dd4e74b9c66eceefd60bff790d03aa1f0f4a08e0084cb1132a5356e85",
+     "name": "fun",
+     "card": "loom-fun/ggml-org-Laguna-XS-2.1-loom@640cfee4a72a1336888459ba83948d5d74ab9f44"
     },
     {
-     "name": "nodraft",
-     "build": {},
+     "name": "staging",
+     "context": 24576,
      "execution": {
+      "context_capacity": 24576,
+      "pool_capacity": 24576
+     },
+     "sdk": "0.3.0",
+     "programs_sha256": "3681776dd4e74b9c66eceefd60bff790d03aa1f0f4a08e0084cb1132a5356e85"
+    },
+    {
+     "context": 24576,
+     "execution": {
+      "context_capacity": 24576,
+      "pool_capacity": 24576,
       "draft_depth": 0
-     }
+     },
+     "sdk": "card",
+     "programs_sha256": "3681776dd4e74b9c66eceefd60bff790d03aa1f0f4a08e0084cb1132a5356e85",
+     "name": "funnd",
+     "card": "loom-fun/ggml-org-Laguna-XS-2.1-loom@640cfee4a72a1336888459ba83948d5d74ab9f44"
+    },
+    {
+     "name": "stagingnd",
+     "context": 24576,
+     "execution": {
+      "context_capacity": 24576,
+      "pool_capacity": 24576,
+      "draft_depth": 0
+     },
+     "sdk": "0.3.0",
+     "programs_sha256": "3681776dd4e74b9c66eceefd60bff790d03aa1f0f4a08e0084cb1132a5356e85"
     }
    ],
    "steps": [
-    "func:card",
-    "ktest:card",
-    "gates:card:dev",
-    "perf:card:3",
-    "perf:card:3:long",
-    "c4:nodraft",
-    "llama@rocm.np1:3",
-    "llama@rocm.np1:3:long",
-    "llamac4@rocm.nodraft",
-    "llama@vulkan.np1:3",
-    "llama@vulkan.np1:3:long",
-    "llamac4@vulkan.perslot.nodraft"
-   ]
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:fun:1",
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:fun:1",
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:fun:1",
+    "perf:staging:1:long",
+    "perf:fun:1:long",
+    "perf:fun:1:long",
+    "perf:staging:1:long",
+    "perf:staging:1:long",
+    "perf:fun:1:long",
+    "perf:fun:1:long",
+    "perf:staging:1:long",
+    "perf:staging:1:long",
+    "perf:fun:1:long",
+    "perf:fun:1:long",
+    "perf:staging:1:long",
+    "c4:funnd",
+    "c4:stagingnd",
+    "c4:stagingnd",
+    "c4:funnd",
+    "c4:funnd",
+    "c4:stagingnd",
+    "c4:stagingnd",
+    "c4:funnd",
+    "textmatch:fun",
+    "textmatch:staging"
+   ],
+   "sdk": "0.3.0"
+  },
+  {
+   "llama_kv_rocm": 45056,
+   "name": "rab-ggml-org-muse-glimmer-30b-loom-r2",
+   "runner": "r9700",
+   "card": "loom-fun/ggml-org-Muse-Glimmer-30B-loom@40344e99e4b4d632b89c45278e5d1ffc46023cfb",
+   "require_preset_r9700": true,
+   "memory_bytes_r9700": 34000000000,
+   "served_context": 32768,
+   "kit": "glimmer",
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "context": 32768,
+     "sdk": "card",
+     "programs_sha256": "d7b7d23eb071d9e867abe828fbf4c5291cecf698bb241d911387ab4f848f241a",
+     "name": "fun",
+     "card": "loom-fun/ggml-org-Muse-Glimmer-30B-loom@40344e99e4b4d632b89c45278e5d1ffc46023cfb"
+    },
+    {
+     "name": "staging",
+     "context": 32768,
+     "sdk": "0.3.0",
+     "programs_sha256": "d7b7d23eb071d9e867abe828fbf4c5291cecf698bb241d911387ab4f848f241a"
+    },
+    {
+     "context": 32768,
+     "execution": {
+      "draft_depth": 0
+     },
+     "sdk": "card",
+     "programs_sha256": "d7b7d23eb071d9e867abe828fbf4c5291cecf698bb241d911387ab4f848f241a",
+     "name": "funnd",
+     "card": "loom-fun/ggml-org-Muse-Glimmer-30B-loom@40344e99e4b4d632b89c45278e5d1ffc46023cfb"
+    },
+    {
+     "name": "stagingnd",
+     "context": 32768,
+     "execution": {
+      "draft_depth": 0
+     },
+     "sdk": "0.3.0",
+     "programs_sha256": "d7b7d23eb071d9e867abe828fbf4c5291cecf698bb241d911387ab4f848f241a"
+    }
+   ],
+   "steps": [
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:fun:1",
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:staging:1:long",
+    "perf:fun:1:long",
+    "perf:fun:1:long",
+    "perf:staging:1:long",
+    "perf:staging:1:long",
+    "perf:fun:1:long",
+    "c4:funnd",
+    "c4:stagingnd",
+    "c4:stagingnd",
+    "c4:funnd",
+    "textmatch:fun",
+    "textmatch:staging"
+   ],
+   "sdk": "0.3.0"
+  },
+  {
+   "llama_kv_rocm": 61440,
+   "name": "rab-ggml-org-qwen3-6-27b-loom-r2",
+   "runner": "r9700",
+   "card": "loom-fun/ggml-org-Qwen3.6-27B-loom@f86d908dd9e7caaf8312c4f753a600c3dfdc6ad8",
+   "require_preset_r9700": true,
+   "memory_bytes_r9700": 34000000000,
+   "served_context": 69632,
+   "kit": null,
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "context": 69632,
+     "sdk": "card",
+     "programs_sha256": "dd12d8ccac4e4e15b560f53c3499c13246cf738562c51a69e76b50bfcf343602",
+     "name": "fun",
+     "card": "loom-fun/ggml-org-Qwen3.6-27B-loom@f86d908dd9e7caaf8312c4f753a600c3dfdc6ad8"
+    },
+    {
+     "name": "staging",
+     "context": 69632,
+     "sdk": "0.3.0",
+     "programs_sha256": "dd12d8ccac4e4e15b560f53c3499c13246cf738562c51a69e76b50bfcf343602"
+    },
+    {
+     "context": 69632,
+     "execution": {
+      "draft_depth": 0
+     },
+     "sdk": "card",
+     "programs_sha256": "dd12d8ccac4e4e15b560f53c3499c13246cf738562c51a69e76b50bfcf343602",
+     "name": "funnd",
+     "card": "loom-fun/ggml-org-Qwen3.6-27B-loom@f86d908dd9e7caaf8312c4f753a600c3dfdc6ad8"
+    },
+    {
+     "name": "stagingnd",
+     "context": 69632,
+     "execution": {
+      "draft_depth": 0
+     },
+     "sdk": "0.3.0",
+     "programs_sha256": "dd12d8ccac4e4e15b560f53c3499c13246cf738562c51a69e76b50bfcf343602"
+    }
+   ],
+   "steps": [
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:fun:1",
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:staging:1:long",
+    "perf:fun:1:long",
+    "perf:fun:1:long",
+    "perf:staging:1:long",
+    "perf:staging:1:long",
+    "perf:fun:1:long",
+    "c4:funnd",
+    "c4:stagingnd",
+    "c4:stagingnd",
+    "c4:funnd",
+    "textmatch:fun",
+    "textmatch:staging"
+   ],
+   "sdk": "0.3.0"
+  },
+  {
+   "name": "rab-ggml-org-qwen3-coder-30b-a3b-inst-r2",
+   "runner": "r9700",
+   "repeat_rows": 3,
+   "card": "loom-fun/ggml-org-Qwen3-Coder-30B-A3B-Instruct-loom@90f4d2874d066ab7ad0c16daab9a383fa55f47a5",
+   "require_preset_r9700": true,
+   "memory_bytes_r9700": 34000000000,
+   "served_context": 94208,
+   "kit": null,
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "context": 94208,
+     "sdk": "card",
+     "programs_sha256": "6800f442df0dde69131323f30b67202a3b950b095a55c4fba452016e272d63f6",
+     "name": "fun",
+     "card": "loom-fun/ggml-org-Qwen3-Coder-30B-A3B-Instruct-loom@90f4d2874d066ab7ad0c16daab9a383fa55f47a5"
+    },
+    {
+     "name": "staging",
+     "context": 94208,
+     "sdk": "0.3.0",
+     "programs_sha256": "6800f442df0dde69131323f30b67202a3b950b095a55c4fba452016e272d63f6"
+    },
+    {
+     "context": 94208,
+     "execution": {
+      "draft_depth": 0
+     },
+     "sdk": "card",
+     "programs_sha256": "6800f442df0dde69131323f30b67202a3b950b095a55c4fba452016e272d63f6",
+     "name": "funnd",
+     "card": "loom-fun/ggml-org-Qwen3-Coder-30B-A3B-Instruct-loom@90f4d2874d066ab7ad0c16daab9a383fa55f47a5"
+    },
+    {
+     "name": "stagingnd",
+     "context": 94208,
+     "execution": {
+      "draft_depth": 0
+     },
+     "sdk": "0.3.0",
+     "programs_sha256": "6800f442df0dde69131323f30b67202a3b950b095a55c4fba452016e272d63f6"
+    }
+   ],
+   "steps": [
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:fun:1",
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:fun:1",
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:fun:1",
+    "perf:staging:1:long",
+    "perf:fun:1:long",
+    "perf:fun:1:long",
+    "perf:staging:1:long",
+    "perf:staging:1:long",
+    "perf:fun:1:long",
+    "perf:fun:1:long",
+    "perf:staging:1:long",
+    "perf:staging:1:long",
+    "perf:fun:1:long",
+    "perf:fun:1:long",
+    "perf:staging:1:long",
+    "c4:funnd",
+    "c4:stagingnd",
+    "c4:stagingnd",
+    "c4:funnd",
+    "c4:funnd",
+    "c4:stagingnd",
+    "c4:stagingnd",
+    "c4:funnd",
+    "textmatch:fun",
+    "textmatch:staging"
+   ],
+   "sdk": "0.3.0"
+  },
+  {
+   "llama_kv_rocm": 36864,
+   "name": "rab-lmstudio-community-gemma-4-26b-a4-r2",
+   "runner": "r9700",
+   "repeat_rows": 3,
+   "card": "loom-fun/lmstudio-community-gemma-4-26B-A4B-it-loom@eb2bd1117e4a1de4d949b39fb6ac217e7ef35e6a",
+   "require_preset_r9700": true,
+   "memory_bytes_r9700": 34000000000,
+   "served_context": 26624,
+   "kit": "gemma4",
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "context": 26624,
+     "sdk": "card",
+     "programs_sha256": "500c2d0ef4e65fa5abccb584958b4047f7c94325b11d2625ddf365e3328751b3",
+     "name": "fun",
+     "card": "loom-fun/lmstudio-community-gemma-4-26B-A4B-it-loom@eb2bd1117e4a1de4d949b39fb6ac217e7ef35e6a"
+    },
+    {
+     "name": "staging",
+     "context": 26624,
+     "sdk": "0.3.0",
+     "programs_sha256": "500c2d0ef4e65fa5abccb584958b4047f7c94325b11d2625ddf365e3328751b3"
+    },
+    {
+     "context": 26624,
+     "execution": {
+      "draft_depth": 0
+     },
+     "sdk": "card",
+     "programs_sha256": "500c2d0ef4e65fa5abccb584958b4047f7c94325b11d2625ddf365e3328751b3",
+     "name": "funnd",
+     "card": "loom-fun/lmstudio-community-gemma-4-26B-A4B-it-loom@eb2bd1117e4a1de4d949b39fb6ac217e7ef35e6a"
+    },
+    {
+     "name": "stagingnd",
+     "context": 26624,
+     "execution": {
+      "draft_depth": 0
+     },
+     "sdk": "0.3.0",
+     "programs_sha256": "500c2d0ef4e65fa5abccb584958b4047f7c94325b11d2625ddf365e3328751b3"
+    }
+   ],
+   "steps": [
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:fun:1",
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:fun:1",
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:fun:1",
+    "perf:staging:1:long",
+    "perf:fun:1:long",
+    "perf:fun:1:long",
+    "perf:staging:1:long",
+    "perf:staging:1:long",
+    "perf:fun:1:long",
+    "perf:fun:1:long",
+    "perf:staging:1:long",
+    "perf:staging:1:long",
+    "perf:fun:1:long",
+    "perf:fun:1:long",
+    "perf:staging:1:long",
+    "c4:funnd",
+    "c4:stagingnd",
+    "c4:stagingnd",
+    "c4:funnd",
+    "c4:funnd",
+    "c4:stagingnd",
+    "c4:stagingnd",
+    "c4:funnd",
+    "textmatch:fun",
+    "textmatch:staging"
+   ],
+   "sdk": "0.3.0"
+  },
+  {
+   "name": "rab-nvidia-nvidia-nemotron-3-5-bolt-e-r2",
+   "runner": "r9700",
+   "repeat_rows": 3,
+   "card": "loom-fun/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom@3f36ed722f6c8bdb51d90526bc05e03a05f24dbf",
+   "memory_bytes_r9700": 34000000000,
+   "kit": "gemma4",
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "sdk": "card",
+     "programs_sha256": "c0f2ffffb75fbe4fb88300109f23df40b85f248261d999139dd28792cbdbe95c",
+     "name": "fun",
+     "card": "loom-fun/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom@3f36ed722f6c8bdb51d90526bc05e03a05f24dbf"
+    },
+    {
+     "name": "staging",
+     "sdk": "0.3.0",
+     "programs_sha256": "c0f2ffffb75fbe4fb88300109f23df40b85f248261d999139dd28792cbdbe95c"
+    },
+    {
+     "execution": {
+      "draft_depth": 0
+     },
+     "sdk": "card",
+     "programs_sha256": "c0f2ffffb75fbe4fb88300109f23df40b85f248261d999139dd28792cbdbe95c",
+     "name": "funnd",
+     "card": "loom-fun/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom@3f36ed722f6c8bdb51d90526bc05e03a05f24dbf"
+    },
+    {
+     "name": "stagingnd",
+     "execution": {
+      "draft_depth": 0
+     },
+     "sdk": "0.3.0",
+     "programs_sha256": "c0f2ffffb75fbe4fb88300109f23df40b85f248261d999139dd28792cbdbe95c"
+    }
+   ],
+   "steps": [
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:fun:1",
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:fun:1",
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:fun:1",
+    "perf:staging:1:long",
+    "perf:fun:1:long",
+    "perf:fun:1:long",
+    "perf:staging:1:long",
+    "perf:staging:1:long",
+    "perf:fun:1:long",
+    "perf:fun:1:long",
+    "perf:staging:1:long",
+    "perf:staging:1:long",
+    "perf:fun:1:long",
+    "perf:fun:1:long",
+    "perf:staging:1:long",
+    "c4:funnd",
+    "c4:stagingnd",
+    "c4:stagingnd",
+    "c4:funnd",
+    "c4:funnd",
+    "c4:stagingnd",
+    "c4:stagingnd",
+    "c4:funnd",
+    "textmatch:fun",
+    "textmatch:staging"
+   ],
+   "sdk": "0.3.0"
+  },
+  {
+   "name": "rab-rippertnt-hyperclovax-seed-text-i-r2",
+   "runner": "r9700",
+   "repeat_rows": 3,
+   "card": "loom-fun/rippertnt-HyperCLOVAX-SEED-Text-Instruct-1.5B-loom@0c8e8831544e6625431a8177873fa531e75d0cc0",
+   "require_preset_r9700": true,
+   "memory_bytes_r9700": 24000000000,
+   "kit": null,
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "sdk": "card",
+     "programs_sha256": "e4184377323e3d9bbe2bf58d66abdb805b36beb6bba7fba222ed9675d415f874",
+     "name": "fun",
+     "card": "loom-fun/rippertnt-HyperCLOVAX-SEED-Text-Instruct-1.5B-loom@0c8e8831544e6625431a8177873fa531e75d0cc0"
+    },
+    {
+     "name": "staging",
+     "sdk": "0.3.0",
+     "programs_sha256": "e4184377323e3d9bbe2bf58d66abdb805b36beb6bba7fba222ed9675d415f874"
+    },
+    {
+     "execution": {
+      "draft_depth": 0
+     },
+     "sdk": "card",
+     "programs_sha256": "e4184377323e3d9bbe2bf58d66abdb805b36beb6bba7fba222ed9675d415f874",
+     "name": "funnd",
+     "card": "loom-fun/rippertnt-HyperCLOVAX-SEED-Text-Instruct-1.5B-loom@0c8e8831544e6625431a8177873fa531e75d0cc0"
+    },
+    {
+     "name": "stagingnd",
+     "execution": {
+      "draft_depth": 0
+     },
+     "sdk": "0.3.0",
+     "programs_sha256": "e4184377323e3d9bbe2bf58d66abdb805b36beb6bba7fba222ed9675d415f874"
+    }
+   ],
+   "steps": [
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:fun:1",
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:fun:1",
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:fun:1",
+    "perf:staging:1:long",
+    "perf:fun:1:long",
+    "perf:fun:1:long",
+    "perf:staging:1:long",
+    "perf:staging:1:long",
+    "perf:fun:1:long",
+    "perf:fun:1:long",
+    "perf:staging:1:long",
+    "perf:staging:1:long",
+    "perf:fun:1:long",
+    "perf:fun:1:long",
+    "perf:staging:1:long",
+    "c4:funnd",
+    "c4:stagingnd",
+    "c4:stagingnd",
+    "c4:funnd",
+    "c4:funnd",
+    "c4:stagingnd",
+    "c4:stagingnd",
+    "c4:funnd",
+    "textmatch:fun",
+    "textmatch:staging"
+   ],
+   "sdk": "0.3.0"
   }
  ],
- "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
+ "card": "loom-fun/ggml-org-Laguna-XS-2.1-loom@640cfee4a72a1336888459ba83948d5d74ab9f44",
  "kit": null,
  "llamacpp": "b1375",
  "llamacpp_vulkan": "b12211"
