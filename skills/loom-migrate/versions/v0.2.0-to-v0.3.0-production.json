@@ -28,11 +28,12 @@
   "loom-fun/ggml-org-Qwen3.6-27B-loom": "f86d908dd9e7caaf8312c4f753a600c3dfdc6ad8",
   "loom-fun/ggml-org-Qwen3.6-35B-A3B-loom": "9a06cc9ba5ca93e2de3a5fa40b2ad4e415d191fe",
   "loom-fun/InternScience-Sage-A1.5-loom": "bfa32772063c03a549b3452520d3110e0d978f2f",
-  "loom-fun/jdopensource-JoyAI-LLM-Flash-loom": "cb7861a81dbb586782044145ebb11f8cd48d8c8e",
+  "loom-fun/jdopensource-JoyAI-LLM-Flash-loom": "b4787e7927e3863b612b50c13c69207efaa7806e",
   "loom-fun/lmstudio-community-gemma-4-26B-A4B-it-loom": "eb2bd1117e4a1de4d949b39fb6ac217e7ef35e6a",
   "loom-fun/lmstudio-community-Ornith-1.0-35B-loom": "70e56c1cc62e13fda963337500228fded6ffdb9d",
   "loom-fun/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom": "3f36ed722f6c8bdb51d90526bc05e03a05f24dbf",
   "loom-fun/rippertnt-HyperCLOVAX-SEED-Text-Instruct-1.5B-loom": "0c8e8831544e6625431a8177873fa531e75d0cc0",
+  "loom-fun/SenseNova-U1.6-MoT-R9700-loom": "924a9aa0c5a3d810389c8af20d1f84fc78a7d566",
   "loom-fun/Tongyi-MAI-Z-Image-Turbo-loom": "77e103e314324c35a88b62350286b07e8dc0f05d",
   "loom-fun/unsloth-gemma-4-12B-it-loom": "34d4382c23b9357cd46894e7a6b1577aa86cf084",
   "loom-fun/unsloth-gemma-4-26B-A4B-it-qat-loom": "da1e6ae137920f0565d989e0731128288eb712e3",
@@ -59,5 +60,38 @@
   "loom-fun/unsloth-Qwen3.8-27B-UD-Q4_K_XL": "3e43d41d0bfae65f17a77794264f82a3b5f2c990",
   "loom-fun/unsloth-Qwen3.8-Flash-Next-loom": "d847c21bc93c0c6bc45752a9edaf91d80ac74490",
   "loom-fun/XHToken-Spark-X2.5-4B-loom": "b2e87e163ac1e1db1912ea4aaed57bc3816b78a5",
-  "loom-fun/xinntao-Real-ESRGAN-x4plus-loom": "d7126ceb45f03476c8f6608ba77959dd48fe4515"
+  "loom-fun/xinntao-Real-ESRGAN-x4plus-loom": "28f0b3d9e036b367e52845b422e30ed6b029b503",
+  "_drift": {
+    "captured": "2026-11-24 (US Eastern evening); previous inventory: the release bundle snapshot 2026-11-24 20:05:30 UTC",
+    "added": {
+      "loom-fun/SenseNova-U1.6-MoT-R9700-loom": {
+        "to": "924a9aa0c5a3d810389c8af20d1f84fc78a7d566",
+        "note": "created 2026-11-24 20:05 UTC on SDK 0.2.0; held (owner decision, #1409)"
+      }
+    },
+    "moved": {
+      "loom-fun/jdopensource-JoyAI-LLM-Flash-loom": {
+        "from": "cb7861a81dbb586782044145ebb11f8cd48d8c8e",
+        "to": "b4787e7927e3863b612b50c13c69207efaa7806e",
+        "commits": [
+          "58159cc3 Card",
+          "9dd20c66 Loom package and card",
+          "beb54184 Card",
+          "b3ab79c9 Loom package and card",
+          "b4787e79 Card"
+        ],
+        "programs_sha256": {
+          "from": "708f049b6caa3e73bc4d72e94a50b78353aa810c5c43d16e1eb424e18952246f",
+          "to": "bf2c516bdedc09998b86e9a48e240b4a7cde001881c77fcb0c3c4b5d530c28c6"
+        }
+      },
+      "loom-fun/xinntao-Real-ESRGAN-x4plus-loom": {
+        "from": "d7126ceb45f03476c8f6608ba77959dd48fe4515",
+        "to": "28f0b3d9e036b367e52845b422e30ed6b029b503",
+        "commits": [
+          "28f0b3d9 Time every backend through the same workflow"
+        ]
+      }
+    }
+  }
 }
