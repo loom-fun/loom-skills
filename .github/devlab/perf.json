@@ -1,47 +1,241 @@
 {
- "_comment": "R9700 per-model measurement (r9700_jobs.py): one job per model on one R9700 runner; loom-fun-staging card, llama.cpp ROCm b1375 + Vulkan b12211 with the matched drafting, reduced-context models served at served_context. Does not fit: none",
- "runner": "r9700",
- "memory_bytes": 34000000000,
- "llama_spec": "matched",
+ "_comment": "qwen35 lane round 3: bisect the gfx11 set's 32k prefill cost + flash2s head_dim-256 screens (Strix, chunk 8192, long rows)",
  "jobs": [
   {
-   "name": "unsloth-qwen3-0-6b-loom",
-   "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
+   "name": "r3-s-q36",
+   "runner": "strix",
+   "card": "loom-fun/ggml-org-Qwen3.6-35B-A3B-loom@9a06cc9ba5ca93e2de3a5fa40b2ad4e415d191fe",
+   "memory_bytes": 48000000000,
    "kit": null,
-   "llamacpp": "b1375",
+   "llamacpp": "b1374",
    "llamacpp_vulkan": "b12211",
-   "memory_bytes_r9700": 17000000000,
    "variants": [
     {
-     "name": "card",
-     "build": {}
+     "name": "x8",
+     "build": {
+      "QG_SPLIT": "1",
+      "GDN_CHUNK11": "1",
+      "GDN_CHUNK11_CN": "16",
+      "GEMM_M256_F16O": "1",
+      "FLASH2_KT256": "16",
+      "GDN_CHUNK": "1",
+      "GDN_COPY_SPLIT": "8",
+      "FLASH2_TRIM": "1",
+      "MOE_STORE16": "1",
+      "ROUTE_TR": "8"
+     },
+     "build_args": [
+      "--memory-gib",
+      "4096"
+     ],
+     "sdk": "0.3.0",
+     "execution": {
+      "prefill_capacity": 8192
+     }
     },
     {
-     "name": "nodraft",
-     "build": {},
+     "name": "nokt",
+     "build": {
+      "QG_SPLIT": "1",
+      "GDN_CHUNK11": "1",
+      "GDN_CHUNK11_CN": "16",
+      "GEMM_M256_F16O": "1",
+      "GDN_CHUNK": "1",
+      "GDN_COPY_SPLIT": "8",
+      "FLASH2_TRIM": "1",
+      "MOE_STORE16": "1",
+      "ROUTE_TR": "8"
+     },
+     "build_args": [
+      "--memory-gib",
+      "4096"
+     ],
+     "sdk": "0.3.0",
      "execution": {
-      "draft_depth": 0
+      "prefill_capacity": 8192
+     }
+    },
+    {
+     "name": "nof16o",
+     "build": {
+      "QG_SPLIT": "1",
+      "GDN_CHUNK11": "1",
+      "GDN_CHUNK11_CN": "16",
+      "FLASH2_KT256": "16",
+      "GDN_CHUNK": "1",
+      "GDN_COPY_SPLIT": "8",
+      "FLASH2_TRIM": "1",
+      "MOE_STORE16": "1",
+      "ROUTE_TR": "8"
+     },
+     "build_args": [
+      "--memory-gib",
+      "4096"
+     ],
+     "sdk": "0.3.0",
+     "execution": {
+      "prefill_capacity": 8192
+     }
+    },
+    {
+     "name": "noqgs",
+     "build": {
+      "GDN_CHUNK11": "1",
+      "GDN_CHUNK11_CN": "16",
+      "GEMM_M256_F16O": "1",
+      "FLASH2_KT256": "16",
+      "GDN_CHUNK": "1",
+      "GDN_COPY_SPLIT": "8",
+      "FLASH2_TRIM": "1",
+      "MOE_STORE16": "1",
+      "ROUTE_TR": "8"
+     },
+     "build_args": [
+      "--memory-gib",
+      "4096"
+     ],
+     "sdk": "0.3.0",
+     "execution": {
+      "prefill_capacity": 8192
+     }
+    },
+    {
+     "name": "noc11",
+     "build": {
+      "QG_SPLIT": "1",
+      "GEMM_M256_F16O": "1",
+      "FLASH2_KT256": "16",
+      "GDN_CHUNK": "1",
+      "GDN_COPY_SPLIT": "8",
+      "FLASH2_TRIM": "1",
+      "MOE_STORE16": "1",
+      "ROUTE_TR": "8"
+     },
+     "build_args": [
+      "--memory-gib",
+      "4096"
+     ],
+     "sdk": "0.3.0",
+     "execution": {
+      "prefill_capacity": 8192
+     }
+    },
+    {
+     "name": "ng2",
+     "build": {
+      "QG_SPLIT": "1",
+      "GDN_CHUNK11": "1",
+      "GDN_CHUNK11_CN": "16",
+      "GEMM_M256_F16O": "1",
+      "FLASH2_KT256": "16",
+      "GDN_CHUNK": "1",
+      "GDN_COPY_SPLIT": "8",
+      "FLASH2_TRIM": "1",
+      "MOE_STORE16": "1",
+      "ROUTE_TR": "8",
+      "FLASH2_NG256": "2"
+     },
+     "build_args": [
+      "--memory-gib",
+      "4096"
+     ],
+     "sdk": "0.3.0",
+     "execution": {
+      "prefill_capacity": 8192
+     }
+    },
+    {
+     "name": "pf",
+     "build": {
+      "QG_SPLIT": "1",
+      "GDN_CHUNK11": "1",
+      "GDN_CHUNK11_CN": "16",
+      "GEMM_M256_F16O": "1",
+      "FLASH2_KT256": "16",
+      "GDN_CHUNK": "1",
+      "GDN_COPY_SPLIT": "8",
+      "FLASH2_TRIM": "1",
+      "MOE_STORE16": "1",
+      "ROUTE_TR": "8",
+      "FLASH2_G11": "pf"
+     },
+     "build_args": [
+      "--memory-gib",
+      "4096"
+     ],
+     "sdk": "0.3.0",
+     "execution": {
+      "prefill_capacity": 8192
+     }
+    },
+    {
+     "name": "pfu",
+     "build": {
+      "QG_SPLIT": "1",
+      "GDN_CHUNK11": "1",
+      "GDN_CHUNK11_CN": "16",
+      "GEMM_M256_F16O": "1",
+      "FLASH2_KT256": "16",
+      "GDN_CHUNK": "1",
+      "GDN_COPY_SPLIT": "8",
+      "FLASH2_TRIM": "1",
+      "MOE_STORE16": "1",
+      "ROUTE_TR": "8",
+      "FLASH2_G11": "pfu"
+     },
+     "build_args": [
+      "--memory-gib",
+      "4096"
+     ],
+     "sdk": "0.3.0",
+     "execution": {
+      "prefill_capacity": 8192
+     }
+    },
+    {
+     "name": "db",
+     "build": {
+      "QG_SPLIT": "1",
+      "GDN_CHUNK11": "1",
+      "GDN_CHUNK11_CN": "16",
+      "GEMM_M256_F16O": "1",
+      "FLASH2_KT256": "16",
+      "GDN_CHUNK": "1",
+      "GDN_COPY_SPLIT": "8",
+      "FLASH2_TRIM": "1",
+      "MOE_STORE16": "1",
+      "ROUTE_TR": "8",
+      "FLASH2_G11": "db"
+     },
+     "build_args": [
+      "--memory-gib",
+      "4096"
+     ],
+     "sdk": "0.3.0",
+     "execution": {
+      "prefill_capacity": 8192
      }
     }
    ],
    "steps": [
-    "func:card",
-    "ktest:card",
-    "gates:card:dev",
-    "perf:card:3",
-    "perf:card:3:long",
-    "c4:nodraft",
-    "llama@rocm.np1:3",
-    "llama@rocm.np1:3:long",
-    "llamac4@rocm.nodraft",
-    "llama@vulkan.np1:3",
-    "llama@vulkan.np1:3:long",
-    "llamac4@vulkan.perslot.nodraft"
-   ]
+    "perf:x8:1:long",
+    "perf:nokt:1:long",
+    "perf:nof16o:1:long",
+    "perf:noqgs:1:long",
+    "perf:noc11:1:long",
+    "perf:ng2:1:long",
+    "perf:pf:1:long",
+    "perf:pfu:1:long",
+    "perf:db:1:long",
+    "perf:x8:1:long"
+   ],
+   "sdk": "0.3.0",
+   "llama_spec": "matched"
   }
  ],
- "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
+ "memory_bytes": 48000000000,
+ "llama_spec": "matched",
+ "llamacpp": "b1374",
  "kit": null,
- "llamacpp": "b1375",
- "llamacpp_vulkan": "b12211"
+ "runner": "strix"
 }
