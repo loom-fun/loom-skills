@@ -1224,8 +1224,37 @@ def grouped_gemm(fmt, mode, N, K, E, KU, gemm_fn, fused=False, bias=False, act=N
             "  %row_group_id = kernel.workgroup.id<y> : index\n  %out_group_id = kernel.workgroup.id<x> : index")
     if bias or (act and act != "silu"):
         text = _gemm_bias_act(text, mode, N, E, bias, act)
+    if mode == "store" and store16():
+        text = _store16_rows(text)
     import gen_gemm_rdna4
     return text + "\n" + gen_gemm_rdna4.twin(text) if gen_gemm_rdna4.enabled() else text   # the gfx12 twin K_rdna4 beside K
+
+
+def store16():
+    """moe.prefill.store16 (MOE_STORE16; numerics-moving): the grouped down GEMM stores its expert rows (ys_sorted) as f16 and
+    g_moe_combine_sorted reads them as f16, in place (same kernel names, same launches): half the DRAM traffic of the
+    largest prefill intermediate (prompt rows x used experts x hidden), written by the down GEMM and read back by the combine."""
+    return os.environ.get("MOE_STORE16", "") not in ("", "0", "off", "no", "false")
+
+
+def _store16_rows(text):
+    """The store-mode grouped GEMM text with an f16 output tile (an f32 result fragment stored into an f16 view narrows)."""
+    four = "  %tile_offset = index.scale %tile_first, %four : index, offset -> offset\n"
+    assert text.count(four) == 1 and text.count("view<64x64xf32, %y_layout>") >= 3, "store16: unexpected store-mode GEMM text"
+    text = text.replace(four, "  %two_y16 = index.constant 2 : offset\n  %tile_offset = index.scale %tile_first, %two_y16 : index, offset -> offset\n")
+    return text.replace("view<64x64xf32, %y_layout>", "view<64x64xf16, %y_layout>")
+
+
+def _combine_sorted16(text, H):
+    """g_moe_combine_sorted reading f16 expert rows (store16)."""
+    a = f"%ys_view = buffer.view %ys[%zero] : buffer -> view<[%rows]x{H}xf32>"
+    assert text.count(a) == 1
+    text = text.replace(a, f"%ys_view = buffer.view %ys[%zero] : buffer -> view<[%rows]x{H}xf16>")
+    text, n = re.subn(r"%vv(\d+) = view\.load %ys_view\[%pr\1, %ch\] : view<\[%rows\]x" + str(H) + r"xf32> -> f32",
+                      lambda m: f"%vh{m.group(1)} = view.load %ys_view[%pr{m.group(1)}, %ch] : view<[%rows]x{H}xf16> -> f16\n"
+                                f"    %vv{m.group(1)} = scalar.extf %vh{m.group(1)} : f16 to f32", text)
+    assert n >= 1 and f"view<[%rows]x{H}xf32>" not in text, n
+    return text
 
 
 def combine_sorted(H, KU, acc=False):
@@ -1233,6 +1262,11 @@ def combine_sorted(H, KU, acc=False):
     KU expert rows are read whole and at once (with a workgroup per (token, block) and tokens fastest, each row was
     fetched in H/256 pieces far apart: Qwen3.5-35B-A3B, 1k tokens, 10 % of the prefill). The row loads are
     unconditional (a dead assignment reads row 0 and selects 0) so they are in flight together."""
+    text = _combine_sorted_text(H, KU, acc)
+    return _combine_sorted16(text, H) if store16() else text
+
+
+def _combine_sorted_text(H, KU, acc):
     return f"""
 kernel.def export("g_moe_combine_sorted") @g_moe_combine_sorted(%tokens: index) {{
   %c1 = index.constant 1 : index
