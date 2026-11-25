@@ -3753,16 +3753,24 @@ SEG_MIN = int(os.environ.get("SEG_MIN", "8192"))
 # candidates, dropped n-gram drafting. Longer verification runs are cut into segments of at most this many tokens
 # (same bits). SEG_TS_MAX=N overrides (A/B switch).
 SEG_TS_MAX = int(os.environ.get("SEG_TS_MAX", "3" if D == 128 else "64"))
+# head_dim 256 (choice decode.attn.segment.d256; opt-in by scope): the span body for the qwen35 hybrids' verify spans (2 KV heads x 8
+# query heads, 4 verify tokens re-read the 64 MB/layer KV at 32k through the split kernel: 12 of a 47 ms step, Qwen3.6-35B Strix). The
+# score loop runs chunk-outer (each 32-dim K chunk feeds every token's dot, then dies: 8 chunks of K never live at once) and each
+# token's p values are read back four keys at a time where the values loop uses them; the arithmetic is the same per token.
+SEG_D256 = os.environ.get("SEG_D256", "0") == "1"
+SEG_WMMA = os.environ.get("SEG_WMMA", "0") == "1"   # choice decode.attn.segment.wmma: the span body on WMMA (attention_seg_wmma)
 
 
 def seg_tokens():
     """Tokens per segment: the verification span (draft depth + 1), capped so the q and p tiles fit 64 KB of
     workgroup memory (longer runs go one token at a time); 0 when the decode path keeps the split kernel."""
-    if not (os.environ.get("SEG_ATTN", "1") == "1" and gen_draft.enabled() and D in (64, 128) and KVH <= 2):
+    if not (os.environ.get("SEG_ATTN", "1") == "1" and gen_draft.enabled() and (D in (64, 128) or (D == 256 and SEG_D256)) and KVH <= 2):
         return 0
     # at least 3 tokens even for depth 1: a depth-1 build with 2-token segments ran slower at long context than the same
     # spans in 3-token segments (Qwen2.5-1.5B 16k-32k: 76 vs 95-98 tok/s), and tune measures depths on one build
     ts = min(max(gen_draft.DRAFT["depth"] + 1, 3), 65536 // (G * 4 * (D + 32)), SEG_TS_MAX)
+    if seg_wmma():   # the WMMA body's query tiles: 4 tokens x 8 heads
+        ts = min(ts, 4)
     return ts if ts >= 2 else 0
 
 
@@ -3874,16 +3882,32 @@ def attention_seg(split_text):
       %kdb = index.scale %kdelta, %pb : index, offset -> offset
       %kofs = index.add %kbase, %kdb : offset
       %krow = buffer.view %arena[%kofs] : buffer -> view<{KVH}x{D}xf16>""")
-    for c in range(NC):
+    lazy = D == 256   # chunk-outer scores in a loop over 32-dim chunks, values in a loop over 4-key groups (SEG_D256)
+    if lazy:   # every token's dot, one 32-dim chunk of the key per step (each token's chunks in order, as the unrolled form)
+        L.append(f"""      %cnc = index.constant {NC} : index
+      {", ".join(f"%sdr{k}" for k in range(TS))} = scf.for %kc = [%c0 to %cnc step %c1]({", ".join(f"%sa{k} = %zero_f : f32" for k in range(TS))}) -> ({", ".join(["f32"] * TS)}) {{
+        %kdd = index.mul %kc, %c32k : index
+        %khh = vector.load %krow[%kv_head, %kdd] : view<{KVH}x{D}xf16> -> vector<32xf16>
+        %kff = vector.extf %khh : vector<32xf16> to vector<32xf32>""")
+        for k in range(TS):
+            L.append(f"""        %qq{k} = vector.load %q_row[%ck{k}, %wave, %kdd] : view<{TS}x{G}x{D}xf32> -> vector<32xf32>
+        %sn{k} = vector.dotf<reassoc|contract> %kff, %qq{k}, %sa{k} : vector<32xf32>, vector<32xf32>, f32""")
+        L.append("        scf.yield " + ", ".join(f"%sn{k}" for k in range(TS)) + " : " + ", ".join(["f32"] * TS) + "\n      }")
+    for c in range(0 if lazy else NC):
         L.append(f"""      %kd{c} = index.constant {32 * c} : index
       %kh{c} = vector.load %krow[%kv_head, %kd{c}] : view<{KVH}x{D}xf16> -> vector<32xf16>
       %kf{c} = vector.extf %kh{c} : vector<32xf16> to vector<32xf32>""")
     for k in range(TS):
         dots, prev = [], "%zero_f"
         for c in range(NC):
-            dots.append(f"""        %qc{k}_{c} = vector.load %q_row[%ck{k}, %wave, %kd{c}] : view<{TS}x{G}x{D}xf32> -> vector<32xf32>
+            if lazy:
+                continue
+            else:
+                dots.append(f"""        %qc{k}_{c} = vector.load %q_row[%ck{k}, %wave, %kd{c}] : view<{TS}x{G}x{D}xf32> -> vector<32xf32>
         %sd{k}_{c} = vector.dotf<reassoc|contract> %kf{c}, %qc{k}_{c}, {prev} : vector<32xf32>, vector<32xf32>, f32""")
             prev = f"%sd{k}_{c}"
+        if lazy:
+            prev = f"%sdr{k}"
         L.append(f"""      %bl{k} = index.cmp ult, %j, %hi_{k} : index
       %bh{k} = index.cmp ugt, %j32, %lo_{k} : index
       %bb{k} = scalar.andi %bl{k}, %bh{k} : i1
@@ -3921,11 +3945,44 @@ def attention_seg(split_text):
       %c31k = index.constant 31 : index
       %pe_hi_a = index.add %j, %c31k : index
       %pe_hi = index.min %pe_hi_a, %hi_u_less : index""")
-    for k in range(TS):   # each token's 32 p values of the block, 4 per load
-        for g in range(8):
-            L.append(f"""      %pq{k}_{g} = vector.load %p_lds[%wave, %ck{k}, %pg{g}] : view<{G}x{TS}x32xf32> -> vector<4xf32>""")
+    if not lazy:
+        for k in range(TS):   # each token's 32 p values of the block, 4 per load
+            for g in range(8):
+                L.append(f"""      %pq{k}_{g} = vector.load %p_lds[%wave, %ck{k}, %pg{g}] : view<{G}x{TS}x32xf32> -> vector<4xf32>""")
     prev = {k: f"%as{k}" for k in range(TS)}
-    for jj in range(0, 32, KS):   # keys jj .. jj + KS - 1, lane sub-group i takes key jj + i (KS <= 2)
+    if lazy:   # KS == 1 (32 lanes per key): 8 steps of 4 keys; keys 16..31 sit on the block's second page
+        VAs = ", ".join([VA] * TS)
+        L.append(f"""      %cvg4 = index.constant 4 : index
+      %cvg8 = index.constant 8 : index
+      {", ".join(f"%vr{k}" for k in range(TS))} = scf.for %vg = [%c0 to %cvg8 step %c1]({", ".join(f"%vacc{k} = %as{k} : {VA}" for k in range(TS))}) -> ({VAs}) {{
+        %vg4 = index.mul %vg, %cvg4 : index
+        %vsel = index.cmp uge, %vg, %cvg4 : index
+        %vbase = scf.select %vsel, %vhi, %vlo : offset
+        %vrow = buffer.view %arena[%vbase] : buffer -> view<16x{KVH}x{LPK}x{VW}xf16>
+        %vpe = scf.select %vsel, %pe_hi, %pe_lo : index
+        %vanc = scf.select %vsel, %anc_hi, %anc_lo : index
+        %vj = index.add %j, %vg4 : index""")
+        for k in range(TS):
+            L.append(f"""        %pqg{k} = vector.load %p_lds[%wave, %ck{k}, %vg4] : view<{G}x{TS}x32xf32> -> vector<4xf32>""")
+        cur = {k: f"%vacc{k}" for k in range(TS)}
+        for i in range(4):
+            L.append(f"""        %vci{i} = index.constant {i} : index
+        %vki{i} = index.add %vj, %vci{i} : index
+        %vkai{i} = index.min %vki{i}, %vpe : index
+        %vkci{i} = index.max %vkai{i}, %vanc : index
+        %vii{i} = index.sub %vkci{i}, %vanc : index
+        %vixi{i} = index.assume %vii{i} [range(%vii{i}, 0, 15)] : index
+        %vhi{i} = vector.load %vrow[%vixi{i}, %kv_head, %vlane, %c0] : view<16x{KVH}x{LPK}x{VW}xf16> -> vector<{VW}xf16>
+        %vfi{i} = vector.extf %vhi{i} : vector<{VW}xf16> to {VA}""")
+            for k in range(TS):
+                L.append(f"""        %pxi{i}_{k} = vector.extract %pqg{k}[{i}] : vector<4xf32> -> f32
+        %pei{i}_{k} = scf.select %use{k}, %pxi{i}_{k}, %zero_f : f32
+        %pvi{i}_{k} = vector.splat %pei{i}_{k} : {VA}
+        %vai{i}_{k} = vector.fmaf %pvi{i}_{k}, %vfi{i}, {cur[k]} : {VA}""")
+                cur[k] = f"%vai{i}_{k}"
+        L.append("        scf.yield " + ", ".join(cur[k] for k in range(TS)) + f" : {VAs}\n      }}")
+        prev = {k: f"%vr{k}" for k in range(TS)}
+    for jj in range(0, 32 if not lazy else 0, KS):   # keys jj .. jj + KS - 1, lane sub-group i takes key jj + i (KS <= 2)
         h = "hi" if jj >= 16 else "lo"
         L.append(f"""      %vc{jj} = index.constant {jj} : index
       %vk0_{jj} = index.add %j, %vc{jj} : index
@@ -3989,6 +4046,347 @@ def attention_seg(split_text):
     text = re.sub(r"%hi_(\d+)\b", r"%stop_\1", text)
     return text.replace("%lo_u", lo).replace("%hi_u", hi)
 
+
+# The span body on WMMA (choice decode.attn.segment.wmma, SEG_WMMA=1, with SEG_D256 at head_dim 256 and 8 query heads per KV head):
+# the scalar body's every wave loads whole 512-byte K rows (8x the L2 -> CU traffic) and does 256-dim f32 dots per lane (DevLab,
+# Qwen3.6-35B 32k: 637 us per layer vs the 0.29 ms K/V-once floor). Here the segment's (token, head) pairs are the 32 columns of two
+# 16-query tiles (column c of tile qt: token 2 qt + c / 8, head c % 8; a segment of fewer than 4 tokens leaves its columns masked),
+# and each 32-key block of K and V is staged once in workgroup memory (K rows; V transposed, key pairs packed per 32-bit store)
+# from registers loaded during the previous block (their pages looked up a block before that; the page map read once).
+# Workgroup memory 37.6 KB (the S^T partials reuse K's rows behind a barrier): three workgroups per WGP. Transposed form (gen_flash2s.py): S^T = K Q^T, so a lane's result column is
+# one query and the softmax is in-lane plus one xor-16 shuffle; O^T += V^T P^T. Wave w: query tile w / 4, dim quarter w % 4
+# (64 dims: 4 fragments of Q^T in registers, 8 MMAs of S per block, published and summed in quarter order by the tile's four
+# waves, which then hold the same S, softmax and P; 8 MMAs of O^T over its 64 dims). The partials are the split kernel's
+# (through workgroup memory, per wave = head as the scalar body), so g_attention_combine is unchanged. Masks: each column's own
+# [start, stop) of the split, absolute 32-aligned blocks; keys past the segment's union are read at its last key and weighted
+# by p = +0. Numerics: Q (scaled by 1/16, exact) and P are rounded to f16 for the MMAs; accumulation and the online softmax
+# stay f32. A column's bits do not depend on the other columns, so a token's output is the same alone or in any segment.
+
+
+def seg_wmma():
+    """The WMMA span body applies (SEG_WMMA with the head_dim 256 segment path, 8 query heads per KV head)."""
+    return SEG_WMMA and SEG_D256 and D == 256 and G == 8
+
+
+def attention_seg_wmma(arch="rdna3"):
+    """The WMMA span body (gfx11 layouts, or arch "rdna4": gfx12): same contract as attention_seg."""
+    R3 = arch == "rdna3"
+    TS, S = seg_tokens(), 64
+    assert D == 256 and G == 8 and 2 <= TS <= 4, (D, G, TS)
+    FH, QW = ("vector<16xf16>", 16) if R3 else ("vector<8xf16>", 8)   # MMA f16 operand; Q values per lane per fragment
+    KP, VTC, OP = D + 8, 40, D + 8   # K row pitch (f16), V^T row pitch (f16: 32 keys + 8), output row pitch (f32)
+    VT_OFF = 32 * KP * 2
+    S_OFF = 0                         # the S^T partials reuse K's rows once every wave has read them (a barrier between)
+    ML_OFF = VT_OFF + D * VTC * 2
+    BYTES = ML_OFF + 32 * 2 * 4       # 37.6 KB: three workgroups per WGP
+    assert 32 * OP * 4 <= ML_OFF and 8 * 2 * 256 * 4 <= VT_OFF and BYTES <= 65536
+    SH = "shape [%c16, %c16]"
+    L = [f"""  %info_s = buffer.view %info[%zero] : buffer -> view<[%tokens]x4xi32>
+  %seg_min = scalar.constant {SEG_MIN} : i32
+  %true = scalar.constant true : i1
+  %tokens_less = index.sub %tokens, %c1 : index
+  %c4 = index.constant 4 : index
+  %c8 = index.constant 8 : index
+  %c32k = index.constant 32 : index
+  %c64 = index.constant 64 : index
+  %far_lo = index.constant {1 << 30} : index
+  %seg_bytes = index.constant {BYTES} : offset
+  %seg_tile = buffer.alloca<workgroup> align(16) %seg_bytes : buffer
+  %vt_off = index.constant {VT_OFF} : offset
+  %s_off = index.constant {S_OFF} : offset
+  %ml_off = index.constant {ML_OFF} : offset
+  %k_lds = buffer.view %seg_tile[%zero] : buffer -> view<32x{KP}xf16>
+  %vt_lds = buffer.view %seg_tile[%vt_off] : buffer -> view<{D}x{VTC}xf16>
+  %vt32 = buffer.view %seg_tile[%vt_off] : buffer -> view<{D}x{VTC // 2}xi32>
+  %s_lds = buffer.view %seg_tile[%s_off] : buffer -> view<16x32x8xf32>
+  %ml_lds = buffer.view %seg_tile[%ml_off] : buffer -> view<32x2xf32>
+  %cont0 = func.call @g_seg_next(%info, %tokens, %token, %seg_min) : (buffer, index, index, i32) -> (i1)
+  %first = scalar.xori %cont0, %true : i1"""]
+    for k in range(1, TS):   # members: the next tokens of the run the leader starts (as attention_seg)
+        prev_m = "%first" if k == 1 else f"%member{k - 1}"
+        L.append(f"""  %cb{k} = index.constant {k} : index
+  %ta{k} = index.add %token, %cb{k} : index
+  %next{k} = func.call @g_seg_next(%info, %tokens, %ta{k}, %seg_min) : (buffer, index, index, i32) -> (i1)
+  %member{k} = scalar.andi {prev_m}, %next{k} : i1""")
+    lo, hi = "%far_lo", "%c0"
+    for k in range(TS):   # each token's own [start, stop) of this split (the split kernel's partition), and their union
+        act = f"%in_split_{k}" if k == 0 else f"%active_{k}"
+        L.append(f"""  %ck{k} = index.constant {k} : index
+  %tr{k} = index.add %token, %ck{k} : index
+  %tm{k} = index.min %tr{k}, %tokens_less : index
+  %tok{k} = index.assume %tm{k} [lt(%tm{k}, %tokens)] : index
+  %position32_{k} = view.load %info_s[%tok{k}, 1] : view<[%tokens]x4xi32> -> i32
+  %position_bound_{k} = scalar.assume %position32_{k} [range(%position32_{k}, 0, 262143)] : i32
+  %position_{k} = index.cast %position_bound_{k} : i32 to index
+  %visible_value_{k} = index.add %position_{k}, %c1 : index
+  %visible_{k} = index.assume %visible_value_{k} [range(%visible_value_{k}, 1, 262144)] : index
+  %s_eff_{k} = func.call @g_split_count(%visible_{k}) : (index) -> (index)
+  %in_split_{k} = index.cmp ult, %split, %s_eff_{k} : index""" + ("" if k == 0 else f"""
+  %active_{k} = scalar.andi %member{k}, %in_split_{k} : i1""") + f"""
+  %s_less_{k} = index.sub %s_eff_{k}, %c1 : index
+  %per_padded_{k} = index.add %visible_{k}, %s_less_{k} : index
+  %per_{k} = index.div %per_padded_{k}, %s_eff_{k} : index
+  %start_raw_{k} = index.mul %split, %per_{k} : index
+  %start_{k} = index.min %start_raw_{k}, %visible_{k} : index
+  %stop_raw_{k} = index.add %start_raw_{k}, %per_{k} : index
+  %stop_{k} = index.min %stop_raw_{k}, %visible_{k} : index
+  %cs_{k} = scf.select {act}, %start_{k}, %c0 : index
+  %ce_{k} = scf.select {act}, %stop_{k}, %c0 : index
+  %lo_sel_{k} = scf.select {act}, %start_{k}, %far_lo : index
+  %hi_sel_{k} = scf.select {act}, %stop_{k}, %c0 : index
+  %lo_min_{k} = index.min {lo}, %lo_sel_{k} : index
+  %hi_max_{k} = index.max {hi}, %hi_sel_{k} : index""")
+        lo, hi = f"%lo_min_{k}", f"%hi_max_{k}"
+    # lane roles: wave = (query tile, dim quarter); lane column = query (token 2 qt + col / 8, head col % 8)
+    L.append(f"""  %lo_u = index.add {lo}, %c0 : index
+  %hi_u = index.add {hi}, %c0 : index
+  %hi_one = index.max %hi_u, %c1 : index
+  %hi_less = index.sub %hi_one, %c1 : index
+  %lo_b = index.div %lo_u, %c32k : index
+  %lo_al = index.mul %lo_b, %c32k : index
+  %qt_v = index.div %wave, %c4 : index
+  %qt = index.assume %qt_v [range(%qt_v, 0, 1)] : index
+  %dq_v = index.rem %wave, %c4 : index
+  %dq = index.assume %dq_v [range(%dq_v, 0, 3)] : index
+  %lane_col = index.rem %lane, %c16 : index
+  %lane_half = index.div %lane, %c16 : index
+  %hi_half = index.cmp ne, %lane_half, %c0 : index
+  %col_t = index.div %lane_col, %c8 : index
+  %col_k = index.madd %qt, %c2, %col_t : index
+  %col_hin = index.rem %lane_col, %c8 : index
+  %col_head_v = index.madd %kv_head, %c8, %col_hin : index
+  %col_head = index.assume %col_head_v [range(%col_head_v, 0, {QH - 1})] : index""")
+    tok, cs, ce = "%tok0", "%c0", "%c0"   # columns past the segment's tokens: an empty range (all keys masked)
+    for k in range(TS):
+        L.append(f"""  %is_k{k} = index.cmp eq, %col_k, %ck{k} : index
+  %col_tok{k} = scf.select %is_k{k}, %tok{k}, {tok} : index
+  %col_s{k} = scf.select %is_k{k}, %cs_{k}, {cs} : index
+  %col_e{k} = scf.select %is_k{k}, %ce_{k}, {ce} : index""")
+        tok, cs, ce = f"%col_tok{k}", f"%col_s{k}", f"%col_e{k}"
+    L.append(f"""  %col_tok = index.assume {tok} [lt({tok}, %tokens)] : index
+  %col_s32 = index.cast {cs} : index to i32
+  %col_e32 = index.cast {ce} : index to i32
+  %cs_v = vector.splat %col_s32 : vector<8xi32>
+  %ce_v = vector.splat %col_e32 : vector<8xi32>
+  %half32 = index.cast %lane_half : index to i32""" + ("""
+  %two_i32 = scalar.constant 2 : i32
+  %row_off = vector.iota %half32 step %two_i32 : vector<8xi32>""" if R3 else """
+  %c8_i32 = scalar.constant 8 : i32
+  %one_i32 = scalar.constant 1 : i32
+  %lane_h8_i32 = scalar.muli %half32, %c8_i32 : i32
+  %lane_h8_v = index.mul %lane_half, %c8 : index
+  %lane_h8 = index.assume %lane_h8_v [range(%lane_h8_v, 0, 8)] : index
+  %row_off = vector.iota %lane_h8_i32 step %one_i32 : vector<8xi32>""") + f"""
+  %xch = scalar.constant 16 : i32
+  %xw = scalar.constant 32 : i32
+  %zero8 = vector.splatf 0.0 : vector<8xf32>
+  %neg_v = vector.splat %neg_big : vector<8xf32>
+  %init = vector.fragment<init> %zero8 {SH} : vector<8xf32>
+  %dq64 = index.mul %dq, %c64 : index
+  %qt16_v = index.mul %qt, %c16 : index
+  %qt16 = index.assume %qt16_v [range(%qt16_v, 0, 16)] : index
+  %q_s = buffer.view %q[%zero] : buffer -> view<[%tokens]x{QH}x{D}xf32>
+  %qscale = scalar.constant {D ** -0.5!r} : f32
+  %qscale_v = vector.splat %qscale : vector<{QW}xf32>""")
+    for f in range(4):   # this wave's quarter of Q^T (scaled, f16) as MMA rhs: 4 fragments of 16 dims, held for the whole loop
+        L.append(f"""  %cf{f} = index.constant {16 * f} : index
+  %fd{f}_v = index.add %dq64, %cf{f} : index
+  %fd{f} = index.assume %fd{f}_v [range(%fd{f}_v, 0, {D - 16})] : index""" + (f"""
+  %qd{f} = index.add %fd{f}, %c0 : index""" if R3 else f"""
+  %qd{f}_v = index.add %fd{f}, %lane_h8 : index
+  %qd{f} = index.assume %qd{f}_v [range(%qd{f}_v, 0, {D - 8})] : index""") + f"""
+  %qr{f} = vector.load %q_s[%col_tok, %col_head, %qd{f}] : view<[%tokens]x{QH}x{D}xf32> -> vector<{QW}xf32>
+  %qs{f} = vector.mulf %qr{f}, %qscale_v : vector<{QW}xf32>
+  %qh{f} = vector.fptrunc %qs{f} : vector<{QW}xf32> to vector<{QW}xf16>
+  %qf{f} = vector.fragment<rhs> %qh{f} {SH} : {FH}""")
+    for kb in range(2):
+        L.append(f"""  %kbr{kb} = index.constant {16 * kb} : index
+  %kbo{kb} = scalar.constant {16 * kb} : i32
+  %sslot{kb}_v = index.madd %wave, %c2, %c{"0" if kb == 0 else "1"} : index
+  %sslot{kb} = index.assume %sslot{kb}_v [range(%sslot{kb}_v, 0, 15)] : index""")
+        for d in range(4):
+            L.append(f"""  %cq{kb}_{d} = index.constant {2 * d + kb} : index
+  %pslot{kb}_{d}_v = index.madd %qt, %c8, %cq{kb}_{d} : index
+  %pslot{kb}_{d} = index.assume %pslot{kb}_{d}_v [range(%pslot{kb}_{d}_v, 0, 15)] : index""")
+    # staging: K lane (key wi / 8, 32 dims); V lane (key pair wi % 16, 16 dims wi / 16), the pair packed per 32-bit V^T store
+    L.append(f"""  %wi = index.madd %wave, %c32k, %lane : index
+  %st_key_v = index.div %wi, %c8 : index
+  %st_key = index.assume %st_key_v [range(%st_key_v, 0, 31)] : index
+  %st_seg = index.rem %wi, %c8 : index
+  %st_kd_v = index.mul %st_seg, %c32k : index
+  %st_kd = index.assume %st_kd_v [range(%st_kd_v, 0, {D - 32})] : index
+  %v_kp_v = index.rem %wi, %c16 : index
+  %v_kp = index.assume %v_kp_v [range(%v_kp_v, 0, 15)] : index
+  %v_seg = index.div %wi, %c16 : index
+  %v_d_v = index.mul %v_seg, %c16 : index
+  %v_d = index.assume %v_d_v [range(%v_d_v, 0, {D - 16})] : index
+  %v_key0 = index.mul %v_kp, %c2 : index""")
+    for e in range(16):
+        L.append(f"""  %vtr{e}_c = index.constant {e} : index
+  %vtr{e}_v = index.add %v_d, %vtr{e}_c : index
+  %vtr{e} = index.assume %vtr{e}_v [range(%vtr{e}_v, 0, {D - 1})] : index""")
+
+    # paged K/V as g_kv_offset, the page map read once: block jb's physical pages (this lane's K key and V key pair, clamped to
+    # the union's last key: a valid key, weighted 0) are looked up a block ahead of its loads, which run a block ahead of its use
+    L.append(f"""  %rec_stride = index.constant 40 : offset
+  %rec_off = index.scale %row, %rec_stride : index, offset -> offset
+  %records = buffer.view %origins[%rec_off] : buffer -> view<5xi64>
+  %map64 = view.load %records[4] : view<5xi64> -> i64
+  %map_bound = scalar.assume %map64 [range(%map64, 0, 9223372036854775807)] : i64
+  %map_origin = index.cast %map_bound : i64 to offset
+  %map = buffer.view %origins[%map_origin] : buffer -> view<[%blocks]xi32>
+  %blocks_less = index.sub %blocks, %c1 : index
+  %pos_bytes = index.constant {POS_BYTES} : offset""")
+
+    def keys(jb, s, ind):   # this lane's clamped keys of block jb
+        return f"""
+{ind}%gk_r{s} = index.add {jb}, %st_key : index
+{ind}%gk{s} = index.min %gk_r{s}, %hi_less : index
+{ind}%ga_r{s} = index.add {jb}, %v_key0 : index
+{ind}%ga{s} = index.min %ga_r{s}, %hi_less : index
+{ind}%gb_r{s} = index.add %ga{s}, %c1 : index
+{ind}%gb{s} = index.min %gb_r{s}, %hi_less : index"""
+
+    def pages(jb, s, ind="  "):   # physical pages of block jb (the V pair shares one page: an even key and the next)
+        return keys(jb, s, ind) + "".join(f"""
+{ind}%g{x}_pg_v{s} = index.div %g{x}{s}, %c16 : index
+{ind}%g{x}_pg{s} = index.assume %g{x}_pg_v{s} [range(%g{x}_pg_v{s}, 0, %blocks_less), lt(%g{x}_pg_v{s}, %blocks)] : index
+{ind}%g{x}_ph32{s} = view.load %map[%g{x}_pg{s}] : view<[%blocks]xi32> -> i32
+{ind}%g{x}_phb{s} = scalar.assume %g{x}_ph32{s} [range(%g{x}_ph32{s}, 0, 134217727)] : i32
+{ind}%g{x}_ph{s} = index.cast %g{x}_phb{s} : i32 to index""" for x in "ka")
+
+    def loads(jb, s, pk, pv, ind="  ", with_keys=True):   # block jb's K (32 dims of a key) and V (16 dims of a key pair) slots of this lane
+        t = keys(jb, s, ind) if with_keys else ""
+        for x, ph, plane in (("k", pk, ""), ("a", pv, " V"), ("b", pv, " V")):
+            t += f"""
+{ind}%h{x}_base{s} = index.mul {ph}, %c16 : index
+{ind}%h{x}_in{s} = index.rem %g{x}{s}, %c16 : index
+{ind}%h{x}_slot{s} = index.add %h{x}_base{s}, %h{x}_in{s} : index
+{ind}%h{x}_ps{s} = index.madd %k_plane, %pool, %h{x}_slot{s} : index
+{ind}%h{x}_ko{s} = index.scale %h{x}_ps{s}, %pos_bytes : index, offset -> offset"""
+            t += (f"""
+{ind}%h{x}_off{s} = index.add %h{x}_ko{s}, %plane_stride : offset""" if plane else f"""
+{ind}%h{x}_off{s} = index.add %h{x}_ko{s}, %zero : offset""")
+            t += f"""
+{ind}%h{x}_row{s} = buffer.view %arena[%h{x}_off{s}] : buffer -> view<{KVH}x{D}xf16>"""
+        return t + f"""
+{ind}%fk{s} = vector.load %hk_row{s}[%kv_head, %st_kd] : view<{KVH}x{D}xf16> -> vector<32xf16>
+{ind}%fva{s} = vector.load %ha_row{s}[%kv_head, %v_d] : view<{KVH}x{D}xf16> -> vector<16xf16>
+{ind}%fvb{s} = vector.load %hb_row{s}[%kv_head, %v_d] : view<{KVH}x{D}xf16> -> vector<16xf16>"""
+    L.append(pages("%lo_al", "0").lstrip("\n") + loads("%lo_al", "0", "%gk_ph0", "%ga_ph0", with_keys=False))
+    L.append("  %lo_al1 = index.add %lo_al, %c32k : index" + pages("%lo_al1", "1"))
+    os_ = ", ".join(f"%o{t} = %init : vector<8xf32>" for t in range(4))
+    ty = "f32, f32, " + ", ".join(["vector<8xf32>"] * 4) + ", vector<32xf16>, vector<16xf16>, vector<16xf16>"
+    L.append(f"""  %fm, %fl, %fo0, %fo1, %fo2, %fo3, %fk_end, %fva_end, %fvb_end, %pk_end, %pv_end = scf.for %j = [%lo_al to %hi_u step %c32k](%m = %neg_big : f32, %l = %zero_f : f32, {os_}, %kc = %fk0 : vector<32xf16>, %vac = %fva0 : vector<16xf16>, %vbc = %fvb0 : vector<16xf16>, %pkc = %gk_ph1 : index, %pvc = %ga_ph1 : index) -> ({ty}, index, index) {{
+    vector.store %kc, %k_lds[%st_key, %st_kd] : vector<32xf16>, view<32x{KP}xf16>
+    %vpair = vector.interleave<0> %vac, %vbc : vector<16xf16>, vector<16xf16> -> vector<32xf16>
+    %vpw = vector.bitcast %vpair : vector<32xf16> to vector<16xi32>""")
+    for e in range(16):
+        L.append(f"""    %vpe{e} = vector.extract %vpw[{e}] : vector<16xi32> -> i32
+    view.store %vpe{e}, %vt32[%vtr{e}, %v_kp] : i32, view<{D}x{VTC // 2}xi32>""")
+    L.append("""    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+    %jn = index.add %j, %c32k : index""")
+    L.append(f"    %jnn = index.add %jn, %c32k : index{loads('%jn', 'n', '%pkc', '%pvc', '    ')}{pages('%jnn', 'p', '    ')}")   # in flight during this block
+    for kb in range(2):   # S^T partial over this wave's 64 dims
+        acc = "%init"
+        for f in range(4):
+            L.append(f"""    %kl{kb}_{f} = vector.fragment.load<lhs> %k_lds[%kbr{kb}, %fd{f}] {SH} : view<32x{KP}xf16> -> {FH}
+    %sa{kb}_{f} = vector.mma %kl{kb}_{f}, %qf{f}, {acc} : {FH}, {FH}, vector<8xf32>""")
+            acc = f"%sa{kb}_{f}"
+    L.append("    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)")   # K read by every wave: its rows take the partials
+    for kb in range(2):   # published lane-native (the tile's waves share the result layout)
+        L.append(f"    vector.store %sa{kb}_3, %s_lds[%sslot{kb}, %lane, %c0] : vector<8xf32>, view<16x32x8xf32>")
+    L.append("""    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+    %j32 = index.cast %j : index to i32""")
+    for kb in range(2):   # the tile's S^T: the four quarters in order (every wave of the tile gets the same bits), masked
+        L.append("\n".join(f"    %sp{kb}_{d} = vector.load %s_lds[%pslot{kb}_{d}, %lane, %c0] : view<16x32x8xf32> -> vector<8xf32>" for d in range(4)))
+        L.append(f"""    %ss{kb}_1 = vector.addf %sp{kb}_0, %sp{kb}_1 : vector<8xf32>
+    %ss{kb}_2 = vector.addf %ss{kb}_1, %sp{kb}_2 : vector<8xf32>
+    %st{kb} = vector.addf %ss{kb}_2, %sp{kb}_3 : vector<8xf32>
+    %kbase{kb} = scalar.addi %j32, %kbo{kb} : i32
+    %kbase{kb}_v = vector.splat %kbase{kb} : vector<8xi32>
+    %kpos{kb} = vector.addi %kbase{kb}_v, %row_off : vector<8xi32>
+    %vge{kb} = vector.cmpi sge, %kpos{kb}, %cs_v : vector<8xi32> -> vector<8xi1>
+    %vlt{kb} = vector.cmpi slt, %kpos{kb}, %ce_v : vector<8xi32> -> vector<8xi1>
+    %valid{kb} = vector.andi %vge{kb}, %vlt{kb} : vector<8xi1>
+    %masked{kb} = vector.select %valid{kb}, %st{kb}, %neg_v : vector<8xf32>
+    %lmax{kb} = vector.reduce<maxnumf> %masked{kb}, %neg_big : vector<8xf32>, f32""")
+    L.append("""    %lmax = scalar.maxnumf %lmax0, %lmax1 : f32
+    %omax, %omax_u = kernel.subgroup.shuffle<xor> %lmax, %xch, %xw : f32, i32, i32
+    %tmax = scalar.maxnumf %lmax, %omax : f32
+    %m_new = scalar.maxnumf %m, %tmax : f32
+    %m_shift = scalar.subf %m, %m_new : f32
+    %alpha = scalar.expf<afn> %m_shift : f32
+    %m_new_v = vector.splat %m_new : vector<8xf32>""")
+    for kb in range(2):
+        L.append(f"""    %sh{kb} = vector.subf %masked{kb}, %m_new_v : vector<8xf32>
+    %pe{kb} = vector.expf<afn> %sh{kb} : vector<8xf32>
+    %p{kb} = vector.select %valid{kb}, %pe{kb}, %zero8 : vector<8xf32>
+    %ls{kb} = vector.reduce<addf> %p{kb}, %zero_f : vector<8xf32>, f32""")
+        if R3:   # P^T (rhs: all 16 keys of the column): the other key parity from the partner lane (xor 16), interleaved
+            for i in range(8):
+                L.append(f"""    %pi{kb}_{i} = vector.extract %p{kb}[{i}] : vector<8xf32> -> f32
+    %po{kb}_{i}, %pu{kb}_{i} = kernel.subgroup.shuffle<xor> %pi{kb}_{i}, %xch, %xw : f32, i32, i32""")
+            L.append(f"""    %partner{kb} = vector.from_elements {", ".join(f"%po{kb}_{i}" for i in range(8))} : vector<8xf32>
+    %even{kb} = scf.select %hi_half, %partner{kb}, %p{kb} : vector<8xf32>
+    %odd{kb} = scf.select %hi_half, %p{kb}, %partner{kb} : vector<8xf32>
+    %ptf{kb} = vector.interleave<0> %even{kb}, %odd{kb} : vector<8xf32>, vector<8xf32> -> vector<16xf32>
+    %pth{kb} = vector.fptrunc %ptf{kb} : vector<16xf32> to vector<16xf16>
+    %pt{kb} = vector.fragment<rhs> %pth{kb} {SH} : vector<16xf16>""")
+        else:    # gfx12: the result layout of S^T is the rhs layout of P^T
+            L.append(f"""    %pth{kb} = vector.fptrunc %p{kb} : vector<8xf32> to vector<8xf16>
+    %pt{kb} = vector.fragment<rhs> %pth{kb} {SH} : vector<8xf16>""")
+    L.append("""    %lsum = scalar.addf %ls0, %ls1 : f32
+    %osum, %osum_u = kernel.subgroup.shuffle<xor> %lsum, %xch, %xw : f32, i32, i32
+    %tsum = scalar.addf %lsum, %osum : f32
+    %l_new = scalar.fmaf %l, %alpha, %tsum : f32
+    %alpha_v = vector.splat %alpha : vector<8xf32>""")
+    for t in range(4):   # O^T over this wave's 64 dims
+        L.append(f"    %os{t} = vector.mulf %o{t}, %alpha_v : vector<8xf32>")
+        acc = f"%os{t}"
+        for kb in range(2):
+            L.append(f"""    %vl{t}_{kb} = vector.fragment.load<lhs> %vt_lds[%fd{t}, %kbr{kb}] {SH} : view<{D}x{VTC}xf16> -> {FH}
+    %on{t}_{kb} = vector.mma %vl{t}_{kb}, %pt{kb}, {acc} : {FH}, {FH}, vector<8xf32>""")
+            acc = f"%on{t}_{kb}"
+    L.append(f"""    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+    scf.yield %m_new, %l_new, %on0_1, %on1_1, %on2_1, %on3_1, %fkn, %fvan, %fvbn, %gk_php, %ga_php : {ty}, index, index
+  }}
+  %o_layout = encoding.layout.strided [1, {OP}] : encoding<layout>
+  %ot_lds = buffer.view %seg_tile[%zero] : buffer -> view<{D}x32xf32, %o_layout>""")
+    for t in range(4):   # O^T tiles to workgroup memory as [query][dim]: the per-wave (head) partial rows of the split kernel's layout
+        L.append(f"  vector.fragment.store<result> %fo{t}, %ot_lds[%fd{t}, %qt16] {SH} : vector<8xf32>, view<{D}x32xf32, %o_layout>")
+    L.append(f"""  %dq0 = index.cmp eq, %dq, %c0 : index
+  %half0 = index.cmp eq, %lane_half, %c0 : index
+  %ml_w = scalar.andi %dq0, %half0 : i1
+  %qrow_v = index.add %qt16, %lane_col : index
+  %qrow = index.assume %qrow_v [range(%qrow_v, 0, 31)] : index
+  scf.if %ml_w {{
+    view.store %fm, %ml_lds[%qrow, 0] : f32, view<32x2xf32>
+    view.store %fl, %ml_lds[%qrow, 1] : f32, view<32x2xf32>
+  }}
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  %o_rows = buffer.view %seg_tile[%zero] : buffer -> view<32x{OP}xf32>
+  %ldim_v = index.mul %lane, %c8 : index
+  %ldim = index.assume %ldim_v [range(%ldim_v, 0, {D - 8})] : index
+  %acc_view = buffer.view %part_acc[%zero] : buffer -> view<[%tokens]x{QH}x{S}x32x{DL}xf32>
+  %ml_view = buffer.view %part_ml[%zero] : buffer -> view<[%tokens]x{QH}x{S}x2xf32>
+  %first_lane = index.cmp eq, %lane, %c0 : index""")
+    for k in range(TS):
+        act = "%in_split_0" if k == 0 else f"%active_{k}"
+        L.append(f"""  %orow{k}_c = index.constant {8 * k} : index
+  %orow{k}_v = index.add %wave, %orow{k}_c : index
+  %orow{k} = index.assume %orow{k}_v [range(%orow{k}_v, 0, 31)] : index
+  scf.if {act} {{
+    %ov{k} = vector.load %o_rows[%orow{k}, %ldim] : view<32x{OP}xf32> -> vector<{DL}xf32>
+    vector.store %ov{k}, %acc_view[%tok{k}, %bounded_head, %split, %lane, %c0] : vector<{DL}xf32>, view<[%tokens]x{QH}x{S}x32x{DL}xf32>
+    scf.if %first_lane {{
+      %om{k} = view.load %ml_lds[%orow{k}, 0] : view<32x2xf32> -> f32
+      %ol{k} = view.load %ml_lds[%orow{k}, 1] : view<32x2xf32> -> f32
+      view.store %om{k}, %ml_view[%tok{k}, %bounded_head, %split, 0] : f32, view<[%tokens]x{QH}x{S}x2xf32>
+      view.store %ol{k}, %ml_view[%tok{k}, %bounded_head, %split, 1] : f32, view<[%tokens]x{QH}x{S}x2xf32>
+    }}
+  }}""")
+    return "\n".join(L)
 
 SEG_LEAD = """
 // Does token %t (live, at position >= %min) lead a segment? It starts a run of consecutive same-row tokens, or sits
@@ -4063,11 +4461,29 @@ def seg_attention(text):
     """The generated module with the long-context decode share moved into g_attention_split: on a full-attention
     layer a token at position >= SEG_MIN that leads a segment (g_seg_leader) runs the span body for all the
     segment's tokens (writing their partials), the other tokens of a segment exit, and every other token takes the
-    per-token path. One launch as before: no leader list, no extra launch per layer."""
+    per-token path. One launch as before: no leader list, no extra launch per layer. With the WMMA body the gfx12
+    twin (g_attention_split_rdna4: its own WMMA layouts) carries the span body too, emitted here when no per-target
+    choice made one."""
+    if not seg_wmma():
+        text = seg_into(text, 'kernel.def export("g_attention_split")', attention_seg(text))
+        return text + SEG_NEXT + SEG_LEAD.replace("{TS}", str(seg_tokens()))
     a = text.index('kernel.def export("g_attention_split")')
+    twin = 'export("g_attention_split_rdna4")'
+    rdna4 = os.environ.get("LOOM_RDNA4", "1").strip().lower() not in ("0", "off", "no", "false")
+    if rdna4 and twin not in text:   # the gfx11 kernel's text as its twin (next to it: before any launch), before the span body goes in
+        e = text.index("\n}\n", a) + 3
+        text = text[:e] + "\n" + twin_names(text[a:e]) + text[e:]
+    text = seg_into(text, 'kernel.def export("g_attention_split")', attention_seg_wmma("rdna3"))
+    if rdna4:
+        text = seg_into(text, twin, attention_seg_wmma("rdna4"))
+    return text + SEG_NEXT + SEG_LEAD.replace("{TS}", str(seg_tokens()))
+
+
+def seg_into(text, kernel, body):
+    """TEXT with the span BODY in the split kernel that starts at KERNEL (its first occurrence)."""
+    a = text.index(kernel)
     old = "    scf.if %active_split {\n"
     b = text.index(old, a)
-    body = attention_seg(text)
     names = set()   # the span body's own SSA names, renamed so they never shadow the split kernel's
     for line in body.split("\n"):
         m = re.match(r"\s*((?:%\w+, )*%\w+) = ", line)
@@ -4077,7 +4493,7 @@ def seg_attention(text):
             names.update(re.findall(r"(?:scf\.for |[(,] ?)(%\w+) = ", line))
     for n in sorted(names, key=len, reverse=True):
         body = re.sub(rf"(?<![\w%]){re.escape(n)}\b", "%sq_" + n[1:], body)
-    wg = [l for l in body.split("\n") if re.match(r"\s*%sq_(q_bytes|p_bytes|q_tile|p_tile) = ", l)]   # workgroup tiles: kernel scope
+    wg = [l for l in body.split("\n") if re.match(r"\s*%sq_(q_bytes|p_bytes|q_tile|p_tile|seg_bytes|seg_tile) = ", l)]   # workgroup tiles: kernel scope
     body = "\n".join(l for l in body.split("\n") if l not in wg)
     top = text.index("  scf.if %live {\n", a)
     text = text[:top] + "\n".join(wg) + "\n" + text[top:b] + f"""    %seg_min = index.constant {SEG_MIN} : index
@@ -4100,7 +4516,7 @@ def seg_attention(text):
     }}
     scf.if %split_here {{
 """ + text[b + len(old):]
-    return text + SEG_NEXT + SEG_LEAD.replace("{TS}", str(seg_tokens()))
+    return text
 
 
 def attention():
@@ -5397,6 +5813,20 @@ def moe_routed(i, b, x="%h", rx="%h", out="%y"):
 """
 
 
+_ROUTE_DEC = re.compile(r"(?m)^(?P<ind>\s*)kernel\.launch @g_moe_route\[%t\]\(%t, (?P<x>%\w+), (?P<w>%router_\w+), (?P<b>%\w+), %ids, %wts\) : "
+                        r"\[index\]\(index, buffer, (?P<wt>view<[^>]*>), (?P<bt>[^,]+(?:<[^>]*>)?), buffer, buffer\)$")
+
+
+def route_dsplit_program(program):
+    """moe.route.decode_split (gen_moe.route_dsplit_on): every decode-shaped g_moe_route launch becomes g_moe_route_lg (logits into the
+    prefill expert-row scratch %ys_sorted, unused in decode-shaped epochs) + g_moe_route_tk. Applied to the generated program text."""
+    import gen_moe as _gm
+    if not (MOE and _gm.route_dsplit_on() and MOE.get("gating") != 3):
+        return program
+    return _ROUTE_DEC.sub(lambda m: (f"{m['ind']}kernel.launch @g_moe_route_lg[%t](%t, {m['x']}, {m['w']}, %ys_sorted) : [index](index, buffer, {m['wt']}, buffer)\n"
+                                     f"{m['ind']}kernel.launch @g_moe_route_tk[%t](%t, %ys_sorted, {m['b']}, %ids, %wts) : [index](index, buffer, {m['bt']}, buffer, buffer)"), program)
+
+
 def moe_alloc():
     """Scratch buffers of the MoE layers (decode: per assignment; prefill: bucketed 64-row tiles, worst case)."""
     KU, FE = MOE["used"], MOE["ffn"]
@@ -6338,6 +6768,7 @@ if __name__ == "__main__":
     TRUNK_Q8 = bool(USED_MVQ or USED_MOEQ)   # the trunk (verified path) has int8-activation matvecs; MTP_BLOCK_PREP / the bf16 proposal head add them to the MTP programs alone
     program = deepstack_wiring(program) if DEEPSTACK else program
     program = last_out_select_program(program) if LAST_OUT else program
+    program = route_dsplit_program(program)
     spec_kernels = ""
     MTP_ONLY_Q8 = False
     if gen_draft.enabled():   # before the kernel list is emitted: these programs record mv / GEMM variants too

@@ -1091,8 +1091,17 @@ PY
         tar -xzf "$here/$rcache" -C "$D/$p1/bench" && echo "reference cache restored from $rcache"
       fi
       nref0=$("$T" "$B/reference_cache.py" count "$D/$p1/bench" 2>/dev/null || echo 0)
+      # A package whose own GGUF llama.cpp cannot load (reference_models.json, keyed by its checkpoint): the reference loads the
+      # publisher's mainline-layout file of the same tensors, sha256-pinned and fetched once per runner, and its answers are keyed by that file.
+      rgguf=$gguf; rref=
+      if [ -z "$safetensors" ]; then
+        rref=$("$T" "$B/reference_model.py" "$D/$p1/pkg" --cache "$WORK/reference-gguf" --tag "$tag" 2> "$out/reference_model_$p1.log") \
+          || { tail -2 "$out/reference_model_$p1.log"; res[$s]="ERROR: reference GGUF ($(tail -1 "$out/reference_model_$p1.log" | cut -c1-200))"; echo "RESULT $job $s: ${res[$s]}"; continue; }
+        [ -n "$rref" ] && { rgguf=$rref; cat "$out/reference_model_$p1.log"; }
+      fi
       step "gates $p1 LEVEL=$p2"
-      ( unset LLAMA_SPEC; FORCE=1 LEVEL=$p2 "$B/gates.sh" "$D/$p1/pkg" "$url" "$gguf" "$D/$p1/bench" "$LLAMA_PORT" ) > "$out/gates_$p1.out" 2>&1; rc=$?
+      ( unset LLAMA_SPEC; [ -n "$rref" ] && export REFERENCE_GGUF=$rref
+        FORCE=1 LEVEL=$p2 "$B/gates.sh" "$D/$p1/pkg" "$url" "$rgguf" "$D/$p1/bench" "$LLAMA_PORT" ) > "$out/gates_$p1.out" 2>&1; rc=$?
       mkdir -p "$out/gates_$p1"; cp "$D/$p1"/bench/gates.json "$D/$p1"/bench/gates_*.log "$out/gates_$p1/" 2>/dev/null
       if [ -n "$safetensors" ]; then   # the card's reference statement, install/load/memory logs of the vLLM reference
         cp "$D/$p1"/bench/reference.json "$D/vllm-state"/vllm-*.{log,mem,json} "$out/gates_$p1/" 2>/dev/null

@@ -1075,10 +1075,78 @@ def seg_case(li):
   check.return
 }}
 """)
+# 3e. the same at head_dim 256 (the qwen35 hybrids: 2 KV heads x 8 query heads, gated attention; gen_llm.py SEG_D256 /
+# SEG_WMMA span bodies, else the split kernel): one epoch of four rows past SEG_MIN. Row 0's 8 tokens cross SEG_MIN (split
+# kernel, a full segment, then tokens alone); row 1's span crosses a multiple of 64 visible keys, so its tokens split the
+# keys at different boundaries (per-token ranges that cut the 32-key blocks at different places); row 2 is one token;
+# row 3 a 3-token segment (the WMMA body's padded query columns). The rows map their pages onto one shared set, each in
+# its own order, so the pool stays one context long. A saturated gate makes combine's output the plain attention.
+def seg_case_d256(li):
+    G_ = QH // KVH; SEG_MIN = int(os.environ.get("SEG_MIN", "8192"))   # gen_llm.py's
+    rows = [(0, SEG_MIN - 3, 8), (1, SEG_MIN + 62, 4), (2, SEG_MIN + 100, 1), (3, SEG_MIN + 108, 3)]   # (row, first position, tokens)
+    ctx = ((max(p + n for _, p, n in rows) + 15) // 16) * 16 + 32; blocks = ctx // 16; R = len(rows)
+    info, toks = [], []
+    for r, p0, n in rows:
+        for i in range(n):
+            info.append([r, p0 + i, 1, 0]); toks.append((r, p0 + i))
+    info = np.array(info, np.int32); t = len(toks)
+    arena = (rng.standard_normal((2, ctx, KVH, D)) * 0.5).astype(np.float16)   # [K/V, physical position, head, dim]
+    perm = [(np.arange(blocks) * (1 if r % 2 == 0 else -1) + 37 * r) % blocks for r in range(R)]   # row r's page i -> physical page
+    def kv_of(r, n):   # row r's positions 0..n-1: [position, K/V, head, dim]
+        ph = perm[r][np.arange(n) // 16] * 16 + np.arange(n) % 16
+        return arena[:, ph].transpose(1, 0, 2, 3)
+    # each query points at the key one position after its own (scaled up): a key leaking past a token's causal end dominates
+    q = rng.standard_normal((t, QH, D)).astype(np.float32)
+    for i, (r, p) in enumerate(toks):
+        q[i] += 3 * kv_of(r, p + 2)[p + 1, 0].astype(np.float32)[np.arange(QH) // G_]
+    orig = np.zeros(10 * R + R * blocks, np.int32)
+    for r in range(R):
+        orig[r * 10 + 8] = (10 * R + r * blocks) * 4
+        orig[10 * R + r * blocks:10 * R + (r + 1) * blocks] = perm[r]
+    att = np.zeros((t, QH, D))
+    for i, (r, p) in enumerate(toks):
+        kv = kv_of(r, p + 1)
+        for hh in range(QH):
+            k_, v_ = kv[:, 0, hh // G_].astype(np.float64), kv[:, 1, hh // G_].astype(np.float64)
+            sc = k_ @ q[i, hh].astype(np.float64) / np.sqrt(D); pr = np.exp(sc - sc.max())
+            att[i, hh] = pr @ v_ / pr.sum()
+    tag = f"seg256_batch_{li}"
+    for nn, a in [("q", q.reshape(t, -1)), ("info", info), ("orig", orig), ("arena", arena.reshape(-1)), ("o", att.reshape(t, -1).astype(np.float32))]:
+        save(f"{tag}_{nn}", a)
+    print(f"{tag}: {t} tokens in {R} rows, positions {SEG_MIN - 3}..{SEG_MIN + 110}")
+    QD, S = QH * D, 64
+    OT, IT, RT, AR = f"tensor<{t}x{QD}xf32>", f"tensor<{t}x4xi32>", f"tensor<{len(orig)}xi32>", f"tensor<{2 * ctx * KVH * D}xf16>"
+    PA, PM = f"tensor<{t * QH * S * D}xf32>", f"tensor<{t * QH * S * 2}xf32>"
+    gate_fill = "1.0" if cfg.get("attn_gate_act") == "softplus" else "40.0"   # sigmoid(40) = 1.0 in f32; softplus gates hold the value
+    cases.append(f"""check.case public @{tag} {{
+  %t = check.literal value({t}) : index
+  %layer = check.literal value(0) : index
+  %sliding = check.literal value(0) : i32
+  %ctx = check.literal value({ctx}) : index
+  %pool = check.literal value({ctx}) : index
+  %q = check.file.read.npy path("{tag}_q.npy") : {OT}
+  %info = check.file.read.npy path("{tag}_info.npy") : {IT}
+  %orig = check.file.read.npy path("{tag}_orig.npy") : {RT}
+  %arena = check.file.read.npy path("{tag}_arena.npy") : {AR}
+  %eo = check.file.read.npy path("{tag}_o.npy") : {OT}
+  %gate = check.generate.fill value({gate_fill if cfg.get("attn_gate") else "0.0"}) : {OT}
+  %pacc = check.generate.fill value(0.0) : {PA}
+  %pml = check.generate.fill value(0.0) : {PM}
+  %o = check.generate.fill value(0.0) : {OT}
+  kernel.launch @g_attention_split[%t](%t, %layer, %sliding, %ctx, %pool, %q, %info, %orig, %arena, %pacc, %pml) : [index](index, index, i32, index, index, {OT}, {IT}, {RT}, {AR}, {PA}, {PM})
+  kernel.launch @g_attention_combine[%t](%t, %sliding, %info, %pacc, %pml, %gate, %o) : [index](index, i32, {IT}, {PA}, {PM}, {OT}, {OT})
+  check.expect.close actual(%o) expected(%eo) atol(1.5e-3) rtol(3.0e-3) nan(different) : {OT}
+  check.return
+}}
+""")
+
+
 # the drafting settings: the config's (a package's llm_config.json) or build.py's LLM_DRAFT (a pre-build cfg.json)
 cfg.setdefault("draft", json.loads(os.environ.get("LLM_DRAFT") or "null"))
 if cfg.get("draft") and not cfg.get("attn_gate") and not cfg.get("attn_sinks"):   # combine's gate input: none here
     seg_case([i for i in range(cfg["layers"]) if i not in set(cfg.get("sliding_layers") or []) | set(cfg.get("recurrent_layers", []))][0])
+if cfg.get("draft") and D == 256 and KVH <= 2 and not cfg.get("attn_sinks"):
+    seg_case_d256([i for i in range(cfg["layers"]) if i not in set(cfg.get("sliding_layers") or []) | set(cfg.get("recurrent_layers", []))][0])
 # 4. gated delta-net chain on one 5-token span at position 3 that continues the reader slot
 if cfg.get("recurrent_layers"):
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -3529,8 +3597,12 @@ if cfg.get("moe") and os.environ.get("MOE_TESTS", "1") == "1" and os.environ.get
         if (fd, gun) in seen7: continue
         seen7.add((fd, gun))
         tg = f"mg{li}"
-        ex = [0, E7 // 2, E7 - 1]; mt = 4; mr = mt * 64; t7 = 40; ta7 = t7 * KU7
+        ex = [0, E7 // 2, E7 - 1]; t7 = 40; ta7 = t7 * KU7
         counts = [64, 37, 0, 5]; tile_exp = [ex[0], ex[1], -1, ex[2]]
+        import gen_moe_cw_q4k   # moe.prefill.cw_q4k specializes its K loop per live 16-row fragment count: cover nf = 2 too
+        if gen_moe_cw_q4k.modes():
+            counts.append(20); tile_exp.append(ex[1])
+        mt = len(counts); mr = mt * 64
         tile_info = np.array([[e, c] for e, c in zip(tile_exp, counts)], np.int32)
         rowmap = np.full(mr, -1, np.int32)
         for ti, c in enumerate(counts):

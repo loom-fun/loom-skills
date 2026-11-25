@@ -819,7 +819,11 @@
    "fits": true,
    "date": "2026-11-17",
    "max_context": 131072,
-   "native_context": 131072
+   "native_context": 131072,
+   "execution": {
+    "prefill_capacity": 2048
+   },
+   "note": "the R9700 preset's prefill_capacity 4096 (8.45 GiB scratch) refuses the native context in 15 GB on 0.3.0 (HTTP 503); 2048 admits 131072, prefill within 2 % of 4096 (DevLab R9700 at 15 GB, run 45658635919)"
   },
   "unsloth-gemma-4-E4B-it-loom": {
    "fits": true,

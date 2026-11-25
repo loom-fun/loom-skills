@@ -144,6 +144,12 @@ class SdkAb(unittest.TestCase):
             f = {x["name"]: x for x in next(x for x in j if FAST.lower().replace(".", "-") in x["name"])["variants"]}
             self.assertEqual(f["staging"]["build_args"], ["--memory-gib", "4096"])   # no Strix scope rule: unchanged
 
+    def test_the_built_side_gets_its_admission_probe(self):
+        for device in ("strix-halo", "radeon-r9700"):
+            extra = ["--fit", os.path.join(ROOT, ".github", "devlab", "r9700_fit.json")] if device == "radeon-r9700" else []
+            steps = self.jobs(device, *extra)["steps"]
+            self.assertEqual(steps.count("admit:staging"), 1, (device, steps))
+
     def test_abba_order_of_old_and_new_sessions(self):
         steps = self.jobs("strix-halo")["steps"]
         self.assertEqual(steps[:4], ["perf:fun:1", "perf:staging:1", "perf:staging:1", "perf:fun:1"])

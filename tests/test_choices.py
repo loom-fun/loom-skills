@@ -152,6 +152,15 @@ class Resolution(unittest.TestCase):
                              (cfg(arch="qwen3moe", moe={"experts": 8}), "dflash"), (cfg(vision={"mmproj": "x"}), None)):
             self.assertEqual(resolve.resolve(other, ("rdna3", "rdna4"), KB, draft=draft)["env"], {}, other["arch"])
 
+    def test_qwen3moe_router_rule_is_the_30b_shape(self):
+        """qwen3moe at hidden 2048 (Coder-30B-A3B, Qwen3-30B-A3B-2507; #1400): the 8-token prefill router and f16 expert rows on both
+        device families; other qwen3moe shapes keep the defaults."""
+        q = cfg(arch="qwen3moe", hidden=2048, moe={"experts": 128})
+        for dev in (("rdna3",), ("rdna4",), ("rdna3", "rdna4")):
+            env = resolve.resolve(q, dev, KB, draft="dflash")["env"]
+            self.assertEqual((env.get("ROUTE_TR"), env.get("MOE_STORE16")), ("8", "1"), dev)
+        self.assertNotIn("ROUTE_TR", resolve.resolve(cfg(arch="qwen3moe", moe={"experts": 8}), ("rdna3", "rdna4"), KB, draft=None)["env"])
+
     def test_no_scope_sets_anything_by_default_means_no_exports(self):
         """Every program is as before: nothing is exported for any model shape, with the real knowledge base as of this change."""
         if any(s["choices"] for _, s in resolve.load_scopes(KB)):

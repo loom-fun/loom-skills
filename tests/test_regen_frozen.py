@@ -40,6 +40,26 @@ def facts(repo, rev, cache):
             "features": ["draft"], "sdk": {"hrx_loom": "0.2.0"}}
 
 
+class AcceptanceEvidence(unittest.TestCase):
+    def test_perf_session_per_pass_uses_old_decode_row_and_device_depth(self):
+        view = {"performance": {"sessions": [{"source": "old", "metrics": {
+            "decode": {"acceptance": 0.5}, "spec_acceptance": {"loom": 0.8}}}]},
+                "sources": {"old": {"hrx_loom": {"hrx_loom": "0.2.0"}}}}
+        with tempfile.TemporaryDirectory() as d:
+            def write(name, doc):
+                with open(os.path.join(d, name), "w") as f:
+                    json.dump(doc, f)
+            write("model_staging.json", {"presets": {"chat": {"execution": {}}, "chat-r9700": {"execution": {"draft_depth": 2}}}})
+            write("llm_config.json", {"draft": {"depth": 3}})
+            write("perf_staging.jsonl", {"label": "fun", "accepted_per_pass": {"decode_tps": 0.9}})
+            result = regen.acceptance_evidence(d, "radeon-r9700", view)
+            self.assertEqual((result["old"], result["new"], result["unit"]), (1, 0.9, "accepted_per_pass"))
+            del view["performance"]["sessions"][0]["metrics"]["decode"]
+            result = regen.acceptance_evidence(d, "radeon-r9700", view)
+            self.assertIsNone(result["old"])
+            self.assertTrue(result["incomparable"])
+
+
 class VersionGeneric(unittest.TestCase):
     def test_newest_verified_release_is_the_default_target(self):
         self.assertEqual(regen.SDK_NEW, max(regen.VERIFIED_RELEASES, key=regen.version_key))
@@ -915,3 +935,22 @@ class OldFrozenGates(unittest.TestCase):
     def test_devlab_ktest_reads_its_own_variants_package(self):
         text = open(os.path.join(ROOT, ".github", "scripts", "devlab_perf.sh")).read()
         self.assertIn('[ -f "$D/$p1/cfg.json" ] || cp "$D/cfg.json" "$D/$p1/cfg.json"', text)
+
+
+class ConstrainedEvidence(unittest.TestCase):
+    def test_replay_is_scoped_and_uses_candidate(self):
+        opts = {"constrained_gates": {TEXT: {"artifact": "artifact", "job": "job.json", "variant": "sample"}}}
+        with mock.patch.object(regen, "run_tool") as run:
+            for slug, gpu in [(IMAGE, "radeon-r9700"), (TEXT, "strix-halo")]:
+                self.assertEqual(regen.constrained_evidence(opts, slug, gpu, "candidate", "work", None), [])
+            with self.assertRaisesRegex(RuntimeError, "pinned production"):
+                regen.constrained_evidence(opts, TEXT, "radeon-r9700", "candidate", "work", None)
+            run.assert_not_called()
+            args = (opts, TEXT, "radeon-r9700", "candidate", "work", "production/info.json")
+            self.assertEqual(regen.constrained_evidence(*args), ["ev_constrained.json"])
+            run.assert_called_once_with([f"{regen.CARD}/make_info.py", "emulated-gates", os.path.abspath("artifact"),
+                                         "--job", os.path.abspath("job.json"), "--variant", "sample", "--package",
+                                         "candidate", "-o", "ev_constrained.json"], "work")
+            run.side_effect = RuntimeError("package programs differ")
+            with self.assertRaisesRegex(RuntimeError, "programs differ"):
+                regen.constrained_evidence(*args)

@@ -198,13 +198,22 @@ def _gguf_fingerprint(path):
 _FP = {}
 
 
+def reference_gguf(pkg=None):
+    """The GGUF a reference request is keyed by: $REFERENCE_GGUF when the gates' llama.cpp loads another file than the
+    package's own (reference_models.json, set by devlab_perf.sh: the cached answers are that file's), else the
+    package's GGUF ($LLAMA_GGUF in llama_fill.py, which carries the gate's value)."""
+    if os.environ.get("REFERENCE_GGUF"):
+        return os.environ["REFERENCE_GGUF"]
+    return pkg.cfg.get("gguf") if pkg is not None else os.environ.get("LLAMA_GGUF")
+
+
 # llama-server started under another numerics it ships (LLAMA_SPEC arguments), for a request with `"_server": NAME`.
 SERVER_VARIANTS = {"cpu-encoder": "--no-mmproj-offload"}   # the image encoder on the CPU, not offloaded to the GPU
 
 
 def ref_key(body, pkg=None, salt=""):
     """The cache key of a reference request (llama_completion): GGUF fingerprint or checkpoint identity + engine build + body + salt."""
-    gguf = pkg.cfg.get("gguf") if pkg is not None else os.environ.get("LLAMA_GGUF")
+    gguf = reference_gguf(pkg)
     ident = reference_identity(pkg.cfg) if pkg is not None else os.environ.get("REFERENCE_IDENTITY")
     if ident:   # a safetensors checkpoint (the vLLM reference): no GGUF file to fingerprint
         _FP[gguf] = ident
@@ -272,7 +281,7 @@ def llama_completion(url, body, pkg=None, salt="", timeout=7200):
     only llama.cpp loaded, and the gate re-runs from the cache. Otherwise, when nothing answers at
     `url` and $LLAMA_START is set, that command is run once to start llama-server.
     """
-    gguf = pkg.cfg.get("gguf") if pkg is not None else os.environ.get("LLAMA_GGUF")
+    gguf = reference_gguf(pkg)
     ident = reference_identity(pkg.cfg) if pkg is not None else os.environ.get("REFERENCE_IDENTITY")
     key = ref_key(body, pkg, salt)
     d = os.environ.get("LLAMA_CACHE", "llama_cache")

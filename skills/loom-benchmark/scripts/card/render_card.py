@@ -28,7 +28,7 @@ from card_lib import (DEFAULT_GPU, FEATURES, GATE_NAMES, GATES, GPUS, HF, LOOM_U
                       TIMED, PRELOAD_FLAG, preload_mode, card_gpus, card_metrics, derived_tags, beyond_context, gate_applies, generator_commit, stamped, gpu_context, gpu_memory, recorded_quick_start, serves,
                       gpu_view, has_results, has_runner, load_info, load_json, load_package, metric_applies, native_context, over_context,
                       package_facts, programs_sha256, require_valid, stale_metrics, with_gate_features, historical_xsj_gate, sdk_uses_file_parameters, xsj_enabled,
-                      DELTA_BAND, DELTA_NAMES, GOOD_CONCLUSIONS, UNRECORDED_SDK, carried_sdk, delta_rows, drop_carried, previous_gate, sdk_at_least, sdk_version)
+                      DELTA_BAND, DELTA_NAMES, GOOD_CONCLUSIONS, UNRECORDED_SDK, carried_sdk, delta_rows, drop_carried, new_port_line, previous_gate, sdk_at_least, sdk_version)
 from matched_spec import TIE_BAND, classification  # noqa: E402
 
 YES, NO, NA, MISSING = "✅", "❌", "—", "—"
@@ -864,6 +864,8 @@ def delta_lines(info, pin, solo, depth=None):
     re-measured on its own SDK, against that card's stored value. A regression beyond DELTA_BAND is numbered and followed
     by its explanation from evidence, or "unexplained" (lint_card.py refuses to publish that)."""
     L = []
+    if (info.get("sdk_delta") or {}).get("new_port"):   # no earlier card of this package exists (make_info.py build --new-port checked it)
+        L += [f"**{new_port_line(sdk_version(pin))}**", ""]
     kit = (info.get("sdk_delta") or {}).get("kit")
     if kit:
         L += [f"**Programs:** the previous card's programs with only the SDK migration; this release's loom-skills kit build was A/B'd "
@@ -1112,7 +1114,7 @@ def render(d):
     L += ["## Correctness", "", head, "|---|---|" + "---|" * len(cols)]
     ev = []
 
-    def gate_cell(g, name, desc):
+    def gate_result(g, name, desc):
         dev = info["devices"][g]
         if not has_results(dev):
             return MISSING + ((" not yet re-measured" if has_runner(g) else " not measured") if dev.get("state") == "not_measured" else " does not fit")
@@ -1148,6 +1150,18 @@ def render(d):
         pre = (", pre-existing: the previous card failed it too" + (f" ({prev['detail']})" if prev.get("detail") else "")
                if prev and prev["status"] == "fail" else "")
         return res + (f" ({gt['detail']})" if gt["detail"] else "") + pre + f" {mark(ev.index(key) + 1)}"
+
+    def gate_cell(g, name, desc):
+        result = gate_result(g, name, desc)
+        row = (info["devices"][g].get("gates") or {}).get(name) or {}
+        emulated = row.get("emulated_on")
+        if emulated:
+            source = info["sources"][row["source"]]
+            label = GPUS[emulated["device"]]["short"]
+            sdk = sdk_version(source["hrx_loom"])
+            result += f" ([measured on {label} limited to 16 GB (SDK {sdk})]({source['url']}))"
+        return result
+
     vision_details = [(gpu_view(info, g)["gates"].get("vision", {}).get("detail") or "") for g in cols]
     for name, desc in GATES:
         if name == "vision" and (c["file"].endswith(".safetensors") or any(d.startswith("vLLM ") for d in vision_details)):
@@ -1166,6 +1180,8 @@ def render(d):
         src = sources[x["source"]]
         old = carried_sdk(info, x["source"], pin)
         where = "" if solo else f" on the {GPUS[g]['short']}"
+        if x.get("emulated_on"):
+            where = f" measured on {GPUS[x['emulated_on']['device']]['short']} limited to 16 GB (SDK {sdk_version(src['hrx_loom'])})"
         verdict = (f"admitted a {x['tokens']:,}-token request" if x["admitted"] and x.get("tokens") else "admitted" if x["admitted"]
                    else "refused the request")
         L.append(f"- Context admission{where}: one request filling the {x['context']:,}-token context "
