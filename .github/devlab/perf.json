@@ -1,47 +1,341 @@
 {
- "_comment": "R9700 per-model measurement (r9700_jobs.py): one job per model on one R9700 runner; loom-fun-staging card, llama.cpp ROCm b1375 + Vulkan b12211 with the matched drafting, reduced-context models served at served_context. Does not fit: none",
- "runner": "r9700",
- "memory_bytes": 34000000000,
+ "_comment": "Strix Halo A/B of the staging cards (strix_ab_jobs.py): per model one job on one Strix runner, loom-fun package (fun) vs loom-fun-staging package (staging), same prompts and settings; compare with strix_ab_compare.py Frozen programs (--programs production): staging = the published package at its pinned revision on hrx-loom 0.3.0, fun = the same package on card; nothing is built, the programs hash is checked before measuring. Loom only (--loom-only): the new package alone, no old-card variant, no llama.cpp.",
+ "runner": "strix",
+ "memory_bytes": 36000000000,
  "llama_spec": "matched",
  "jobs": [
   {
-   "name": "unsloth-qwen3-0-6b-loom",
-   "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
-   "kit": null,
-   "llamacpp": "b1375",
+   "name": "sab-nvidia-nvidia-nemotron-3-5-bolt-e4b-",
+   "runner": "strix",
+   "card": "loom-fun/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom@3f36ed722f6c8bdb51d90526bc05e03a05f24dbf",
+   "memory_bytes": 36000000000,
+   "kit": "gemma4",
+   "llamacpp": "b1374",
    "llamacpp_vulkan": "b12211",
-   "memory_bytes_r9700": 17000000000,
    "variants": [
     {
-     "name": "card",
-     "build": {}
+     "name": "staging",
+     "sdk": "0.3.0",
+     "programs_sha256": "c0f2ffffb75fbe4fb88300109f23df40b85f248261d999139dd28792cbdbe95c"
     },
     {
-     "name": "nodraft",
-     "build": {},
+     "name": "stagingnd",
      "execution": {
       "draft_depth": 0
-     }
+     },
+     "sdk": "0.3.0",
+     "programs_sha256": "c0f2ffffb75fbe4fb88300109f23df40b85f248261d999139dd28792cbdbe95c"
     }
    ],
    "steps": [
-    "func:card",
-    "ktest:card",
-    "gates:card:dev",
-    "perf:card:3",
-    "perf:card:3:long",
-    "c4:nodraft",
-    "llama@rocm.np1:3",
-    "llama@rocm.np1:3:long",
-    "llamac4@rocm.nodraft",
-    "llama@vulkan.np1:3",
-    "llama@vulkan.np1:3:long",
-    "llamac4@vulkan.perslot.nodraft"
-   ]
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:staging:1:long",
+    "perf:staging:1:long",
+    "perf:staging:1:long",
+    "c4:stagingnd",
+    "c4:stagingnd",
+    "func:staging",
+    "ktest:staging",
+    "gates:staging:dev",
+    "admit:staging"
+   ],
+   "sdk": "0.3.0"
+  },
+  {
+   "name": "sab-rippertnt-hyperclovax-seed-text-inst",
+   "runner": "strix",
+   "repeat_rows": 3,
+   "card": "loom-fun/rippertnt-HyperCLOVAX-SEED-Text-Instruct-1.5B-loom@0c8e8831544e6625431a8177873fa531e75d0cc0",
+   "memory_bytes": 24000000000,
+   "kit": null,
+   "llamacpp": "b1374",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "staging",
+     "sdk": "0.3.0",
+     "programs_sha256": "e4184377323e3d9bbe2bf58d66abdb805b36beb6bba7fba222ed9675d415f874"
+    },
+    {
+     "name": "stagingnd",
+     "execution": {
+      "draft_depth": 0
+     },
+     "sdk": "0.3.0",
+     "programs_sha256": "e4184377323e3d9bbe2bf58d66abdb805b36beb6bba7fba222ed9675d415f874"
+    }
+   ],
+   "steps": [
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:staging:1:long",
+    "perf:staging:1:long",
+    "perf:staging:1:long",
+    "perf:staging:1:long",
+    "perf:staging:1:long",
+    "perf:staging:1:long",
+    "c4:stagingnd",
+    "c4:stagingnd",
+    "c4:stagingnd",
+    "c4:stagingnd",
+    "func:staging",
+    "ktest:staging",
+    "gates:staging:dev",
+    "admit:staging"
+   ],
+   "sdk": "0.3.0"
+  },
+  {
+   "name": "sab-unsloth-inkling-2-mini-loom",
+   "runner": "strix",
+   "card": "loom-fun/unsloth-Inkling-2-Mini-loom@4e018e88a3aa9826286c71dfe2f6c905a491659b",
+   "memory_bytes": 33000000000,
+   "kit": null,
+   "llamacpp": "b1384",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "staging",
+     "sdk": "0.3.0",
+     "programs_sha256": "fdb1aaa4771f05a9cc9315aa774bddf121123c8143d3b81762563e6fedc0f6aa"
+    },
+    {
+     "name": "stagingnd",
+     "execution": {
+      "draft_depth": 0
+     },
+     "sdk": "0.3.0",
+     "programs_sha256": "fdb1aaa4771f05a9cc9315aa774bddf121123c8143d3b81762563e6fedc0f6aa"
+    }
+   ],
+   "steps": [
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:staging:1:long",
+    "perf:staging:1:long",
+    "perf:staging:1:long",
+    "c4:stagingnd",
+    "c4:stagingnd",
+    "func:staging",
+    "ktest:staging",
+    "gates:staging:dev",
+    "admit:staging"
+   ],
+   "sdk": "0.3.0"
+  },
+  {
+   "name": "sab-unsloth-llama-3-2-3b-instruct-loom",
+   "runner": "strix",
+   "card": "loom-fun/unsloth-Llama-3.2-3B-Instruct-loom@c6defa4cd5a8764b2cd8d4c14cb81ca0f118a76c",
+   "memory_bytes": 29000000000,
+   "kit": null,
+   "llamacpp": "b1374",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "staging",
+     "sdk": "0.3.0",
+     "programs_sha256": "3585b4ecca62d501794cd356fb330001090b0656c45b1cfb831435738ef95ef9"
+    },
+    {
+     "name": "stagingnd",
+     "execution": {
+      "draft_depth": 0
+     },
+     "sdk": "0.3.0",
+     "programs_sha256": "3585b4ecca62d501794cd356fb330001090b0656c45b1cfb831435738ef95ef9"
+    }
+   ],
+   "steps": [
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:staging:1:long",
+    "perf:staging:1:long",
+    "perf:staging:1:long",
+    "c4:stagingnd",
+    "c4:stagingnd",
+    "func:staging",
+    "ktest:staging",
+    "gates:staging:dev",
+    "admit:staging"
+   ],
+   "sdk": "0.3.0"
+  },
+  {
+   "name": "sab-unsloth-ornith-1-0-9b-loom",
+   "runner": "strix",
+   "card": "loom-fun/unsloth-Ornith-1.0-9B-loom@dff6b66ed20512c86ec2f847bfe78fc6b5589149",
+   "memory_bytes": 22000000000,
+   "kit": null,
+   "llamacpp": "b1374",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "staging",
+     "sdk": "0.3.0",
+     "programs_sha256": "0793c4220b34a0253939042d00917b49fad64149a8c98351623d5fd2fe0e47c5"
+    },
+    {
+     "name": "stagingnd",
+     "execution": {
+      "draft_depth": 0
+     },
+     "sdk": "0.3.0",
+     "programs_sha256": "0793c4220b34a0253939042d00917b49fad64149a8c98351623d5fd2fe0e47c5"
+    }
+   ],
+   "steps": [
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:staging:1:long",
+    "perf:staging:1:long",
+    "perf:staging:1:long",
+    "c4:stagingnd",
+    "c4:stagingnd",
+    "func:staging",
+    "ktest:staging",
+    "gates:staging:dev",
+    "admit:staging"
+   ],
+   "sdk": "0.3.0"
+  },
+  {
+   "name": "sab-unsloth-qwen3-0-6b-loom",
+   "runner": "strix",
+   "repeat_rows": 3,
+   "card": "loom-fun/unsloth-Qwen3-0.6B-loom@564d578f4e487c6fbabd84915439f873651b5953",
+   "memory_bytes": 17000000000,
+   "kit": null,
+   "llamacpp": "b1374",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "staging",
+     "sdk": "0.3.0",
+     "programs_sha256": "36be806329b1e49f47cb705f853b61a503c10e49daac939427b3c58a334da243"
+    },
+    {
+     "name": "stagingnd",
+     "execution": {
+      "draft_depth": 0
+     },
+     "sdk": "0.3.0",
+     "programs_sha256": "36be806329b1e49f47cb705f853b61a503c10e49daac939427b3c58a334da243"
+    }
+   ],
+   "steps": [
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:staging:1:long",
+    "perf:staging:1:long",
+    "perf:staging:1:long",
+    "perf:staging:1:long",
+    "perf:staging:1:long",
+    "perf:staging:1:long",
+    "c4:stagingnd",
+    "c4:stagingnd",
+    "c4:stagingnd",
+    "c4:stagingnd",
+    "func:staging",
+    "ktest:staging",
+    "gates:staging:dev",
+    "admit:staging"
+   ],
+   "sdk": "0.3.0"
+  },
+  {
+   "name": "sab-unsloth-qwen3-30b-a3b-instruct-2507-",
+   "runner": "strix",
+   "card": "loom-fun/unsloth-Qwen3-30B-A3B-Instruct-2507-loom@c6598438289b2cbb1543e73e90b749136c888797",
+   "memory_bytes": 63000000000,
+   "kit": null,
+   "llamacpp": "b1374",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "staging",
+     "sdk": "0.3.0",
+     "programs_sha256": "09e2b605bcb1c65d5a8b11aa8d23893b61de0d25bc959b1863a39fb40d1f3e13"
+    },
+    {
+     "name": "stagingnd",
+     "execution": {
+      "draft_depth": 0
+     },
+     "sdk": "0.3.0",
+     "programs_sha256": "09e2b605bcb1c65d5a8b11aa8d23893b61de0d25bc959b1863a39fb40d1f3e13"
+    }
+   ],
+   "steps": [
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:staging:1:long",
+    "perf:staging:1:long",
+    "perf:staging:1:long",
+    "c4:stagingnd",
+    "c4:stagingnd",
+    "func:staging",
+    "ktest:staging",
+    "gates:staging:dev",
+    "admit:staging"
+   ],
+   "sdk": "0.3.0"
+  },
+  {
+   "name": "sab-unsloth-qwen3-4b-instruct-2507-loom",
+   "runner": "strix",
+   "card": "loom-fun/unsloth-Qwen3-4B-Instruct-2507-loom@d0df214dfcbf73e905ad7930498e110bb5525e3d",
+   "memory_bytes": 55000000000,
+   "kit": null,
+   "llamacpp": "b1374",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "staging",
+     "sdk": "0.3.0",
+     "programs_sha256": "46c11c082d8f879e614031f170120d06582c135a02d8b63f1db1e03b2882c4ac"
+    },
+    {
+     "name": "stagingnd",
+     "execution": {
+      "draft_depth": 0
+     },
+     "sdk": "0.3.0",
+     "programs_sha256": "46c11c082d8f879e614031f170120d06582c135a02d8b63f1db1e03b2882c4ac"
+    }
+   ],
+   "steps": [
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:staging:1:long",
+    "perf:staging:1:long",
+    "perf:staging:1:long",
+    "c4:stagingnd",
+    "c4:stagingnd",
+    "func:staging",
+    "ktest:staging",
+    "gates:staging:dev",
+    "admit:staging"
+   ],
+   "sdk": "0.3.0"
   }
  ],
- "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
+ "card": "loom-fun/nvidia-NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-loom@3f36ed722f6c8bdb51d90526bc05e03a05f24dbf",
  "kit": null,
- "llamacpp": "b1375",
- "llamacpp_vulkan": "b12211"
+ "llamacpp": "b1374"
 }
