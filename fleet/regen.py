@@ -17,6 +17,8 @@
   regen.py accept  S.json SLUG... --note TEXT              a person's call: greedy text differs only at a near-tie, decide again with that accepted
   regen.py accept-regression S.json SLUG... --note TEXT   SDK modes: publish a CONFIRMED slowdown as measured (the note names its explanation)
   regen.py adopt   S.json --run RUN                        attach an already running / finished run to the state's jobs (by job name)
+  regen.py evidence S.json -o EVIDENCE.json               --programs production: the sdk-evidence/1 document (per model / device / metric, fail closed)
+  regen.py eligible S.json --out-dir DIR                  --programs production: the release's eligible.json / held.json / pending.json from the evidence
 
 Modes. sdk-ab: the SDK migration's A/B (ab_jobs.py --sdk-ab): per model and device ONE job, ABBA on one runner: variant "fun" = the published staging card
   (the staging repo's head at plan time) on its own SDK pin (hrx-loom 0.1.0), variant "staging" = the package built in the job from the job's branch on
@@ -31,6 +33,17 @@ Modes. sdk-ab: the SDK migration's A/B (ab_jobs.py --sdk-ab): per model and devi
   own pin vs the new package, same job) whose verdict decides (slower than 3 % there = needs_decision with the numbers, else promote). State per job:
   perf = the cross-job deltas, the ABBA ones on the confirmed rows, confirmed = {row: ABBA %}. `ingest` builds the device's table from the job's Loom rows
   plus the previous card's llama.cpp rows (copied with their own run and date, never re-measured); the card's methodology line says "different jobs".
+  --programs production (sdk-loom / sdk-ab): the FROZEN migration. The target SDK (--new-sdk, default the newest sdk_pin.VERIFIED_RELEASES entry) has an
+  accepted production inventory skills/loom-migrate/versions/vOLD-to-vNEW-production.json ({org/repo: revision}, fleet/sdk_inventory.py; held packages in
+  the sibling -held.json). Nothing is built: every job serves the production package at its inventory revision byte for byte on the target SDK (the
+  ABBA confirmation: the same package on its own old pin), each variant carries the production programs hash and devlab_perf.sh refuses to measure
+  anything else. plan reads each package's small files (programs hash, kind, the devices its card claims): a claimed device with a runner gets a job, a
+  claimed runner-less device is recorded (no_runner: carried under the owner's policy), an image package gets an image-service job (image_sdk_compare.py:
+  identical pixels on both SDKs). collect holds a job that concluded other than success, served other programs or ran another SDK wheel. package makes
+  the staging repo hold exactly the production package with only the llm_config.json pin stamped (card files the production card's until ingest);
+  `evidence` / `eligible` write the release's inputs (eligible only when every runner device is qualified by a passing job of those programs).
+  --old-sdk target (sdk-ab / sdk-loom, --programs build): the old package is served on the target SDK too: the kit build against the frozen
+  programs on the same SDK (phase 2 of a migration: --mode sdk-ab --old-sdk target --no-baselines; the baseline rows are the previous card's).
   ab: regeneration of a device that already has a package to compare with (ab_jobs.py: old vs new in ABBA sessions, text match, func, ktest, gates,
   llama.cpp baselines where the card's table comes from the job). card: a NEW device, no old package: one card measurement per model (device_jobs.py: card +
   nodraft variants, func, ktest, gates, llama.cpp ROCm + Vulkan baselines), no A/B: about half the runner time of ab.
@@ -131,6 +144,11 @@ def inventory_path(version):
     if len(hits) > 1:
         die(f"several production inventories for {version}: {hits}")
     return hits[0] if hits else None
+
+
+def load_inventory(path):
+    """{org/repo: revision} of an inventory file (keys without a "/", e.g. "_drift", are its records, not packages)"""
+    return {k: v for k, v in sdk_package.load(path).items() if "/" in k}
 
 
 def inventory_old_version(path):
@@ -444,7 +462,7 @@ def cmd_plan(a):
     # a verified target with a production inventory (skills/loom-migrate/versions/vOLD-to-vNEW-production.json): the old side is the production
     # package at its accepted revision, never a staging history walk
     inventory = inventory_path(new_sdk) if a.mode in SDK_MODES and release_pin(new_sdk) else None
-    accepted = sdk_package.load(inventory) if inventory else None
+    accepted = load_inventory(inventory) if inventory else None
     if production and not accepted:
         die(f"--programs production needs a verified SDK {new_sdk} (sdk_pin.VERIFIED_RELEASES) and its inventory {VERSIONS}/v*-to-v{new_sdk}-production.json")
     sibling = inventory and inventory.replace("-production.json", "-held.json")
@@ -1328,13 +1346,11 @@ def package_one(st, slug, canon, sha, dry, env, prefill_changes=None, source_car
         if os.path.isfile(qualification):
             # Keep the receipt. Card generation applies it only to the exact measured settings.
             shutil.copy2(qualification, os.path.join(out, card_lib.QUICK_START_QUALIFICATION))
-    if release_pin(version):
-        path = os.path.join(out, "llm_config.json")
-        config = sdk_package.load(path)
-        config["sdk"] = release_pin(version)
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(config, f, indent=1)
-            f.write("\n")
+    if release_pin(version):   # the pin is the emitter's (the kit at --ref writes it into llm_config.json): a different one stops the model
+        got_pin = sdk_package.load(os.path.join(out, "llm_config.json")).get("sdk") or {}
+        if any(got_pin.get(k) != v for k, v in release_pin(version).items()):
+            raise RuntimeError(f"the canonical build of {sha[:10]} pins hrx-loom {got_pin.get('hrx_loom')}, not the verified {version} "
+                               f"(the kit's emitter must write the target pin; nothing is stamped over it)")
     if sdk_package.same_files(reference, out):   # the head already holds exactly this package (programs AND llm_config pin, model.json, ...)
         return {"revision": rev, "programs_sha256": want, "base": sha, "already": True}
     msg = f"Loom package rebuilt for hrx-loom {version} from loom-skills {sha[:10]} (card files unchanged until the card step)"
@@ -1880,10 +1896,11 @@ def build_evidence(st):
            "inventory": {"path": o["inventory"], "sha256": hashlib.sha256(open(inv, "rb").read()).hexdigest() if os.path.isfile(inv) else None},
            "models": {}, "held": {}}
     held = o.get("held") or {}
-    accepted = sdk_package.load(inv) if os.path.isfile(inv) else {}
+    accepted = load_inventory(inv) if os.path.isfile(inv) else {}
     for s in held:
         doc["held"][s] = {**(held[s] if isinstance(held, dict) else {}), "production": f"{PRODUCTION_ORG}/{s}",
-                          "production_revision": accepted.get(f"{PRODUCTION_ORG}/{s}")}
+                          "production_revision": accepted.get(f"{PRODUCTION_ORG}/{s}"),
+                          "tag_revision": accepted.get(f"{PRODUCTION_ORG}/{s}")}   # the production head that gets the outgoing tag
     info_cache = {}
     sweep = {n: e for n, e in st.jobs.items() if not e.get("prev")}   # an ABBA confirmation's numbers live on its first job (confirmed)
     for name, e in sorted(sweep.items(), key=lambda kv: (kv[1]["slug"], kv[1]["device"])):
@@ -1937,8 +1954,9 @@ def eligibility(doc):
             elif m["kind"] == "text" and not v.get("programs_match"):
                 bad[d] = "the qualification job served other programs"
         staged = sorted({v.get("published_revision") for v in qual.values() if v.get("published_revision")})
-        if not bad and m["kind"] == "text" and not staged:
-            bad["staging"] = "the staging card is not published yet"
+        unpublished = sorted(d for d, v in qual.items() if not v.get("published_revision"))
+        if not bad and m["kind"] == "text" and unpublished:
+            bad["staging"] = f"the staging card is not published for {', '.join(unpublished)} yet"
         if bad:
             pending[slug] = {"production": m["production"], "reasons": bad}
             continue

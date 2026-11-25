@@ -19,6 +19,7 @@ def snapshot(org):
 
 
 def drift(old, new):
+    old, new = ({k: v for k, v in d.items() if "/" in k} for d in (old, new))   # "_drift" and other records are not packages
     return {"added": {k: new[k] for k in sorted(set(new) - set(old))},
             "removed": {k: old[k] for k in sorted(set(old) - set(new))},
             "moved": {k: {"from": old[k], "to": new[k]} for k in sorted(set(old) & set(new)) if old[k] != new[k]}}
