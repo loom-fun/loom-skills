@@ -8,7 +8,7 @@ The job: {"name": ..., "kind": "image", "card": "ORG/REPO@REV", "image": {"old_s
 "preset": null}} (preset null = the package's first preset). Each SDK fetches the package with its own loom-fetch (the published model.json at
 REV, nothing rebuilt) and must hold programs hashing to H (card_lib.programs_sha256) before anything is served. Sessions alternate ABBA
 (old new new old): each serves the package alone, waits for registration, sends REQUESTS timed requests of the preset's own request (its
-"request" block with the model id; an upscale service gets a fixed synthetic RGB input at a quarter of the preset's geometry). Every output must be a
+"request" block with the model id; an upscale service gets a fixed synthetic RGB input at a quarter of the preset's geometry, so the timing is the preset's workload). Every output must be a
 PNG of the expected size with visual variation; the RGB bytes of every output of one SDK must be identical (deterministic), and the old and new
 SDK's must be identical (pixels_match). Writes OUT/image_result.json, OUT/image_{old,new}.png, OUT/serve_{old,new}_N.log and OUT/summary.json
 ({"job", "runner", "results": {"image:old": ..., "image:new": ..., "pixels": PASS|FAIL ...}}): the job's verdict for fleet/regen.py collect.
@@ -42,7 +42,8 @@ def request_body(model, preset):
     body = dict(p.get("request") or {}, model=model["model"]["id"], response_format="b64_json")
     service = (model.get("services") or {}).get(p.get("service"))
     if upscale_input(service):
-        w, h = 64, 16   # a 4x upscaler: the output geometry is four times the input's
+        # a 4x upscaler: the input is a quarter of the preset's geometry (its declared workload), the output four times the input
+        w, h = int(ex.get("width") or 256) // 4, int(ex.get("height") or 64) // 4
         raw = bytes((x * 5 + y * 9 + c * 47) % 256 for y in range(h) for x in range(w) for c in range(3))
         body.update(prompt=base64.b64encode(raw).decode(), size=f"{4 * w}x{4 * h}")
         return body, (4 * w, 4 * h)
