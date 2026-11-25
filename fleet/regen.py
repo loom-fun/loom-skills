@@ -2679,15 +2679,70 @@ def final_kit_qualifications(doc, sweep, states):
 FULL_SUITE_GATES = {"agent", "agent_think_off", "compare", "consistency", "golden", "sampling", "spec", "vision"}
 
 
-def check_staged_qualification(row, *, kit, sdk=None, full_suites=None):
+def load_accepted_failures(path):
+    """Read exact (slug, GPU, gate) decisions for one release."""
+    if not path:
+        return {}
+    entries = sdk_package.load(path)
+    if not isinstance(entries, list):
+        die("accepted failures must be a JSON array")
+    accepted = {}
+    for entry in entries:
+        if not isinstance(entry, dict) or set(entry) != {"slug", "gpu", "gate", "decision"}:
+            die("an accepted failure needs slug, gpu, gate and decision")
+        if not all(isinstance(value, str) and value.strip() for value in entry.values()):
+            die("an accepted failure contains an empty or invalid value")
+        slug, gpu, name = (entry[key] for key in ("slug", "gpu", "gate"))
+        if not all(re.fullmatch(r"[A-Za-z0-9_.-]+", value) for value in (slug, gpu, name)):
+            die("accepted failures require exact identifiers")
+        gates = accepted.setdefault(slug, {}).setdefault(gpu, {})
+        if name in gates:
+            die(f"duplicate accepted failure: {slug} {gpu} {name}")
+        gates[name] = entry["decision"]
+    return accepted
+
+
+def review_shown_failures(doc, sweep, decisions):
+    """Consider only verified, published promotions held solely by their recorded gate failures."""
+    for job in sweep.jobs.values():
+        shown = job.get("shown_failed") or {}
+        if (job.get("prev") or job["stage"] != "published" or job.get("decision") != "promote"
+                or not (job.get("verified") or {}).get("ok") or shown.get("not_run") or not shown.get("failed")):
+            continue
+        slug, gpu = job["slug"], job["device"]
+        row = doc["models"][slug]["devices"][gpu]
+        names = {"kernel_tests" if name == "ktest:staging" else name for name in shown["failed"]}
+        if (row["status"] == "failed" and names <= decisions.get(slug, {}).get(gpu, {}).keys()
+                and (row.get("sdk") or {}).get("verified") and (row.get("admission") or {}).get("result") == "ADMITTED"):
+            row.update(status="qualified", required_shown_failures=sorted(names))
+
+
+def check_staged_qualification(row, *, kit, sdk=None, full_suites=None, accepted=None, required=None):
     """Check the pinned text card for failing gates and, for shipped kits, the exact measured sessions."""
     try:
         info = card_lib.load_info(hf_file(row["staging"], "info.json", row["staging_revision"]))
+        applied = {}
         for gpu, qual in row["qualification"].items():
             view = card_lib.gpu_view(info, gpu)
             failed = sorted(name for name, gate in (view.get("gates") or {}).items() if gate["status"] == "fail")
-            if failed:
-                return f"{gpu}: final staging card shows failed gates: {', '.join(failed)}"
+            decisions = (accepted or {}).get(gpu, {})
+            unlisted = sorted(set(failed) - decisions.keys())
+            if unlisted:
+                return f"{gpu}: final staging card shows failed gates: {', '.join(unlisted)}"
+            if set((required or {}).get(gpu, ())) - set(failed):
+                return f"{gpu}: the final staging card omits a recorded failure"
+            for name in failed:
+                gate = view["gates"][name]
+                src = info["sources"].get(gate.get("source")) or {}
+                url = src.get("url") or ""
+                pin = release_pin(sdk) or {}
+                if (not pin.get("wheel_sha256") or (src.get("hrx_loom") or {}).get("wheel_sha256") != pin["wheel_sha256"]
+                        or card_lib.gpu_from_device(src.get("device")) != gpu or card_lib.source_sdk(info, gate.get("source")) != sdk
+                        or not row.get("programs_sha256") or gate.get("programs_sha256") != row["programs_sha256"]
+                        or src.get("kind") != "devlab" or not re.fullmatch(
+                            r"https://github\.com/" + re.escape(REPO) + r"/actions/runs/[0-9]+/job/[0-9]+", url)):
+                    return f"{gpu}: accepted failure lacks current runner evidence on final programs: {name}"
+                applied.setdefault(gpu, {})[name] = {"decision": decisions[name], "url": url}
             if sdk and gpu not in (row.get("gates_not_rerun") or {}):
                 carried = sorted(name for name, gate in (view.get("gates") or {}).items()
                                  if card_lib.carried_sdk(info, gate.get("source"), sdk))
@@ -2706,6 +2761,8 @@ def check_staged_qualification(row, *, kit, sdk=None, full_suites=None):
             if not any(s.get("programs_sha256") == row["programs_sha256"] and
                        (info["sources"].get(s.get("source")) or {}).get("url") == qual["url"] for s in sessions):
                 return f"{gpu}: final staging card lacks the measured kit session"
+        if applied:
+            row["accepted_failures"] = applied
     except Exception as err:   # an unreadable Hub revision cannot qualify
         return f"cannot validate the published card: {err}"
     return None
@@ -2715,6 +2772,9 @@ def cmd_eligible(a):
     st = State(a.state)
     doc = build_evidence(st)
     states = [State(path) for path in (getattr(a, "kit_state", None) or [])]
+    accepted = load_accepted_failures(getattr(a, "accepted_failures", None))
+    if accepted:
+        review_shown_failures(doc, st, accepted)
     shipped = final_kit_qualifications(doc, st, states) if states else set()
     held_programs = set().union(*(program_holds(state) for state in [st, *states]))
     for slug in held_programs.intersection(doc["models"]):
@@ -2727,7 +2787,9 @@ def cmd_eligible(a):
             continue
         expected = ({gpu: d.get("gates") for gpu, d in doc["models"][slug]["devices"].items()}
                     if getattr(a, "require_full_gates", False) else None)
-        problem = check_staged_qualification(row, kit=slug in shipped, sdk=doc["sdk"]["new"], full_suites=expected)
+        required = {gpu: d.get("required_shown_failures", []) for gpu, d in doc["models"][slug]["devices"].items()}
+        problem = check_staged_qualification(row, kit=slug in shipped, sdk=doc["sdk"]["new"], full_suites=expected,
+                                             accepted=accepted.get(slug), required=required)
         if problem:
             pending[slug] = {"production": eligible[slug]["production"], "reasons": {"staging": problem}}
             del eligible[slug]
@@ -3129,6 +3191,7 @@ def main(argv=None):
             q.add_argument("-o", "--out", required=True)
         else:
             q.add_argument("--out-dir", required=True)
+            q.add_argument("--accepted-failures", metavar="FILE", help="release decisions, a JSON array of {slug, gpu, gate, decision}")
             q.add_argument("--require-full-gates", action="store_true", help="require full-level runner suites on the final program digest")
             q.add_argument("--kit-state", action="append", help="phase-2 state (repeat for every device): qualify the final published programs")
         q.set_defaults(fn=fn)
