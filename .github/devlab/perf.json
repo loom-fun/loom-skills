@@ -52,6 +52,29 @@
      "sdk": "0.3.0"
     },
     {
+     "name": "bf0",
+     "build": {
+      "ATTN_BFLY": "0"
+     },
+     "build_args": [
+      "--memory-gib",
+      "4096"
+     ],
+     "sdk": "0.3.0"
+    },
+    {
+     "name": "kvo4",
+     "build": {
+      "ATTN_GQA_D256": "1",
+      "ATTN_GQA_U": "4"
+     },
+     "build_args": [
+      "--memory-gib",
+      "4096"
+     ],
+     "sdk": "0.3.0"
+    },
+    {
      "name": "funnd",
      "card": "loom-fun/bartowski-Ornith-1.5-35B-A3B-loom",
      "sdk": "0.2.0",
@@ -97,6 +120,35 @@
      "execution": {
       "draft_depth": 0
      }
+    },
+    {
+     "name": "bf0nd",
+     "build": {
+      "ATTN_BFLY": "0"
+     },
+     "build_args": [
+      "--memory-gib",
+      "4096"
+     ],
+     "sdk": "0.3.0",
+     "execution": {
+      "draft_depth": 0
+     }
+    },
+    {
+     "name": "kvo4nd",
+     "build": {
+      "ATTN_GQA_D256": "1",
+      "ATTN_GQA_U": "4"
+     },
+     "build_args": [
+      "--memory-gib",
+      "4096"
+     ],
+     "sdk": "0.3.0",
+     "execution": {
+      "draft_depth": 0
+     }
     }
    ],
    "steps": [
@@ -104,7 +156,11 @@
     "perf:fz3:1",
     "perf:segnd:1",
     "perf:seg:1",
+    "perf:bf0:1",
+    "perf:kvo4:1",
     "perf:fun:1",
+    "perf:kvo4:1",
+    "perf:bf0:1",
     "perf:seg:1",
     "perf:segnd:1",
     "perf:fz3:1",
@@ -112,21 +168,27 @@
     "perf:fz3:1:long",
     "perf:segnd:1:long",
     "perf:seg:1:long",
+    "perf:bf0:1:long",
+    "perf:kvo4:1:long",
     "perf:fun:1:long",
+    "perf:kvo4:1:long",
+    "perf:bf0:1:long",
     "perf:seg:1:long",
     "perf:segnd:1:long",
     "perf:fz3:1:long",
     "perf:segnd:1:long",
     "perf:seg:1:long",
+    "perf:bf0:1:long",
+    "perf:kvo4:1:long",
     "perf:fun:1:long",
     "perf:fz3:1:long",
-    "perf:segnd:1:long",
-    "perf:fz3:1:long",
-    "perf:fun:1:long",
-    "perf:seg:1:long",
     "smoke:segnd",
     "smoke:seg",
-    "ktest:segnd"
+    "smoke:bf0",
+    "smoke:kvo4",
+    "ktest:segnd",
+    "ktest:bf0",
+    "ktest:kvo4"
    ],
    "sdk": "0.3.0"
   }
