@@ -182,7 +182,7 @@
       "admission": {
        "type": "object", "additionalProperties": false, "required": ["admitted", "tokens", "context", "detail", "date", "source"],
        "description": "The native-context admission check of the latest gates run on this GPU (gates.sh context_admit, ctx_admit.py): one request filling the context the GPU serves, admitted or refused",
-       "properties": {"admitted": {"type": "boolean"}, "tokens": {"type": ["integer", "null"]}, "context": {"type": ["integer", "null"]},
+       "properties": {"emulated_on": {"$ref": "#/$defs/emulation"}, "admitted": {"type": "boolean"}, "tokens": {"type": ["integer", "null"]}, "context": {"type": ["integer", "null"]},
                       "detail": {"type": ["string", "null"]}, "date": {"type": ["string", "null"], "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"},
                       "source": {"type": "string"}, "programs_sha256": {"type": ["string", "null"]}}
       },
@@ -321,6 +321,10 @@
     "unreported": {"enum": ["proposals"], "description": "spec_acceptance only, with loom null: proposals = the SDK counted accepted drafted tokens but no proposals for this package's controller (hrx-loom 0.3 with a service ABI 1 controller; bench_common.proposals_unreported); never derived from the configured draft depth"}
    }
   },
+  "emulation": {
+   "type": "object", "additionalProperties": false, "required": ["device", "memory_bytes"],
+   "properties": {"device": {"type": "string"}, "memory_bytes": {"type": "integer"}}
+  },
   "gate": {
    "type": "object", "required": ["status", "level", "date", "source", "detail"],
    "properties": {
@@ -328,6 +332,7 @@
     "level": {"type": ["string", "null"], "description": "gates.sh LEVEL the evidence ran at"},
     "date": {"type": ["string", "null"], "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"},
     "source": {"type": "string"},
+    "emulated_on": {"$ref": "#/$defs/emulation"},
     "detail": {"type": ["string", "null"], "description": "a count from the gate's own output (e.g. 66/66), or null"},
     "programs_sha256": {"type": ["string", "null"]}
    }

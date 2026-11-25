@@ -110,6 +110,7 @@ times: the later file), except that on the same programs_sha256 a later pass at 
 full) does not replace a pass at a higher level; a later failure always does. roofline: the later file wins. A "devlab"
 block (an older Loom-only sweep) is ignored. Unknown metric and gate names are kept.
 """
+from pathlib import Path
 import argparse
 import ast
 import datetime
@@ -127,7 +128,7 @@ from card_lib import (DEFAULT_GPU, DRAFTED_ROWS, EVIDENCE_ID, GPUS, METRIC_KEYS,
                       gpu_view, load_info, load_json, load_package, metric_applies, native_context, over_context, package_facts,
                       programs_sha256, require_valid, fixed_pool_capacity, gpu_preset_execution, gpu_preset_name, with_gpu_preset, served_context, fit_served_context, upstream_facts, with_gate_features, write_json,
                       SERVE_HEADROOM, registry, fit_rows, non_targets, load_device_results, validate_device_results, with_device_preset, DEVICE_RESULTS_ID, card_serve_args, quick_start, serves,
-                      historical_xsj_gate, sdk_serve_args, xsj_enabled, xsj_evidence_errors, xsj_measurement_errors, xsj_vulkan_comparison_errors,
+                      emulated_gate_errors, historical_xsj_gate, sdk_serve_args, xsj_enabled, xsj_evidence_errors, xsj_measurement_errors, xsj_vulkan_comparison_errors,
                       CAVEAT_MAX, DEVICE_RESULTS_DIR, QUICK_START_QUALIFICATION, qualified_bare_quick_start, text_errors, previous_values, stamped, SESSION_ACCEPTANCE_ROWS,
                       new_port_problem, sdk_version)
 
@@ -182,7 +183,7 @@ class Sources:
 
     def add(self, src):
         src = {**{k: src.get(k) for k in ("kind", "run", "url", "device", "hrx_loom")},
-               **{k: src[k] for k in ("power_mode", "power") if src.get(k)}}   # a local session at a power mode keeps its evidence
+               **{k: src[k] for k in ("power_mode", "power", "conclusion") if src.get(k)}}   # a local session at a power mode keeps its evidence
         base = source_id(src)
         if src["kind"] == "xsj" and base in self.by_id and self.by_id[base] != src:
             raise SystemExit(f"{base}: conflicting source records for the same XSJ run")
@@ -708,6 +709,8 @@ def cmd_build(a):
                    "source": sources.add(g["source"]), "detail": g.get("detail")}
             if g.get("programs_sha256"):
                 row["programs_sha256"] = g["programs_sha256"]
+            if g.get("emulated_on"):
+                row["emulated_on"] = g["emulated_on"]
             out[name] = row
         return out
     gate_out = {g: gate_rows(G[g]["gates"]) for g in G}
@@ -1360,6 +1363,63 @@ def cmd_devices(a):
         print("no device results files")
 
 
+def cmd_emulated_gates(a):
+    """Create gate-only build evidence from one pinned DevLab package and job."""
+    gpu, host = "gfx1201-16gb", "radeon-r9700"
+    d = Path(a.artifact)
+    v = a.variant
+    summary, job = load_json(d / "summary.json"), load_json(a.job)
+    run = str(job["run_id"])
+    if (summary["job"] != job["name"] or summary["runner"] != job["runner_name"]
+            or job["conclusion"] != "success" or host not in job.get("labels", [])):
+        sys.exit("artifact does not identify the successful R9700 job")
+    info = load_json(Path(a.package) / "info.json")
+    quick = info["devices"][gpu]["quick_start"]
+    expected = [f"--preset={quick['preset']}", f"--device={quick['device']}", *quick["args"]]
+    budget = GPUS[gpu]["memory_bytes"]
+    if f"--memory_bytes={budget}" not in expected:
+        sys.exit("package Quick start lacks the 16 GB device budget")
+    stamp = {"device": host, "memory_bytes": budget}
+    for step in ("gates", "admit"):
+        server = load_json(d / f"{step}_serve_{v}.json")
+        if server["runner"] != "r9700" or server["run"] != run or sorted(server["flags"]) != sorted(expected):
+            sys.exit(f"{step}: live server settings do not match this run and the card's 16 GB Quick start")
+    digest = programs_sha256(a.package)
+    if not digest or digest != (d / f"programs_sha256_{v}.txt").read_text().strip():
+        sys.exit("package programs differ from measured programs")
+    model = load_json(Path(a.package) / "model.json")
+    measured = load_json(d / f"model_{v}.json")
+    if model["model"] != measured["model"] or model["presets"][quick["preset"]] != measured["presets"][quick["preset"]]:
+        sys.exit("model or served preset differs from the measured package")
+    sdk = load_json(d / f"sdk_{v}.json")
+    pin = load_json(Path(a.package) / "llm_config.json").get("sdk") or {}
+    if not sdk.get("hrx_loom") or sdk["hrx_loom"] != pin.get("hrx_loom"):
+        sys.exit("measured SDK differs from the package pin")
+    from pull_devlab import perf_identity
+    device, _ = perf_identity(d, host)
+    src = {"kind": "devlab", "run": run, "url": job["html_url"], "conclusion": job["conclusion"],
+           "device": device, "hrx_loom": sdk}
+    errors = emulated_gate_errors(gpu, {"emulated_on": stamp}, src)
+    if errors:
+        sys.exit("; ".join(errors))
+    gates = load_json(d / f"gates_{v}" / "gates.json")
+    if not gates.get("ts") or gates.get("level") != "dev" or not gates.get("gates"):
+        sys.exit("missing dated dev gate results")
+    rows = []
+    for name, gate in gates["gates"].items():
+        if type(gate.get("pass")) is not bool:
+            sys.exit(f"{name}: missing boolean gate result")
+        rows.append({"name": name, "status": "pass" if gate["pass"] else "fail", "level": gates["level"],
+                     "time": gates["ts"], "source": src, "programs_sha256": digest, "emulated_on": stamp,
+                     "detail": gate.get("detail")})
+    admission = load_json(d / f"admit_{v}.json")
+    if type(admission.get("admitted")) is not bool or not admission.get("tokens") or not admission.get("context"):
+        sys.exit("missing native admission verdict")
+    admission = {k: admission.get(k) for k in ("admitted", "tokens", "context", "detail")}
+    admission.update(date=gates["ts"][:10], source=src, programs_sha256=digest, emulated_on=stamp)
+    write_json(a.o, {"evidence": EVIDENCE_ID, "gpu": gpu, "gates": rows, "admission": admission})
+
+
 def cmd_gates(a):
     src, psha = measurement_identity(a)
     out, spec_date, logs = [], None, [a.spec_log] if a.spec_log else []
@@ -1721,6 +1781,12 @@ def main(argv=None):
     p.add_argument("--date", help="YYYY-MM-DD (default: the latest Loom row's time)")
     add_source_args(p, "devlab", xsj=True)
     p.add_argument("-o", required=True)
+    e = sub.add_parser("emulated-gates", help="16 GB gate evidence from a budget-limited R9700 DevLab artifact")
+    e.add_argument("artifact", help="unpacked devlab-perf job directory")
+    e.add_argument("--variant", required=True)
+    e.add_argument("--job", required=True, help="Actions jobs API response for the measured job")
+    e.add_argument("--package", required=True, help="card package with its info.json and programs")
+    e.add_argument("-o", required=True)
     g = sub.add_parser("gates")
     g.add_argument("files", nargs="+")
     g.add_argument("--time", help="ISO time of the run when the file has none (gates.out, kernel test log)")
@@ -1774,7 +1840,7 @@ def main(argv=None):
     dv = sub.add_parser("devices", help="validate fleet/devices/*.json (loom-device-results/1) and summarize them")
     dv.add_argument("dir", nargs="?", default=None, help="the directory (default: $LOOM_DEVICE_RESULTS, else fleet/devices)")
     a = ap.parse_args(argv)
-    {"devices": cmd_devices, "build": cmd_build, "equivalent": cmd_equivalent, "perf": cmd_perf, "gates": cmd_gates, "roofline": cmd_roofline, "remeasure": cmd_remeasure}[a.cmd](a)
+    {"devices": cmd_devices, "build": cmd_build, "equivalent": cmd_equivalent, "perf": cmd_perf, "gates": cmd_gates, "emulated-gates": cmd_emulated_gates, "roofline": cmd_roofline, "remeasure": cmd_remeasure}[a.cmd](a)
 
 
 if __name__ == "__main__":
