@@ -1,11 +1,11 @@
 {
- "_comment": "pf-gemma r6 (do not merge): HyperCLOVAX-1.5B chat-16gb native-context admission on the R9700 at the 15 GB budget (closest 16 GB card by arithmetic).",
+ "_comment": "pf-gemma r7 (do not merge): HyperCLOVAX-1.5B chat-16gb at the 15 GB budget on the R9700: native admission at prefill 2048 / 1024 (4096 refused in r6), ABBA perf 4096/2048/1024, dev gates on the candidates.",
  "runner": "r9700",
  "memory_bytes": 34000000000,
  "llama_spec": "matched",
  "jobs": [
   {
-   "name": "pfg6-rab-hyperclovax-16gb-admit",
+   "name": "pfg7-rab-hyperclovax-16gb-prefill",
    "runner": "r9700",
    "repeat_rows": 3,
    "card": "loom-fun-staging/rippertnt-HyperCLOVAX-SEED-Text-Instruct-1.5B-loom",
@@ -15,7 +15,6 @@
    "llamacpp_vulkan": "b12211",
    "variants": [
     {
-     "name": "g16",
      "card": "loom-fun-staging/rippertnt-HyperCLOVAX-SEED-Text-Instruct-1.5B-loom",
      "sdk": "0.3.0",
      "memory_bytes": 15000000000,
@@ -23,11 +22,52 @@
       "--preset=chat-16gb",
       "--state_slab_bytes=4mib",
       "--weight_slab_bytes=64mib"
-     ]
+     ],
+     "name": "p4k"
+    },
+    {
+     "card": "loom-fun-staging/rippertnt-HyperCLOVAX-SEED-Text-Instruct-1.5B-loom",
+     "sdk": "0.3.0",
+     "memory_bytes": 15000000000,
+     "serve_args": [
+      "--preset=chat-16gb",
+      "--state_slab_bytes=4mib",
+      "--weight_slab_bytes=64mib"
+     ],
+     "name": "p2k",
+     "execution": {
+      "prefill_capacity": 2048
+     }
+    },
+    {
+     "card": "loom-fun-staging/rippertnt-HyperCLOVAX-SEED-Text-Instruct-1.5B-loom",
+     "sdk": "0.3.0",
+     "memory_bytes": 15000000000,
+     "serve_args": [
+      "--preset=chat-16gb",
+      "--state_slab_bytes=4mib",
+      "--weight_slab_bytes=64mib"
+     ],
+     "name": "p1k",
+     "execution": {
+      "prefill_capacity": 1024
+     }
     }
    ],
    "steps": [
-    "admit:g16"
+    "admit:p2k",
+    "admit:p1k",
+    "perf:p1k:1",
+    "perf:p2k:1",
+    "perf:p4k:1",
+    "perf:p4k:1",
+    "perf:p2k:1",
+    "perf:p1k:1",
+    "perf:p1k:1:long",
+    "perf:p2k:1:long",
+    "perf:p4k:1:long",
+    "gates:p2k:dev",
+    "gates:p1k:dev"
    ],
    "sdk": "0.3.0"
   }
