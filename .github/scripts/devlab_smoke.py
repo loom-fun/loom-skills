@@ -444,6 +444,8 @@ def main(argv=None):
         c = job["cards"][0]
         henv = dict(env, SMOKE_CARD=c["card"], SMOKE_REVISION=c["revision"], SMOKE_DEVICE=job["device"], SMOKE_OUT=out,
                     SMOKE_WORK=work, **{k: str(v) for k, v in (job.get("env") or {}).items()})
+        for k in [k for k in henv if k.startswith("HF_TOKEN") or k in ("GITHUB_TOKEN", "GH_TOKEN")]:
+            henv.pop(k)   # a hook builds and runs another repository's code (e.g. a downstream PR head): it gets no credentials
         hook = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", job["hook"])
         with open(os.path.join(out, "hook.log"), "w") as hl:
             try:
