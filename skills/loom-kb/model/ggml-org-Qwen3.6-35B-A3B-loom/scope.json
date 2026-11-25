@@ -20,17 +20,6 @@
     "exec.context_cap": 84992
    },
    "evidence": "migrated from the R9700 fit table (.github/devlab/r9700_fit.json r9700_execution / ctx_cap, measured on the R9700 DevLab runner; #609 #613 #615 #617 #618 #619 #628 #630); values unchanged"
-  },
-  {
-   "when": {
-    "devices": [
-     "rdna4"
-    ]
-   },
-   "set": {
-    "decode.attn.kv_once.d256": false
-   },
-   "evidence": "SDK 0.3.0 R9700, DevLab 45297807464: matched 32k decode 83.16 to 121.18 tok/s with split attention (frozen 0.2.0 baseline 121.92); 2k 160.83 to 161.24 (baseline 161.05). Eight full gates and 93 kernel checks passed. The 32k frozen-source depth-0 profile measured g_attention_split_rdna4 at 427.80 ms on 0.2.0 and 1109.92 ms on 0.3.0 for 1290 launches. The gfx11 rule already uses split attention."
   }
  ]
 }
