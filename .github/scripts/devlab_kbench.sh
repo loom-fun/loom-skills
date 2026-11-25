@@ -10,6 +10,8 @@
 #                           "config": ["k=v", ...] (--config=), "args": ["--measure=...", ...] (loom-benchmark flags),
 #                           "repeats": N (optional), "runner": "strix" (default) | "r9700" (workflow runs-on),
 #                           "device": loom-benchmark --device URI (default amdgpu; e.g. amdgpu://?completion_spin_ns=4294967295, the active wait),
+#                           "file_sdk": {"bench_x.loom": "0.2.0", ...} (optional): those files are benchmarked with that SDK (its own root, installed on
+#                           first use), interleaved with the rest on the same runner: an SDK code-generation A/B of one kernel source,
 #                           "probes": [{"name": N, "args": [...]}] (optional): after the timing runs, the FIRST file once more per probe with these extra
 #                           loom-benchmark flags (JSONL rows, raw profile bundles) -> probe_N.jsonl/.log, probe_N_artifacts/: hardware counters,
 #                           executable traces, compile report details; a probe that fails is recorded, never fails the suite,
@@ -112,7 +114,13 @@ rc=0
 for i in $(seq 1 "$reps"); do
   for f in $files; do
     v=$(vname "$f"); step "$v run $i/$reps"
-    "$LB" "$f" "--device=$dev" $cfgs $args --compile-report=summary --file-output-root="$D/run/fo_${v}_$i" \
+    fsdk=$(q "print(s.get('file_sdk', {}).get('$f', ''))"); LBF=$LB
+    if [ -n "$fsdk" ]; then   # "file_sdk": this file on its own SDK root
+      froot=$WORK/loom-$(echo "$fsdk" | tr ':' '-')
+      [ -x "$froot/.venv/bin/loom-benchmark" ] || "$SV/install_loom.sh" "$froot" "$fsdk" > "$out/install_$fsdk.log" 2>&1 || { echo "FAIL install $fsdk"; tail -5 "$out/install_$fsdk.log"; rc=1; continue; }
+      LBF=$froot/.venv/bin/loom-benchmark
+    fi
+    "$LBF" "$f" "--device=$dev" $cfgs $args --compile-report=summary --file-output-root="$D/run/fo_${v}_$i" \
       --output="$out/r_${v}_$i.json" > "$out/r_${v}_$i.json.log" 2>&1 || { echo "FAIL $v $i"; tail -5 "$out/r_${v}_$i.json.log"; rc=1; }
     rm -rf "$D/run/fo_${v}_$i"
   done
