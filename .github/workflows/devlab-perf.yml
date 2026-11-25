@@ -159,7 +159,18 @@ jobs:
           rm -rf "$WORK/_gufo-bundle-dl"
           echo "GUFO_BUNDLE=$d" >> "$GITHUB_ENV"
       - name: "experiment: ${{ matrix.job }}"
-        run: bash .github/scripts/devlab_perf.sh .github/devlab/perf.json "${{ matrix.job }}"
+        env:
+          GROUP: ${{ matrix.job }}
+        run: |
+          config=".github/devlab/$GROUP.json"
+          mkdir -p "$WORK/$GROUP/out"
+          for model in $(jq -r '.jobs[].name' "$config"); do
+            rc=0
+            bash .github/scripts/devlab_perf.sh "$config" "$model" || rc=$?
+            mv "$WORK/$model/out" "$WORK/$GROUP/out/$model"
+            rm -rf "$WORK/$model"
+            if [ "$rc" -ne 0 ]; then exit "$rc"; fi
+          done
       - name: upload results
         if: always()
         uses: actions/upload-artifact@v4

@@ -778,6 +778,10 @@ while [ "$qi" -lt "${#queue[@]}" ]; do
       more=$("$T" "$here/.github/scripts/ab_extend.py" "$out" --to "$p1" --have "$p2" --rot "${p3:-0}" 2> "$out/extend.log"); cat "$out/extend.log"
       queue+=($more); res[$s]="$(echo $more | wc -w) more sessions"
       echo "$(echo "$more" | tr '\n' ' ')" > "$out/extended_steps.txt";;
+    accept)
+      serve_alone "$p1" || exit 1
+      "$T" "$B/accept_probe.py" "$url" "$cardid" "$p2" "$rrows" "$TH" > "$out/accept_${p1}_${p2}.jsonl" || exit 1
+      res[$s]="acceptance recorded";;
     perf)
       serve_alone "$p1" || { res[$s]=ERROR; continue; }
       step "perf $p1 x $p2 ${p3:-} (thinking $TH)"

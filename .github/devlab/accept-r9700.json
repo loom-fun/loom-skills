@@ -1,0 +1,187 @@
+{
+  "jobs": [
+    {
+      "name": "rab-bartowski-ornith-1-5-9b-loom",
+      "runner": "r9700",
+      "repeat_rows": 3,
+      "card": "loom-fun/bartowski-Ornith-1.5-9B-loom@fd3c6efebabc4ea9502c296326402a079bb84827",
+      "memory_bytes_r9700": 32000000000,
+      "kit": null,
+      "variants": [
+        {
+          "name": "old",
+          "sdk": "card",
+          "programs_sha256": "8966d3a22644212b1c594e39d9d2b2194ac4b821e0c9e5d8149685dba3241ee8"
+        },
+        {
+          "name": "new",
+          "sdk": "0.3.0",
+          "programs_sha256": "8966d3a22644212b1c594e39d9d2b2194ac4b821e0c9e5d8149685dba3241ee8"
+        }
+      ],
+      "steps": [
+        "accept:old:1",
+        "accept:new:1",
+        "accept:new:2",
+        "accept:old:2",
+        "accept:old:3",
+        "accept:new:3",
+        "accept:new:4",
+        "accept:old:4"
+      ],
+      "sdk": "0.3.0",
+      "memory_bytes": 34000000000,
+      "env": {
+        "ACCEPT_LONG": "1"
+      }
+    },
+    {
+      "llama_kv_rocm": 61440,
+      "name": "rab-ggml-org-qwen3-6-27b-loom",
+      "runner": "r9700",
+      "card": "loom-fun/ggml-org-Qwen3.6-27B-loom@f86d908dd9e7caaf8312c4f753a600c3dfdc6ad8",
+      "require_preset_r9700": true,
+      "memory_bytes_r9700": 34000000000,
+      "served_context": 69632,
+      "kit": null,
+      "variants": [
+        {
+          "name": "old",
+          "context": 69632,
+          "sdk": "card",
+          "programs_sha256": "dd12d8ccac4e4e15b560f53c3499c13246cf738562c51a69e76b50bfcf343602"
+        },
+        {
+          "name": "new",
+          "context": 69632,
+          "sdk": "0.3.0",
+          "programs_sha256": "dd12d8ccac4e4e15b560f53c3499c13246cf738562c51a69e76b50bfcf343602"
+        }
+      ],
+      "steps": [
+        "accept:old:1",
+        "accept:new:1",
+        "accept:new:2",
+        "accept:old:2",
+        "accept:old:3",
+        "accept:new:3",
+        "accept:new:4",
+        "accept:old:4"
+      ],
+      "sdk": "0.3.0",
+      "memory_bytes": 34000000000,
+      "env": {
+        "ACCEPT_LONG": "1"
+      }
+    },
+    {
+      "llama_kv_rocm": 36864,
+      "name": "rab-unsloth-gemma-4-31b-it-qat-loom",
+      "runner": "r9700",
+      "card": "loom-fun/unsloth-gemma-4-31B-it-qat-loom@0826c6e9d4cc3971f94f2730a07f6b33ad9982e2",
+      "require_preset_r9700": true,
+      "memory_bytes_r9700": 34000000000,
+      "served_context": 10240,
+      "kit": "gemma4",
+      "variants": [
+        {
+          "name": "old",
+          "context": 10240,
+          "sdk": "card",
+          "programs_sha256": "ff90bca99c41739df6b48e51c30377c2f8e78076655b7c7dfe67849504c7adf1"
+        },
+        {
+          "name": "new",
+          "context": 10240,
+          "sdk": "0.3.0",
+          "programs_sha256": "ff90bca99c41739df6b48e51c30377c2f8e78076655b7c7dfe67849504c7adf1"
+        }
+      ],
+      "steps": [
+        "accept:old:1",
+        "accept:new:1",
+        "accept:new:2",
+        "accept:old:2",
+        "accept:old:3",
+        "accept:new:3",
+        "accept:new:4",
+        "accept:old:4"
+      ],
+      "sdk": "0.3.0",
+      "memory_bytes": 34000000000,
+      "env": {
+        "ACCEPT_LONG": "0"
+      }
+    },
+    {
+      "name": "rab-unsloth-gemma-4-e4b-it-loom",
+      "runner": "r9700",
+      "repeat_rows": 3,
+      "card": "loom-fun/unsloth-gemma-4-E4B-it-loom@e53717d9759ed9faa3454a65818c8401b5ff9f14",
+      "memory_bytes_r9700": 31000000000,
+      "kit": "gemma4",
+      "variants": [
+        {
+          "name": "old",
+          "sdk": "card",
+          "programs_sha256": "b3056f70d482a668b6db4b205067838985d2a130934cf2c266fcb7efcc397109"
+        },
+        {
+          "name": "new",
+          "sdk": "0.3.0",
+          "programs_sha256": "b3056f70d482a668b6db4b205067838985d2a130934cf2c266fcb7efcc397109"
+        }
+      ],
+      "steps": [
+        "accept:old:1",
+        "accept:new:1",
+        "accept:new:2",
+        "accept:old:2",
+        "accept:old:3",
+        "accept:new:3",
+        "accept:new:4",
+        "accept:old:4"
+      ],
+      "sdk": "0.3.0",
+      "memory_bytes": 34000000000,
+      "env": {
+        "ACCEPT_LONG": "1"
+      }
+    },
+    {
+      "name": "rab-unsloth-qwen3-5-4b-loom",
+      "runner": "r9700",
+      "repeat_rows": 3,
+      "card": "loom-fun/unsloth-Qwen3.5-4B-loom@64bf40259117d99f3e6a9f43b7e80fb030300697",
+      "memory_bytes_r9700": 28000000000,
+      "kit": null,
+      "variants": [
+        {
+          "name": "old",
+          "sdk": "card",
+          "programs_sha256": "6a47f53f1466bb7cad142b6b2874ccf9c5ee8b96aa77490155252e5d8d7c8f62"
+        },
+        {
+          "name": "new",
+          "sdk": "0.3.0",
+          "programs_sha256": "6a47f53f1466bb7cad142b6b2874ccf9c5ee8b96aa77490155252e5d8d7c8f62"
+        }
+      ],
+      "steps": [
+        "accept:old:1",
+        "accept:new:1",
+        "accept:new:2",
+        "accept:old:2",
+        "accept:old:3",
+        "accept:new:3",
+        "accept:new:4",
+        "accept:old:4"
+      ],
+      "sdk": "0.3.0",
+      "memory_bytes": 34000000000,
+      "env": {
+        "ACCEPT_LONG": "1"
+      }
+    }
+  ]
+}

@@ -1,0 +1,70 @@
+{
+  "jobs": [
+    {
+      "name": "sab-unsloth-gemma-4-31b-it-loom",
+      "runner": "strix",
+      "card": "loom-fun/unsloth-gemma-4-31B-it-loom@568071f2fbee4b39c45d10ed9ea2453d5eec7137",
+      "memory_bytes": 80000000000,
+      "kit": "gemma4",
+      "variants": [
+        {
+          "name": "old",
+          "sdk": "card",
+          "programs_sha256": "a94d2a3e23c431b279124494629062db61f93917fd23e80deb2cc2037aef0f73"
+        },
+        {
+          "name": "new",
+          "sdk": "0.3.0",
+          "programs_sha256": "a94d2a3e23c431b279124494629062db61f93917fd23e80deb2cc2037aef0f73"
+        }
+      ],
+      "steps": [
+        "accept:old:1",
+        "accept:new:1",
+        "accept:new:2",
+        "accept:old:2",
+        "accept:old:3",
+        "accept:new:3",
+        "accept:new:4",
+        "accept:old:4"
+      ],
+      "sdk": "0.3.0",
+      "env": {
+        "ACCEPT_LONG": "1"
+      }
+    },
+    {
+      "name": "sab-unsloth-qwen3-8b-loom",
+      "runner": "strix",
+      "card": "loom-fun/unsloth-Qwen3-8B-loom@35d393f359b50ec874e5f2d635bcf03fb48d080f",
+      "memory_bytes": 29000000000,
+      "kit": null,
+      "variants": [
+        {
+          "name": "old",
+          "sdk": "card",
+          "programs_sha256": "ea9aebc58d058e4d9d1d0729f010ee6ebf384a678ec0ef2166bd8339b96adf80"
+        },
+        {
+          "name": "new",
+          "sdk": "0.3.0",
+          "programs_sha256": "ea9aebc58d058e4d9d1d0729f010ee6ebf384a678ec0ef2166bd8339b96adf80"
+        }
+      ],
+      "steps": [
+        "accept:old:1",
+        "accept:new:1",
+        "accept:new:2",
+        "accept:old:2",
+        "accept:old:3",
+        "accept:new:3",
+        "accept:new:4",
+        "accept:old:4"
+      ],
+      "sdk": "0.3.0",
+      "env": {
+        "ACCEPT_LONG": "1"
+      }
+    }
+  ]
+}
