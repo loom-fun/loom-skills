@@ -392,6 +392,7 @@ class DevlabPerfFrozenCheck(unittest.TestCase):
         self.assertLess(check, src.index("pkg_preset() {"))   # inside the variant setup loop, before any serve
         self.assertIn('kind\') or \'\')")" = image ]', src)
         self.assertIn('metrics_${p1}_', src)
+        self.assertIn('${SERVED_PRESET:+--preset "$SERVED_PRESET"}', src)   # the probe uses the served (device) preset's context
 
 
 if __name__ == "__main__":

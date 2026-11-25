@@ -521,6 +521,7 @@ serve_alone() { # serve_alone VARIANT
   # With no device-specific alternate, select the first preset explicitly on every runner for a multi-preset card.
   [ -z "$rp" ] && rp=$(pkg_preset "$D/$1/pkg/model.json")
   if [ -n "$rp" ] && [[ "$sa" != *--preset=* ]]; then sa="--preset=$rp $sa"; fi
+  SERVED_PRESET=$(printf '%s\n' $sa | sed -n 's/^--preset=//p' | head -1)   # the preset this server serves (admit: probes ITS context)
   vmem=$(qv "$1" "print(v.get('memory_bytes') or '$mem')")   # variant "memory_bytes": "none" with --pool_backing=fixed
   # every GPU is served as its card's Quick start serves it: the registry device's card.serve_args (card_lib.GPUS "serve_args": --pool_backing=fixed on the
   # R9700 and on Strix Halo, no --memory_bytes; the R9700's elastic trim + compaction stalls the long-prefill rows, hrx-loom 0.2.0's elastic backing
@@ -1011,7 +1012,7 @@ PY
     admit)   # admit:V[:TOKENS]: ctx_admit.py on V served as configured (its execution context/pool): is a request of TOKENS (default ~ the served context) admitted? (the card's served context on the device)
       serve_alone "$p1" || { res[$s]=ERROR; continue; }
       step "context admission $p1 ${p2:-}"
-      (cd "$out" && "$T" "$B/ctx_admit.py" "$D/$p1/pkg" "$url" ${p2:+--tokens "$p2"} --out "admit_${p1}${p2:+_$p2}.json" 2>&1 | tee "admit_${p1}${p2:+_$p2}.txt" | tail -3)
+      (cd "$out" && "$T" "$B/ctx_admit.py" "$D/$p1/pkg" "$url" ${p2:+--tokens "$p2"} ${SERVED_PRESET:+--preset "$SERVED_PRESET"} --out "admit_${p1}${p2:+_$p2}.json" 2>&1 | tee "admit_${p1}${p2:+_$p2}.txt" | tail -3)
       res[$s]=$(tail -1 "$out/admit_${p1}${p2:+_$p2}.txt" | cut -c1-200);;
     fullctx)   # fullctx:V[:TOKENS]: one request of ~the served context that must finish (ctx_admit.py --complete): the card's context is a measured one
       serve_alone "$p1" || { res[$s]=ERROR; continue; }
