@@ -185,6 +185,19 @@ class SubmitPollTest(Base):
         self.assertEqual((e["stage"], e["run"], e["completed"]), ("done", "5", "t1"))
 
 
+    def test_poll_follows_an_adopted_batch_without_a_branch(self):
+        """regen.py adopt --run (a batch submitted by hand, e.g. while the contents API failed) records the run but no branch: poll still follows it"""
+        self.plan()
+        st = regen.State(self.state)
+        st.d["batches"][0].update(stage="submitted", run="9")
+        st.save()
+        jobs = {"jobs": [{"name": JOB, "status": "completed", "conclusion": "success", "url": "u", "startedAt": "t0", "completedAt": "t1"}]}
+        with mock.patch.object(regen, "gh_json", lambda args: jobs), contextlib.redirect_stdout(io.StringIO()):
+            with self.assertRaises(SystemExit) as c:
+                regen.main(["poll", self.state])
+            self.assertEqual(c.exception.code, 0)
+        self.assertEqual(regen.State(self.state).jobs[JOB]["stage"], "done")
+
 class CollectTest(Base):
     def test_aa_job_in_band_is_promoted(self):
         self.collected()
