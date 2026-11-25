@@ -18,6 +18,8 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
+from pathlib import Path
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -198,8 +200,20 @@ if DRAFT and cfg.get("recurrent_layers") and env.get("GDN_FOLD", "").strip().low
     from gen_gdn import FOLD_SPANS  # noqa: E402
     if a.rows > FOLD_SPANS:   # the fold banks hold FOLD_SPANS speculative spans (one per drafting row)
         sys.exit(f"decode.spec.gdn_fold holds {FOLD_SPANS} drafting rows; --rows {a.rows} needs it off")
-subprocess.run([sys.executable, os.path.join(HERE, "gen_llm.py"), os.path.abspath(a.config)], check=True, env=env, stdout=subprocess.DEVNULL)
-os.replace(os.path.join(gen, "model.loom"), os.path.join(pkg, "program", "llm.loom"))
+generate = [sys.executable, os.path.join(HERE, "gen_llm.py"), os.path.abspath(a.config)]
+subprocess.run(generate, check=True, env=env, stdout=subprocess.DEVNULL)
+llm = Path(pkg, "program", "llm.loom")
+os.replace(os.path.join(gen, "model.loom"), llm)
+twin_env = kb_choices.family_program_env(env)
+scratch = program_scratch(llm, a.prefill, a.rows)
+if twin_env is not None:
+    import family_program
+    with tempfile.TemporaryDirectory(dir=pkg) as twin_gen:
+        subprocess.run(generate, check=True, env=dict(twin_env, LLM_OUT=twin_gen), stdout=subprocess.DEVNULL)
+        twin_llm = Path(twin_gen, "model.loom")
+        scratch = max(scratch, program_scratch(twin_llm, a.prefill, a.rows))
+        text = family_program.compose(llm.read_text(encoding="utf-8"), twin_llm.read_text(encoding="utf-8"))
+        llm.write_text(text, encoding="utf-8", newline="\n")
 # Load-time weight policies of drafting (draft/prep_weights.py): a BF16/F16 drafter as Q8_0, the proposals' Q4_0 head.
 POLICIES = []
 for f, k in (("draft_weights.loom", "policy"), ("head_weights.loom", "head_policy")):
@@ -216,7 +230,7 @@ if os.path.exists(os.path.join(gen, "phead_main")):   # draft.propose.head_piece
 # gated delta-net inputs for the replay: 7 GB for 30 such layers at a 4096-token prefill), plus 3 GiB for the state
 # storage, slab rounding and the workspace's own rounding. A fixed 3 GiB alone refused such a card's full-context
 # request (503) at the memory_bytes printed here, on a fresh server.
-workspace = program_scratch(os.path.join(pkg, "program", "llm.loom"), a.prefill, a.rows) + 3 * 2**30
+workspace = scratch + 3 * 2**30
 
 native = cfg.get("context_length") or 32768
 if native > KERNEL_CONTEXT and not a.context:

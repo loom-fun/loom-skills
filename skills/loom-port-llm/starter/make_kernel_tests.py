@@ -17,6 +17,7 @@ from gguf.quants import dequantize
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import kb_choices  # noqa: E402  the choices the model's kernels were generated with (resolved.env of the package, else resolved here)
 kb_choices.apply_for_tests(json.load(open(sys.argv[1])))
+kb_choices.apply_graph_test_env(os.environ)
 from mv_rows import pick_r, iq_r, flash2_deep_from  # noqa: E402
 from gen_gemm import HELPER as GEMM_HELPER, IQ4_NATIVE as _IQ4_NATIVE, Q3_K_NATIVE as _Q3_K_NATIVE  # noqa: E402
 _IQ4_NATIVE_FMTS = frozenset(({"iq4_xs", "iq4_nl"} if _IQ4_NATIVE else set()) | ({"q3_k"} if _Q3_K_NATIVE else set()))   # prefill.gemm.iq4_native / q3_k_native: their own 128/256-row GEMMs, tested like the K-quants'

@@ -23,6 +23,7 @@ CHOICE(key, type, legacy, env=..., kernels=[...], rows=[...], devices=None, per_
   rows        card rows it can move (decode, decode_2k, decode_32k, prefill_1k..prefill_32k, streams4)
   devices     device families the choice can change (None: every device). A key that only changes a gfx12 twin says ["rdna4"]
   per_target  True when one dual-target build can emit different values per device (a twin K / K_rdna4)
+  family_program  True for a family-scoped choice that changes a command graph or its shared kernels; build both graphs and select per device.
   from_pr     the PR (or file) the choice came from
   enc         ("true text", "false text") env spelling of a bool (default "1", "0"); None as false text: variable unset
   derive      f(cfg, values, ctx) -> the model's effective default (cfg-driven flags such as rdna4_f16_ffn, gemm_n_fastest)
@@ -50,14 +51,15 @@ FALSE_WORDS = ("", "0", "false", "no", "off", "none")
 class Choice:
     def __init__(self, key, type, legacy, env, kernels=(), rows=(), devices=None, per_target=False, from_pr=None, doc="",
                  enc=("1", "0"), derive=None, kits=None, kit_legacy=None, dynamic=False, experiment=False,
-                 generator_defaults=None, execution=False):
+                 generator_defaults=None, execution=False, family_program=False):
         assert type in TYPES, (key, type)
         assert key not in CHOICES and (env is None or env not in BY_ENV), f"duplicate choice {key} / {env}"
         assert (env is None) == bool(execution), f"{key}: an execution choice has no environment variable (and only those)"
         assert re.fullmatch(r"[a-z0-9_]+(\.[a-z0-9_]+)+", key), key
         self.key, self.type, self.legacy, self.env = key, type, legacy, env
         self.kernels, self.rows, self.devices = list(kernels), list(rows), list(devices) if devices else None
-        self.per_target, self.from_pr, self.doc, self.enc = per_target, from_pr, doc, enc
+        self.family_program = family_program
+        self.per_target, self.from_pr, self.doc, self.enc = per_target or family_program, from_pr, doc, enc
         self.derive, self.kits, self.kit_legacy = derive, kits, dict(kit_legacy or {})
         self.dynamic, self.experiment, self.execution = dynamic, experiment, execution
         # strings (None: no default) the generators pass as the default of this variable; tests compare legacy to them
@@ -302,7 +304,7 @@ CHOICE("prefill.gemm.m256_a32", "bool", False, "GEMM_M256_A32", from_pr="q38pf-g
        "scalar base instead of 64-bit per-load address arithmetic; every m256 weight tensor must be < 2 GiB), the dequant column split "
        "into the uniform superblock and the thread's slice, and the swiglu gate/up buffer choice from the subgroup id. q6_k store loop "
        "VALU 227 -> 175 per 64 WMMA, q8_0 94 -> 80, mixed 222 -> 177. The gfx12 twins keep the default addressing.", **_PG)
-CHOICE("prefill.gemm.m256_edq", "bool", False, "GEMM_M256_EDQ", from_pr="q38pf-gemm2", devices=["rdna3"],
+CHOICE("prefill.gemm.m256_edq", "bool", False, "GEMM_M256_EDQ", from_pr="q38pf-gemm2", family_program=True, devices=["rdna3"],
        doc="gfx11 m256 GEMM: the next step's weights dequantized right after this step's MMAs (before the overwrite barrier) and "
        "carried as f16, so only the LDS stores sit between the overwrite and publication barriers (not the mixed branch form).", **_PG)
 CHOICE("prefill.gemm.m256_ws", "int", 0, "GEMM_M256_WS", from_pr="q38pf-gemm2", devices=["rdna3"],
@@ -494,21 +496,21 @@ CHOICE("prefill.fuse.silu_mul_rs", "bool", True, "SILU_MUL_RS", doc="g_silu_mul 
        "(GEMM-shape epochs; Qwen3.8-27B Strix: +0.4-0.6 % prefill).", **_PR)
 CHOICE("prefill.fuse.gdn_norm_rs", "bool", True, "GDN_NORM_RS", doc="g_gdn_norm_gate + the f16 row scale of the ssm_out GEMM operand in one kernel.", **_PR)
 CHOICE("prefill.fuse.post_norm_noh", "bool", True, "POST_NORM_NOH", doc="Post-attention norm without the f32 h store no GEMM-branch reader uses.", **_PR)
-CHOICE("prefill.fuse.post_norm_noh_all", "bool", False, "POST_NORM_NOH_ALL", from_pr="q38pf-fuse2", devices=["rdna3"], kernels=["g_post_add_norm*"], rows=ROWS_PREFILL,
+CHOICE("prefill.fuse.post_norm_noh_all", "bool", False, "POST_NORM_NOH_ALL", from_pr="q38pf-fuse2", family_program=True, devices=["rdna3"], kernels=["g_post_add_norm*"], rows=ROWS_PREFILL,
        doc="GEMM epochs: every g_post_add_norm_rs_live_lv whose f32 h no GEMM-epoch launch reads (attention-layer inputs; GDN-layer inputs with "
        "prefill.gdn.ab_wmma) runs as the _noh kernel (gen_llm.noh_dead_h).")
-CHOICE("prefill.fuse.resid_epi", "bool", False, "RESID_EPI", from_pr="q38pf-fuse2", devices=["rdna3"], kernels=["g_gemm_*_acc_m256", "g_add_norm_rs_live*", "g_post_add_norm*"],
+CHOICE("prefill.fuse.resid_epi", "bool", False, "RESID_EPI", from_pr="q38pf-fuse2", family_program=True, devices=["rdna3"], kernels=["g_gemm_*_acc_m256", "g_add_norm_rs_live*", "g_post_add_norm*"],
        rows=ROWS_PREFILL, doc="Whole 256-row epochs: the output GEMMs (attn o, ssm_out, ffn down) accumulate into the residual x in their m256 "
        "epilogue (g_gemm_<fmt>_acc_m256) and the next norm reads x only (g_add_norm_rs_live[_noh]_lv); gen_llm.resid_epi.")
 CHOICE("prefill.gemm.acc_batch", "int", 16, "GEMM_ACC_BATCH", from_pr="q38pf-fuse2", kernels=["g_gemm_*_acc_m256"], rows=ROWS_PREFILL,
        doc="acc m256 epilogue: fragments whose old values are loaded before the batch's stores (0: per-fragment load/add/store, one DRAM round trip each).")
-CHOICE("prefill.gdn.ab_wmma", "bool", False, "GDN_AB_WMMA", from_pr="q38pf-fuse2", devices=["rdna3"], kernels=["g_gemm_ab_f32w", "g_mv_f32_*"], rows=ROWS_PREFILL,
+CHOICE("prefill.gdn.ab_wmma", "bool", False, "GDN_AB_WMMA", from_pr="q38pf-fuse2", family_program=True, devices=["rdna3"], kernels=["g_gemm_ab_f32w", "g_mv_f32_*"], rows=ROWS_PREFILL,
        doc="GEMM epochs: the F32 GDN alpha / beta projections as one WMMA GEMM on %h16 + %s_h (weights rounded to f16 while staging; gen_gdn_ab.py) "
        "instead of two 4-token f32 matvecs.")
-CHOICE("prefill.gdn.o16", "bool", False, "GDN_O16", from_pr="q38pf-fuse2", devices=["rdna3"], kernels=["g_gdn_chunk_o16", "g_gdn_norm_gate_s_o16", "g_row_scale*"],
+CHOICE("prefill.gdn.o16", "bool", False, "GDN_O16", from_pr="q38pf-fuse2", family_program=True, devices=["rdna3"], kernels=["g_gdn_chunk_o16", "g_gdn_norm_gate_s_o16", "g_row_scale*"],
        rows=ROWS_PREFILL, doc="GEMM epochs (with the gated chunk kernel): the GDN output written as f16 with unit row scales by its producers; "
        "no g_row_scale_f16_live pass (gen_llm.gdn_o16).")
-CHOICE("prefill.fuse.qg_split", "bool", False, "QG_SPLIT", from_pr="q38pf-fuse2", devices=["rdna3"], kernels=["g_gemm_*_store_m256_qgs", "g_split_qgate*"],
+CHOICE("prefill.fuse.qg_split", "bool", False, "QG_SPLIT", from_pr="q38pf-fuse2", family_program=True, devices=["rdna3"], kernels=["g_gemm_*_store_m256_qgs", "g_split_qgate*"],
        rows=ROWS_PREFILL, doc="Whole 256-row epochs: the fused query+gate projection's m256 GEMM stores q and gate directly (gen_gemm.qg_split); "
        "g_split_qgate only in other GEMM epochs.")
 
@@ -691,16 +693,16 @@ CHOICE("hybrid.gdn.chunk", "bool", False, "GDN_CHUNK", devices=["rdna4"], rows=R
        from_pr="q38r9700 gdnpf",
        doc="gfx12 chunked (WY) gated delta-net prefill (gen_gdn_chunk.py): spans of 64+ tokens run g_gdn_chunk_rdna4 (f16 WMMA, f32 state), the "
            "sequential kernel's gfx12 twin the shorter ones; the gfx11 kernels do not change (128 x 128 heads only).")
-CHOICE("hybrid.gdn.chunk11", "bool", False, "GDN_CHUNK11", devices=["rdna3"], rows=ROWS_PREFILL, kernels=["g_gdn_chunk", "g_gdn_recurrence*"],
+CHOICE("hybrid.gdn.chunk11", "bool", False, "GDN_CHUNK11", family_program=True, devices=["rdna3"], rows=ROWS_PREFILL, kernels=["g_gdn_chunk", "g_gdn_recurrence*"],
        from_pr="q38pf gdn",
        doc="gfx11 chunked (WY) gated delta-net prefill (gen_gdn_chunk.py arch rdna3): spans of 64+ tokens run g_gdn_chunk (RDNA3 f16 WMMA, f32 "
            "state), the sequential g_gdn_recurrence the shorter ones (decode, verify); its gfx12 twin is g_gdn_chunk_rdna4 with hybrid.gdn.chunk, "
            "else the sequential kernel (gfx12 numerics unchanged). 128 x 128 heads only.")
-CHOICE("hybrid.gdn.chunk11_fuse", "bool", False, "GDN_CHUNK11_FUSE", devices=["rdna3"], rows=ROWS_PREFILL,
+CHOICE("hybrid.gdn.chunk11_fuse", "bool", False, "GDN_CHUNK11_FUSE", family_program=True, devices=["rdna3"], rows=ROWS_PREFILL,
        kernels=["g_gdn_chunk", "g_gdn_conv", "g_gdn_recurrence*"], from_pr="q38pf gdn",
        doc="With hybrid.gdn.chunk11 (single-form models): g_gdn_chunk (and its gfx12 twin) also run the conv1d + SiLU and the q / k norms of their "
            "spans on the raw qkv projection; g_gdn_conv skips the rows of spans of 64+ tokens and the history commit runs after the recurrence.")
-CHOICE("hybrid.gdn.chunk11_gate", "bool", False, "GDN_CHUNK11_GATE", devices=["rdna3"], rows=ROWS_PREFILL,
+CHOICE("hybrid.gdn.chunk11_gate", "bool", False, "GDN_CHUNK11_GATE", family_program=True, devices=["rdna3"], rows=ROWS_PREFILL,
        kernels=["g_gdn_chunk", "g_gdn_norm_gate*"], from_pr="q38pf gdn",
        doc="With hybrid.gdn.chunk11 (single-form models): g_gdn_chunk (and its gfx12 twin) run the gated RMSNorm of their rows and write the "
            "mixer output; g_gdn_norm_gate_s (the norm-gate with the span metadata) leaves the rows of spans of 64+ tokens alone.")
@@ -712,7 +714,7 @@ CHOICE("hybrid.gdn.chunk11_alias", "bool", False, "GDN_CHUNK11_ALIAS", devices=[
 CHOICE("hybrid.gdn.chunk11_opt", "str", "", "GDN_CHUNK11_OPT", devices=["rdna3"], rows=ROWS_PREFILL, kernels=["g_gdn_chunk"], from_pr="q38pf gdn",
        doc="With hybrid.gdn.chunk11: comma list of g_gdn_chunk options: kbo (K S / Q S kb-outer: one state rhs copy live, -56 VGPR peak), xpf (with fuse: the next chunk's qkv rows loaded during this chunk, loop-carried), scan (the g prefix sum unrolled, independent LDS loads), acc4 "
            "(the solve's dot products in 4 partial sums).")
-CHOICE("prefill.gdn.fused11", "bool", False, "GDN_FUSED11", devices=["rdna3"], rows=ROWS_PREFILL,
+CHOICE("prefill.gdn.fused11", "bool", False, "GDN_FUSED11", family_program=True, devices=["rdna3"], rows=ROWS_PREFILL,
        kernels=["g_gdn_fa", "g_gdn_fb", "g_gdn_conv", "g_gdn_norm_gate*"], from_pr="q38pf gdn",
        doc="With hybrid.gdn.chunk11 (single-form models, 128 x 128 heads, conv 4): GEMM-shape epochs run the spans of 64+ tokens through the "
            "gfx11 fused pair g_gdn_fa + g_gdn_fb (gen_gdn_fused.py arch rdna3; its gfx12 twins restricted the same way) after the chain of the "
@@ -722,7 +724,7 @@ CHOICE("prefill.gdn.fused11_regnorm", "bool", False, "GDN_FUSED11_REGNORM", devi
        doc="With prefill.gdn.fused11: g_gdn_fb's norm-gate epilogue keeps O in registers (row sums of squares by a 16-lane DPP butterfly into a "
            "[32][8] LDS table) instead of a 32 x 132 f32 LDS tile: 57.5 -> 41.6 KB LDS, 237 VGPR, so 3 workgroups fit a WGP and the 48 head "
            "workgroups of a 27B span run in one round instead of two.")
-CHOICE("hybrid.gdn.skip_long", "bool", False, "GDN_SKIP_LONG", devices=["rdna3"], rows=ROWS_PREFILL, kernels=["g_gdn_norm_gate_s", "g_gdn_qk_norm_s"],
+CHOICE("hybrid.gdn.skip_long", "bool", False, "GDN_SKIP_LONG", family_program=True, devices=["rdna3"], rows=ROWS_PREFILL, kernels=["g_gdn_norm_gate_s", "g_gdn_qk_norm_s"],
        from_pr="q38pf gdn",
        doc="With hybrid.gdn.chunk11_fuse / chunk11_gate / prefill.gdn.fused11: g_gdn_norm_gate_s and g_gdn_qk_norm_s skip the whole row of a "
            "64+-token span and padding rows (the fused long-span kernel did that row's work); off, g_gdn_norm_gate_s still loads and computes "

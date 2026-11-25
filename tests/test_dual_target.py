@@ -11,6 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 STARTER = ROOT / "skills/loom-port-llm/starter"
 sys.path.insert(0, str(STARTER))
 import dual_target  # noqa: E402
+import family_program  # noqa: E402
 import ktest_select  # noqa: E402
 
 # A q4_k GEMM (g_gemm_q4_k_store, from a generated llm.loom) with its gfx12 twin g_gemm_q4_k_store_rdna4, and a
@@ -24,6 +25,23 @@ def loom_compile():
     for c in (os.environ.get("LOOM_COMPILE"), shutil.which("loom-compile")):
         if c and os.path.exists(c):
             return c
+
+
+class FamilyProgramTests(unittest.TestCase):
+    def test_selects_family_command_and_omits_unavailable_twin(self):
+        launch = next(line for line in FIXTURE.splitlines(True) if line.startswith("  kernel.launch @"))
+        # The base launches a fused WMMA kernel twice. The twin graph has no such
+        # kernel and no such launches; leaving its twin in the library is also a leak.
+        twin = FIXTURE[:FIXTURE.index("kernel.def ")] + FIXTURE[FIXTURE.index("command.def "):].replace(launch, "")
+        program = family_program.compose(FIXTURE, twin)
+        self.assertIn(f'kernel.def target(@rdna3) export("{K}")', program)
+        self.assertNotIn(f'export("{TWIN}")', program)
+        base, gfx12 = program.split("target(@rdna4) @dual_probe_body_rdna4(")
+        self.assertEqual(base.count(launch), 2)
+        self.assertNotIn("kernel.launch @", gfx12)
+
+    def test_same_graph_retains_launch_selection(self):
+        self.assertEqual(family_program.compose(FIXTURE, FIXTURE), dual_target.apply(FIXTURE))
 
 
 class DualTargetTests(unittest.TestCase):

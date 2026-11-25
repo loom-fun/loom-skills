@@ -92,6 +92,51 @@ def apply(cfg, draft_kind, environ=None, kit=None, devices=None, kit_dir=HERE, s
     return block
 
 
+def family_program_env(environ, kit_dir=HERE):
+    """The second gen_llm pass's environment, only for choices that rewrite a whole graph.
+
+    Keep all other base and __RDNA4 pairs intact: their generators select their own twins.
+    An explicit base environment override also stays on its declared family.
+    """
+    if environ.get("LOOM_RDNA4", "1").lower() in OFF:
+        return None
+    root = find_kb_root(kit_dir)
+    choices = load_resolver(root).choices_module(root)
+    env = dict(environ)
+    for c in choices.CHOICES.values():
+        if not getattr(c, "family_program", False):
+            continue
+        twin = c.env + "__RDNA4"
+        value = env.pop(twin, c.to_env(c.legacy))
+        if value in (None, ""):
+            env.pop(c.env, None)
+        elif c.env in environ or twin in environ:
+            env[c.env] = value
+    return env if env != environ else None
+
+
+def apply_graph_test_env(environ):
+    """Test the selected family's launch signatures from the package's recorded overrides."""
+    overrides = {key[:-7]: val for key, val in environ.items() if key.endswith("__RDNA4")}
+    if not overrides:
+        return
+    root = find_kb_root()
+    if not root:
+        return
+    registry = load_resolver(root).choices_module(root).BY_ENV
+    overrides = {key: val for key, val in overrides.items()
+                 if key in registry and getattr(registry[key], "family_program", False)}
+    if not overrides:
+        return
+    import ktest_select
+    if ktest_select.is_gfx12(ktest_select.device_arch(environ)):
+        for key, val in overrides.items():
+            if val == "":
+                environ.pop(key, None)
+            else:
+                environ[key] = val
+
+
 def apply_for_tests(cfg, environ=None):
     """make_kernel_tests.py: the environment the kernels under test were generated with. A built package's llm_config.json carries
     it (resolved.env); a cfg.json before the build is resolved with the draft of cfg["draft"] or LLM_DRAFT (none: not drafted)."""

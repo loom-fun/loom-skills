@@ -254,6 +254,27 @@ class Resolution(unittest.TestCase):
         r = resolve.resolve(cfg(), ("rdna4",), os.path.join(FIX, "pertarget"))
         self.assertEqual(r["env"]["MV_WG1"], "1024")
 
+    def test_family_program_model_override(self):
+        c = cfg(choices={"prefill.fuse.resid_epi": True})
+        for devices, want in ((("rdna3", "rdna4"), {"RESID_EPI": "1", "RESID_EPI__RDNA4": "0"}),
+                              (("rdna3",), {"RESID_EPI": "1"}), (("rdna4",), {})):
+            env = resolve.resolve(c, devices, KB)["env"]
+            self.assertEqual({k: v for k, v in env.items() if k.startswith("RESID_EPI")}, want)
+
+    def test_family_program_dirty_base_and_independent_flash_twin(self):
+        env = {"QG_SPLIT": "1", "FLASH2_PEEL": "1", "FLASH2_PEEL__RDNA4": "0"}
+        self.assertEqual(kb_choices.family_program_env(env), dict(env, QG_SPLIT="0"))
+        self.assertIsNone(kb_choices.family_program_env(dict(env, LOOM_RDNA4="0")))
+
+    def test_graph_test_signatures_follow_package_target(self):
+        for arch, value in (("gfx1151", "1"), ("gfx1201", "0")):
+            env = {"QG_SPLIT": "1", "QG_SPLIT__RDNA4": "0", "DEVICE_ARCH": arch}
+            kb_choices.apply_graph_test_env(env)
+            self.assertEqual(env["QG_SPLIT"], value)
+        legacy = {"DEVICE_ARCH": "gfx1201", "QG_SPLIT": "1"}
+        kb_choices.apply_graph_test_env(legacy)
+        self.assertEqual(legacy["QG_SPLIT"], "1")
+
     def test_per_target_rule_resolves_per_family(self):
         """qwen3moe (undrafted): the flash2 peel is off for the gfx11 kernel only; its gfx12 twin keeps it (PR #771 evidence)."""
         q = cfg(arch="qwen3moe", moe={"experts": 8})

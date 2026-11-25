@@ -410,6 +410,10 @@ def resolve_full(cfg, devices=("rdna3", "rdna4"), kb_root=None, draft=AUTO, kit=
                 if not _is_exec(c):
                     _check_devices(c, rule_devs, env.families, family_of, where)
                 fams = {family_of(d) for d in rule_devs} if (rule_devs and c.per_target) else None
+                if c.family_program:
+                    fams = set(c.devices) if fams is None else fams.intersection(c.devices)
+                    if not fams.intersection(env.families):
+                        continue
                 contrib.setdefault(k, []).append(((lvl, depth), scope, c.check(v), ent.get("evidence", ""), fams))
     for k, v in (cfg.get("choices") or {}).items():
         c = ch.CHOICES.get(k)
@@ -418,7 +422,10 @@ def resolve_full(cfg, devices=("rdna3", "rdna4"), kb_root=None, draft=AUTO, kit=
         if _is_exec(c) and not execution:
             continue
         try:
-            contrib.setdefault(k, []).append(((LEVELS["model"], 0), "model", c.check(v), "llm_config.json choices", None))
+            fams = set(c.devices) if c.family_program else None
+            if fams and not fams.intersection(env.families):
+                continue
+            contrib.setdefault(k, []).append(((LEVELS["model"], 0), "model", c.check(v), "llm_config.json choices", fams))
         except ValueError as e:
             raise ResolveError(f"model choices: {e}")
     def pick(k, items):

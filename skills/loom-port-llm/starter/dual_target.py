@@ -95,7 +95,7 @@ def select_mode():
 PROGRAM_HEAD = re.compile(r"^command\.def\s+(?:public\s+)?@(\w+)\(\)\s+launch\((.*)\)\s*\{\s*$")
 
 
-def _program_blocks(lines, tw):
+def _program_blocks(lines, tw, alternate):
     """[(start, end)] line ranges (end inclusive: the closing `}` at column 0) of the command programs that launch a twin
     kernel of TW or carry a launch group."""
     blocks, i = [], 0
@@ -104,27 +104,20 @@ def _program_blocks(lines, tw):
             j = i + 1
             while lines[j] != "}":
                 j += 1
-            if any(GROUP_BEGIN.match(l) or ((m := LAUNCH.match(l)) and m.group(2) in tw) for l in lines[i + 1:j]):
+            if lines[i] in alternate or any(GROUP_BEGIN.match(l) or ((m := LAUNCH.match(l)) and m.group(2) in tw) for l in lines[i + 1:j]):
                 blocks.append((i, j))
             i = j
         i += 1
     return blocks
 
 
-def _program_templates(block, tw, decls):
-    """The stub program for the command program BLOCK (its lines) and its template.decl / providers appended to DECLS."""
-    m = PROGRAM_HEAD.match(block[0])
-    if not m:
-        raise ValueError(f"dual-target select=program: cannot read the program header: {block[0][:120]}")
-    name, params = m.groups()
-    ps = _split_top(params)
-    names = ", ".join(p.split(":")[0].strip() for p in ps)
-    types = ", ".join(p.split(":", 1)[1].strip() for p in ps)
+def _provider_body(block, tw, target):
+    """Lower one raw command body for TARGET, selecting its launch groups and twins."""
     body = block[1:-1]
     if not body or body[-1].strip() != "command.return":
-        raise ValueError(f"dual-target select=program: @{name} does not end in command.return")
+        raise ValueError(f"dual-target select=program: {block[0]} does not end in command.return")
     body = body[:-1]
-    by = {BASE: [], TWIN: []}
+    out = []
     i = 0
     while i < len(body):
         gm = GROUP_BEGIN.match(body[i])
@@ -132,25 +125,36 @@ def _program_templates(block, tw, decls):
             ind, alt = gm.groups()
             j = i + 1
             while not GROUP_END.match(body[j]):
-                by[BASE].append(body[j])
+                if target == BASE:
+                    out.append(body[j])
                 j += 1
-            by[TWIN].append(ind + alt)
+            if target == TWIN:
+                out.append(ind + alt)
             i = j + 1
             continue
         lm = LAUNCH.match(body[i])
-        if lm and lm.group(2) in tw:
-            by[BASE].append(body[i])
+        if target == TWIN and lm and lm.group(2) in tw:
             ind, k, grid, args, gty, aty = lm.groups()
-            by[TWIN].append(f"{ind}kernel.launch @{k}{SUFFIX}[{grid}]({args}) : [{gty}]({aty})")
+            out.append(f"{ind}kernel.launch @{k}{SUFFIX}[{grid}]({args}) : [{gty}]({aty})")
         else:
-            by[BASE].append(body[i])
-            by[TWIN].append(body[i])
+            out.append(body[i])
         i += 1
+    return out
+
+
+def _program_templates(block, tw, decls, alternate=None):
+    m = PROGRAM_HEAD.match(block[0])
+    if not m:
+        raise ValueError(f"dual-target select=program: cannot read the program header: {block[0][:120]}")
+    name, params = m.groups()
+    ps = _split_top(params)
+    names = ", ".join(p.split(":")[0].strip() for p in ps)
+    types = ", ".join(p.split(":", 1)[1].strip() for p in ps)
     tname = f"{name}_body"
     decls.append(f"template.decl @{tname}({params})")
     for tgt in (BASE, TWIN):
         decls.append(f"template.def<@{tname}> target(@{tgt}) @{tname}_{tgt}({params}) {{")
-        decls += by[tgt]
+        decls += _provider_body(alternate if alternate and tgt == TWIN else block, tw, tgt)
         decls.append("  template.return\n}")
     return [block[0], f"  template.apply<@{tname}>({names}) : ({types})", "  command.return", "}"]
 
@@ -218,7 +222,7 @@ def _groups(lines, decls, sigs):
     return out
 
 
-def apply(text, enable=None, select=None):
+def apply(text, enable=None, select=None, alternate=None):
     """TEXT made dual-target; unchanged when it has no twin kernels (or the pass is off). SELECT: "launch" or "program"
     (default: env LOOM_DUAL_SELECT)."""
     if enable is None:
@@ -228,7 +232,7 @@ def apply(text, enable=None, select=None):
     if not enable or "target.decl @device" in text:
         return encodings_first(text)
     tw = set(twins(text))
-    if not tw:
+    if not tw and not alternate:
         return encodings_first(text)
     lines = text.split("\n")
     out, last_def_end = [], -1
@@ -253,14 +257,19 @@ def apply(text, enable=None, select=None):
         i += 1
         if base in tw or sym.endswith(SUFFIX):
             last_def_end = len(out)
+    if last_def_end == -1 and alternate:
+        last_def_end = next(i for i, line in enumerate(out) if line in alternate)
     decls, sigs, res = [], {}, []
-    if select == "program":
+    alternate = alternate or {}
+    if select == "program" or alternate:
         stubs, rebuilt, pos = [], [], 0
-        for a, b in _program_blocks(out, tw):
+        for a, b in _program_blocks(out, tw, alternate):
+            if select != "program" and out[a] not in alternate:
+                continue
             if a < last_def_end:
                 raise ValueError(f"program {out[a][:80]} starts before the end of its twin kernels")
             rebuilt += out[pos:a] + [f"\0PROGRAM{len(stubs)}\0"]
-            stubs.append(_program_templates(out[a:b + 1], tw, decls))
+            stubs.append(_program_templates(out[a:b + 1], tw, decls, alternate.get(out[a])))
             pos = b + 1
         out = rebuilt + out[pos:]
     out = _groups(out, decls, sigs)
@@ -289,7 +298,7 @@ def apply(text, enable=None, select=None):
     # res has one line per line of out: the templates go right after the last twin kernel
     res = res[:last_def_end] + ([""] + decls if decls else []) + res[last_def_end:]
     body = "\n".join(res)
-    if select == "program":
+    if select == "program" or alternate:
         for n, stub in enumerate(stubs):
             body = body.replace(f"\0PROGRAM{n}\0", "\n".join(stub))
     body = PROGRAM_DEF.sub(r"\1target(@device) \2", body)

@@ -9,6 +9,7 @@ without a twin: it cannot be compiled for gfx12) is skipped, so one test file co
 import os
 import re
 import sys
+import subprocess
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import dual_target  # noqa: E402
@@ -18,6 +19,20 @@ EXPORT = re.compile(r'^kernel\.def\b[^\n]*?\bexport\("([^"]+)"\)', re.M)
 SYMBOL = re.compile(r'^kernel\.def\b[^\n]*?\s@([\w.]+)\(', re.M)
 RDNA4_ONLY = re.compile(r'^kernel\.def\b[^\n]*?target\(@rdna4\)[^\n]*?\s@([\w.]+)\(', re.M)
 RDNA3_ONLY = re.compile(r'^kernel\.def\b[^\n]*?target\(@rdna3\)[^\n]*?\s@([\w.]+)\(', re.M)
+
+
+def device_arch(environ):
+    if environ.get("DEVICE_ARCH"):
+        return environ["DEVICE_ARCH"]
+    for cmd in (["rocminfo"], ["amd-smi", "static", "--asic"]):
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        except FileNotFoundError:
+            continue
+        match = re.search(r"gfx[1-9][0-9a-f]*", result.stdout)
+        if match:
+            return match.group()
+    raise ValueError("set DEVICE_ARCH to generate kernel tests for a family-specific command graph")
 
 
 def is_gfx12(arch):
@@ -31,7 +46,7 @@ def select(lib, cases, arch=None, rdna4=None):
     defined = set(EXPORT.findall(lib)) | set(SYMBOL.findall(lib))
     defined |= set(EXPORT.findall(cases)) | set(SYMBOL.findall(cases))   # test helper kernels
     gfx11_only = set(RDNA3_ONLY.findall(lib)) - {k[:-len(dual_target.SUFFIX)] for k in defined if k.endswith(dual_target.SUFFIX)}
-    gfx12_only = {k for k in RDNA4_ONLY.findall(lib) if k.endswith(dual_target.SUFFIX) and k[:-len(dual_target.SUFFIX)] not in defined}   # K_rdna4 with no K (f16o fusions)
+    gfx12_only = {k for k in RDNA4_ONLY.findall(lib) if not k.endswith(dual_target.SUFFIX) or k[:-len(dual_target.SUFFIX)] not in defined}   # K_rdna4 with no K (f16o fusions)
     keep, skipped = [], []
     for b in re.split(r'(?m)^(?=check\.case )', cases):
         if not b.startswith("check.case"):
