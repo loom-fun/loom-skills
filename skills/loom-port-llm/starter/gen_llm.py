@@ -5778,12 +5778,6 @@ def moe_routed(i, b, x="%h", rx="%h", out="%y"):
     wu = f"%wge_{i}" if fused else f"%wue_{i}"
     wsc = (f"    kernel.launch @g_moe_wscale[%t](%t, %ids, %wts, %dsc_{i}) : [index](index, buffer, buffer, view<{E}xf32>)\n"
            if MOE.get("down_scale") else "")
-    import gen_moe as _gm
-    if _gm.route_split() and MOE["gating"] != 3:   # moe.route.decode_split: logits into the (decode-unused) prefill expert-row scratch
-        route_dec = (f"    kernel.launch @g_moe_route_lg[%t](%t, {rx}, %router_{i}, %ys_sorted) : [index](index, buffer, view<{E * H}x{rty}>, buffer)\n"
-                     f"    kernel.launch @g_moe_route_tk[%t](%t, %ys_sorted, {bias}, %ids, %wts) : [index](index, buffer, {bias_ty}, buffer, buffer)")
-    else:
-        route_dec = f"    kernel.launch @g_moe_route[%t](%t, {rx}, %router_{i}, {bias}, %ids, %wts) : [index](index, buffer, view<{E * H}x{rty}>, {bias_ty}, buffer, buffer)"
     x16 = "" if x == "%h" else f"    kernel.launch @g_row_scale_f16[%t](%t, %nH, {x}, %s_h, %h16) : [index](index, index, buffer, buffer, buffer)\n"
     return f"""  %router_{i} = command.parameter %weights, "{b}ffn_gate_inp.weight" : view<{E * H}x{rty}>
 """ + (f"""  %ebias_{i} = command.parameter %weights, "{b}exp_probs_b.bias" : view<{E}xf32>
@@ -5799,12 +5793,26 @@ def moe_routed(i, b, x="%h", rx="%h", out="%y"):
     kernel.launch @g_moe_gdn_{fd}_k{FE}[%max_rows, %nH](%max_rows, %nFE, %nH, %max_rows, %tile_info, %rowmap, %act16, %s_rows, %wde_{i}{dn_b}, %ys_sorted) : [index, index](index, index, index, index, buffer, buffer, buffer, buffer, view<{sd}xi8>{dn_bt}, buffer)
     kernel.launch @g_moe_combine_sorted[%t](%t, %max_rows, %ys_sorted, %pos, %wts, {sgarg}{out}) : [index](index, index, buffer, buffer, buffer, {sgty}buffer)
   }} else {{
-{route_dec}
+    kernel.launch @g_moe_route[%t](%t, {rx}, %router_{i}, {bias}, %ids, %wts) : [index](index, buffer, view<{E * H}x{rty}>, {bias_ty}, buffer, buffer)
 {wsc}{hq}    kernel.launch @g_moe_gu_{gun}{q8}_k{H}_r{R}[%nFE, %ta](%nFE, %ta, %ids, {xa}, %wge_{i}, {wu}{gu_b}, %act) : [index, index](index, index, buffer, buffer, view<{sg}xi8>, view<{su}xi8>{gu_bt}, buffer)
 {quant_act}    kernel.launch @g_moe_dn_{fd}{q8}_k{FE}_r{R}[%nH, %ta](%nH, %ta, %ids, {actd}, %wde_{i}{dn_b}, %ys) : [index, index](index, index, buffer, buffer, view<{sd}xi8>{dn_bt}, buffer)
     kernel.launch @g_moe_combine[%t](%t, %ys, %wts, {sgarg}{out}) : [index](index, buffer, buffer, {sgty}buffer)
   }}
 """
+
+
+_ROUTE_DEC = re.compile(r"(?m)^(?P<ind>\s*)kernel\.launch @g_moe_route\[%t\]\(%t, (?P<x>%\w+), (?P<w>%router_\w+), (?P<b>%\w+), %ids, %wts\) : "
+                        r"\[index\]\(index, buffer, (?P<wt>view<[^>]*>), (?P<bt>[^,]+(?:<[^>]*>)?), buffer, buffer\)$")
+
+
+def route_dsplit_program(program):
+    """moe.route.decode_split (gen_moe.route_split): every decode-shaped g_moe_route launch becomes g_moe_route_lg (logits into the
+    prefill expert-row scratch %ys_sorted, unused in decode-shaped epochs) + g_moe_route_tk. Applied to the generated program text."""
+    import gen_moe as _gm
+    if not (MOE and _gm.route_split() and MOE.get("gating") != 3):
+        return program
+    return _ROUTE_DEC.sub(lambda m: (f"{m['ind']}kernel.launch @g_moe_route_lg[%t](%t, {m['x']}, {m['w']}, %ys_sorted) : [index](index, buffer, {m['wt']}, buffer)\n"
+                                     f"{m['ind']}kernel.launch @g_moe_route_tk[%t](%t, %ys_sorted, {m['b']}, %ids, %wts) : [index](index, buffer, {m['bt']}, buffer, buffer)"), program)
 
 
 def moe_alloc():
@@ -6748,6 +6756,7 @@ if __name__ == "__main__":
     TRUNK_Q8 = bool(USED_MVQ or USED_MOEQ)   # the trunk (verified path) has int8-activation matvecs; MTP_BLOCK_PREP / the bf16 proposal head add them to the MTP programs alone
     program = deepstack_wiring(program) if DEEPSTACK else program
     program = last_out_select_program(program) if LAST_OUT else program
+    program = route_dsplit_program(program)
     spec_kernels = ""
     MTP_ONLY_Q8 = False
     if gen_draft.enabled():   # before the kernel list is emitted: these programs record mv / GEMM variants too
