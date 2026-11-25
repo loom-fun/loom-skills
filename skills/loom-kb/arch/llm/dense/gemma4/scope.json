@@ -30,6 +30,23 @@
     "sampling.final_softcap": true
    },
    "evidence": "Every gemma4 config names its final logit softcap final_softcap (30.0), which the kit never read: temperature sampling and the host logits readback used uncapped logits (logits gate on E2B/E4B/12B/31B/26B, runs 43709383032 / 43712511169: top-5 log-probs about 2x llama.cpp's, e.g. 'You' -19.55 vs -9.12). llama.cpp applies the cap (gemma4 graph). Greedy output is unchanged."
+  },
+  {
+   "when": {
+    "devices": [
+     "rdna4"
+    ],
+    "kv_heads": [
+     8,
+     16
+    ]
+   },
+   "set": {
+    "prefill.attn.flash2_swa_twin": "s",
+    "prefill.attn.flash2_kt256": 16,
+    "prefill.attn.flash2_trim": true
+   },
+   "evidence": "#1400 (SDK 0.3.0 code generation on the generic d256 sliding twin g_attention_flash2_rdna4: +23..45 % device time; kbench run 45626435212: 0.917 ms on 0.3.0 vs 0.646 on 0.2.0, same source). gfx12 sliding twin = gen_flash2s.py's split-dims kernel with 16-key tiles at 2 query heads per KV head, plus the twin trims: kbench run 45628178111 0.350 ms. DevLab R9700 same-runner A/B vs the production package on 0.2.0 (run 45630563660), prefill 1k/2k/8k/16k/32k: 12B +3.5/+3.9/+4.5/+5.0/+5.5 % (0.3.0 frozen -0.2/-2.8/-3.6/-3.6/-3.3 %); 26B-A4B qat +2.1/+2.9/+3.8/+4.4/+5.0 %; 26B-A4B lmstudio +2.6/+2.4/+4.2/+4.5 % (1k/2k/8k/16k); 31B +1.9/+2.8 % (1k/2k); decode rows within drafted-session noise; ktest pass on every model."
   }
  ]
 }
