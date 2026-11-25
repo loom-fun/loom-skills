@@ -30,7 +30,7 @@
      "type": "object",
      "description": "Only for a package built before build.py stamped llm_config.json 'generator': what generated its programs, as recovered afterwards. Ignored when llm_config.json has the stamp.",
      "properties": {
-      "skills_commit": {"oneOf": [{"$ref": "#/$defs/recovered_commit"}, {"const": "unknown"}]},
+      "skills_commit": {"oneOf": [{"$ref": "#/$defs/recovered_commit"}, {"$ref": "#/$defs/no_generator"}, {"const": "unknown"}]},
       "hrx_loom": {"oneOf": [{"$ref": "#/$defs/hrx_loom"}, {"const": "unknown"}]}
      }
     }
@@ -262,6 +262,14 @@
     "verified": {"type": "boolean"},
     "recovered": {"type": "boolean", "description": "Established after the fact rather than recorded at the time"},
     "basis": {"type": "string", "description": "How a recovered value was established"}
+   }
+  },
+  "no_generator": {
+   "type": "object", "required": ["commit", "basis"],
+   "description": "programs no loom-skills generator made (a hand-written package): commit null, basis says so",
+   "properties": {
+    "commit": {"type": "null"},
+    "basis": {"type": "string"}
    }
   },
   "recovered_commit": {

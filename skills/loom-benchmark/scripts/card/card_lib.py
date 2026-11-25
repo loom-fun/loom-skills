@@ -678,15 +678,22 @@ def remeasure_reasons(flags):
     return ["stale"] if (flags or {}).get("stale") else []
 
 
+def stamped(gen):
+    """llm_config.json's "generator" names the loom-skills commit that built the programs (a stamp that says
+    "unknown", as hand-written packages carry, is no stamp)."""
+    return bool(gen and gen.get("skills_commit") and gen["skills_commit"] != "unknown")
+
+
 def generator_commit(gen, versions):
     """(loom-skills commit that generated the programs, how it is known): llm_config.json's build stamp
     ("generator".skills_commit, build.py's generator_stamp(); "stamp"), else info.json's recovered
-    versions.package.skills_commit ("recovered"); (None, None) when neither says."""
-    if gen and gen.get("skills_commit") and gen["skills_commit"] != "unknown":
+    versions.package.skills_commit ("recovered"), or its statement that no generator made the programs
+    ({"commit": null, "basis": ...}; (None, "none")); (None, None) when neither says."""
+    if stamped(gen):
         return gen["skills_commit"], "stamp"
     rec = ((versions or {}).get("package") or {}).get("skills_commit")
-    if not gen and isinstance(rec, dict):
-        return rec["commit"], "recovered"
+    if isinstance(rec, dict):
+        return (rec["commit"], "recovered") if rec.get("commit") else (None, "none")
     return None, None
 
 
