@@ -298,6 +298,17 @@ def dequant16(fmt, w, view_name, out):
         return iq4_dequant16(fmt, w, out)
     if fmt == "q3_k" and Q3_K_NATIVE:
         return q3_k_dequant16(w, out)
+    if fmt == "ptq1_0":   # 16 consecutive trits = one (byte vector, power of 3) pair of the block (ternary.py @g_ptq1_0_half16)
+        return f'''
+      %{out}_bv = index.constant 128 : index
+      %{out}_block = index.div %w_col, %{out}_bv : index
+      %{out}_within = index.rem %w_col, %{out}_bv : index
+      %{out}_h0 = index.div %{out}_within, %c16 : index
+      %{out}_h = index.assume %{out}_h0 [range(%{out}_h0, 0, 7)] : index
+      %{out}_block_add = index.scale %{out}_block, %block_bytes : index, offset -> offset
+      %{out}_block_origin = index.add %w_row_origin, %{out}_block_add : offset
+      %{out}_v = func.call @g_ptq1_0_half16(%{w}, %{out}_block_origin, %{out}_h) : (buffer, offset, index) -> (vector<16xf32>)
+      %{out} = vector.fptrunc %{out}_v : vector<16xf32> to vector<16xf16>'''
     if fmt in HELPER:   # 16 consecutive weights = one half of a 32-value group from the shared value helper
         bv = FMT[fmt]["block_values"]
         sc_setup = f"""      %{out}_sidx = index.madd %bounded_w_out_row, %blocks, %{out}_block : index

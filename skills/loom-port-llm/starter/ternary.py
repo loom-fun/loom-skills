@@ -97,6 +97,70 @@ func.def inline @g_ptq1_0_icodes(%w: buffer, %origin: offset, %group: index) -> 
   func.return %codes, %d : vector<32xi8>, f32
 }
 
+// Values 16h..16h+15 of a block (h = 0..7): h < 5: bytes 0..15 at 3^h; h = 5: bytes 16..23 twice at (1 x8, 3 x8); h = 6: the same at
+// (9 x8, 27 x8); h = 7: bytes 16..23 then 24, 25 four times at (81 x8, 1, 1, 3, 3, 9, 9, 27, 27). The GEMMs' 16-value staging.
+func.def inline @g_ptq1_0_half16(%w: buffer, %origin: offset, %h: index) -> (vector<16xf32>) {
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c3 = index.constant 3 : index
+  %c4 = index.constant 4 : index
+  %c5 = index.constant 5 : index
+  %c6 = index.constant 6 : index
+  %c7 = index.constant 7 : index
+  %o16 = index.constant 16 : offset
+  %o24 = index.constant 24 : offset
+  %o26 = index.constant 26 : offset
+  %a_view = buffer.view %w[%origin] : buffer -> view<16xi8>
+  %b_origin = index.add %origin, %o16 : offset
+  %b_view = buffer.view %w[%b_origin] : buffer -> view<8xi8>
+  %h_origin = index.add %origin, %o24 : offset
+  %h_view = buffer.view %w[%h_origin] : buffer -> view<2xi8>
+  %d_origin = index.add %origin, %o26 : offset
+  %d_view = buffer.view %w[%d_origin] : buffer -> view<1xf16>
+  %d_half = view.load %d_view[0] : view<1xf16> -> f16
+  %d = scalar.extf %d_half : f16 to f32
+  %a = vector.load %a_view[0] : view<16xi8> -> vector<16xi8>
+  %b8 = vector.load %b_view[0] : view<8xi8> -> vector<8xi8>
+  %h2 = vector.load %h_view[0] : view<2xi8> -> vector<2xi8>
+  %bb = vector.concat<0> %b8, %b8 : vector<8xi8>, vector<8xi8> -> vector<16xi8>
+  %h4 = vector.concat<0> %h2, %h2 : vector<2xi8>, vector<2xi8> -> vector<4xi8>
+  %h8 = vector.concat<0> %h4, %h4 : vector<4xi8>, vector<4xi8> -> vector<8xi8>
+  %bq = vector.concat<0> %b8, %h8 : vector<8xi8>, vector<8xi8> -> vector<16xi8>
+  %ge5 = index.cmp uge, %h, %c5 : index
+  %is7 = index.cmp eq, %h, %c7 : index
+  %m5 = vector.splat %ge5 : vector<16xi1>
+  %m7 = vector.splat %is7 : vector<16xi1>
+  %bsel = vector.select %m7, %bq, %bb : vector<16xi8>
+  %bytes = vector.select %m5, %bsel, %a : vector<16xi8>
+  %i1 = scalar.constant 1 : i8
+  %i3 = scalar.constant 3 : i8
+  %i9 = scalar.constant 9 : i8
+  %i27 = scalar.constant 27 : i8
+  %i81 = scalar.constant 81 : i8
+  %is1 = index.cmp eq, %h, %c1 : index
+  %is2 = index.cmp eq, %h, %c2 : index
+  %is3 = index.cmp eq, %h, %c3 : index
+  %is4 = index.cmp eq, %h, %c4 : index
+  %s1 = scf.select %is1, %i3, %i1 : i8
+  %s2 = scf.select %is2, %i9, %s1 : i8
+  %s3 = scf.select %is3, %i27, %s2 : i8
+  %s4 = scf.select %is4, %i81, %s3 : i8
+  %ps = vector.splat %s4 : vector<16xi8>
+  %p5 = vector.from_elements %i1, %i1, %i1, %i1, %i1, %i1, %i1, %i1, %i3, %i3, %i3, %i3, %i3, %i3, %i3, %i3 : vector<16xi8>
+  %p6 = vector.from_elements %i9, %i9, %i9, %i9, %i9, %i9, %i9, %i9, %i27, %i27, %i27, %i27, %i27, %i27, %i27, %i27 : vector<16xi8>
+  %p7 = vector.from_elements %i81, %i81, %i81, %i81, %i81, %i81, %i81, %i81, %i1, %i1, %i3, %i3, %i9, %i9, %i27, %i27 : vector<16xi8>
+  %p67 = vector.select %m7, %p7, %p6 : vector<16xi8>
+  %is5 = index.cmp eq, %h, %c5 : index
+  %m5e = vector.splat %is5 : vector<16xi1>
+  %p567 = vector.select %m5e, %p5, %p67 : vector<16xi8>
+  %pw = vector.select %m5, %p567, %ps : vector<16xi8>
+  %codes = func.call @g_ptq1_0_tc16(%bytes, %pw) : (vector<16xi8>, vector<16xi8>) -> (vector<16xi8>)
+  %f = vector.sitofp %codes : vector<16xi8> to vector<16xf32>
+  %ds = vector.splat %d : vector<16xf32>
+  %values = vector.mulf %f, %ds : vector<16xf32>
+  func.return %values : vector<16xf32>
+}
+
 func.def inline @g_ptq1_0_values(%w: buffer, %origin: offset, %group: index) -> (vector<32xf32>) {
   %codes, %d = func.call @g_ptq1_0_icodes(%w, %origin, %group) : (buffer, offset, index) -> (vector<32xi8>, f32)
   %f = vector.sitofp %codes : vector<32xi8> to vector<32xf32>
