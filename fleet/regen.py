@@ -1668,6 +1668,8 @@ def package_one(st, slug, canon, sha, dry, env, prefill_changes=None, source_car
         for f in ("README.md", "info.json", "REPORT.md"):   # the card files stay the staging head's (the migration-only card) until the card step
             if os.path.isfile(os.path.join(reference, f)):
                 shutil.copy2(os.path.join(reference, f), os.path.join(out, f))
+            elif os.path.isfile(os.path.join(out, f)):   # a production-only card file (absent on staging) never ships
+                os.remove(os.path.join(out, f))
         qualification = os.path.join(reference, card_lib.QUICK_START_QUALIFICATION)
         if os.path.isfile(qualification):
             # Keep the receipt. Card generation applies it only to the exact measured settings.
