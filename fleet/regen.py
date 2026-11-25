@@ -1566,6 +1566,8 @@ def cmd_ingest(a):
     dry = getattr(a, "dry_run", False)
     if dry and st.d["opts"].get("programs") != "production":
         die("ingest --dry-run builds a --programs production card on the local frozen package (other modes need the staging package)")
+    if phase2_state(st.d):   # phase 2: a job waits (not stopped) until kit-verdict ships its model; `package` publishes the kit package first
+        todo = [(n, e) for n, e in todo if e["slug"] in (st.d["opts"].get("ship") or ())]
     if st.d["mode"] in SDK_MODES and not dry:
         todo = [(n, e) for n, e in todo if sdk_ingest_ready(st, n, e)]
     global INGEST_DRY
