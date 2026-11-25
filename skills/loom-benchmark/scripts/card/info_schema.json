@@ -64,7 +64,10 @@
   "sdk_delta": {
    "type": "object", "additionalProperties": false, "required": ["comparisons"],
    "description": "Earlier cards of this package (make_info.py build --previous-card): their stored Loom values per GPU, so render_card.py generates the delta line of every metric on every GPU this card re-measured on its own SDK. A regression beyond the band needs an explanation from evidence (lint_card.py).",
-   "properties": {"comparisons": {"type": "array", "items": {
+   "properties": {"kit": {"type": "object", "additionalProperties": false, "required": ["reason"],
+     "description": "migration-only programs whose release kit build was A/B'd against them on the new SDK and not shipped (make_info.py build --kit-kept): why, generated from that A/B's decision, and its job",
+     "properties": {"reason": {"type": "string"}, "url": {"type": ["string", "null"]}}},
+    "comparisons": {"type": "array", "items": {
     "type": "object", "additionalProperties": false, "required": ["label", "devices"],
     "properties": {
      "label": {"enum": ["card", "migration"], "description": "card: the published card this one replaces; migration: this package's migration-only card on the new SDK (frozen programs), for a card whose programs changed beyond the migration"},

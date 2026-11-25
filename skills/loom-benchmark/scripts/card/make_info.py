@@ -863,7 +863,17 @@ def sdk_delta(a, old_delta):
                     sys.exit("\n".join(errs))
                 ex.setdefault(gpu, {})[k] = {"text": e["text"], "url": e.get("url")}
     order = {"card": 0, "migration": 1}
-    return {"comparisons": sorted(comps.values(), key=lambda c: order[c["label"]])} if comps else None
+    kit = getattr(a, "kit_kept", None) or (old_delta or {}).get("kit")
+    if kit:
+        if not kit.get("reason"):
+            sys.exit("--kit-kept: needs a reason")
+        errs = text_errors("--kit-kept reason", kit["reason"], CAVEAT_MAX)
+        if errs:
+            sys.exit("\n".join(errs))
+        kit = {"reason": kit["reason"], "url": kit.get("url")}
+    if not comps and not kit:
+        return None
+    return {**({"kit": kit} if kit else {}), "comparisons": sorted(comps.values(), key=lambda c: order[c["label"]])}
 
 
 # ---------------------------------------------------------------- perf logs -> evidence
@@ -1623,6 +1633,9 @@ def main(argv=None):
                    help="an earlier card of this package whose stored Loom values the delta line compares with (repeat): card = the published "
                    "card this one replaces (its repo and revision), migration = this package's migration-only card on the new SDK (frozen "
                    "programs; no link, it is never published as the production card). Replaces --from-info's comparison of the same label")
+    b.add_argument("--kit-kept", type=load_json, metavar="KIT.json",
+                   help='{"reason": ..., "url": ...}: these migration-only programs stay; the release kit build was A/B\'d against them on the new SDK '
+                        "and not shipped (fleet/regen.py, phase 2): the card says why, one generated line")
     b.add_argument("--sdk-evidence", type=load_json, metavar="EVIDENCE.json",
                    help="an sdk-evidence/1 file (fleet/regen.py evidence): this card's regression explanations (as --delta-explanations "
                    "card) and the conclusion of every job it cites (recorded on the sources; render_card.py refuses a failed one)")
