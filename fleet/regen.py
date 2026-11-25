@@ -786,7 +786,7 @@ def cmd_poll(a):
     pending = 0
     seen = []   # (batch id, run, jobs): the network part first, then ONE locked read-modify-write, so a step that saved the state meanwhile
     for b in st.d["batches"]:   # (collect, rerun, accept: possibly in another shell) keeps its changes
-        if b["stage"] in ("planned", "dropped") or not b.get("branch"):   # dropped (share): never submitted, no run to find
+        if b["stage"] in ("planned", "dropped") or not (b.get("branch") or b.get("run")):   # dropped (share): never submitted, no run to find; an adopted batch has its run
             continue
         run = b.get("run") or find_run(b)
         if run:
