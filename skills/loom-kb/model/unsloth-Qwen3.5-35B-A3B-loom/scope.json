@@ -20,6 +20,53 @@
     "exec.context_cap": 56320
    },
    "evidence": "migrated from the R9700 fit table (.github/devlab/r9700_fit.json r9700_execution / ctx_cap, measured on the R9700 DevLab runner; #609 #613 #615 #617 #618 #619 #628 #630); values unchanged"
+  },
+  {
+   "when": {
+    "devices": [
+     "rdna3"
+    ]
+   },
+   "set": {
+    "prefill.fuse.qg_split": true,
+    "hybrid.gdn.chunk11": true,
+    "hybrid.gdn.chunk11_cn": 16
+   },
+   "evidence": "qwen35 lane (#1418): gfx11 prefill stack from the Qwen3.8-27B Strix lanes, minus flash2_kt256 16 (costs 16k/32k at 8 query heads per KV head). DevLab Strix same-job ABBA (chunk 8192): bisect run 45539231189 (without chunk11 -3.9/-3.5/-2.7 % at 8k/16k/32k, without qg_split -1.4/-1.1/-0.7 %); full stack runs 45527429236, 45532240632; ktest + smoke PASS."
+  },
+  {
+   "when": {
+    "devices": [
+     "rdna4"
+    ]
+   },
+   "set": {
+    "hybrid.gdn.chunk": true,
+    "decode.spec.gdn_copy_split": 8,
+    "prefill.attn.flash2_trim": true
+   },
+   "evidence": "qwen35 lane (#1418): gfx12 stack from the Qwen3.8-27B R9700 lanes (GDN chunk, capture/restore split 8, flash2 trims). DevLab R9700 same-job ABBA vs the kit build (run 45527429236): Qwen3.5 prefill 1k/2k/8k/16k/32k +9.5/+10.2/+12.8/+13.6/+15.2 %, decode +4.2 %; Qwen3.6 +10.0/+10.3/+13.1/+13.8/+15.2 %, decode +3.5 %, decode_32k +4.2 %; ktest + smoke PASS. prefill.gdn.fused2 does not fit the 32 GB card (RESOURCE_EXHAUSTED, same run)."
+  },
+  {
+   "when": {},
+   "set": {
+    "prefill.gemm.m256_f16o": true,
+    "moe.prefill.store16": true,
+    "moe.route.tokens_per_wg": 8,
+    "draft.dflash.split_window": true
+   },
+   "evidence": "qwen35 lane (#1418): f16 expert rows (moe.prefill.store16), 8-token prefill router (moe.route.tokens_per_wg 8: logits in registers, 4 blocks per step), split-K drafter attention for the 4096-window DFlash drafter (draft.dflash.split_window), f16 swiglu m256 output. DevLab R9700 same-job ABBA (run 45539230989): prefill +4.8..+7.0 %, decode_2k +6.4/+9.3 %, decode_32k +9.3 % (Qwen3.6; Qwen3.5 decodes 32k undrafted); Strix (run 45532240632): prefill +2.7..+4.6 %; numerics-moving (f16 rows): gates in the card job."
+  },
+  {
+   "when": {
+    "devices": [
+     "strix-halo"
+    ]
+   },
+   "set": {
+    "exec.prefill_capacity": 8192
+   },
+   "evidence": "qwen35 lane (#1418): prefill chunk 8192 on Strix Halo (MoE expert tiles fill at larger epochs). DevLab Strix same-job ABBA vs 4096 with the same programs (run 45527429236): prefill 8k/16k/32k +5.9/+4.3/+2.9 % (Qwen3.6), +6.6/+4.2/+2.9 % (Qwen3.5), 1k/2k tie, decode tie."
   }
  ]
 }
