@@ -27,7 +27,7 @@
      "sdk": "0.3.0"
     },
     {
-     "name": "segnd",
+     "name": "segu",
      "build": {
       "SEG_D256": "1",
       "SEG_WMMA": "1"
@@ -73,88 +73,12 @@
       "4096"
      ],
      "sdk": "0.3.0"
-    },
-    {
-     "name": "funnd",
-     "card": "loom-fun/bartowski-Ornith-1.5-35B-A3B-loom",
-     "sdk": "0.2.0",
-     "execution": {
-      "draft_depth": 0
-     }
-    },
-    {
-     "name": "fz3nd",
-     "card": "loom-fun/bartowski-Ornith-1.5-35B-A3B-loom",
-     "sdk": "0.3.0",
-     "execution": {
-      "draft_depth": 0
-     }
-    },
-    {
-     "name": "segndnd",
-     "build": {
-      "SEG_D256": "1",
-      "SEG_WMMA": "1"
-     },
-     "build_args": [
-      "--memory-gib",
-      "4096"
-     ],
-     "sdk": "0.3.0",
-     "execution": {
-      "draft_depth": 0
-     }
-    },
-    {
-     "name": "segnd",
-     "build": {
-      "SEG_D256": "1",
-      "SEG_WMMA": "1",
-      "SPEC_CTX_MAX": "0"
-     },
-     "build_args": [
-      "--memory-gib",
-      "4096"
-     ],
-     "sdk": "0.3.0",
-     "execution": {
-      "draft_depth": 0
-     }
-    },
-    {
-     "name": "bf0nd",
-     "build": {
-      "ATTN_BFLY": "0"
-     },
-     "build_args": [
-      "--memory-gib",
-      "4096"
-     ],
-     "sdk": "0.3.0",
-     "execution": {
-      "draft_depth": 0
-     }
-    },
-    {
-     "name": "kvo4nd",
-     "build": {
-      "ATTN_GQA_D256": "1",
-      "ATTN_GQA_U": "4"
-     },
-     "build_args": [
-      "--memory-gib",
-      "4096"
-     ],
-     "sdk": "0.3.0",
-     "execution": {
-      "draft_depth": 0
-     }
     }
    ],
    "steps": [
     "perf:fun:1",
     "perf:fz3:1",
-    "perf:segnd:1",
+    "perf:segu:1",
     "perf:seg:1",
     "perf:bf0:1",
     "perf:kvo4:1",
@@ -162,11 +86,11 @@
     "perf:kvo4:1",
     "perf:bf0:1",
     "perf:seg:1",
-    "perf:segnd:1",
+    "perf:segu:1",
     "perf:fz3:1",
     "perf:fun:1:long",
     "perf:fz3:1:long",
-    "perf:segnd:1:long",
+    "perf:segu:1:long",
     "perf:seg:1:long",
     "perf:bf0:1:long",
     "perf:kvo4:1:long",
@@ -174,19 +98,19 @@
     "perf:kvo4:1:long",
     "perf:bf0:1:long",
     "perf:seg:1:long",
-    "perf:segnd:1:long",
+    "perf:segu:1:long",
     "perf:fz3:1:long",
-    "perf:segnd:1:long",
+    "perf:segu:1:long",
     "perf:seg:1:long",
     "perf:bf0:1:long",
     "perf:kvo4:1:long",
     "perf:fun:1:long",
     "perf:fz3:1:long",
-    "smoke:segnd",
+    "smoke:segu",
     "smoke:seg",
     "smoke:bf0",
     "smoke:kvo4",
-    "ktest:segnd",
+    "ktest:segu",
     "ktest:bf0",
     "ktest:kvo4"
    ],
