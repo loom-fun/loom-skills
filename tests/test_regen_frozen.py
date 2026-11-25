@@ -1100,7 +1100,7 @@ class StandaloneLogits(unittest.TestCase):
             with mock.patch.object(regen.card_lib, "programs_sha256", return_value=H), mock.patch.object(regen, "run_tool") as run:
                 self.assertEqual(regen.standalone_logits(spec, TEXT, "radeon-r9700", t, t), "ev_logits.json")
                 args = run.call_args.args[0]
-                self.assertIn(str(root / "logits_staging.json"), args)
+                self.assertIn(str((root / "logits_staging.json").resolve()), args)
                 self.assertIn(job["html_url"], args)
                 with self.assertRaisesRegex(RuntimeError, "completed device"):
                     regen.standalone_logits(spec, TEXT, "strix-halo", t, t)
