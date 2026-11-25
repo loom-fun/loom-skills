@@ -84,6 +84,46 @@ class Comparisons(unittest.TestCase):
         # Gufo prints a whitespace-only token as '', llama.cpp keeps its text
         self.assertEqual(lc.check_vs_llama([[("", -0.3)]], [" "], [{" ": -0.31}], near_tie), (1, []))
 
+    @unittest.skipIf(near_tie is None, "bench_common needs requests")
+    def test_leading_spaces_of_a_byte_level_vocabulary(self):
+        # gpt-oss (DevLab R9700): Loom wrote '17*' where llama.cpp wrote '17 *'; with leading spaces folded the two read as one token and the
+        # divergence surfaced one step later, after the texts had parted ('23' vs ' ', not a near-tie). Gufo prints this vocabulary's spaces.
+        loom = [[("17", -0.0)], [("*", -0.78), (" *", -0.86), (" times", -2.48)], [("23", -0.0003), ("20", -8.45)]]
+        keys = ["17", " *", " "]
+        tops = [{"17": -0.0}, {" *": -0.62, "*": -0.81, " times": -2.45}, {" ": -0.001, "23": -6.9}]
+        self.assertTrue(lc.keeps_spaces([loom]))
+        self.assertFalse(lc.keeps_spaces([[[("are", -0.1), ("is", -2.0)]], [[(" ", -0.2)]]]))    # sentencepiece; a whitespace-only token says nothing
+        n, probs = lc.check_vs_llama(loom, keys, tops, near_tie)              # folded: the divergence is found at step 2
+        self.assertEqual((n, len(probs)), (2, 1))
+        self.assertIn("step 2", probs[0])
+        self.assertEqual(lc.check_vs_llama(loom, keys, tops, near_tie, keep_space=True), (1, []))   # step 1: a near-tie (0.19 nats)
+        # the stricter keys catch a divergence folding hid: llama.cpp sure of ' *'
+        n, probs = lc.check_vs_llama(loom, keys, [tops[0], {" *": -0.01, "*": -5.0}, tops[2]], near_tie, keep_space=True)
+        self.assertTrue(probs and "step 1" in probs[0])
+        self.assertEqual(lc.special_key(" *", True), " *")
+        self.assertEqual(lc.special_key(" *"), "*")
+        self.assertEqual(lc.best_by_key([(" *", -0.6), ("*", -0.8)], True), {" *": -0.6, "*": -0.8})
+
+    @unittest.skipIf(near_tie is None, "bench_common needs requests")
+    def test_divergence_with_llama_views(self):
+        # the golden gate's rule (bench_common.near_tie_at): a divergence the plain rule rejects is judged again with llama.cpp's own views
+        loom, keys = [[("-", -0.63), ("**", -0.78)]], ["**"]
+        ref = [{"**": -0.12, "-": -2.21}]
+        asked = []
+
+        def views(k, out):
+            asked.append(k)
+            return out
+        self.assertTrue(lc.check_vs_llama(loom, keys, ref, near_tie)[1])                                  # no views: not a near-tie
+        self.assertEqual(lc.check_vs_llama(loom, keys, ref, near_tie, views_at=lambda k: views(k, [{"**": -0.5, "-": -1.0}])), (0, []))
+        self.assertEqual(asked, [0])
+        # views that agree with the reference keep it a problem; a view that lists neither token never widens the bar
+        self.assertTrue(lc.check_vs_llama(loom, keys, ref, near_tie, views_at=lambda k: [{"**": -0.1, "-": -2.4}, {"x": -0.1}])[1])
+        # views are asked only at a divergence the plain rule rejects
+        asked.clear()
+        self.assertEqual(lc.check_vs_llama([[("**", -0.1)]], keys, ref, near_tie, views_at=lambda k: views(k, [])), (1, []))
+        self.assertEqual(asked, [])
+
     def test_eog_keys(self):
         class Tok:
             def decode(self, ids, skip_special_tokens=False):
