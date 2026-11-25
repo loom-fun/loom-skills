@@ -12,7 +12,9 @@
    "variants": [
     {
      "name": "base",
-     "build": {},
+     "build": {
+      "SPEC_CTX_MAX": "0"
+     },
      "build_args": [
       "--memory-gib",
       "4096"
@@ -25,7 +27,8 @@
     {
      "name": "nocw",
      "build": {
-      "MOE_CW_Q4K": "0"
+      "MOE_CW_Q4K": "0",
+      "SPEC_CTX_MAX": "0"
      },
      "build_args": [
       "--memory-gib",
@@ -39,7 +42,8 @@
     {
      "name": "nowm",
      "build": {
-      "SEG_WMMA": "0"
+      "SEG_WMMA": "0",
+      "SPEC_CTX_MAX": "0"
      },
      "build_args": [
       "--memory-gib",
