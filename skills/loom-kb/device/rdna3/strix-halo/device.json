@@ -59,7 +59,13 @@
       "Linux",
       "self-hosted"
     ],
-    "note": "always include Linux: without it a job can land on a Windows runner"
+    "note": "always include Linux: without it a job can land on a Windows runner",
+  "windows_labels": [
+   "windows",
+   "strix-halo",
+   "devlab-dispatch"
+  ],
+  "windows_note": "the DevLab Windows 11 runners of this GPU (release Windows sample: fleet/smoke_plan.py --windows)"
   },
   "preset_suffix": "",
   "fit_table": null,

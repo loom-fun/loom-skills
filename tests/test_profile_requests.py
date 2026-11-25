@@ -17,7 +17,7 @@ ESSAY = 'Write a detailed 300-word essay about the history of the printing press
 
 
 class ProfileRequests(unittest.TestCase):
-    def run_profile(self, *args):
+    def run_profile(self, *args, scenario='dec'):
         calls = []
 
         def stream(url, model, messages, tokens, **kwargs):
@@ -29,12 +29,13 @@ class ProfileRequests(unittest.TestCase):
                         decode_tps=40, total=8, text='fixture')
 
         counters = iter({'draft_proposed_tokens': value} for value in (3, 9, 15))
-        bench = types.SimpleNamespace(doc=lambda n: 'doc', stream=stream,
+        bench = types.SimpleNamespace(doc=lambda n: f'doc{n}', stream=stream,
+                                      long_prompt=lambda metric, nonce: f'[{nonce} ctx32] long {metric}',
                                       thinking_extra=lambda mode: {},
                                       server_draft_counters=lambda url: next(counters))
         output = io.StringIO()
         with patch.dict(sys.modules, {'bench_common': bench}), patch.object(sys, 'argv',
-                [str(SCRIPT), 'http://fixture', 'model', 'dec', *args]), \
+                [str(SCRIPT), 'http://fixture', 'model', scenario, *args]), \
                 patch.dict(os.environ, {k: '' for k in ('LOOM_PROFILE_LITERAL_DECODE',
                     'LOOM_PROFILE_TRACE_GAPS', 'LOOM_PROFILE_PROCESS_IO', 'LOOM_PROFILE_PERF_WARMUP')}, clear=False), \
                 contextlib.redirect_stdout(output):
@@ -59,6 +60,15 @@ class ProfileRequests(unittest.TestCase):
         self.assertEqual(calls[1][0], ESSAY)
         self.assertEqual(result['warmup_mode'], 'perf-essay')
         self.assertEqual(result['warmup_draft']['draft_proposed_tokens'], 6)
+
+    def test_context_decode_is_perf_request_without_nonce(self):
+        calls, result = self.run_profile(scenario='dec2k')
+        self.assertEqual(calls[1][:2], ('[ctx] Write a long, detailed essay discussing this documentation.\n\ndoc2000', 256))
+        self.assertEqual(result['prompt_mode'], 'literal-context')
+        again, _ = self.run_profile(scenario='dec2k')
+        self.assertEqual(again[1][0], calls[1][0])   # identical text on every server
+        calls, _ = self.run_profile(scenario='dec32k')
+        self.assertEqual(calls[1][:2], ('[profile ctx32] long decode_tps_32k', 128))
 
     def test_default_keeps_nonced_profile_prompt(self):
         calls, result = self.run_profile()

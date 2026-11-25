@@ -427,6 +427,16 @@ class PackageFrozen(unittest.TestCase):
         res, commits = self.run_package(["README.md"], dry=True)
         self.assertEqual((res["revision"], commits), (None, []))
 
+    def test_a_model_with_only_its_abba_confirmation_promoted_is_skipped(self):
+        """the sweep job waits for a decision while its ABBA job is promoted: nothing to package for that model (no crash), the next model is"""
+        abba = dict(self.job, stage="collected", prev="first")
+        other = dict(self.job, slug="other", stage="collected", package={"revision": "p" * 40})
+        st = SimpleNamespace(d={"opts": {}}, save=lambda: None, log=lambda m: None)
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            regen.cmd_package_frozen(st, SimpleNamespace(dry_run=False), [("abba", abba), ("o", other)])
+        self.assertIn("other: package already published", out.getvalue())
+        self.assertNotIn(TEXT, out.getvalue())
+
 
 class ImageRequest(unittest.TestCase):
     def test_text_to_image_and_upscale_requests(self):
@@ -581,6 +591,84 @@ class AcceptNoReference(unittest.TestCase):
         self.assertEqual((e["stage"], e["decision"], e["no_reference"]), ("collected", "promote", "no stock reference for inkling2"))
 
 
+class AcceptShownNotEligible(unittest.TestCase):
+    """accept-gate-failure --shown-not-eligible: serving gates that ran and failed on the new SDK are published as failed, never eligible"""
+    def test_failed_gates_shown_and_the_device_never_qualifies(self):
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, True)
+        d = os.path.join(tmp, "job")
+        os.makedirs(os.path.join(d, "gates_staging"))
+        cmp = os.path.join(tmp, "cmp.json")
+        metrics = {k: {"new": 100.0, "card": 100.0, "new_vs_card": 1.0} for k in regen.SDK_METRICS.values()}
+        state = os.path.join(tmp, "s.json")
+        held = {"slug": STRIX_ONLY, "device": "strix-halo", "stage": "needs_decision", "decision": "hold", "round": 1, "cmp": cmp, "dir": d,
+                "reason": "confirmed regression / failed gate / text difference: gate failed: gates:staging:dev"}
+
+        def job(fails=("gates:staging:dev",), admitted=True, programs="production", **passed):
+            json.dump({"gate_failures": list(fails), "metrics": metrics}, open(cmp, "w"))
+            json.dump({"verdict": "FAIL", "context_admit": {"admitted": admitted}, "gates": {n: {"pass": p} for n, p in passed.items()}},
+                      open(os.path.join(d, "gates_staging", "gates.json"), "w"))
+            json.dump({"work": tmp, "mode": "sdk-loom", "opts": {"programs": programs, "new_sdk": "0.3.0"}, "jobs": {"j": dict(held)}, "batches": []},
+                      open(state, "w"))
+
+        def accept(*flags):
+            with contextlib.redirect_stdout(io.StringIO()) as out:
+                regen.main(["accept-gate-failure", state, STRIX_ONLY, "--note", "new on 0.3.0; root cause open", *flags])
+            return regen.State(state).jobs["j"], out.getvalue()
+
+        open(os.path.join(d, "gates_staging.out"), "w").write("could not start llama-server: x\n== golden: references still pending after 5 rounds (FAIL)\n")
+        job(consistency=False, spec=False, golden=False, agent=True)
+        self.assertEqual(accept()[0]["stage"], "needs_decision")   # without the flag: kernel tests only
+        e, _ = accept("--shown-not-eligible")
+        self.assertEqual((e["stage"], e["decision"]), ("collected", "promote"))
+        self.assertEqual((e["shown_failed"]["failed"], e["shown_failed"]["not_run"]), (["consistency", "spec"], ["golden"]))
+        self.assertIn("not eligible for the release", e["accepted_gate_failure"])
+        self.assertIn("golden: not re-run", regen.card_message(e, "strix-halo", "9", True, True))
+        self.assertEqual(regen.device_status(e), "failed")   # published, still never qualified: eligible lists it as pending
+        self.assertEqual(json.load(open(cmp))["gate_failures"], ["gates:staging:dev"])   # the job's evidence is untouched
+        # refused: a func failure, a refused admission check, only reference-pending gates (accept-no-reference), a state not --programs production
+        for kw, word in ((dict(fails=("gates:staging:dev", "func:staging"), consistency=False), "func:staging"),
+                         (dict(admitted=False, consistency=False), "admission"), (dict(golden=False, agent=True), "accept-no-reference")):
+            job(**kw)
+            e, out = accept("--shown-not-eligible")
+            self.assertEqual(e["stage"], "needs_decision", kw)
+            self.assertIn(word, out)
+        job(programs="build", consistency=False)
+        with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
+            accept("--shown-not-eligible")
+
+
+class LaneOwned(unittest.TestCase):
+    """slugs a lane owns end to end: the sweep never packages, ingests, publishes, verifies, confirms or submits them"""
+    def test_sidecar_and_opts_skip_every_publishing_step(self):
+        with tempfile.TemporaryDirectory() as t:
+            state = os.path.join(t, "s.json")
+            jobs = {"l": {"slug": "lane-loom", "device": "strix-halo", "stage": "ingested", "round": 1, "batch": 0},
+                    "c": {"slug": "lane-loom", "device": "radeon-r9700", "stage": "collected", "decision": "confirm", "round": 1, "batch": 0},
+                    "o": {"slug": "other-loom", "device": "strix-halo", "stage": "planned", "round": 1, "batch": 1}}
+            json.dump({"work": t, "mode": "sdk-loom", "opts": {"programs": "production", "new_org": regen.STAGING_ORG, "lane_owned": ["x-loom"]},
+                       "jobs": jobs, "batches": [{"id": 0, "device": "strix-halo", "jobs": ["l"], "stage": "planned"},
+                                                 {"id": 1, "device": "strix-halo", "jobs": ["o"], "stage": "planned"}]}, open(state, "w"))
+            open(state + ".lane_owned", "w").write("# lanes\nlane-loom  # qwen35 lane\n")
+            st = regen.State(state)
+            self.assertEqual(regen.lane_owned(st), {"x-loom", "lane-loom"})
+            submitted, ran = [], []
+            with mock.patch.object(regen, "submit_batch", lambda st, b, dry: submitted.append(b["id"])), \
+                    mock.patch.object(regen, "sh", lambda *a, **k: ran.append(a) or SimpleNamespace(returncode=0, stdout="", stderr="")), \
+                    contextlib.redirect_stdout(io.StringIO()) as out:
+                regen.main(["submit", state])
+                regen.main(["rerun", state])
+                regen.main(["publish", state])
+                regen.main(["package", state])
+            self.assertEqual(submitted, [1])
+            self.assertEqual(ran, [])
+            self.assertIn("no confirming runs needed", out.getvalue())
+            self.assertEqual(regen.State(state).jobs["l"]["stage"], "ingested")
+            with self.assertRaises(SystemExit) as ex:
+                regen.main(["package", state, "--slugs", "lane-loom"])
+            self.assertIn("lane-owned", str(ex.exception.code))
+
+
 class KitVerdict(unittest.TestCase):
     """Phase 2: ship the kit programs of a model only when every device's A/B passes; else keep the frozen ones and re-queue its cards."""
     def write(self, t, name, doc):
@@ -621,6 +709,12 @@ class KitVerdict(unittest.TestCase):
             self.assertEqual(sw.jobs["a-s"]["stage"], "published")
             self.assertEqual(regen.State(r).d["opts"]["ship"], ["a"])
             self.assertEqual(regen.State(s).d["opts"]["ship"], ["a"])
+            with contextlib.redirect_stdout(io.StringIO()):   # ingest: a model kit-verdict has not shipped waits; a shipped one needs its package
+                regen.main(["ingest", s])
+            p2 = regen.State(s).jobs
+            self.assertEqual((p2["sc"]["stage"], p2["sc"].get("reason")), ("collected", None))
+            self.assertEqual(p2["sa"]["stage"], "needs_decision")
+            self.assertIn("package is not published yet", p2["sa"]["reason"])
 
 
 class Share(unittest.TestCase):
@@ -727,6 +821,28 @@ class RooflineStub(unittest.TestCase):
             self.assertIsNone(regen.roofline_stub("unsloth-Qwen3-0.6B-loom", t, t))   # cached: make_info reads the real file
             self.assertIsNone(regen.roofline_stub("no-such-model", t, t))
 
+    def test_a_package_outside_the_fleet_reads_the_header_from_the_hub(self):
+        import gguf_stub
+        dump = sorted(glob.glob(os.path.join(ROOT, "fleet", "unsloth-Qwen3-0.6B-loom", "gguf", "*.json.gz")))[0]
+        name = os.path.basename(dump)[:-len(".json.gz")]
+        ck = {"repo": "someone/Hand-GGUF", "revision": "r" * 40, "file": name}
+        seen = []
+
+        def remote(url, blobs):
+            seen.append((url, blobs))
+            return gguf_stub.load(dump)
+        with tempfile.TemporaryDirectory() as t, mock.patch.dict(os.environ, {"HF_HOME": os.path.join(t, "hf")}), \
+                mock.patch.object(regen.card_lib, "load_package", lambda p: {}), \
+                mock.patch.object(regen.card_lib, "package_facts", lambda f: {"checkpoint": ck}), \
+                mock.patch.object(gguf_stub, "dump", remote), mock.patch.object(gguf_stub, "write_stub", lambda d, path, blobs=None: path):
+            self.assertEqual(os.path.basename(regen.roofline_stub("someone-Hand-loom", t, t)), name)
+            self.assertEqual(seen[0][0], f"https://huggingface.co/someone/Hand-GGUF/resolve/{'r' * 40}/{name}")
+            self.assertTrue(seen[0][1].startswith(t))   # the card's own blob store, never the fleet's
+            seen.clear()
+            ck["file"] = "missing.gguf"   # a fleet package without its dump: no Hub fallback
+            self.assertIsNone(regen.roofline_stub("unsloth-Qwen3-0.6B-loom", t, t))
+            self.assertEqual(seen, [])
+
 
 class ConfirmationRows(unittest.TestCase):
     def test_a_row_the_sweep_job_never_had_is_not_missing(self):
@@ -781,3 +897,21 @@ class Explain(unittest.TestCase):
             with contextlib.redirect_stdout(io.StringIO()):
                 regen.main(["explain", p, f])   # unchanged: nothing re-queued
             self.assertEqual(regen.State(p).jobs["a"]["stage"], "published")
+
+
+class OldFrozenGates(unittest.TestCase):
+    def test_the_frozen_sides_gates_do_not_decide_the_kit_build(self):
+        with tempfile.TemporaryDirectory() as t:
+            p = os.path.join(t, "cmp.json")
+            m = {"decode": {"old": 1.0, "new": 1.0, "ratio": 1.0}, "prefill_8k": {"old": 1.0, "new": 1.0, "ratio": 1.0},
+                 "decode_32k": {"old": 1.0, "new": 1.0, "ratio": 1.0}, "streams4": {"old": 1.0, "new": 1.0, "ratio": 1.0}}
+            json.dump({"metrics": m, "gate_failures": ["ktest:fun"], "text": {"status": "MATCH"}}, open(p, "w"))
+            st = SimpleNamespace(d={"mode": "sdk-ab", "opts": {"old_frozen": True, "old_sdk_target": True}}, jobs={})
+            self.assertEqual(regen.sdk_decide(st, "j", {"round": 1}, p)[0], "promote")
+            json.dump({"metrics": m, "gate_failures": ["ktest:fun", "gates:staging:dev"], "text": {"status": "MATCH"}}, open(p, "w"))
+            d, r, *_ = regen.sdk_decide(st, "j", {"round": 1}, p)
+            self.assertEqual((d, r[0]), ("hold", "gate failed: gates:staging:dev"))
+
+    def test_devlab_ktest_reads_its_own_variants_package(self):
+        text = open(os.path.join(ROOT, ".github", "scripts", "devlab_perf.sh")).read()
+        self.assertIn('[ -f "$D/$p1/cfg.json" ] || cp "$D/cfg.json" "$D/$p1/cfg.json"', text)

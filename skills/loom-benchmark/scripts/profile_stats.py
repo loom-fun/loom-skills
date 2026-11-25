@@ -45,7 +45,7 @@ def main():
     includes_warmup = req.get("warmup_mode") == "perf-essay"
     if includes_warmup:
         reqs = [req["warmup"], *reqs]
-    if req["scenario"] in ("pf1k", "pf2k", "pf8k", "pf32k"):
+    if req["scenario"] in ("pf2k", "pf8k"):
         toks = sum(r["prompt_tokens"] for r in reqs)   # the warm-up's few tokens are in the totals too (negligible vs thousands)
     else:
         toks = sum(r["completion_tokens"] for r in reqs)
@@ -54,9 +54,7 @@ def main():
     for n, (c, t) in rows.items():
         f = by.setdefault(family(n, fams), {"count": 0, "ms": 0.0, "kernels": {}})
         f["count"] += c; f["ms"] += t; f["kernels"][n] = [c, t]
-    wall = sum((r["ttft_s"] if req["scenario"] not in ("dec", "dec2k", "dec32k") else r["total_s"]) for r in reqs) * 1e3
-    if req["scenario"] == "c4":   # concurrent: the wall is the longest stream
-        wall = max(r["total_s"] for r in reqs) * 1e3
+    wall = sum((r["ttft_s"] if not req["scenario"].startswith("dec") else r["total_s"]) for r in reqs) * 1e3
     res = {"scenario": req["scenario"], "includes_warmup": includes_warmup, "tokens": toks, "busy_ms": round(total, 2), "wall_ms": round(wall, 1), "steps": a.steps or None,
            "ms_per_token_busy": round(total / toks, 4) if toks else None, "families": {}, "kernels": {}}
     L = [f"### {req['scenario']}: {toks} tokens, device busy {total:.1f} ms ({total / toks:.4f} ms/token), request wall {wall:.1f} ms"

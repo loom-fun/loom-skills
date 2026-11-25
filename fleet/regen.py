@@ -286,6 +286,15 @@ class State:
         print(msg)
 
 
+def lane_owned(st):
+    """slugs another workstream owns end to end (an optimization lane: its staging package, card and eligible entry): opts.lane_owned plus the
+    lines of the sidecar file STATE.lane_owned, which a running driver honours at its next step without a state edit (no lost update of the state
+    file under a running step). package, ingest, publish, verify, rerun and submit leave their jobs alone; their jobs keep their stage."""
+    side = st.path + ".lane_owned"
+    lines = [ln.split("#")[0].strip() for ln in open(side)] if os.path.isfile(side) else []
+    return set(st.d["opts"].get("lane_owned") or ()) | {ln for ln in lines if ln}
+
+
 @contextlib.contextmanager
 def locked(path):
     """an exclusive lock on PATH.lock (several steps and the other engineers' status writers share status.json)"""
@@ -721,7 +730,8 @@ def max_inflight(opt, device):
 
 def cmd_submit(a):
     st = State(a.state)
-    todo = [b for b in st.d["batches"] if b["stage"] == "planned"]
+    lane = lane_owned(st)
+    todo = [b for b in st.d["batches"] if b["stage"] == "planned" and not all(st.jobs[j]["slug"] in lane for j in b["jobs"] if j in st.jobs)]
     todo.sort(key=lambda b: (not b.get("priority"), device_order(b["device"]), b["id"]))   # priority batches, then R9700-class (few runners): their queue is the long one
     if a.max_batches:
         todo = todo[:a.max_batches]
@@ -905,8 +915,11 @@ def sdk_decide(st, name, e, cmp_path, use_prev=True):
     cmp = json.load(open(cmp_path))
     perf, rows = sdk_deltas(cmp)
     reasons = []
-    if cmp.get("gate_failures"):
-        return "hold", ["gate failed: " + ", ".join(cmp["gate_failures"])], perf, rows
+    fails = cmp.get("gate_failures") or []
+    if st.d["opts"].get("old_frozen"):   # an --old-frozen job: the frozen side's gates are its migration evidence (feed_phase1), not the kit build's
+        fails = [f for f in fails if not OLD_VARIANT.search(f)]
+    if fails:
+        return "hold", ["gate failed: " + ", ".join(fails)], perf, rows
     if (cmp.get("text") or {}).get("status") == "DIFF":
         t = cmp["text"]
         reasons.append(f"greedy text differs from v0.1 on {t['prompts'] - t['identical']}/{t['prompts']} prompts (reported)")
@@ -1242,7 +1255,8 @@ def cmd_rerun(a):
     st = State(a.state)
     want = {}
     for name, e in st.jobs.items():
-        if e["stage"] == "collected" and e.get("decision") in ("rerun", "improved-pending", "confirm") and e["round"] == 1 and not e.get("rerun_of_me"):
+        if e["stage"] == "collected" and e.get("decision") in ("rerun", "improved-pending", "confirm") and e["round"] == 1 and not e.get("rerun_of_me") \
+                and e["slug"] not in lane_owned(st):
             want.setdefault(e["device"], []).append((name, e))
     if not want:
         print("no confirming runs needed")
@@ -1406,8 +1420,13 @@ def ingest_full(st, name, e, W):
     gfiles = [f for f in (f"{d}/gates_{V}/gates.json", f"{d}/ktest_{V}.log") if os.path.exists(f)]
     if e.get("no_reference") and gfiles and gfiles[0].endswith("gates.json"):   # accept-no-reference: the job's gates did not run; the card keeps
         gj = json.load(open(gfiles[0]))   # the previous ones (marked as not re-run on this SDK), only the admission probe is this job's
-        gfiles[0] = os.path.join(W, "gates_not_run.json")
+        gfiles[0] = os.path.join(W, "not_run_gates.json")   # *gates.json: the admission step below adds the probe
         json.dump({"gates": {}, **{k: gj[k] for k in ("ts", "level", "context_admit") if k in gj}}, open(gfiles[0], "w"), indent=1)
+    elif (e.get("shown_failed") or {}).get("not_run") and gfiles and gfiles[0].endswith("gates.json"):   # --shown-not-eligible: the gates that
+        gj = json.load(open(gfiles[0]))   # ran (failed ones too) are this job's; those whose reference could not start keep the previous card's
+        gj["gates"] = {k: v for k, v in (gj.get("gates") or {}).items() if k not in e["shown_failed"]["not_run"]}
+        gfiles[0] = os.path.join(W, "shown_gates.json")   # *gates.json: the admission step below adds the probe
+        json.dump(gj, open(gfiles[0], "w"), indent=1)
     adm = os.path.join(d, f"admit_{V}.json")
     if gfiles and gfiles[0].endswith("gates.json") and os.path.isfile(adm):
         # the frozen job's admission probe (admit:V, the served preset's native context; the gates ran at the dev level, which has none): the card
@@ -1467,7 +1486,8 @@ def ingest_full(st, name, e, W):
 
 def roofline_stub(slug, pkg, W):
     """The roofline reads only the checkpoint's GGUF header: when the pinned checkpoint is not in the Hugging Face cache (never downloaded for a
-    card), a header-only sparse stub from the fleet's dump (fleet/SLUG/gguf/FILE.json.gz, gguf_stub.py) with the original name; None otherwise."""
+    card), a header-only sparse stub from the fleet's dump (fleet/SLUG/gguf/FILE.json.gz, gguf_stub.py) with the original name; a package outside
+    the fleet manifest (hand-written, no dump) reads the header from the Hub at the locked revision (HTTP range reads, no weights); None otherwise."""
     try:
         ck = card_lib.package_facts(card_lib.load_package(pkg))["checkpoint"]
     except Exception:
@@ -1477,11 +1497,16 @@ def roofline_stub(slug, pkg, W):
             os.path.join(hub, "models--" + ck["repo"].replace("/", "--"), "snapshots", ck["revision"], ck["file"]))):
         return None
     dump = os.path.join(HERE, slug, "gguf", ck["file"] + ".json.gz")
-    if not os.path.isfile(dump):
-        return None
     import gguf_stub
     os.makedirs(os.path.join(W, "gguf"), exist_ok=True)
-    return gguf_stub.write_stub(gguf_stub.load(dump), os.path.join(W, "gguf", ck["file"]))
+    if os.path.isfile(dump):
+        return gguf_stub.write_stub(gguf_stub.load(dump), os.path.join(W, "gguf", ck["file"]))
+    if slug in fleet_slugs() or not ck.get("repo") or not ck.get("revision"):   # a fleet package always has its dump: no Hub fallback
+        return None
+    blobs = os.path.join(W, "gguf", "blobs")   # this card's blobs, never the fleet's shared store
+    os.makedirs(blobs, exist_ok=True)
+    d = gguf_stub.dump(f"https://huggingface.co/{ck['repo']}/resolve/{ck['revision']}/{ck['file']}", blobs)
+    return gguf_stub.write_stub(d, os.path.join(W, "gguf", ck["file"]), blobs)
 
 
 _MAKE_INFO_HELP = {}
@@ -1549,9 +1574,12 @@ def cmd_ingest(a):
         todo = [(n, e) for n, e in todo if not e.get("rerun_of_me")]
     if a.slug:
         todo = [(n, e) for n, e in todo if e["slug"] in a.slug]
+    todo = [(n, e) for n, e in todo if e["slug"] not in lane_owned(st)]
     dry = getattr(a, "dry_run", False)
     if dry and st.d["opts"].get("programs") != "production":
         die("ingest --dry-run builds a --programs production card on the local frozen package (other modes need the staging package)")
+    if phase2_state(st.d):   # phase 2: a job waits (not stopped) until kit-verdict ships its model; `package` publishes the kit package first
+        todo = [(n, e) for n, e in todo if e["slug"] in (st.d["opts"].get("ship") or ())]
     if st.d["mode"] in SDK_MODES and not dry:
         todo = [(n, e) for n, e in todo if sdk_ingest_ready(st, n, e)]
     global INGEST_DRY
@@ -1652,6 +1680,8 @@ def package_one(st, slug, canon, sha, dry, env, prefill_changes=None, source_car
         for f in ("README.md", "info.json", "REPORT.md"):   # the card files stay the staging head's (the migration-only card) until the card step
             if os.path.isfile(os.path.join(reference, f)):
                 shutil.copy2(os.path.join(reference, f), os.path.join(out, f))
+            elif os.path.isfile(os.path.join(out, f)):   # a production-only card file (absent on staging) never ships
+                os.remove(os.path.join(out, f))
         qualification = os.path.join(reference, card_lib.QUICK_START_QUALIFICATION)
         if os.path.isfile(qualification):
             # Keep the receipt. Card generation applies it only to the exact measured settings.
@@ -1758,6 +1788,8 @@ def cmd_package_frozen(st, a, picked):
     slugs = sorted({e["slug"] for _, e in picked if e.get("kind") != "image"})   # an image card is migrated by the image tooling (its job is the evidence)
     for slug in slugs:
         jobs = [e for _, e in picked if e["slug"] == slug and not e.get("prev")]   # the sweep jobs (an ABBA confirmation is not a card job)
+        if not jobs:   # only a model's ABBA confirmation is promoted (its sweep job waits for a decision): nothing to package yet
+            continue
         if not a.dry_run and all(e.get("package") for e in jobs):
             print(f"{slug}: package already published ({jobs[0]['package']['revision'][:10]})")
             continue
@@ -1790,6 +1822,10 @@ def cmd_package(a):
         picked = [(n, e) for n, e in st.jobs.items() if e["slug"] in a.slugs and e["stage"] not in ("skipped", "unsupported")]
     else:
         picked = [(n, e) for n, e in st.jobs.items() if e["stage"] in ok and e.get("decision") == "promote"]
+    lane = lane_owned(st)
+    if lane & set(a.slugs or ()):
+        die(f"lane-owned (their lanes publish them): {', '.join(sorted(lane & set(a.slugs)))}")
+    picked = [(n, e) for n, e in picked if e["slug"] not in lane]
     if phase2_state(st.d):   # phase 2: a model's kit programs go out only once kit-verdict decided them on every device (one package for all)
         held = sorted({e["slug"] for _, e in picked} - set(st.d["opts"].get("ship") or ()))
         if held:
@@ -1880,8 +1916,9 @@ def cmd_publish(a):
     if org != STAGING_ORG or "/" in org.strip("/") or org == "loom-fun":
         die(f"publish writes {STAGING_ORG} only")
     env = dict(os.environ, PATH=(LOOMBIN + os.pathsep if LOOMBIN else "") + os.environ["PATH"])
+    lane = lane_owned(st)
     for name, e in st.jobs.items():
-        if e["stage"] != "ingested":
+        if e["stage"] != "ingested" or e["slug"] in lane:
             continue
         cmd = [PY, f"{CARD}/publish_package.py", "upload", e["card_dir"], "--repo", e["slug"], "--org", org, "--card-only",
                "--parent-commit", e["parent"], "--message", e["message"]]
@@ -2047,9 +2084,11 @@ def cmd_accept_regression(a):
     print("accepted: " + (", ".join(done) or "nothing"))
 
 
-def _ktest_fail_only(e):
-    """the job's gate failures when they are kernel tests that RAN and failed some cases (summary FAIL + a "N/M passed" log with N < M), else (None, why)"""
-    fails = json.load(open(e["cmp"])).get("gate_failures") or [] if e.get("cmp") else []
+def _ktest_fail_only(e, fails=None):
+    """the job's gate failures (or FAILS) when they are kernel tests that RAN and failed some cases (summary FAIL + a "N/M passed" log with N < M),
+    else (None, why)"""
+    if fails is None:
+        fails = json.load(open(e["cmp"])).get("gate_failures") or [] if e.get("cmp") else []
     if not fails or not all(f.startswith("ktest:") for f in fails):
         return None, "not held by kernel tests alone (" + (", ".join(fails) or (e.get("reason") or "")[:120]) + ")"
     s = json.load(open(os.path.join(e["dir"], "summary.json"))).get("results", {}) if e.get("dir") else {}
@@ -2059,6 +2098,47 @@ def _ktest_fail_only(e):
         if not str(s.get(f, "")).startswith("FAIL") or not m or int(m[-1][0]) >= int(m[-1][1]):
             return None, f"{f} did not run to a result (summary {str(s.get(f, ''))[:60]!r}, no 'N/M passed' failure in its log): the card could not show it"
     return fails, ""
+
+
+def _shown_failures(e):
+    """--shown-not-eligible: (shown, why) for a job held by gates that RAN and failed on the new SDK (a person read them; they are published as
+    failed and the model is not eligible). shown = {"failed": [step or gate], "not_run": [gate]}: kernel tests must have run to a result (as
+    _ktest_fail_only), each gates:<variant>:<level> step needs its gates_<variant>/gates.json; a failing gate whose reference could not be recorded
+    (PENDING_GATE in the log and llama-server could not start) is not run, every other failing gate is failed. func:* failures, a refused
+    admission check and a step without a recorded result are refused (None, why)."""
+    fails = (json.load(open(e["cmp"])).get("gate_failures") or []) if e.get("cmp") else []
+    if not fails:
+        return None, "no gate failure"
+    shown = {"failed": [], "not_run": []}
+    kt = [f for f in fails if f.startswith("ktest:")]
+    if kt:
+        ok, why = _ktest_fail_only(e, kt)
+        if not ok:
+            return None, why
+        shown["failed"] += kt
+    for f in fails:
+        parts = f.split(":")
+        if parts[0] == "ktest":
+            continue
+        if parts[0] != "gates" or len(parts) < 2:
+            return None, f"{f}: not a kernel-test or serving-gates step (refused)"
+        v = parts[1]
+        try:
+            gj = json.load(open(os.path.join(e.get("dir") or "", f"gates_{v}", "gates.json")))
+        except (OSError, ValueError):
+            return None, f"{f}: no gates_{v}/gates.json (which gates failed is not recorded)"
+        if (gj.get("context_admit") or {}).get("admitted") is False:
+            return None, f"{f}: the native-context admission check was refused"
+        failing = sorted(n for n, g in (gj.get("gates") or {}).items() if not (g or {}).get("pass"))
+        if not failing:
+            return None, f"{f}: gates_{v}/gates.json records no failing gate (verdict {gj.get('verdict')})"
+        log = read(os.path.join(e.get("dir") or "", f"gates_{v}.out"), "") or ""
+        pending = set(PENDING_GATE.findall(log)) if "could not start llama-server" in log else set()
+        shown["not_run"] += [n for n in failing if n in pending]
+        shown["failed"] += [n for n in failing if n not in pending]
+    if not shown["failed"]:
+        return None, "every failing gate is reference-pending: use accept-no-reference"
+    return shown, ""
 
 
 def _decide_without(st, name, e, sdk_loom_first):
@@ -2078,8 +2158,14 @@ def cmd_accept_gate_failure(a):
     """sdk-ab / sdk-loom: publish a model held ONLY by kernel tests that ran and failed some cases, which a person read and explained (e.g. the same case
     failed on the previous SDK's card): the card is built from the job as it is, so its gate table shows the kernel tests as failed (no gate is loosened).
     func and serving gates (func:*, gates:*) and kernel tests that did not run to a result are refused. The perf rows still get the usual verdict: a row
-    outside the band is confirmed first. sdk-loom: when the targeted ABBA job is the one held by the kernel tests, its verdict is settled the same way."""
+    outside the band is confirmed first. sdk-loom: when the targeted ABBA job is the one held by the kernel tests, its verdict is settled the same way.
+    --shown-not-eligible (--programs production): also serving gates (gates:*) that ran and failed on the new SDK (_shown_failures): the card shows
+    them failed (gates whose reference could not start keep the previous card's, shown not re-run), and the device is `failed` in the evidence, so
+    `eligible` never lists the model (publish partial progress, never a loosened gate)."""
     st = State(a.state)
+    shown_mode = getattr(a, "shown_not_eligible", False)
+    if shown_mode and st.d["opts"].get("programs") != "production":
+        die("--shown-not-eligible is for --programs production states (the evidence / eligible steps refuse the device)")
     if st.d["mode"] not in SDK_MODES:
         die("accept-gate-failure is for the SDK modes (sdk-ab, sdk-loom)")
     done = []
@@ -2089,11 +2175,23 @@ def cmd_accept_gate_failure(a):
         abba = next((x for x in st.jobs.values() if x.get("prev") == name), None) if st.d["mode"] == "sdk-loom" else None
         held_by_abba = bool(abba) and "ABBA confirmation" in (e.get("reason") or "") and "gate failed" in (e.get("reason") or "")
         job = abba if held_by_abba else e
-        fails, why = _ktest_fail_only(job)
+        if shown_mode:   # the card is the FIRST job's: its gates decide what is shown; an ABBA held by gates is settled on its rows
+            shown, why = _shown_failures(e)
+            if shown and held_by_abba:
+                ab_shown, ab_why = _shown_failures(abba)
+                shown, why = (shown, "") if ab_shown else (None, f"its ABBA confirmation: {ab_why}")
+            fails = shown and shown["failed"]
+        else:
+            fails, why = _ktest_fail_only(job)
         if not fails:
             print(f"{e['slug']} {e['device']}: {why}, not accepted")
             continue
-        note = f"{', '.join(fails)} failed, published as failed: {a.note}"
+        if shown_mode:
+            e["shown_failed"] = dict(shown, note=a.note)
+            note = (f"{', '.join(fails)} failed on hrx-loom {target_sdk(st.d)}, published as failed, not eligible for the release"
+                    + (f" ({', '.join(shown['not_run'])}: not re-run, no reference engine)" if shown["not_run"] else "") + f": {a.note}")
+        else:
+            note = f"{', '.join(fails)} failed, published as failed: {a.note}"
         e["accepted_gate_failure"] = note   # the first job is the one ingested: its card message names it
         if held_by_abba:
             decision, reasons, job["perf_abba"], job["rows_pct"] = _decide_without(st, [k for k, v in st.jobs.items() if v is abba][0], abba, False)
@@ -2112,7 +2210,7 @@ def cmd_accept_gate_failure(a):
                 e["stage"] = "needs_decision"
                 e["reason"] = ("still undecided after the confirming run: " if decision != "hold" else
                                "confirmed regression / failed gate / text difference: ") + e["reason"]
-        st.log(f"{e['slug']} {e['device']}: kernel-test failure accepted ({', '.join(fails)}): {a.note} -> {e['stage']} ({e.get('decision')})")
+        st.log(f"{e['slug']} {e['device']}: {'gate' if shown_mode else 'kernel-test'} failure accepted ({', '.join(fails)}): {a.note} -> {e['stage']} ({e.get('decision')})")
         done.append(f"{e['slug']} {e['device']} ({e.get('decision')})")
     st.save()
     print("accepted: " + (", ".join(done) or "nothing"))
@@ -2233,6 +2331,8 @@ def device_status(e):
         return "pending"
     if e["stage"] == "needs_decision" or e.get("decision") == "hold":
         return "failed" if e.get("decision") == "hold" else "needs_decision"
+    if e.get("shown_failed"):   # accept-gate-failure --shown-not-eligible: published with its failed gates, never qualified
+        return "failed"
     if e.get("decision") == "promote":
         return "qualified"
     if e["stage"] == "collected" and e.get("decision") in ("confirm", "rerun", "improved-pending"):
@@ -2269,6 +2369,11 @@ def build_evidence(st):
                                                       if (gen := ref_generator(st, e["slug"])) or r.get("kind", e.get("kind", "text")) == "text" else {})})
         status = device_status(e)
         dv = {"status": status, "reason": e.get("reason")}
+        if e.get("shown_failed"):
+            sf = e["shown_failed"]
+            dv["reason"] = (f"gates failed on hrx-loom {target_sdk(st.d)} (published as failed, not eligible): {', '.join(sf['failed'])}"
+                            + (f"; not re-run (no reference engine): {', '.join(sf['not_run'])}" if sf.get("not_run") else "") + f"; {sf.get('note')}")
+            dv["shown_failed"] = sf
         if status not in ("no_runner", "not_claimed", "does_not_fit", "pending"):
             dv.update(device_evidence(st, dict(e, name=name), info_cache))
         if e.get("package"):
@@ -2393,8 +2498,9 @@ def cmd_verify(a):
     problems}; prints the problems."""
     st = State(a.state)
     pin = pinned_target(st.d)
+    lane = lane_owned(st)
     for name, e in st.jobs.items():
-        if e["stage"] != "published" or (e.get("verified") or {}).get("ok"):
+        if e["stage"] != "published" or (e.get("verified") or {}).get("ok") or e["slug"] in lane:
             continue
         repo = f"{st.d['opts']['new_org']}/{e['slug']}"
         d = os.path.join(st.work, "verify", e["slug"])
@@ -2441,8 +2547,9 @@ def kit_job_verdict(st, name, e):
         return True, [f"{gpu} job did not complete"]
     cmp = json.load(open(last["cmp"])) if last.get("cmp") and os.path.isfile(last["cmp"]) else {}
     probs = []
-    if cmp.get("gate_failures"):
-        probs.append(f"{gpu} gate failed: " + ", ".join(cmp["gate_failures"]))
+    fails = [f for f in cmp.get("gate_failures") or [] if not OLD_VARIANT.search(f)]   # the kit build's gates (the frozen side's are phase 1's)
+    if fails:
+        probs.append(f"{gpu} gate failed: " + ", ".join(fails))
     t = cmp.get("text") or {}
     if t.get("status") == "DIFF":
         probs.append(f"{gpu} greedy text differs on {t['prompts'] - t['identical']}/{t['prompts']} prompts")
@@ -2687,6 +2794,9 @@ def main(argv=None):
         if name in ("accept", "accept-regression", "accept-gate-failure"):
             q.add_argument("slug", nargs="+")
             q.add_argument("--note", required=True, help="what was read: e.g. 'hyphen vs space, log-prob gap < band'")
+        if name == "accept-gate-failure":
+            q.add_argument("--shown-not-eligible", action="store_true", help="--programs production: also serving gates that ran and failed "
+                           "on the new SDK; the card shows them failed and `eligible` refuses the device (a person decides about the model later)")
         if name == "adopt":
             q.add_argument("--run", required=True)
         if name == "ingest":

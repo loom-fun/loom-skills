@@ -59,6 +59,9 @@
 #            The single-server `ab` step hosts all its variants in one loom-serve, so it refuses variants whose SDKs differ.
 # Job "require_preset_r9700": true (r9700_jobs.py, a package with a fit-row r9700_execution): serving fails unless the card has its <first>-r9700 preset.
 #            serve_args: extra loom-serve flags; execution: model.json overrides (every preset); double: ablation (each kernel.launch in PROGRAM matching REGEX twice).
+#            {"name": "c3", "catalog": "github:ROCm/hrx-loom-library@v0.3.0", "model": "Qwen/Qwen3.8-27B", "preset": "chat", "sdk": "0.3.0"}: a catalog
+#            CONTROL (an SDK regression's root cause: the library's own package at the tag matching that SDK, fetched and served with that SDK; "sdk" required),
+#            served under the job card's model id; perf / profile / c4 steps only (no tokenizer, gates or kernel tests of its own)
 #            {"name": "parked", "active_wait": false}: the card's programs served with the SDK's default completion wait
 #            (LOOM_ACTIVE_WAIT=0 in serve.sh) instead of the active wait every other variant gets.
 # Job/experiment "env": {"NAME": "value"}: environment for every step.
@@ -67,7 +70,8 @@
 #          perf:V:N:ctx         perf.py --decode-ctx 16000,124000 (decode_tps_16k / decode_tps_128k rows)
 #          perf:V:N[:long]      V served alone with its own settings: perf.py N times (+ --long); N runs = one session (its value: the median of
 #                               its samples); one run per session = perf:V:1 repeated (a round each). Job "repeat_rows": R (fast models: 3) adds --repeat-rows R
-#          profile:V[:LIST]     per-kernel device time of one prefill (pf2k, pf8k) and one drafted decode (dec): V served per scenario with --print_device_statistics
+#          profile:V[:LIST]     per-kernel device time of one prefill (pf2k, pf8k) and one drafted decode (dec; dec2k / dec32k: perf.py's decode_2k / decode_32k
+#                               request without a nonce, identical text on every variant): V served per scenario with --print_device_statistics
 #                               (the HAL's per-function dispatch statistics at shutdown), profile_requests.py + profile_stats.py: out/profile_V_<scenario>.{md,json,serve.log}
 #          observe:V[:LIST]     diagnostic trace plus bounded Linux CPU/thread/wait/IO snapshots (observer; never a primary perf input)
 #          trace:V[:LIST]       same diagnostic requests as profile without HAL timestamps (default: dec); observer-effect control
@@ -417,7 +421,25 @@ kit_for() {   # kit_for VARIANT REF -> builds D/<variant>/kit from REF's starter
 }
 for v in $variants; do
   pkg=$D/$v/pkg; mkdir -p "$D/$v"
-  if [ "$(qv "$v" "print('build' in v)")" = True ]; then
+  catv=$(qv "$v" "print(v.get('catalog') or '')")
+  if [ -n "$catv" ]; then   # a catalog control (release-checklist: SDK regressions): an hrx-loom-library package fetched with the variant's own SDK
+    [ "$(qv "$v" "print(v.get('sdk') or 'card')")" != card ] || { echo "FAIL: catalog variant $v needs an explicit \"sdk\""; exit 1; }
+    sdk_root "$v" || exit 1
+    cm=$(qv "$v" "print(v.get('model') or '')"); cp_=$(qv "$v" "print(v.get('preset') or '')")
+    step "catalog $v: $cm${cp_:+ preset $cp_} from $catv (SDK root $SDKR)"
+    rm -rf "$pkg"
+    HF_HOME="$WORK/hf-home-catalog" HF_HUB_CACHE="$WORK/hf-home-catalog/hub" "$SDKR/.venv/bin/loom-fetch" --catalog="$catv" --model="$cm" ${cp_:+--preset="$cp_"} \
+      --no-input --materialize=share --cache "$WORK/catalog-cache" --output="$pkg" > "$out/fetch_$v.log" 2>&1 || { tail "$out/fetch_$v.log"; echo "FAIL: loom-fetch $cm ($catv)"; exit 1; }
+    # served under the job's model id (every step addresses \$cardid); the chosen preset first (the one serve_alone picks)
+    "$T" - "$pkg/model.json" "$cardid" "$cp_" <<'EOF' || exit 1
+import json, sys
+m = json.load(open(sys.argv[1])); m["model"]["id"] = sys.argv[2]   # (the card schema has no other model field: the catalog id is in catalog_V.txt)
+if sys.argv[3]:
+    m["presets"] = {sys.argv[3]: m["presets"][sys.argv[3]], **{k: x for k, x in m["presets"].items() if k != sys.argv[3]}}
+json.dump(m, open(sys.argv[1], "w"), indent=1)
+EOF
+    echo "$catv $cm" > "$out/catalog_$v.txt"
+  elif [ "$(qv "$v" "print('build' in v)")" = True ]; then
     kit_for "$v" "$(qv "$v" "print(v.get('ref') or '')")" || exit 1
     extra=$(qv "$v" "print(' '.join(v.get('build_args') or []) + (f\" --context {v['context']}\" + (f\" --pool {v['context']}\" if '$POOLFLAG' == '1' else '') if v.get('context') else ''))")   # "context": N = the served context of a reduced-context model (later flags win)
     extra=$(hf_sub "$extra") || exit 1   # a build_args {hf:OWNER/REPO/FILE} (a Hub drafter the card does not ship)
@@ -803,8 +825,11 @@ print('$p1', k, [x.get(k) for x in r if x.get(k)], 'median', round(st.median(v),
         [ "$capture_request_ok" = 1 ] || { capture_failed=1; break; }
         [ "$capture_kind" = profile ] || continue
         grep -c "dispatch " "$out/${capture_kind}_${p1}_$sc.serve.log" | sed "s/^/dispatch rows: /"; grep -A6 "IREE HAL device statistics" "$out/${capture_kind}_${p1}_$sc.serve.log" | head -8
-        [ "$sc" = probe ] || { steps_n=0; [ "$sc" = dec ] && steps_n=$(python3 -c "
-import json; r=json.loads(open('$out/${capture_kind}_${p1}_$sc.req.json').read().splitlines()[-1]); d=r.get('draft') or {}; w=r.get('warmup_draft') or {}; print(round((d.get('draft_proposed_tokens', 0) + w.get('draft_proposed_tokens', 0)) / ${depth:-3}))" 2>/dev/null || echo 0)
+        # verify passes of a decode scenario: decode_tokens - draft_accepted_inputs (both SDKs count them; 0.3.0 serving an ABI 1 program reports no proposals)
+        [ "$sc" = probe ] || { steps_n=0; [[ $sc == dec* ]] && steps_n=$(python3 -c "
+import json; r=json.loads(open('$out/${capture_kind}_${p1}_$sc.req.json').read().splitlines()[-1]); d=r.get('draft') or {}; w=r.get('warmup_draft') or {}
+n=lambda k: d.get(k, 0) + w.get(k, 0)
+print(round(n('decode_tokens') - n('draft_accepted_inputs')) if n('decode_tokens') else round(n('draft_proposed_tokens') / ${depth:-3}))" 2>/dev/null || echo 0)
           "$T" "$B/profile_stats.py" "$out/${capture_kind}_${p1}_$sc.serve.log" "$out/${capture_kind}_${p1}_$sc.req.json" --steps "$steps_n" --families "$B/profile_families.json" \
             --md "$out/${capture_kind}_${p1}_$sc.md" --json "$out/${capture_kind}_${p1}_$sc.json" > "$out/${capture_kind}_${p1}_$sc.table.txt" 2>&1; head -14 "$out/${capture_kind}_${p1}_$sc.table.txt" | cut -c1-200; }
       done
@@ -931,6 +956,9 @@ print('gufo', k, [x.get(k) for x in r if x.get(k)], 'median', round(st.median(v)
       grep -q '"catalog"' "$card/llm_config.json" && { res[$s]="SKIP (catalog package: no generated kernel tests)"; continue; }
       serve_alone "$p1" >/dev/null 2>&1; for f in "$LOOM_SERVE_STATE"/*.pid; do [ -f "$f" ] && "$SV/stop.sh" "$(basename "$f" .pid)" >/dev/null 2>&1; done
       step "kernel tests $p1"; kt=$D/$p1/ktest; rm -rf "$kt"
+      # make_kernel_tests.py reads the package under test next to its config: a variant without its own cfg.json gets a copy, else the first
+      # D/*/pkg found (another variant's, e.g. a kit build beside a served card) would shape this variant's cases
+      [ -f "$D/$p1/cfg.json" ] || cp "$D/cfg.json" "$D/$p1/cfg.json"
       kenv=$(qv "$p1" "print(' '.join(f'{k}={x}' for k, x in (v.get('build') or {}).items()))")   # the variant's build env (e.g. GEMM_F16O) shapes the test cases too
       # the choices the knowledge base resolved for the rebuilt package (resolved.env of its llm_config.json: a model node's rules, not only the variant's build env) shape the cases too
       renv=$("$T" -c "import json, sys; print(' '.join(f'{k}={x}' for k, x in ((json.load(open(sys.argv[1])).get('resolved') or {}).get('env') or {}).items() if x is not None))" "$D/$p1/pkg/llm_config.json" 2>/dev/null)
