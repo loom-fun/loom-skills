@@ -529,6 +529,16 @@ done
 pkg_preset() {   # pkg_preset MODEL_JSON -> the preset this runner serves ("" for a card with one preset): the R9700's <first><suffix> when it has one, else the first
   "$T" -c "import json,sys; p=list(json.load(open(sys.argv[1]))['presets']); r=p[0] + sys.argv[3]; print((r if sys.argv[2] and r in p else p[0]) if len(p) > 1 else '')" "$1" "$RDEV" "$RSUF"
 }
+record_gate_server() {
+  "$T" - "$LOOM_SERVE_STATE/perf-$1.pid" "$out/${2}_serve_$1.json" "$RUNNER" "$GITHUB_RUN_ID" <<'PYFLAGS'
+import json, pathlib, sys
+pid_file, dest, runner, run = sys.argv[1:]
+pid = int(pathlib.Path(pid_file).read_text())
+argv = pathlib.Path(f"/proc/{pid}/cmdline").read_bytes().decode().split("\0")
+flags = [arg for arg in argv if arg.startswith(("--memory_bytes=", "--preset=", "--state_slab_bytes=", "--weight_slab_bytes=", "--pool_backing=", "--device="))]
+pathlib.Path(dest).write_text(json.dumps(dict(runner=runner, run=run, flags=flags)))
+PYFLAGS
+}
 serve_alone() { # serve_alone VARIANT
   vllm_down; gufo_down
   for f in "$LOOM_SERVE_STATE"/*.pid; do [ -f "$f" ] && "$SV/stop.sh" "$(basename "$f" .pid)" >/dev/null 2>&1; done
@@ -1039,6 +1049,7 @@ PY
       res[$s]="$(grep -h DETERMINISM "$out/vllmdet_$p1.log" | tail -1) ($(( $(date +%s) - t1 )) s incl. install+load)";;
     admit)   # admit:V[:TOKENS]: ctx_admit.py on V served as configured (its execution context/pool): is a request of TOKENS (default ~ the served context) admitted? (the card's served context on the device)
       serve_alone "$p1" || { res[$s]=ERROR; continue; }
+      record_gate_server "$p1" admit || exit 1
       step "context admission $p1 ${p2:-}"
       (cd "$out" && "$T" "$B/ctx_admit.py" "$D/$p1/pkg" "$url" ${p2:+--tokens "$p2"} ${SERVED_PRESET:+--preset "$SERVED_PRESET"} --out "admit_${p1}${p2:+_$p2}.json" 2>&1 | tee "admit_${p1}${p2:+_$p2}.txt" | tail -3)
       res[$s]=$(tail -1 "$out/admit_${p1}${p2:+_$p2}.txt" | cut -c1-200);;
@@ -1062,6 +1073,7 @@ PY
       tail -1 "$capdir/probe.log" 2>/dev/null;;
     gates)
       serve_alone "$p1" || { res[$s]=ERROR; continue; }
+      record_gate_server "$p1" gates || exit 1
       if [ -n "$safetensors" ]; then   # the reference is vLLM (gates.sh picks it from source.kind); VLLM_VERSION / VLLM_ROCM_VARIANT / VLLM_EXTRA_ENV come from the job's "env"
         export VLLM_VENV=$WORK/vllm-venv-${VLLM_VERSION:-0.18.0}   # one install per runner and version, reused by later jobs
       else
