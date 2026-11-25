@@ -256,8 +256,8 @@ kernel.def export("g_moe_route") @g_moe_route(%tokens: index) {{
 
 
 def route_split():
-    """moe.route.decode_split (MOE_ROUTE_DSPLIT): decode-shaped epochs score the router in g_moe_route_lg (one wave per U experts over every
-    token of the epoch: each router weight is read once per epoch, by E / U waves instead of one workgroup per token) into a logits scratch,
+    """moe.route.decode_split (MOE_ROUTE_DSPLIT): decode-shaped epochs score the router in g_moe_route_lg (one wave per (U experts, token): E / U waves
+    per token instead of one workgroup per token streaming the whole router) into a logits scratch,
     and g_moe_route_tk (g_moe_route's softmax and top-k, one workgroup per token) reads them. Each expert's logit is the same wave's same
     sums as g_moe_route's, so ids and weights are bit-identical. Qwen3.6-35B Strix: g_moe_route 34 us x 40 layers per verify step (1.4 ms of
     a 28.5 ms step; 4 streams 1.37 of 23.8 ms), one workgroup per token streaming the 2 MB f32 router."""
@@ -271,12 +271,12 @@ def _route_split(text, rloop, H, E, U, wty):
     lg_loop = (rloop.replace("view.store %logit", "view.store %logit").replace("%lg_view[%ex", "%lgt_view[%token, %ex").replace(f" : f32, view<{E}xf32>", f" : f32, view<[%tokens]x{E}xf32>")
                .replace("  scf.for %j = [%c0 to %cEPW step %cU] {", "  scf.for %j = [%c0 to %cU step %cU] {"))
     lg = f"""
-// Router logits of a decode-shaped epoch: wave w of workgroup g scores experts (g*{WPG} + w)*{U} .. +{U} of every token (g_moe_route's sums).
+// Router logits of a decode-shaped epoch: wave w of workgroup (g, token) scores experts (g*{WPG} + w)*{U} .. +{U} of that token (g_moe_route's sums).
 kernel.def export("g_moe_route_lg") @g_moe_route_lg(%tokens: index) {{
   %c1 = index.constant 1 : index
   %cwg = index.constant {E // (U * WPG)} : index
   %clanes = index.constant {32 * WPG} : index
-  kernel.launch.config workgroups(%cwg, %c1, %c1) workgroup_size(%clanes, %c1, %c1) : index
+  kernel.launch.config workgroups(%cwg, %tokens, %c1) workgroup_size(%clanes, %c1, %c1) : index
 }} launch(%tokens_arg: index, %x: buffer, %w: buffer, %lgb: buffer) {{
   %tokens = index.assume %tokens_arg [range(%tokens_arg, 1, 8192)] : index
   %group_id = kernel.workgroup.id<x> : index
@@ -299,10 +299,9 @@ kernel.def export("g_moe_route_lg") @g_moe_route_lg(%tokens: index) {{
   %slot = index.madd %group, %cwpg, %wave : index
   %cU0 = index.constant {U} : index
   %e0 = index.mul %slot, %cU0 : index
-  scf.for %tok = [%c0 to %tokens step %c1] {{
+  %tok = kernel.workgroup.id<y> : index
   %token = index.assume %tok [lt(%tok, %tokens)] : index
-{lg_loop}  }}
-  kernel.return
+{lg_loop}  kernel.return
 }}
 """
     tk = text[text.index('kernel.def export("g_moe_route")'):]
