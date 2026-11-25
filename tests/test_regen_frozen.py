@@ -638,6 +638,37 @@ class AcceptShownNotEligible(unittest.TestCase):
             accept("--shown-not-eligible")
 
 
+class LaneOwned(unittest.TestCase):
+    """slugs a lane owns end to end: the sweep never packages, ingests, publishes, verifies, confirms or submits them"""
+    def test_sidecar_and_opts_skip_every_publishing_step(self):
+        with tempfile.TemporaryDirectory() as t:
+            state = os.path.join(t, "s.json")
+            jobs = {"l": {"slug": "lane-loom", "device": "strix-halo", "stage": "ingested", "round": 1, "batch": 0},
+                    "c": {"slug": "lane-loom", "device": "radeon-r9700", "stage": "collected", "decision": "confirm", "round": 1, "batch": 0},
+                    "o": {"slug": "other-loom", "device": "strix-halo", "stage": "planned", "round": 1, "batch": 1}}
+            json.dump({"work": t, "mode": "sdk-loom", "opts": {"programs": "production", "new_org": regen.STAGING_ORG, "lane_owned": ["x-loom"]},
+                       "jobs": jobs, "batches": [{"id": 0, "device": "strix-halo", "jobs": ["l"], "stage": "planned"},
+                                                 {"id": 1, "device": "strix-halo", "jobs": ["o"], "stage": "planned"}]}, open(state, "w"))
+            open(state + ".lane_owned", "w").write("# lanes\nlane-loom  # qwen35 lane\n")
+            st = regen.State(state)
+            self.assertEqual(regen.lane_owned(st), {"x-loom", "lane-loom"})
+            submitted, ran = [], []
+            with mock.patch.object(regen, "submit_batch", lambda st, b, dry: submitted.append(b["id"])), \
+                    mock.patch.object(regen, "sh", lambda *a, **k: ran.append(a) or SimpleNamespace(returncode=0, stdout="", stderr="")), \
+                    contextlib.redirect_stdout(io.StringIO()) as out:
+                regen.main(["submit", state])
+                regen.main(["rerun", state])
+                regen.main(["publish", state])
+                regen.main(["package", state])
+            self.assertEqual(submitted, [1])
+            self.assertEqual(ran, [])
+            self.assertIn("no confirming runs needed", out.getvalue())
+            self.assertEqual(regen.State(state).jobs["l"]["stage"], "ingested")
+            with self.assertRaises(SystemExit) as ex:
+                regen.main(["package", state, "--slugs", "lane-loom"])
+            self.assertIn("lane-owned", str(ex.exception.code))
+
+
 class KitVerdict(unittest.TestCase):
     """Phase 2: ship the kit programs of a model only when every device's A/B passes; else keep the frozen ones and re-queue its cards."""
     def write(self, t, name, doc):

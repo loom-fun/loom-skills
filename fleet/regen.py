@@ -286,6 +286,15 @@ class State:
         print(msg)
 
 
+def lane_owned(st):
+    """slugs another workstream owns end to end (an optimization lane: its staging package, card and eligible entry): opts.lane_owned plus the
+    lines of the sidecar file STATE.lane_owned, which a running driver honours at its next step without a state edit (no lost update of the state
+    file under a running step). package, ingest, publish, verify, rerun and submit leave their jobs alone; their jobs keep their stage."""
+    side = st.path + ".lane_owned"
+    lines = [ln.split("#")[0].strip() for ln in open(side)] if os.path.isfile(side) else []
+    return set(st.d["opts"].get("lane_owned") or ()) | {ln for ln in lines if ln}
+
+
 @contextlib.contextmanager
 def locked(path):
     """an exclusive lock on PATH.lock (several steps and the other engineers' status writers share status.json)"""
@@ -721,7 +730,8 @@ def max_inflight(opt, device):
 
 def cmd_submit(a):
     st = State(a.state)
-    todo = [b for b in st.d["batches"] if b["stage"] == "planned"]
+    lane = lane_owned(st)
+    todo = [b for b in st.d["batches"] if b["stage"] == "planned" and not all(st.jobs[j]["slug"] in lane for j in b["jobs"] if j in st.jobs)]
     todo.sort(key=lambda b: (not b.get("priority"), device_order(b["device"]), b["id"]))   # priority batches, then R9700-class (few runners): their queue is the long one
     if a.max_batches:
         todo = todo[:a.max_batches]
@@ -1245,7 +1255,8 @@ def cmd_rerun(a):
     st = State(a.state)
     want = {}
     for name, e in st.jobs.items():
-        if e["stage"] == "collected" and e.get("decision") in ("rerun", "improved-pending", "confirm") and e["round"] == 1 and not e.get("rerun_of_me"):
+        if e["stage"] == "collected" and e.get("decision") in ("rerun", "improved-pending", "confirm") and e["round"] == 1 and not e.get("rerun_of_me") \
+                and e["slug"] not in lane_owned(st):
             want.setdefault(e["device"], []).append((name, e))
     if not want:
         print("no confirming runs needed")
@@ -1563,6 +1574,7 @@ def cmd_ingest(a):
         todo = [(n, e) for n, e in todo if not e.get("rerun_of_me")]
     if a.slug:
         todo = [(n, e) for n, e in todo if e["slug"] in a.slug]
+    todo = [(n, e) for n, e in todo if e["slug"] not in lane_owned(st)]
     dry = getattr(a, "dry_run", False)
     if dry and st.d["opts"].get("programs") != "production":
         die("ingest --dry-run builds a --programs production card on the local frozen package (other modes need the staging package)")
@@ -1810,6 +1822,10 @@ def cmd_package(a):
         picked = [(n, e) for n, e in st.jobs.items() if e["slug"] in a.slugs and e["stage"] not in ("skipped", "unsupported")]
     else:
         picked = [(n, e) for n, e in st.jobs.items() if e["stage"] in ok and e.get("decision") == "promote"]
+    lane = lane_owned(st)
+    if lane & set(a.slugs or ()):
+        die(f"lane-owned (their lanes publish them): {', '.join(sorted(lane & set(a.slugs)))}")
+    picked = [(n, e) for n, e in picked if e["slug"] not in lane]
     if phase2_state(st.d):   # phase 2: a model's kit programs go out only once kit-verdict decided them on every device (one package for all)
         held = sorted({e["slug"] for _, e in picked} - set(st.d["opts"].get("ship") or ()))
         if held:
@@ -1900,8 +1916,9 @@ def cmd_publish(a):
     if org != STAGING_ORG or "/" in org.strip("/") or org == "loom-fun":
         die(f"publish writes {STAGING_ORG} only")
     env = dict(os.environ, PATH=(LOOMBIN + os.pathsep if LOOMBIN else "") + os.environ["PATH"])
+    lane = lane_owned(st)
     for name, e in st.jobs.items():
-        if e["stage"] != "ingested":
+        if e["stage"] != "ingested" or e["slug"] in lane:
             continue
         cmd = [PY, f"{CARD}/publish_package.py", "upload", e["card_dir"], "--repo", e["slug"], "--org", org, "--card-only",
                "--parent-commit", e["parent"], "--message", e["message"]]
@@ -2481,8 +2498,9 @@ def cmd_verify(a):
     problems}; prints the problems."""
     st = State(a.state)
     pin = pinned_target(st.d)
+    lane = lane_owned(st)
     for name, e in st.jobs.items():
-        if e["stage"] != "published" or (e.get("verified") or {}).get("ok"):
+        if e["stage"] != "published" or (e.get("verified") or {}).get("ok") or e["slug"] in lane:
             continue
         repo = f"{st.d['opts']['new_org']}/{e['slug']}"
         d = os.path.join(st.work, "verify", e["slug"])
