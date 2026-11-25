@@ -6,9 +6,13 @@ import unittest
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 spec = importlib.util.spec_from_file_location("tune", os.path.join(ROOT, "skills", "loom-port-llm", "starter", "draft", "tune.py"))
 tune = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(tune)
+try:   # tune.py imports the benchmark client (requests, tokenizers): absent on a bare CI python
+    spec.loader.exec_module(tune)
+except ImportError as e:
+    tune, MISSING = None, str(e)
 
 
+@unittest.skipIf(tune is None, "tune.py dependencies missing")
 class TuneRows(unittest.TestCase):
     def test_streams4_dip_keeps_the_drafter(self):   # Ternary Bonsai 27B run 45535242750: MTP depth 3 vs no drafting
         base = {"work0": 26.23, "work1": 26.22, "long": 19.82, "streams4": 83.79}
