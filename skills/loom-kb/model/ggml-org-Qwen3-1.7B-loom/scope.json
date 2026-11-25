@@ -17,6 +17,12 @@
     "exec.prefill_capacity": 4096
    },
    "evidence": "migrated from the R9700 fit table (.github/devlab/r9700_fit.json r9700_execution / ctx_cap, measured on the R9700 DevLab runner; #609 #613 #615 #617 #618 #619 #628 #630); values unchanged"
+  },
+  {
+   "set": {
+    "decode.mv.act_q8": false
+   },
+   "evidence": "pf-misc (logits gate, R9700): the int8 activations (q8_1, 32-value groups) of the matvec path, which also prefills prompts under 64 tokens, flip the first token of the gate's 22-token 'Translate' prompt: Loom '-' -0.63 / '**' -0.78; a float64 forward of the same GGUF '**' -0.22 / '-' -1.63, the same forward with q8_1 activations -0.82 / -0.59, with f16 activations -0.22 / -1.66. The prefill GEMM cannot take shorter epochs (its kernels assume >= 64 rows), so the matvecs read unquantized activations."
   }
  ]
 }
