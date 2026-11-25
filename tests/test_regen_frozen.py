@@ -650,3 +650,18 @@ class ConfirmationRows(unittest.TestCase):
             first["rows_pct"]["prefill_8k"] = -1.0
             d, r, *_ = regen.sdk_decide(st, "a-r2", {"prev": "a", "round": 2}, p, use_prev=False)
             self.assertTrue(any("missing" in x for x in r), r)   # the sweep job measured it: the confirmation must too
+
+
+class AcceptRegressionRows(unittest.TestCase):
+    def test_confirmed_card_rows_and_the_abba_job(self):
+        with tempfile.TemporaryDirectory() as t:
+            p = os.path.join(t, "s.json")
+            json.dump({"work": t, "mode": "sdk-loom", "opts": {"programs": "production"}, "batches": [], "log": [], "jobs": {
+                "a": {"slug": "m", "device": "radeon-r9700", "stage": "needs_decision", "round": 1, "confirm_rows": ["prefill_1k", "prefill_2k"],
+                      "perf": {"prefill": -1.0}, "reason": "ABBA confirmation (job 9): slower than -3% in the same-job ABBA: prefill_2k -3.2 %"},
+                "a-r2": {"slug": "m", "device": "radeon-r9700", "stage": "collected", "round": 2, "prev": "a", "job_url": "https://x/job/2",
+                         "perf_abba": {"decode": -1.3, "prefill": None}, "rows_pct": {"prefill_1k": -2.1, "prefill_2k": -3.2}}}}, open(p, "w"))
+            with contextlib.redirect_stdout(io.StringIO()):
+                regen.main(["accept-regression", p, "m", "--note", "confirmed; root cause open"])
+            e = regen.State(p).jobs["a"]
+            self.assertEqual((e["stage"], e["confirmed"], e["confirmed_by"]), ("collected", {"prefill_1k": -2.1, "prefill_2k": -3.2}, "https://x/job/2"))
