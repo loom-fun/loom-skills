@@ -57,12 +57,17 @@ if Q3_K_NATIVE:
     HELPER = HELPER - {"q3_k"}
 
 
-# GEMM_KQ_DEQ_F32 (choice prefill.gemm.kq_deq_f32; numerics-moving): the Q4_K / Q5_K dequant to the WMMA's f16 operand computes
-# code * scale - min in f32 and rounds the weight once (the value ggml's f32 dequant gives, rounded to f16), instead of rounding
-# the group's scale and minimum to f16 first and fusing in f16. With f16-subnormal block scales (d < 2^-14: every block of
-# Ornith-1.5-122B layer 12's experts) the f16 minimum's rounding error is shared by the 32 weights of a group and does not cancel:
-# 3x the dequant error of the single rounding (layer 12's moe_gemm kernel test fails its unchanged oracle).
-KQ_DEQ_F32 = os.environ.get("GEMM_KQ_DEQ_F32", "0").strip().lower() not in ("", "0", "false", "no", "off")
+# GEMM_KQ_ZP (choice prefill.gemm.kq_zero_point; numerics-moving): the Q4_K / Q5_K dequant to the WMMA's f16 operand without
+# rounding the group's scale d * sc and minimum dmin * mn to f16 first. The default fuses code * f16(scale) - f16(minimum) in f16:
+# where the two products are not f16-exact the group's 32 weights share both rounding errors and the cancelling difference
+# amplifies them (Ornith-1.5-122B layer 12 experts: 31-99 % of the weights equal ggml's f32 dequant rounded once to f16, and
+# the layer's moe_gemm kernel test fails its f64 ggml oracle). Here, in f16 (two packed FMAs per pair, no f32 vector work), with
+# a per-group zero point c0 = clamp(round(minimum / scale), 0, max code):
+#   n = code * sc - sc * c0                  integers |n| <= 945 (Q4_K) / 1953 (Q5_K): exact in f16
+#   w = d * n + f16(c0 * scale - minimum)    d is the block's own f16; one rounding of the weight; |K| ~ scale / 2, not ~minimum
+# On those experts: 97.6-99.98 % of the weights equal ggml rounded once, the rest within 2 ulp of it; the summed absolute error
+# is within 0.6 % of exact rounding (the default: 4-18x it).
+KQ_ZP = os.environ.get("GEMM_KQ_ZP", "0").strip().lower() not in ("", "0", "false", "no", "off")
 _KQ_F16 = _re.compile(
     r"(?P<i>[ \t]*)(?P<o>%\w+)_codes = vector\.uitofp (?P<b>%\w+) : vector<(?P<n>\d+)xi8> to vector<(?P=n)xf16>\n"
     r"[ \t]*(?P=o)_scale_h = scalar\.fptrunc (?P=o)_scale : f32 to f16\n"
@@ -73,19 +78,56 @@ _KQ_F16 = _re.compile(
     r"[ \t]*(?P=o) = vector\.fmaf (?P=o)_codes, (?P=o)_scales, (?P=o)_minima : vector<(?P=n)xf16>")
 
 
-def kq_deq_f32(text):
-    """GEMM_KQ_DEQ_F32: every Q4_K / Q5_K code * scale - min block of a dequant snippet in f32, one rounding to f16 (same result
-    names and types; the f16 scale / minimum lines go away)."""
-    def f32(m):
+def kq_zero_point(text, max_code):
+    """GEMM_KQ_ZP: every Q4_K / Q5_K `code * scale - minimum` block of a dequant snippet (prefix %X: needs %X_header, %X_group,
+    %X_scale, %X_minimum, %X_codes) in the zero-point form above; same result name and type. max_code: 15 (Q4_K) / 31 (Q5_K)."""
+    assert META == "@g_k_metadata", "GEMM_KQ_ZP reads sc through @g_k_scale_minimum (the default K-quant metadata helper)"
+    def zp(m):
         i, o, b, n = m["i"], m["o"], m["b"], m["n"]
-        return (f"{i}{o}_codes = vector.uitofp {b} : vector<{n}xi8> to vector<{n}xf32>\n"
-                f"{i}{o}_neg_min = scalar.negf {o}_minimum : f32\n"
-                f"{i}{o}_scales = vector.splat {o}_scale : vector<{n}xf32>\n"
-                f"{i}{o}_minima = vector.splat {o}_neg_min : vector<{n}xf32>\n"
-                f"{i}{o}_w32 = vector.fmaf {o}_codes, {o}_scales, {o}_minima : vector<{n}xf32>\n"
-                f"{i}{o} = vector.fptrunc {o}_w32 : vector<{n}xf32> to vector<{n}xf16>")
-    out, k = _KQ_F16.subn(f32, text)
-    assert k, "GEMM_KQ_DEQ_F32: no Q4_K / Q5_K f16 dequant block in the snippet"
+        v16 = f"vector<{n}xf16>"
+        return "\n".join(f"{i}{l}" for l in (
+            f"{o}_codes = vector.uitofp {b} : vector<{n}xi8> to {v16}",
+            f"{o}_zh = vector.bitcast {o}_header : vector<4xi32> to vector<8xf16>",
+            f"{o}_zd = vector.extract {o}_zh[0] : vector<8xf16> -> f16",
+            f"{o}_zw1 = vector.extract {o}_header[1] : vector<4xi32> -> i32",
+            f"{o}_zw2 = vector.extract {o}_header[2] : vector<4xi32> -> i32",
+            f"{o}_zw3 = vector.extract {o}_header[3] : vector<4xi32> -> i32",
+            f"{o}_zpk = vector.from_elements {o}_zw1, {o}_zw2, {o}_zw3 : vector<3xi32>",
+            f"{o}_zsc, {o}_zmn = func.call @g_k_scale_minimum({o}_zpk, {o}_group) : (vector<3xi32>, index) -> (i32, i32)",
+            f"{o}_zscf = scalar.uitofp {o}_zsc : i32 to f32",
+            # c0 ~ minimum / scale: a bit-trick reciprocal + one Newton step (~0.2 % off; any c0 in [0, max code] is exact, the
+            # nearest one keeps |K| ~ scale / 2); scale 0 (d or sc 0) gives any finite c0 and the group's weights stay -minimum
+            f"{o}_zsb = scalar.bitcast {o}_scale : f32 to i32",
+            f"{o}_zmagic = scalar.constant 2129859011 : i32",
+            f"{o}_zrb = scalar.subi {o}_zmagic, {o}_zsb : i32",
+            f"{o}_zr0 = scalar.bitcast {o}_zrb : i32 to f32",
+            f"{o}_ztwo = scalar.constant 2.0 : f32",
+            f"{o}_zns = scalar.negf {o}_scale : f32",
+            f"{o}_ze = scalar.fmaf {o}_zns, {o}_zr0, {o}_ztwo : f32",
+            f"{o}_zr = scalar.mulf {o}_zr0, {o}_ze : f32",
+            f"{o}_zhalf = scalar.constant 0.5 : f32",
+            f"{o}_zx = scalar.fmaf {o}_minimum, {o}_zr, {o}_zhalf : f32",
+            f"{o}_zxi = scalar.fptosi {o}_zx : f32 to i32",
+            f"{o}_zlo = scalar.constant 0 : i32",
+            f"{o}_zhi = scalar.constant {max_code} : i32",
+            f"{o}_zci0 = scalar.maxsi {o}_zxi, {o}_zlo : i32",
+            f"{o}_zci = scalar.minsi {o}_zci0, {o}_zhi : i32",
+            f"{o}_zc0 = scalar.sitofp {o}_zci : i32 to f32",
+            f"{o}_neg_min = scalar.negf {o}_minimum : f32",
+            f"{o}_zk = scalar.fmaf {o}_zc0, {o}_scale, {o}_neg_min : f32",
+            f"{o}_zk_h = scalar.fptrunc {o}_zk : f32 to f16",
+            f"{o}_zsc_h = scalar.fptrunc {o}_zscf : f32 to f16",
+            f"{o}_zn0n = scalar.mulf {o}_zscf, {o}_zc0 : f32",
+            f"{o}_zn0 = scalar.negf {o}_zn0n : f32",
+            f"{o}_zn0_h = scalar.fptrunc {o}_zn0 : f32 to f16",
+            f"{o}_zscs = vector.splat {o}_zsc_h : {v16}",
+            f"{o}_zn0s = vector.splat {o}_zn0_h : {v16}",
+            f"{o}_zn = vector.fmaf {o}_codes, {o}_zscs, {o}_zn0s : {v16}",
+            f"{o}_zds = vector.splat {o}_zd : {v16}",
+            f"{o}_zks = vector.splat {o}_zk_h : {v16}",
+            f"{o} = vector.fmaf {o}_zds, {o}_zn, {o}_zks : {v16}"))
+    out, k = _KQ_F16.subn(zp, text)
+    assert k, "GEMM_KQ_ZP: no Q4_K / Q5_K f16 dequant block in the snippet"
     return out
 
 
@@ -313,7 +355,7 @@ def iq4_dequant16(fmt, w, out):
 def dequant16(fmt, w, view_name, out):
     """Loom snippet: dequantize 16 consecutive weights of row %w_row at column %w_col into F16 vector %{out}."""
     text = _dequant16(fmt, w, view_name, out)
-    return kq_deq_f32(text) if KQ_DEQ_F32 and fmt in ("q4_k", "q5_k") else text
+    return kq_zero_point(text, 15 if fmt == "q4_k" else 31) if KQ_ZP and fmt in ("q4_k", "q5_k") else text
 
 
 def _dequant16(fmt, w, view_name, out):
@@ -1061,8 +1103,8 @@ def _g32_dequant(fmt, w, out, col):
         text = _g32_iq4(fmt, w, o, col)
     else:
         raise ValueError(fmt)
-    if KQ_DEQ_F32 and fmt == "q4_k":
-        text = kq_deq_f32(text)
+    if KQ_ZP and fmt == "q4_k":
+        text = kq_zero_point(text, 15)
     lines = [l for l in text.strip("\n").split("\n") if l.strip()]
     last = max(i for i, l in enumerate(lines) if ".load " in l)
     addr = lines[: last + 1]
