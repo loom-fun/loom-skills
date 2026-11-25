@@ -961,6 +961,57 @@ print("SMOKE", "PASS" if t else "FAIL", repr(t[:80]))
 sys.exit(0 if t else 1)
 PY
       res[$s]=$(tail -1 "$out/smoke_$p1.log" | cut -c1-200); [ -n "${res[$s]}" ] || res[$s]=ERROR;;
+    count)   # count:V  (sdkcap experiment) SDK 0.3.0 complete-conversation count: in-window count == chat prompt_tokens; over-window count; over-window chat 400
+      serve_alone "$p1" || { res[$s]=ERROR; continue; }
+      step "count $p1"
+      "$T" - "$url" "$cardid" > "$out/count_$p1.log" 2>&1 <<'PY'
+import json, sys, urllib.request, urllib.error
+url, model = sys.argv[1:3]
+def post(path, body, timeout=600):
+    req = urllib.request.Request(url + path, json.dumps(body).encode(), {"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.status, json.load(r)
+    except urllib.error.HTTPError as e:
+        return e.code, e.read().decode(errors="replace")[:300]
+ctx = None
+try:
+    info = json.load(urllib.request.urlopen(url + "/v1/models/" + urllib.request.quote(model, safe=""), timeout=30))
+    print("model record:", json.dumps(info)[:600])
+    def find(o):
+        if isinstance(o, dict):
+            for k, v in o.items():
+                if k in ("context_length", "context_capacity", "max_model_len") and isinstance(v, int):
+                    return v
+                f = find(v)
+                if f: return f
+        if isinstance(o, list):
+            for v in o:
+                f = find(v)
+                if f: return f
+    ctx = find(info)
+except Exception as e:
+    print("no model record:", e)
+msg = [{"role": "user", "content": "Reply with one short sentence about the sea."}]
+st, r = post("/v1/chat/completions/input_tokens", {"model": model, "messages": msg})
+print("in-window count:", st, r)
+st2, c = post("/v1/chat/completions", {"model": model, "max_tokens": 1, "temperature": 0, "messages": msg})
+pt = c["usage"]["prompt_tokens"] if st2 == 200 else None
+print("chat prompt_tokens:", st2, pt)
+ok_in = st == 200 and isinstance(r, dict) and r.get("input_tokens") == pt
+ctx = ctx or 262144
+words = int(ctx * 1.3) + 1000
+big = [{"role": "user", "content": "lorem ipsum " * (words // 2)}]
+st3, r3 = post("/v1/chat/completions/input_tokens", {"model": model, "messages": big})
+print("over-window count (context %d):" % ctx, st3, r3 if not isinstance(r3, str) else r3[:200])
+st4, r4 = post("/v1/chat/completions", {"model": model, "max_tokens": 1, "messages": big})
+print("over-window chat:", st4, str(r4)[:200])
+over = st3 == 200 and isinstance(r3, dict) and r3.get("input_tokens", 0) > ctx
+alive = post("/v1/chat/completions", {"model": model, "max_tokens": 4, "temperature": 0, "messages": msg})[0] == 200
+print("COUNT", "in-window %s" % ("PASS" if ok_in else "FAIL"), "over-window %s" % ("COUNTED" if over else "REFUSED %s" % st3),
+      "chat-over %s" % st4, "after %s" % ("alive" if alive else "DEAD"))
+PY
+      res[$s]=$(tail -1 "$out/count_$p1.log" | cut -c1-200); [ -n "${res[$s]}" ] || res[$s]=ERROR;;
     func)
       serve_alone "$p1" || { res[$s]=ERROR; continue; }
       step "functional checks $p1"

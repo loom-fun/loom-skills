@@ -1,47 +1,59 @@
 {
- "_comment": "R9700 per-model measurement (r9700_jobs.py): one job per model on one R9700 runner; loom-fun-staging card, llama.cpp ROCm b1375 + Vulkan b12211 with the matched drafting, reduced-context models served at served_context. Does not fit: none",
- "runner": "r9700",
- "memory_bytes": 34000000000,
- "llama_spec": "matched",
+ "_comment": "sdkcap final preset (gates once on the winner): kit build with telemetry.proposal_counts + chat.input_measure on hrx-loom 0.3.0; func + ktest + gates dev + admission + count probe + one perf session (acceptance row).",
+ "memory_bytes": 100000000000,
+ "llamacpp": "b1375",
  "jobs": [
   {
-   "name": "unsloth-qwen3-0-6b-loom",
-   "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
+   "name": "final-r9700-qwen3-5-4b",
+   "card": "loom-fun/unsloth-Qwen3.5-4B-loom",
    "kit": null,
+   "runner": "r9700",
+   "sdk": "0.3.0",
    "llamacpp": "b1375",
-   "llamacpp_vulkan": "b12211",
-   "memory_bytes_r9700": 17000000000,
+   "llama_spec": "matched",
    "variants": [
     {
-     "name": "card",
-     "build": {}
-    },
-    {
-     "name": "nodraft",
-     "build": {},
-     "execution": {
-      "draft_depth": 0
+     "name": "new",
+     "build": {
+      "LLM_PROPOSAL_COUNTS": "1",
+      "LLM_INPUT_MEASURE": "1"
      }
     }
    ],
    "steps": [
-    "func:card",
-    "ktest:card",
-    "gates:card:dev",
-    "perf:card:3",
-    "perf:card:3:long",
-    "c4:nodraft",
-    "llama@rocm.np1:3",
-    "llama@rocm.np1:3:long",
-    "llamac4@rocm.nodraft",
-    "llama@vulkan.np1:3",
-    "llama@vulkan.np1:3:long",
-    "llamac4@vulkan.perslot.nodraft"
+    "func:new",
+    "ktest:new",
+    "gates:new:dev",
+    "admit:new",
+    "count:new",
+    "perf:new:1"
+   ]
+  },
+  {
+   "name": "final-strix-qwen3-8b",
+   "card": "loom-fun/unsloth-Qwen3-8B-loom",
+   "kit": null,
+   "runner": "strix",
+   "sdk": "0.3.0",
+   "llamacpp": "b1374",
+   "llama_spec": "matched",
+   "variants": [
+    {
+     "name": "new",
+     "build": {
+      "LLM_PROPOSAL_COUNTS": "1",
+      "LLM_INPUT_MEASURE": "1"
+     }
+    }
+   ],
+   "steps": [
+    "func:new",
+    "ktest:new",
+    "gates:new:dev",
+    "admit:new",
+    "count:new",
+    "perf:new:1"
    ]
   }
- ],
- "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
- "kit": null,
- "llamacpp": "b1375",
- "llamacpp_vulkan": "b12211"
+ ]
 }
