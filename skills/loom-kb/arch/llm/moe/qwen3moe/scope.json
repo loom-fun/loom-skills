@@ -25,6 +25,12 @@
    "evidence": "Undrafted qwen3moe (Qwen3-30B-A3B-2507, head_dim 128, 4 KV heads) on gfx11 only: the peeled flash2 prefill kernel (#480) cost Strix prefill_16k 0.967-0.968x vs the loom-fun package (runs 43633426669, 43646278564). Peel off: Strix vs loom-fun prefill_16k 1.002, prefill_8k 1.008, all rows in band (run 43651904215, PR #752). The gfx12 twin keeps the peel: without it R9700 prefill_32k fell to 0.949 (same run)."
   },
   {
+   "when": {
+    "hidden": [
+     2048,
+     2048
+    ]
+   },
    "set": {
     "moe.route.tokens_per_wg": 8,
     "moe.prefill.store16": true
