@@ -64,6 +64,7 @@ import glob
 import hashlib
 import json
 import os
+from pathlib import Path
 import re
 import shutil
 import statistics
@@ -2694,6 +2695,56 @@ def phase2_state(d):
     return d.get("mode") == "sdk-ab" and bool(d["opts"].get("old_sdk_target")) and d["opts"].get("programs") != "production"
 
 
+def kit_near_tie(e, text):
+    """Return the diagnostic job only for a two-sided replay of every difference in this measured job."""
+    replay = e.get("near_tie_replay") or {}
+    if text.get("status") != "DIFF" or not replay.get("dir") or replay.get("measured_job") != e.get("job_url"):
+        return None
+    from token_ties import near_tie
+    try:
+        source, probe = Path(e["dir"]), Path(replay["dir"])
+        url = replay["url"]
+        if not re.fullmatch(r"https://github\.com/" + REPO + r"/actions/runs/[0-9]+/job/[0-9]+", url):
+            return None
+        if (probe / "card_revision.txt").read_text().strip() != e["source_card"] or replay["device"] != e["device"]:
+            return None
+        texts = []
+        for side in ("fun", "staging"):
+            digest = f"programs_sha256_{side}.txt"
+            expected = (source / digest).read_text().strip()
+            if not re.fullmatch(r"[0-9a-f]{64}", expected) or (probe / digest).read_text().strip() != expected:
+                return None
+            for name in (f"sdk_{side}.json", f"text_{side}.json"):
+                if sdk_package.load(source / name) != sdk_package.load(probe / name):
+                    return None
+            texts.append(sdk_package.load(source / f"text_{side}.json")["texts"])
+        if not all(len(t) == text["prompts"] for t in texts):
+            return None
+        changed = [i for i, (a, b) in enumerate(zip(*texts)) if a != b]
+        cases = sdk_package.load(probe / "tie_cases.json")
+        if not changed or len(changed) != text["prompts"] - text["identical"] or [c["prompt"] for c in cases] != changed:
+            return None
+        for case in cases:
+            old, new = case["candidates"]
+            if old == new or len(case["common"]) != case["position"]:
+                return None
+            prompts = []
+            for side, native, other in (("fun", old, new), ("staging", new, old)):
+                q = sdk_package.load(probe / f"tie_{side}_{case['prompt']}.json")
+                prompts.append(q["prompt_ids"])
+                if q["prefix_device_choices"] != case["common"] or q["device"] != native or not near_tie(dict(q["top"]), native, other):
+                    return None
+            if not prompts[0] or prompts[0] != prompts[1]:
+                return None
+        gates = sdk_package.load(source / "gates_staging/gates.json")
+        if gates["verdict"] != "PASS" or not gates["gates"]["compare"]["pass"] or not all(
+                g["pass"] for g in gates["gates"].values()) or (admission(str(source)) or {}).get("result") != "ADMITTED":
+            return None
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        return None
+    return url
+
+
 def kit_job_verdict(st, name, e):
     """(done, problems) of one phase-2 A/B job: the kit programs ship on this device only when the ratchet promoted, every gate passed,
     every card row is within -SDK_REGRESSION (equal or better) and the greedy text is identical. problems: short generated phrases."""
@@ -2712,7 +2763,7 @@ def kit_job_verdict(st, name, e):
     if fails:
         probs.append(f"{gpu} gate failed: " + ", ".join(fails))
     t = cmp.get("text") or {}
-    if t.get("status") == "DIFF":
+    if t.get("status") == "DIFF" and not kit_near_tie(last, t):
         probs.append(f"{gpu} greedy text differs on {t['prompts'] - t['identical']}/{t['prompts']} prompts")
     rows = dict(e.get("rows_pct") or {})
     if last is not e:   # a confirmed pair: a row is slower only when it is slower in both runs
@@ -2742,7 +2793,7 @@ def cmd_kit_verdict(a):
         p1 = [e for e in sweep.jobs.values() if e["slug"] == slug and not e.get("prev") and e["stage"] not in ("skipped",)]
         if not p1 or any(e["stage"] != "published" for e in p1):
             continue   # the migration-only card first
-        verdicts, done, urls = [], True, []
+        verdicts, done, urls, ties = [], True, [], {}
         for s_ in states:
             for n, e in s_.jobs.items():
                 if e["slug"] != slug or e.get("prev") or e["stage"] == "skipped":
@@ -2750,6 +2801,11 @@ def cmd_kit_verdict(a):
                 ok, probs = kit_job_verdict(s_, n, e)
                 done &= ok
                 verdicts += probs
+                measured = s_.jobs[e["rerun_of_me"]] if e.get("rerun_of_me") else e
+                if measured.get("near_tie_replay") and measured.get("cmp"):
+                    tie = kit_near_tie(measured, sdk_package.load(measured["cmp"]).get("text") or {})
+                    if tie:
+                        ties[e["device"]] = tie
                 if probs:
                     urls.append((s_.jobs[e["rerun_of_me"]] if e.get("rerun_of_me") else e).get("job_url"))
         if not done:
@@ -2772,6 +2828,8 @@ def cmd_kit_verdict(a):
                 e.pop("verified", None)
             sweep.log(f"{slug}: kit build kept out ({kept['reason'][:120]}); migration-only cards re-queued")
             print(f"{slug}: KEEP the frozen programs: {kept['reason']}")
+        if ties:
+            out[slug]["near_tie_jobs"] = ties
     if not a.dry_run:
         sweep.save()
         for s_ in states:
