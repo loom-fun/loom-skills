@@ -418,6 +418,8 @@ def sdk_ab(doc, old_sdk, new_sdk, key, device=None):
     pooled = device is None or card_lib.GPUS[device]["memory_bytes"] is not None
     for j in doc["jobs"]:
         j["sdk"] = new_sdk
+        if any(x.startswith("gates:staging") for x in j["steps"]) and "admit:staging" not in j["steps"]:
+            j["steps"].append("admit:staging")   # the built package's native-context admission probe, as frozen() gives the production one (the card lints it)
         by = {v["name"]: v for v in j["variants"]}
         for old, new in (("fun", "staging"), ("funnd", "stagingnd")):
             o, n = by[old], by[new]
