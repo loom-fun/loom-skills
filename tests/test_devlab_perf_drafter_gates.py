@@ -30,6 +30,14 @@ class DrafterGates(unittest.TestCase):
         out = self.run_it({"drafter": {"ctx_max": 3500, "occ_min": 2, "depth": 3}}, {"drafter": {"ctx_max": 0, "occ_min": 2}})
         self.assertEqual(out["drafter"], {"ctx_max": 0, "occ_min": 2, "depth": 3})
 
+    def test_explicit_variant_gate_wins_and_unspecified_gate_uses_checkout(self):
+        out = self.run_it(
+            {"drafter": {"ctx_max": 3500, "occ_min": 4}},
+            {"drafter": {"ctx_max": 2048, "occ_min": 2}},
+            {"drafter": {"ctx_max": 0}},
+        )
+        self.assertEqual(out["drafter"], {"ctx_max": 0, "occ_min": 2})
+
     def test_no_fleet_config_or_no_drafter_keeps_the_card(self):
         self.assertEqual(self.run_it({"drafter": {"ctx_max": 3500}}, None)["drafter"], {"ctx_max": 3500})
         self.assertNotIn("drafter", self.run_it({"x": 1}, {"drafter": {"ctx_max": 0}}))

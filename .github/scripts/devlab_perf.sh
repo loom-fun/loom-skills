@@ -456,11 +456,13 @@ EOF
     vroot=${KBV[$v]:+${KBV[$v]}/../..}; vroot=${vroot:-$here}
     "$T" - "$D/cfg.json" "$D/$v/cfg.json" "$vcfg" "$vroot/fleet/${repo##*/}/llm_config.json" <<'EOF2'
 import json, os, sys
-c = json.load(open(sys.argv[1])); c.update(json.loads(sys.argv[3]))
+override = json.loads(sys.argv[3])
+c = json.load(open(sys.argv[1]))
+c.update(override)
 if os.path.isfile(sys.argv[4]) and c.get("drafter"):
     f = json.load(open(sys.argv[4])).get("drafter") or {}
     for k in ("ctx_max", "occ_min"):
-        if k in f and f[k] != c["drafter"].get(k):
+        if k not in (override.get("drafter") or {}) and k in f and f[k] != c["drafter"].get(k):
             print(f"drafter.{k}: {c['drafter'].get(k)} -> {f[k]} (fleet/{os.path.basename(os.path.dirname(sys.argv[4]))}/llm_config.json)")
             c["drafter"][k] = f[k]
 json.dump(c, open(sys.argv[2], "w"), indent=1)
