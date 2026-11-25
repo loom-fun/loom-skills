@@ -905,8 +905,11 @@ def sdk_decide(st, name, e, cmp_path, use_prev=True):
     cmp = json.load(open(cmp_path))
     perf, rows = sdk_deltas(cmp)
     reasons = []
-    if cmp.get("gate_failures"):
-        return "hold", ["gate failed: " + ", ".join(cmp["gate_failures"])], perf, rows
+    fails = cmp.get("gate_failures") or []
+    if st.d["opts"].get("old_frozen"):   # an --old-frozen job: the frozen side's gates are its migration evidence (feed_phase1), not the kit build's
+        fails = [f for f in fails if not OLD_VARIANT.search(f)]
+    if fails:
+        return "hold", ["gate failed: " + ", ".join(fails)], perf, rows
     if (cmp.get("text") or {}).get("status") == "DIFF":
         t = cmp["text"]
         reasons.append(f"greedy text differs from v0.1 on {t['prompts'] - t['identical']}/{t['prompts']} prompts (reported)")
@@ -2441,8 +2444,9 @@ def kit_job_verdict(st, name, e):
         return True, [f"{gpu} job did not complete"]
     cmp = json.load(open(last["cmp"])) if last.get("cmp") and os.path.isfile(last["cmp"]) else {}
     probs = []
-    if cmp.get("gate_failures"):
-        probs.append(f"{gpu} gate failed: " + ", ".join(cmp["gate_failures"]))
+    fails = [f for f in cmp.get("gate_failures") or [] if not OLD_VARIANT.search(f)]   # the kit build's gates (the frozen side's are phase 1's)
+    if fails:
+        probs.append(f"{gpu} gate failed: " + ", ".join(fails))
     t = cmp.get("text") or {}
     if t.get("status") == "DIFF":
         probs.append(f"{gpu} greedy text differs on {t['prompts'] - t['identical']}/{t['prompts']} prompts")
