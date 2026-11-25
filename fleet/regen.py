@@ -1118,7 +1118,8 @@ def cmd_rerun(a):
         bid = len(st.d["batches"])
         pj = os.path.join(st.work, "batches", f"{bid}.perf.json")
         json.dump(doc, open(pj, "w"), indent=1)
-        st.d["batches"].append({"id": bid, "device": dev, "perf": pj, "jobs": [j["name"] for j in jobs], "round": 2, "stage": "planned"})
+        st.d["batches"].append({"id": bid, "device": dev, "perf": pj, "jobs": [j["name"] for j in jobs], "round": 2, "stage": "planned",
+                                "priority": True})   # a confirming job is targeted: it does not wait behind the sweep's waves
         first = {e["slug"]: n for n, e in items}
         for j in jobs:
             s = slug_of(j)
