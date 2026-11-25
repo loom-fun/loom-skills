@@ -75,10 +75,27 @@ def server_draft_counters(url):
 
 
 def acceptance_between(before, after):
-    """Accepted / proposed drafted tokens between two draft_counters() snapshots, or None (nothing proposed)."""
+    """Accepted / proposed drafted tokens between two draft_counters() snapshots, or None (nothing proposed, or the
+    server reports no proposal count: proposals_unreported())."""
     prop = after.get("draft_proposed_tokens", 0) - before.get("draft_proposed_tokens", 0)
     acc = after.get("draft_accepted_inputs", 0) - before.get("draft_accepted_inputs", 0)
     return round(acc / prop, 3) if prop > 0 else None
+
+
+def proposals_unreported(vals):
+    """Whether a draft_counters() snapshot counts accepted drafted tokens but no proposals. hrx-loom 0.3.0 serving a
+    service ABI 1 controller does not know how many tokens the drafter proposed (its publisher passes no proposal
+    counts: proposed_tokens is null in the telemetry events and /metrics omits draft_proposed_tokens); SDK 0.2.0
+    counted verifications x the configured draft depth. The acceptance is then not measurable, and it is never
+    derived from the configured depth."""
+    return "draft_accepted_inputs" in vals and "draft_proposed_tokens" not in vals
+
+
+def accepted_between(before, after):
+    """Drafted tokens accepted between two draft_counters() snapshots (int), or None when the server counts none."""
+    if "draft_accepted_inputs" not in after:
+        return None
+    return int(after["draft_accepted_inputs"] - before.get("draft_accepted_inputs", 0))
 
 
 def perf_metrics(row):

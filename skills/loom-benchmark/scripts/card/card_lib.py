@@ -823,9 +823,8 @@ PRELOAD_FLAG = "--parameter_mode=preload"
 
 
 def sdk_uses_file_parameters(sdk):
-    """SDK 0.3 and later default to buffered file reads and retired the preload flag."""
-    match = re.match(r"(\d+)\.(\d+)\.", (sdk or {}).get("hrx_loom") or "")
-    return bool(match and tuple(map(int, match.groups())) >= (0, 3))
+    """SDK 0.3 and later default to buffered file reads and retired the preload flag (and the --materialize=copy need)."""
+    return sdk_at_least(sdk or {}, 0, 3)
 
 
 def sdk_serve_args(args, sdk):
@@ -1339,6 +1338,133 @@ def xsj_vulkan_comparison_errors(sessions, vulkan, at):
         if k in TIMED and m.get("loom") is not None and vk is not None and vulkan["source"] != sessions[i]["source"]:
             errs.append(f"{at}.metrics.{k}: the Loom and Vulkan values must come from the same XSJ run")
     return errs
+
+
+# ---- the SDK a card's values were measured on, against the SDK its Quick start installs (the pin)
+# Methodology rule 17: an hrx-loom version change invalidates the stored Loom rows and gates. A value or gate measured on
+# another version than the pin is "carried": shown marked (card.carried "mark", the default) or not at all ("drop").
+# The delta line (sdk_delta) compares every metric a GPU re-measured on the pin with the earlier cards' stored values.
+DELTA_BAND = 0.03   # a regression beyond 3 % needs an explanation (loom-migrate step 7)
+DELTA_NAMES = {"decode": "decode", "decode_2k": "decode at 2k", "decode_32k": "decode at 32k", "prefill_1k": "prefill 1k",
+               "prefill_2k": "prefill 2k", "prefill_8k": "prefill 8k", "prefill_16k": "prefill 16k", "prefill_32k": "prefill 32k",
+               "streams4": "4 streams", "spec_acceptance": "drafted tokens accepted"}
+GOOD_CONCLUSIONS = ("success",)
+
+
+def sdk_version(x):
+    """The version of an hrx-loom identity (a source's or llm_config.json's), or None."""
+    return x.get("hrx_loom") if isinstance(x, dict) else None
+
+
+def sdk_at_least(x, major, minor):
+    """Whether an hrx-loom identity or version string is major.minor or later (range-based, never == one release)."""
+    v = x if isinstance(x, str) else sdk_version(x)
+    m = re.match(r"(\d+)\.(\d+)", v or "")
+    return bool(m and tuple(map(int, m.groups())) >= (major, minor))
+
+
+def source_sdk(info, sid):
+    return sdk_version(((info.get("sources") or {}).get(sid) or {}).get("hrx_loom"))
+
+
+UNRECORDED_SDK = "unrecorded"
+
+
+def carried_sdk(info, sid, pin):
+    """The other hrx-loom version a source measured on, when it is not the pin's version (pin: an identity or version):
+    its version, or UNRECORDED_SDK when the source records none (not shown to be the pin's). None when it is the pin's,
+    or there is no pin."""
+    want = pin if isinstance(pin, str) or pin is None else sdk_version(pin)
+    have = source_sdk(info, sid)
+    if not want or have == want:
+        return None
+    return have or UNRECORDED_SDK
+
+
+def requalified(info, gpu, pin):
+    """Whether a GPU of the card has any Loom value or gate measured on the pin's SDK (re-qualified on it)."""
+    dev = (info.get("devices") or {}).get(gpu) or {}
+    if not has_results(dev):
+        return False
+    sids = [s["source"] for s in (dev.get("performance") or {}).get("sessions", [])]
+    sids += [g["source"] for g in (dev.get("gates") or {}).values()]
+    return any(sids) and any(not carried_sdk(info, sid, pin) for sid in sids)
+
+
+def drop_carried(info, pin):
+    """card.carried "drop": the card without the sessions, gates and admission checks measured on another SDK than the
+    pin. A GPU left with nothing keeps its Quick start (serve_args) and says it is not re-qualified (state not_measured)."""
+    out = json.loads(json.dumps(info))
+    for gpu, dev in out.get("devices", {}).items():
+        if not has_results(dev):
+            continue
+        perf = dev.get("performance")
+        if perf:
+            perf["sessions"] = [s for s in perf["sessions"] if not carried_sdk(out, s["source"], pin)]
+            if not perf["sessions"]:
+                dev.pop("performance")
+        dev["gates"] = {n: g for n, g in (dev.get("gates") or {}).items() if not carried_sdk(out, g["source"], pin)}
+        if dev.get("admission") and carried_sdk(out, dev["admission"]["source"], pin):
+            dev.pop("admission")
+        if not dev.get("performance") and not dev["gates"]:
+            keep = {k: dev[k] for k in ("memory_bytes", "served_context", "serve_args", "quick_start", "shares_section_with") if k in dev}
+            out["devices"][gpu] = dict(keep, state="not_measured")
+    return out
+
+
+def previous_values(old):
+    """{gpu: {"hrx_loom": version or None, "metrics": {metric: Loom value}}} of an earlier card's info.json: the values
+    that card shows (card_metrics), what make_info.py build --previous-card stores in sdk_delta."""
+    old = normalize(old)
+    out = {}
+    for gpu, dev in (old.get("devices") or {}).items():
+        if not has_results(dev) or not dev.get("performance"):
+            continue
+        view = gpu_view(old, gpu)
+        sessions = view["performance"]["sessions"]
+        metrics, sdks = {}, set()
+        for k, (m, i) in card_metrics(view).items():
+            if k not in METRIC_KEYS or (m.get("loom") is None and k != "spec_acceptance"):
+                continue
+            metrics[k] = m.get("loom")
+            sdks.add(source_sdk(old, sessions[i]["source"]))
+        if metrics:
+            out[gpu] = {"hrx_loom": sdks.pop() if len(sdks) == 1 else None, "metrics": metrics}
+    return out
+
+
+def delta_rows(info, pin, comparison):
+    """The delta line of one sdk_delta comparison: {gpu: [row]} for every GPU of the comparison this card re-measured
+    on the pin's SDK; a row {metric, old, new, change, unreported, regression, explanation} per metric either side has
+    (change: the relative change, spec_acceptance the change in points; None when one side has no value)."""
+    out = {}
+    expl = comparison.get("explanations") or {}
+    for gpu, prev in comparison["devices"].items():
+        dev = (info.get("devices") or {}).get(gpu)
+        if not dev or not has_results(dev) or not dev.get("performance"):
+            continue
+        view = gpu_view(info, gpu)
+        sessions = view["performance"]["sessions"]
+        current = {k: (m, i) for k, (m, i) in card_metrics(view).items()
+                   if k in METRIC_KEYS and not carried_sdk(info, sessions[i]["source"], pin)}
+        if not current:
+            continue   # not re-measured on this SDK: its rows are carried (marked), no delta
+        rows = []
+        for k in METRIC_KEYS:
+            if k not in prev["metrics"] and k not in current:
+                continue
+            old = prev["metrics"].get(k)
+            m = current[k][0] if k in current else {}
+            new = m.get("loom")
+            change = None
+            if old is not None and new is not None:
+                change = round(new - old, 4) if k == "spec_acceptance" else round(new / old - 1, 4) if old else None
+            regression = change is not None and k != "spec_acceptance" and change < -DELTA_BAND
+            rows.append({"metric": k, "old": old, "new": new, "change": change, "unreported": m.get("unreported"),
+                         "missing": k not in current, "regression": regression,
+                         "explanation": (expl.get(gpu) or {}).get(k)})
+        out[gpu] = rows
+    return out
 
 
 def validate(info, programs=None):

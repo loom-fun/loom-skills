@@ -17,6 +17,7 @@
     "tags": {"type": "array", "items": {"type": "string"}, "description": "Front matter tags after the ones the package implies"},
     "output": {"type": "string", "description": "loom-fetch --output directory, when not model.json's model id"},
     "memory_bytes": {"type": "integer", "description": "loom-serve --memory_bytes the card was validated with, when model.json carries none"},
+    "carried": {"enum": ["mark", "drop"], "description": "How a GPU's rows and gates measured on another hrx-loom version than the card's Quick start installs are shown (the policy for GPUs without a DevLab runner). mark (default): shown, each marked with the SDK it was measured on, not re-qualified; drop: not shown (the GPU keeps its Quick start and a line saying so)"},
     "features": {"type": "object", "additionalProperties": {"$ref": "#/$defs/feature"},
                  "description": "Every feature row as the card shows it, so a reader needs no other file: status yes, no (the upstream model has it, Loom lacks it), n/a (the upstream model has none) or unknown (not determined; rendered as a neutral ?, never red), and its value (speculative_decoding yes with a null method: a drafter is available upstream but not enabled). Written by make_info.py build from the package, the upstream model (vision, audio, chat template), the sampling gate and evidence (an old report stating greedy-only decoding); render_card.py shows these over what it derives itself"}
    }
@@ -59,6 +60,21 @@
      "properties": {"previous": {"type": "number", "minimum": 0}, "current": {"type": "number", "minimum": 0},
                     "percent": {"type": "number", "minimum": -100, "maximum": -3}}}}
    }
+  },
+  "sdk_delta": {
+   "type": "object", "additionalProperties": false, "required": ["comparisons"],
+   "description": "Earlier cards of this package (make_info.py build --previous-card): their stored Loom values per GPU, so render_card.py generates the delta line of every metric on every GPU this card re-measured on its own SDK. A regression beyond the band needs an explanation from evidence (lint_card.py).",
+   "properties": {"comparisons": {"type": "array", "items": {
+    "type": "object", "additionalProperties": false, "required": ["label", "devices"],
+    "properties": {
+     "label": {"enum": ["card", "migration"], "description": "card: the published card this one replaces; migration: this package's migration-only card on the new SDK (frozen programs), for a card whose programs changed beyond the migration"},
+     "repo": {"type": "string", "description": "card only: the earlier card's repository"}, "revision": {"type": "string", "pattern": "^[0-9a-f]{40}$", "description": "card only: its revision"},
+     "devices": {"type": "object", "additionalProperties": {"type": "object", "additionalProperties": false, "required": ["hrx_loom", "metrics"],
+      "properties": {"hrx_loom": {"type": ["string", "null"], "description": "the hrx-loom version the earlier card measured this GPU's values with (null: not recorded, or several)"},
+                     "metrics": {"type": "object", "additionalProperties": {"type": ["number", "null"]}}}}},
+     "explanations": {"type": "object", "description": "GPU -> metric -> why it regressed beyond the band, from evidence (a confirming rerun, a root cause)",
+      "additionalProperties": {"type": "object", "additionalProperties": {"type": "object", "additionalProperties": false, "required": ["text"],
+       "properties": {"text": {"type": "string"}, "url": {"type": ["string", "null"]}}}}}}}}}
   },
   "next_steps": {"type": "array", "items": {"type": "string"},
                  "description": "What would be done next if work continued, one short markdown line each; README.md ends with them under Next steps. Optional key, loom-card/2."}
@@ -156,6 +172,13 @@
         }
        }
       },
+      "admission": {
+       "type": "object", "additionalProperties": false, "required": ["admitted", "tokens", "context", "detail", "date", "source"],
+       "description": "The native-context admission check of the latest gates run on this GPU (gates.sh context_admit, ctx_admit.py): one request filling the context the GPU serves, admitted or refused",
+       "properties": {"admitted": {"type": "boolean"}, "tokens": {"type": ["integer", "null"]}, "context": {"type": ["integer", "null"]},
+                      "detail": {"type": ["string", "null"]}, "date": {"type": ["string", "null"], "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"},
+                      "source": {"type": "string"}, "programs_sha256": {"type": ["string", "null"]}}
+      },
       "gates": {
        "type": "object", "additionalProperties": {"$ref": "#/$defs/gate"},
        "description": "Per gate name the most recent evidence. Gates the package's features make applicable but that have no entry render as no evidence."
@@ -209,6 +232,7 @@
     "url": {"type": ["string", "null"]},
     "device": {"oneOf": [{"$ref": "#/$defs/device"}, {"type": "null"}]},
     "hrx_loom": {"oneOf": [{"$ref": "#/$defs/hrx_loom"}, {"type": "null"}], "description": "The Loom SDK that served the model"},
+    "conclusion": {"enum": ["success", "failure", "cancelled", "skipped", "timed_out", "neutral", "action_required", "stale"], "description": "devlab/factory: the GitHub Actions conclusion of the cited job, when recorded; render_card.py refuses a card citing a job that did not succeed"},
     "power_mode": {"type": "string", "description": "local only: the platform power mode the job ran at (a key of the device preset's power_modes, e.g. 123w); a local source with it may hold performance (card_lib.perf_source_ok, methodology rule 18)"},
     "power": {"type": "object", "description": "local only: power_steps.json summary: per engine median W / GHz of busy samples, steps outside the band",
               "properties": {"mode": {"type": "string"}, "sampler": {"type": ["string", "null"]}, "busy_w": {"type": ["number", "null"]},
@@ -277,7 +301,8 @@
      "description": "Present when this row's llama.cpp value was measured in another job than the Loom value (a Loom-only job, make_info.py perf --baseline-from-info): the date and source id of the session that measured it. Absent: both come from this session (the same job).",
      "properties": {"date": {"type": ["string", "null"], "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"}, "source": {"type": "string"}}
     },
-    "acceptance": {"type": "number", "minimum": 0, "maximum": 1, "description": "speculative decoding: accepted / proposed drafted tokens of this metric's own Loom requests (median over the sessions of each session's median, mean of the runs in a session without aggregate; perf.py, c4_steady.py), the acceptance its roofline ceiling counts"}
+    "acceptance": {"type": "number", "minimum": 0, "maximum": 1, "description": "speculative decoding: accepted / proposed drafted tokens of this metric's own Loom requests (median over the sessions of each session's median, mean of the runs in a session without aggregate; perf.py, c4_steady.py), the acceptance its roofline ceiling counts"},
+    "unreported": {"enum": ["proposals"], "description": "spec_acceptance only, with loom null: proposals = the SDK counted accepted drafted tokens but no proposals for this package's controller (hrx-loom 0.3 with a service ABI 1 controller; bench_common.proposals_unreported); never derived from the configured draft depth"}
    }
   },
   "gate": {

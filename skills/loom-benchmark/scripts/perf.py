@@ -51,7 +51,7 @@ import time
 
 import requests
 
-from bench_common import acceptance_between, doc, long_prompt, perf_metrics, server_draft_counters, stream, thinking_extra
+from bench_common import acceptance_between, accepted_between, doc, long_prompt, perf_metrics, proposals_unreported, server_draft_counters, stream, thinking_extra
 
 
 def decode_context_sizes(value):
@@ -129,7 +129,8 @@ out["warmup_decode_tps"] = round(run(f"[warm-up {nonce}] " + ESSAY, 300)[2], 2)
 def decode(key, content, max_tokens):
     """A timed decode request -> its decode tok/s, or None when it generated fewer than max_tokens // 2 tokens twice
     (the second time with another nonce); out["completion_tokens"][key]: the tokens of each attempt;
-    out["acceptance"][key]: the drafted-token acceptance of the request that counted (Loom)."""
+    out["acceptance"][key]: the drafted-token acceptance of the request that counted (Loom); out["draft_accepted"][key]:
+    its accepted drafted tokens instead when the server reports no proposal count (bench_common.proposals_unreported)."""
     for attempt in range(2):
         prompt = content if attempt == 0 else f"[retry {time.time()}] " + content
         before = server_draft_counters(U) if a.kind == "loom" else {}
@@ -143,6 +144,8 @@ def decode(key, content, max_tokens):
             acc = acceptance_between(before, after) if before else None
             if acc is not None:
                 out.setdefault("acceptance", {})[key] = acc
+            elif before and proposals_unreported(after):   # the SDK counts no proposals: the accepted count only
+                out.setdefault("draft_accepted", {})[key] = accepted_between(before, after)
             return round(dtps, 2)
     print(f"WARNING: {key} generated {out['completion_tokens'][key]} tokens (< {max_tokens // 2}) twice: "
           "logged as missing, not as the rate of a short request", flush=True)

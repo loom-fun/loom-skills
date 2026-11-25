@@ -169,12 +169,14 @@ def compare(a_path, b_path, metrics=None, pkg=None, llama=None):
         print(f"DIFF: {len(a)} vs {len(b)} records")
     acc = ""
     if metrics:
-        from bench_common import draft_counters
+        from bench_common import draft_counters, proposals_unreported
         text = (urllib.request.urlopen(metrics + "/metrics", timeout=30).read().decode() if metrics.startswith("http")
                 else open(metrics).read())
         vals = draft_counters(text)
         if vals.get("draft_proposed_tokens"):
             acc = f", acceptance {vals['draft_accepted_inputs'] / vals['draft_proposed_tokens']:.0%} of {int(vals['draft_proposed_tokens'])} proposals"
+        elif proposals_unreported(vals):   # SDK 0.3 with a service ABI 1 controller: no proposal count (never assume the depth)
+            acc = f", acceptance not reported ({int(vals['draft_accepted_inputs'])} drafted tokens accepted; the server counts no proposals)"
     print(f"SPEC_CHECK {'PASS' if not bad else 'FAIL'}: {len(a) - bad - ties}/{len(a)} completions identical, {ties} near-tie{acc}")
     return 0 if not bad else 1
 

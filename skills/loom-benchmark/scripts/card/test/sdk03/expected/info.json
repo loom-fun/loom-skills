@@ -1,0 +1,434 @@
+{
+ "card": {
+  "features": {
+   "api": {
+    "status": "yes",
+    "value": {
+     "endpoint": "/v1/chat/completions",
+     "style": "openai"
+    }
+   },
+   "audio": {
+    "status": "unknown",
+    "value": null
+   },
+   "concurrency": {
+    "status": "yes",
+    "value": {
+     "pending_requests": null,
+     "rows": 4
+    }
+   },
+   "context": {
+    "status": "yes",
+    "value": {
+     "native": null,
+     "tokens": 262144
+    }
+   },
+   "image_input": {
+    "status": "unknown",
+    "value": null
+   },
+   "max_output_tokens": {
+    "status": "yes",
+    "value": {
+     "max_tokens": 4096
+    }
+   },
+   "reasoning_effort": {
+    "status": "n/a",
+    "value": null
+   },
+   "sampling": {
+    "status": "yes",
+    "value": null
+   },
+   "speculative_decoding": {
+    "status": "yes",
+    "value": {
+     "depth": 3,
+     "drafter": "incoai/Flint-DFlash2-GGUF",
+     "method": "dflash"
+    }
+   },
+   "thinking": {
+    "status": "yes",
+    "value": {
+     "default": true,
+     "mode": "always"
+    }
+   },
+   "tool_calling": {
+    "status": "yes",
+    "value": null
+   }
+  },
+  "memory_bytes": 67000000000
+ },
+ "devices": {
+  "strix-halo": {
+   "admission": {
+    "admitted": true,
+    "context": 65536,
+    "date": "2026-11-25",
+    "detail": "ADMITTED 65410 tokens of a 65536-token context (3.1s, then cancelled)",
+    "programs_sha256": "38d15afaed279db447f85fcaf44d876a7f83fe561fd4ec945f0217da7662bb5e",
+    "source": "devlab-3102",
+    "tokens": 65410
+   },
+   "gates": {
+    "agent": {
+     "date": "2026-11-25",
+     "detail": null,
+     "level": "full",
+     "programs_sha256": "38d15afaed279db447f85fcaf44d876a7f83fe561fd4ec945f0217da7662bb5e",
+     "source": "devlab-3102",
+     "status": "pass"
+    },
+    "compare": {
+     "date": "2026-11-25",
+     "detail": null,
+     "level": "full",
+     "programs_sha256": "38d15afaed279db447f85fcaf44d876a7f83fe561fd4ec945f0217da7662bb5e",
+     "source": "devlab-3102",
+     "status": "pass"
+    },
+    "consistency": {
+     "date": "2026-11-25",
+     "detail": null,
+     "level": "full",
+     "programs_sha256": "38d15afaed279db447f85fcaf44d876a7f83fe561fd4ec945f0217da7662bb5e",
+     "source": "devlab-3102",
+     "status": "pass"
+    },
+    "golden": {
+     "date": "2026-11-25",
+     "detail": null,
+     "level": "full",
+     "programs_sha256": "38d15afaed279db447f85fcaf44d876a7f83fe561fd4ec945f0217da7662bb5e",
+     "source": "devlab-3102",
+     "status": "pass"
+    },
+    "logits": {
+     "date": "2026-11-25",
+     "detail": "128/128 steps, top-5 within 0.05",
+     "level": "full",
+     "programs_sha256": "38d15afaed279db447f85fcaf44d876a7f83fe561fd4ec945f0217da7662bb5e",
+     "source": "devlab-3102",
+     "status": "pass"
+    },
+    "sampling": {
+     "date": "2026-11-25",
+     "detail": null,
+     "level": "full",
+     "programs_sha256": "38d15afaed279db447f85fcaf44d876a7f83fe561fd4ec945f0217da7662bb5e",
+     "source": "devlab-3102",
+     "status": "pass"
+    },
+    "spec": {
+     "date": "2026-11-25",
+     "detail": null,
+     "level": "full",
+     "programs_sha256": "38d15afaed279db447f85fcaf44d876a7f83fe561fd4ec945f0217da7662bb5e",
+     "source": "devlab-3102",
+     "status": "pass"
+    }
+   },
+   "performance": {
+    "baseline": {
+     "args": null,
+     "name": "llama.cpp",
+     "version": "llamacpp-rocm/b1355"
+    },
+    "sessions": [
+     {
+      "aggregate": "median",
+      "commands": [],
+      "date": "2026-11-25",
+      "metrics": {
+       "decode": {
+        "baseline": 67.3,
+        "baseline_runs": [
+         83.84,
+         50.81
+        ],
+        "loom": 93.0,
+        "loom_runs": [
+         93.45,
+         92.64
+        ]
+       },
+       "decode_2k": {
+        "baseline": 54.7,
+        "baseline_runs": [
+         53.76,
+         55.67
+        ],
+        "loom": 76.3,
+        "loom_runs": [
+         79.46,
+         73.17
+        ]
+       },
+       "decode_32k": {
+        "baseline": 49.5,
+        "baseline_runs": [
+         51.63,
+         47.28
+        ],
+        "loom": 47.8,
+        "loom_runs": [
+         44.04,
+         51.47
+        ]
+       },
+       "prefill_16k": {
+        "baseline": 929.3,
+        "baseline_runs": [
+         929.2,
+         929.4
+        ],
+        "loom": 1359.0,
+        "loom_runs": [
+         1347.8,
+         1370.3
+        ]
+       },
+       "prefill_1k": {
+        "baseline": 1081.8,
+        "baseline_runs": [
+         1092.6,
+         1071.1
+        ],
+        "loom": 813.6,
+        "loom_runs": [
+         853.9,
+         773.3
+        ]
+       },
+       "prefill_2k": {
+        "baseline": 1079.0,
+        "baseline_runs": [
+         1073.6,
+         1084.4
+        ],
+        "loom": 1263.8,
+        "loom_runs": [
+         1264.7,
+         1262.8
+        ]
+       },
+       "prefill_32k": {
+        "baseline": 667.6,
+        "baseline_runs": [
+         667.8,
+         667.5
+        ],
+        "loom": 1193.9,
+        "loom_runs": [
+         1193.8,
+         1194.1
+        ]
+       },
+       "prefill_8k": {
+        "baseline": 1094.1,
+        "baseline_runs": [
+         1095.7,
+         1092.5
+        ],
+        "loom": 1424.7,
+        "loom_runs": [
+         1419.1,
+         1430.3
+        ]
+       },
+       "streams4": {
+        "baseline": 124.2,
+        "baseline_runs": [
+         124.4,
+         124.2,
+         123.9
+        ],
+        "loom": 134.2,
+        "loom_runs": [
+         131.9,
+         140.9,
+         134.2
+        ]
+       }
+      },
+      "programs_sha256": "38d15afaed279db447f85fcaf44d876a7f83fe561fd4ec945f0217da7662bb5e",
+      "runs": {
+       "decode_prefill": 2,
+       "streams4": 3
+      },
+      "source": "devlab-3101"
+     },
+     {
+      "commands": [],
+      "date": "2026-11-25",
+      "metrics": {
+       "spec_acceptance": {
+        "loom": null,
+        "unreported": "proposals"
+       }
+      },
+      "programs_sha256": "38d15afaed279db447f85fcaf44d876a7f83fe561fd4ec945f0217da7662bb5e",
+      "runs": {
+       "decode_prefill": null,
+       "streams4": null
+      },
+      "source": "devlab-3102"
+     }
+    ]
+   },
+   "quick_start": {
+    "args": [
+     "--pool_backing=fixed"
+    ],
+    "device": "amdgpu://?completion_spin_ns=4294967295",
+    "preset": "chat"
+   },
+   "roofline": {
+    "checkpoint": "Flint-Q4_K_M.gguf",
+    "device": {
+     "bandwidth_bytes_per_s": 216000000000.0,
+     "name": "AMD Ryzen AI Max+ 395 \"Strix Halo\" (gfx1151)",
+     "peak_flops": 59000000000000.0
+    },
+    "drafting": {
+     "acceptance": 0.68,
+     "depth": 3,
+     "method": "dflash",
+     "tokens_per_pass": 3.04
+    },
+    "metrics": {
+     "decode": {
+      "ceiling": 177.8,
+      "efficiency": 0.52,
+      "single_pass": 95.4
+     },
+     "decode_2k": {
+      "ceiling": 173.4,
+      "efficiency": 0.52,
+      "single_pass": 91.6
+     },
+     "decode_32k": {
+      "ceiling": 141.3,
+      "efficiency": 0.52,
+      "single_pass": 67.1
+     },
+     "prefill_16k": {
+      "ceiling": 9014.9,
+      "efficiency": 0.33
+     },
+     "prefill_1k": {
+      "ceiling": 12248.4,
+      "efficiency": 0.33
+     },
+     "prefill_2k": {
+      "ceiling": 11945.5,
+      "efficiency": 0.33
+     },
+     "prefill_32k": {
+      "ceiling": 7040.8,
+      "efficiency": 0.33
+     },
+     "prefill_8k": {
+      "ceiling": 10484.7,
+      "efficiency": 0.33
+     },
+     "streams4": {
+      "ceiling": 301.8,
+      "efficiency": 0.44,
+      "single_pass": 221.1
+     }
+    },
+    "tool": {
+     "script": "skills/loom-roofline/roofline.py",
+     "sha256": "915576a9df574f4d5565c8b61151e622a737104f63b2cfc2d047617da1f863b7",
+     "skills_commit": "0123456789abcdef0123456789abcdef01234567"
+    }
+   }
+  }
+ },
+ "repo": "loom-fun/ggml-org-Flint-loom",
+ "report": "generated",
+ "schema": "loom-card/3",
+ "sdk_delta": {
+  "comparisons": [
+   {
+    "devices": {
+     "strix-halo": {
+      "hrx_loom": "0.1.0",
+      "metrics": {
+       "decode": 92.4,
+       "decode_2k": 76.3,
+       "decode_32k": 47.8,
+       "prefill_16k": 1359.0,
+       "prefill_1k": 956.9,
+       "prefill_2k": 1316.4,
+       "prefill_32k": 1193.9,
+       "prefill_8k": 1424.7,
+       "spec_acceptance": 0.68,
+       "streams4": 134.2
+      }
+     }
+    },
+    "explanations": {
+     "strix-halo": {
+      "prefill_1k": {
+       "text": "confirmed by a same-runner rerun of both SDKs (fixture)",
+       "url": "https://github.com/loom-fun/loom-skills/actions/runs/3103/job/3104"
+      }
+     }
+    },
+    "label": "card",
+    "repo": "loom-fun/ggml-org-Flint-loom",
+    "revision": "89abcdef0123456789abcdef0123456789abcdef"
+   }
+  ]
+ },
+ "sources": {
+  "devlab-3101": {
+   "device": {
+    "cpu": "AMD RYZEN AI MAX+ 395 w/ Radeon 8060S",
+    "gpu": "AMD Radeon 8060S Graphics",
+    "os": "Ubuntu 26.04"
+   },
+   "hrx_loom": {
+    "artifact_id": null,
+    "branch": "v0.3.0",
+    "hrx_loom": "0.3.0",
+    "hrx_system_sha": "e2c41a720363911c04606ce0f4417e2d55630352",
+    "source": "pypi",
+    "wheel_sha256": "6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f"
+   },
+   "kind": "devlab",
+   "run": "3101",
+   "url": null
+  },
+  "devlab-3102": {
+   "device": {
+    "cpu": "AMD RYZEN AI MAX+ 395 w/ Radeon 8060S",
+    "gpu": "AMD Radeon 8060S Graphics",
+    "os": "Ubuntu 26.04"
+   },
+   "hrx_loom": {
+    "artifact_id": null,
+    "branch": "v0.3.0",
+    "hrx_loom": "0.3.0",
+    "hrx_system_sha": "e2c41a720363911c04606ce0f4417e2d55630352",
+    "source": "pypi",
+    "wheel_sha256": "6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f"
+   },
+   "kind": "devlab",
+   "run": "3102",
+   "url": null
+  }
+ },
+ "versions": {
+  "card_generator": "0123456789abcdef0123456789abcdef01234567"
+ }
+}

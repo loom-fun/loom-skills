@@ -1,0 +1,8 @@
+{
+ "artifact_id": null,
+ "branch": "v0.3.0",
+ "hrx_loom": "0.3.0",
+ "hrx_system_sha": "e2c41a720363911c04606ce0f4417e2d55630352",
+ "source": "pypi",
+ "wheel_sha256": "6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f"
+}

@@ -2,7 +2,8 @@
 produced by all streams inside the window where every stream is decoding
 (excludes ramp-up and tail). Tokens, not streamed events: with speculative decoding one event can carry several.
 With a drafting Loom server the JSON line also gives "acceptance": accepted / proposed drafted tokens over the N
-streams (loom-serve's /metrics counters around them), the roofline's acceptance for the 4-stream row.
+streams (loom-serve's /metrics counters around them), the roofline's acceptance for the 4-stream row; a server that
+counts no proposals (bench_common.proposals_unreported) gives "draft_accepted" (the accepted drafted tokens) instead.
 
 usage: python c4_steady.py URL [N=4] [--model MODEL_ID]   (omit --model for llama.cpp)
 Loom needs execution.rows >= N in the package preset; llama-server needs -np N.
@@ -15,7 +16,7 @@ import sys
 import threading
 import time
 
-from bench_common import acceptance_between, server_draft_counters, stream, thinking_extra
+from bench_common import acceptance_between, accepted_between, proposals_unreported, server_draft_counters, stream, thinking_extra
 
 ap = argparse.ArgumentParser()
 ap.add_argument("url")
@@ -54,7 +55,10 @@ def one_pass():
     ts = [threading.Thread(target=run, args=(i,)) for i in range(a.n)]
     [t.start() for t in ts]
     [t.join() for t in ts]
-    acc = acceptance_between(before, server_draft_counters(a.url)) if before else None
+    after = server_draft_counters(a.url) if before else {}
+    acc = acceptance_between(before, after) if before else None
+    if acc is None and before and proposals_unreported(after):   # the SDK counts no proposals: the accepted count only
+        acc = {"draft_accepted": accepted_between(before, after)}
     bad = [f"stream {i}: {err}" for i, err in enumerate(errors) if err]
     bad += [f"stream {i}: no tokens" for i in range(a.n) if not errors[i] and not (tokens[i] and events[i])]
     if bad:
@@ -85,7 +89,7 @@ print(json.dumps({"time": time.strftime("%Y-%m-%d %H:%M:%S"), "streams": a.n, "t
                   "agg_tps": round(rate, 1),
                   "per_stream_events": [len(e) for e in events], "per_stream_tokens": tokens,
                   **({"warmup_agg_tps": warm} if warm else {}),
-                  **({"acceptance": acc} if acc is not None else {})}))
+                  **({"acceptance": acc} if isinstance(acc, float) else acc if isinstance(acc, dict) else {})}))
 if a.label and a.model:  # Loom run: track it in the optimization campaign
     from campaign import log_metrics
     log_metrics({"c4_steady": round(rate, 1)}, a.label, a.reverted)

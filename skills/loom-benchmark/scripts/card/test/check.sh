@@ -615,7 +615,53 @@ assert od['baseline'] == pd['baseline'], 'the baseline block (build, arguments) 
   || { echo "FAIL loomonly: the Loom-only card does not carry the previous card's llama.cpp rows"; bad=1; }
 ! py "$C/make_info.py" perf --gpu radeon-r9700 --loom-jsonl "$F/evidence/loom.jsonl" --baseline-from-info "$tmp/flint/info.json" "${SRC[@]}" --run 3005 -o "$tmp/lo_none.json" 2>/dev/null \
   && echo "OK   loomonly: a device the previous card has no table for stops" || { echo "FAIL loomonly: perf --baseline-from-info accepted a device without a table"; bad=1; }
-for n in flint d1 ratchet r9700_two r9700_none r9700_staging r9700_preset r9700_exec gpus4 sdk02 sdk02_presets loomonly; do
+# an SDK 0.3.0 migration card (sdk03): flint's frozen programs pinned to 0.3.0, re-measured on it (decode and prefill 1k/2k
+# 4 % slower than flint's first session; prefill 1k/2k regress against the card's values), full gates whose spec gate found accepted drafted tokens but no proposal count
+# (hrx-loom 0.3 with a service ABI 1 controller), the native-context admission check, and the delta line against the
+# published flint card (--previous-card) with one regression explained from evidence and the others not
+S3=$here/sdk03/evidence; S3SRC=(--device "$F/evidence/device.json" --hrx-loom "$S3/hrx_loom.json")
+mkdir -p "$tmp/sdk03"; cp -r "$F/pkg/." "$tmp/sdk03/"
+py -c "import json, sys; p = sys.argv[1] + '/llm_config.json'; c = json.load(open(p)); c['sdk'] = {k: v for k, v in json.load(open(sys.argv[2])).items() if k != 'artifact_id' and k != 'branch'}
+json.dump(c, open(p, 'w'), indent=1)" "$tmp/sdk03" "$S3/hrx_loom.json"
+py -c "import json, sys; rs = [json.loads(l) for l in open(sys.argv[1]) if l.strip()]
+for r in rs:
+    if 'decode_tps' in r: r['decode_tps'] = round(r['decode_tps'] * 0.96, 2)
+    if 'prefill' in r: r['prefill'] = [dict(p, prefill_tps=round(p['prefill_tps'] * 0.96, 1)) for p in r['prefill']]
+    r.pop('acceptance', None)
+open(sys.argv[2], 'w').write(''.join(json.dumps(r) + '\\n' for r in rs))" "$F/evidence/loom.jsonl" "$tmp/s3_loom.jsonl"
+py "$C/make_info.py" perf --loom-jsonl "$tmp/s3_loom.jsonl" --llama-jsonl "$F/evidence/llama.jsonl" --c4-loom "$F/evidence/c4_loom_runs.txt" \
+  --c4-llama "$F/evidence/c4_llama_runs.txt" --baseline-version b1355 --date 2026-11-25 "${S3SRC[@]}" --package "$tmp/sdk03" --run 3101 \
+  -o "$tmp/s3_perf.json" 2>/dev/null
+py "$C/make_info.py" gates "$S3/gates.json" "${S3SRC[@]}" --package "$tmp/sdk03" --source-kind devlab --run 3102 -o "$tmp/s3_gates.json" 2>/dev/null
+py "$C/make_info.py" build "$tmp/sdk03" --generator-commit $GEN --from-info "$tmp/flint/info.json" --reset-performance \
+  --previous-card "card:loom-fun/ggml-org-Flint-loom@89abcdef0123456789abcdef0123456789abcdef=$tmp/flint/info.json" \
+  --delta-explanations "$S3/explanations.json" --evidence "$tmp/s3_perf.json" "$tmp/s3_gates.json" -o "$tmp/sdk03/info.json" 2>/dev/null
+py -c "import sys; sys.path.insert(0, sys.argv[1]); import card_lib as c
+i = c.load_json(sys.argv[2]); d = i['devices']['strix-halo']
+assert c.validate(i) == [], c.validate(i)
+m = {k: v for k, (v, _) in c.card_metrics(c.gpu_view(i, 'strix-halo')).items()}
+assert m['spec_acceptance'] == {'loom': None, 'unreported': 'proposals'}, m['spec_acceptance']
+assert d['admission']['admitted'] and d['admission']['tokens'] == 65410
+rows = c.delta_rows(i, {'hrx_loom': '0.3.0'}, i['sdk_delta']['comparisons'][0])['strix-halo']
+reg = [r['metric'] for r in rows if r['regression']]
+assert reg == ['prefill_1k', 'prefill_2k'], reg
+assert [r['metric'] for r in rows if r['regression'] and r['explanation']] == ['prefill_1k']
+acc = next(r for r in rows if r['metric'] == 'spec_acceptance'); assert acc['old'] == 0.68 and acc['unreported'] == 'proposals', acc" "$C" "$tmp/sdk03/info.json" \
+  && echo "OK   sdk03: unreported acceptance, admission, delta rows vs the 0.2-era card" || { echo "FAIL sdk03: info.json"; bad=1; }
+# card.carried "drop": the sdk02 card's values and gates measured on SDK 0.1.0 (not its pin 0.2.0rc1) are not shown; the GPU keeps its Quick start
+rm -rf "$tmp/sdk02_drop"; mkdir -p "$tmp/sdk02_drop"
+py -c "import json, sys; i = json.load(open(sys.argv[1] + '/info.json')); i['card']['carried'] = 'drop'; json.dump(i, open(sys.argv[2], 'w'))" "$tmp/sdk02" "$tmp/s2drop.json"
+for f in "$tmp"/sdk02/*; do [ "$(basename "$f")" = info.json ] || cp -r "$f" "$tmp/sdk02_drop/"; done; cp "$tmp/s2drop.json" "$tmp/sdk02_drop/info.json"
+py "$C/render_card.py" "$tmp/sdk02_drop" -o "$tmp/sdk02_drop.md" 2>/dev/null && py -c "import sys; r = open(sys.argv[1]).read()
+assert '§' not in r and 'not re-qualified' not in r and '330.3' not in r, 'carried values shown'
+assert 'loom-fetch' in r and 'not yet re-measured' in r, 'Quick start or the not-re-measured line missing'" "$tmp/sdk02_drop.md" \
+  && echo "OK   carried drop: values and gates of another SDK are not shown, the Quick start stays" || { echo "FAIL carried drop"; bad=1; }
+# render refuses a card that cites a job that did not succeed
+py -c "import json, sys; i = json.load(open(sys.argv[1] + '/info.json')); s = next(iter(i['sources'].values())); s['conclusion'] = 'failure'
+json.dump(i, open(sys.argv[2], 'w'))" "$tmp/sdk03" "$tmp/s3fail.json"
+rm -rf "$tmp/sdk03_fail"; cp -r "$tmp/sdk03" "$tmp/sdk03_fail"; cp "$tmp/s3fail.json" "$tmp/sdk03_fail/info.json"
+! py "$C/render_card.py" "$tmp/sdk03_fail" -o - >/dev/null 2>&1 && echo "OK   render refuses a failed run as evidence" || { echo "FAIL render rendered a card citing a failed run"; bad=1; }
+for n in flint d1 ratchet r9700_two r9700_none r9700_staging r9700_preset r9700_exec gpus4 sdk02 sdk02_presets loomonly sdk03; do
   files="info.json README.md REPORT.md"; [ "$n" = flint ] && files="$files flags.json roofline_rows.json"
   py "$C/render_card.py" "$tmp/$n" 2>/dev/null
   py "$C/render_card.py" "$tmp/$n" -o "$tmp/${n}_README2.md" 2>/dev/null
