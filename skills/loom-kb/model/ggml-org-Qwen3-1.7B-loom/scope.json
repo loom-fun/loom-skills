@@ -20,9 +20,9 @@
   },
   {
    "set": {
-    "prefill.gemm.min_tokens_dense": 17
+    "decode.mv.act_q8": false
    },
-   "evidence": "pf-misc (logits gate, R9700): with int8 activations in the sub-64-token prefill matvecs the first token of the 22-token 'Translate' prompt is '-' -0.63 / '**' -0.78; a float64 forward of the same GGUF gives '**' -0.22 / '-' -1.63, the same forward with q8_1 activations -0.59 / -0.82 (Loom's), with f16 activations -0.22 / -1.66. Epochs of 17+ tokens take the f16 GEMM path; decode and batched decode (<= 16 rows) keep the int8 matvecs."
+   "evidence": "pf-misc (logits gate, R9700): the int8 activations (q8_1, 32-value groups) of the matvec path, which also prefills prompts under 64 tokens, flip the first token of the gate's 22-token 'Translate' prompt: Loom '-' -0.63 / '**' -0.78; a float64 forward of the same GGUF '**' -0.22 / '-' -1.63, the same forward with q8_1 activations -0.82 / -0.59, with f16 activations -0.22 / -1.66. The prefill GEMM cannot take shorter epochs (its kernels assume >= 64 rows), so the matvecs read unquantized activations."
   }
  ]
 }
