@@ -889,6 +889,9 @@ def delta_lines(info, pin, solo, depth=None):
                     parts.append(f"{name} per verification pass {pp['old']:.2f} → {pp['new']:.2f} ({r['change'] * 100:+.1f} %; both in the "
                                  f"performance session's decode requests, the previous card's share of depth-{depth} proposals as SDK "
                                  f"{olds[0] if olds else 'its'} counted them)")
+                    if r["regression"]:
+                        notes.append((g, r))
+                        parts[-1] += f" {mark(len(notes))}"
                 elif r["metric"] == "spec_acceptance" and r.get("different_workloads"):
                     parts.append(f"{name}: previous card {pct_of(r['old'])} of proposals in its speculative-decoding gate, this card "
                                  f"{r['accepted_per_pass']:.2f} per verification pass in the performance session (different workloads, no delta)")
@@ -896,6 +899,9 @@ def delta_lines(info, pin, solo, depth=None):
                     new = ("not reported" if r["unreported"] else "not re-measured" if r["missing"]
                            else pct_of(r["new"]) if r["new"] is not None else "not measured")
                     parts.append(f"{name} {pct_of(r['old']) if r['old'] is not None else MISSING} → {new}")
+                    if r["regression"]:
+                        notes.append((g, r))
+                        parts[-1] += f" {mark(len(notes))}"
                 elif r["change"] is None:
                     parts.append(f"{name} " + ("not re-measured" if r["missing"] else "new" if r["old"] is None else "not measured"))
                 else:
@@ -908,8 +914,13 @@ def delta_lines(info, pin, solo, depth=None):
         for i, (g, r) in enumerate(notes, 1):
             e = r["explanation"]
             why = (e["text"].rstrip(".") + (f" ([evidence]({e['url']}))" if e.get("url") else "")) if e else "unexplained"
-            L.append(f"- {mark(i)} {GPUS[g]['short']} {DELTA_NAMES[r['metric']]} {r['change'] * 100:+.1f} % "
-                     f"({num(r['metric'], r['old'])} → {num(r['metric'], r['new'])} tok/s): {why}.")
+            if r["metric"] == "spec_acceptance":   # a drafted-token acceptance drop: its own quantity, not tok/s
+                pp = r.get("per_pass")
+                vals = f"{pp['old']:.2f} → {pp['new']:.2f} per verification pass" if pp else f"{pct_of(r['old'])} → {pct_of(r['new'])}"
+                L.append(f"- {mark(i)} {GPUS[g]['short']} {DELTA_NAMES[r['metric']]} {r['relative'] * 100:+.1f} % ({vals}): {why}.")
+            else:
+                L.append(f"- {mark(i)} {GPUS[g]['short']} {DELTA_NAMES[r['metric']]} {r['change'] * 100:+.1f} % "
+                         f"({num(r['metric'], r['old'])} → {num(r['metric'], r['new'])} tok/s): {why}.")
         L.append(f"- Change: (this card / previous card - 1) × 100 % of the Loom value; beyond -{DELTA_BAND * 100:g} % a regression needs a "
                  "confirmed explanation.")
         L.append("")
