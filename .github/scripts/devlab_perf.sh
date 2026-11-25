@@ -433,7 +433,7 @@ for v in $variants; do
     # served under the job's model id (every step addresses \$cardid); the chosen preset first (the one serve_alone picks)
     "$T" - "$pkg/model.json" "$cardid" "$cp_" <<'EOF' || exit 1
 import json, sys
-m = json.load(open(sys.argv[1])); m["model"]["catalog_id"] = m["model"]["id"]; m["model"]["id"] = sys.argv[2]
+m = json.load(open(sys.argv[1])); m["model"]["id"] = sys.argv[2]   # (the card schema has no other model field: the catalog id is in catalog_V.txt)
 if sys.argv[3]:
     m["presets"] = {sys.argv[3]: m["presets"][sys.argv[3]], **{k: x for k, x in m["presets"].items() if k != sys.argv[3]}}
 json.dump(m, open(sys.argv[1], "w"), indent=1)
