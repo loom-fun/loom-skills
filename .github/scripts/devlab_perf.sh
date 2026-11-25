@@ -145,6 +145,21 @@ PORT=${LOOM_PORT:-8161}; LLAMA_PORT=${LLAMA_PORT:-8131}; url=http://127.0.0.1:$P
 t0=$(date +%s); step() { echo "== $* ($(date +%T), +$(( $(date +%s) - t0 ))s)"; }
 q() { python3 -c "import json,sys; e=json.load(open('$exp')); j=next(j for j in e['jobs'] if j['name']=='$job'); $1"; }
 qv() { python3 -c "import json,sys; e=json.load(open('$exp')); j=next(j for j in e['jobs'] if j['name']=='$job'); v=next(v for v in j['variants'] if v['name']=='$1'); $2"; }
+# Job "kind": "image" (fleet/regen.py --programs production, an image package): no text steps. image_sdk_compare.py serves the pinned package
+# ("card": ORG/REPO@REV) on the old and the new SDK (job "image": {"old_sdk", "new_sdk", "programs_sha256", "preset"}), ABBA sessions, the
+# preset's deterministic request: identical pixels, programs hash checked before serving, timings per session; writes out/summary.json.
+if [ "$(q "print(j.get('kind') or '')")" = image ]; then
+  hostname > "$out/runner.txt"
+  iold=$(q "print(j['image']['old_sdk'])"); inew=$(q "print(j['image']['new_sdk'])")
+  for v in old new; do
+    sv=$([ $v = old ] && echo "$iold" || echo "$inew")
+    r=$(LOOM_VERSION=$sv "$SV/ensure_sdk.sh" "$WORK/loom-sdk-${sv//:/-}" "" 2> "$out/install_$v.log") || { tail -5 "$out/install_$v.log"; echo "FAIL: SDK $sv"; exit 1; }
+    cp "$r/loom-install.json" "$out/sdk_$v.json"; eval "IROOT_$v=\$r"
+  done
+  "$IROOT_new/.tools/bin/python" "$here/.github/scripts/image_sdk_compare.py" "$exp" "$job" --old-root "$IROOT_old" --new-root "$IROOT_new" \
+    --work "$D" --out "$out" --port "$PORT"
+  exit $?
+fi
 # a card reference is ORG/REPO or ORG/REPO@REV (job "card" and variant "card"): REV pins the commit fetched instead of main
 repo_ref=$(q "print(j.get('card') or e['card'])"); repo=${repo_ref%@*}; mem=$(q "print(j.get('memory_bytes') or e['memory_bytes'])")
 kit=$(q "print((j['kit'] if 'kit' in j else e.get('kit')) or '-')"); tag=$(q "print(j.get('llamacpp') or e.get('llamacpp') or '-')"); variants=$(q "print(' '.join(v['name'] for v in j['variants']))")
@@ -482,6 +497,11 @@ EOF
   cp "$pkg/model.json" "$out/model_$v.json"; sha256sum "$pkg"/program/*.loom > "$out/programs_$v.sha256"
   "$T" -I -c "import sys; sys.path.insert(0, sys.argv[1]); from card_lib import programs_sha256; print(programs_sha256(sys.argv[2]))" \
     "$here/skills/loom-benchmark/scripts/card" "$pkg" > "$out/programs_sha256_$v.txt" 2>/dev/null   # the aggregate hash of THIS variant's programs (a built variant's: make_info.py --fetched-programs)
+  # variant "programs_sha256": the programs this variant must serve (fleet/regen.py --programs production: the frozen production programs); any other
+  # hash ends the job before anything is measured
+  vwant=$(qv "$v" "print(v.get('programs_sha256') or '')")
+  if [ -n "$vwant" ] && [ "$vwant" != "$(cat "$out/programs_sha256_$v.txt")" ]; then
+    echo "FAIL: variant $v serves programs $(cat "$out/programs_sha256_$v.txt"), not the expected $vwant: nothing measured"; exit 1; fi
 done
 
 pkg_preset() {   # pkg_preset MODEL_JSON -> the preset this runner serves ("" for a card with one preset): the R9700's <first><suffix> when it has one, else the first
@@ -738,8 +758,12 @@ while [ "$qi" -lt "${#queue[@]}" ]; do
     perf)
       serve_alone "$p1" || { res[$s]=ERROR; continue; }
       step "perf $p1 x $p2 ${p3:-} (thinking $TH)"
+      # the server's raw /metrics before and after every perf.py run (metrics_V_NNN.txt: the cumulative speculative counters the drafted-token
+      # acceptance is derived from; kept raw so a telemetry change of an SDK is visible in the artifact)
+      mi=$(ls "$out"/metrics_"$p1"_*.txt 2>/dev/null | wc -l); curl -s "$url/metrics" > "$out/metrics_${p1}_$(printf %03d "$mi").txt" 2>/dev/null
       for i in $(seq 1 "$p2"); do
         (cd "$out" && "$T" "$B/perf.py" "$url" "$p1" --model "$cardid" --no-campaign --thinking "$TH" --repeat-rows "$rrows" --log "perf_$p1.jsonl" $([ "${p3:-}" = ctx ] && echo --decode-ctx 16000,124000 || echo ${p3:+--long}) | tail -1)
+        mi=$((mi + 1)); curl -s "$url/metrics" > "$out/metrics_${p1}_$(printf %03d "$mi").txt" 2>/dev/null
       done
       echo "{\"session_end\": \"$p1\"}" >> "$out/perf_$p1.jsonl"   # one serve session ends (strix_ab_compare.py: per-session medians)
       "$T" "$here/.github/scripts/ab_decode.py" "$url" "$cardid" --rounds 2 --think "$TH" --log "$out/tps_$p1.jsonl" | grep SUMMARY
