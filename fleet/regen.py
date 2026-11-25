@@ -889,6 +889,11 @@ def sdk_loom_decide(st, name, e, cmp_path):
     gone = [k for k, v in perf.items() if v is None and (m.get(SDK_METRICS[k]) or {}).get("card") and not (m.get(SDK_METRICS[k]) or {}).get("new")]
     nocard = [k for k, v in perf.items() if v is None and (m.get(SDK_METRICS[k]) or {}).get("new") and not (m.get(SDK_METRICS[k]) or {}).get("card")]
     moved = {k: v for k, v in perf.items() if v is not None and abs(v) > limit}
+    if st.d["opts"].get("programs") == "production":   # every card row needs its delta explained: a row outside the band is confirmed too (by row name)
+        for row, x in m.items():
+            r = x.get("new_vs_card")
+            if row not in SDK_METRICS.values() and r and abs(r - 1) > SDK_REGRESSION:
+                moved[row] = round((r - 1) * 100, 1)
     if not any((m.get(r) or {}).get("new") for r in SDK_METRICS.values()):
         return "hold", ["the job measured none of decode, prefill, longctx, 4stream"], perf, rows
     reasons = []
@@ -1008,10 +1013,14 @@ def sdk_loom_settle(st, e, decision, reasons):
     """sdk-loom: the ABBA job e answers its first job's question. promote: the first job's rows that moved take the ABBA deltas (state: confirmed =
     {row: ABBA %}, perf = the cross-job deltas with those rows replaced) and the first job promotes; hold: the first job stops with the ABBA numbers."""
     f = st.jobs[e["prev"]]
-    abba = e.get("perf_abba") or {}
+    abba = {**(e.get("rows_pct") or {}), **(e.get("perf_abba") or {})}   # metric keys (decode, prefill, ...) and card row names (prefill_2k, ...)
     rows = f.get("confirm_rows") or []
+    slower = {k: abba[k] for k in rows if k not in SDK_METRICS and abba.get(k) is not None and abba[k] < -SDK_REGRESSION * 100}
+    if decision == "promote" and slower:   # a card row the ratchet's four metrics do not cover, confirmed slower in the same job
+        decision, reasons = "hold", [f"slower than -{SDK_REGRESSION:.0%} in the same-job ABBA: " + ", ".join(f"{k} {v:+.1f} %" for k, v in slower.items())] + list(reasons)
     if decision == "promote":
         f["confirmed"] = {k: abba[k] for k in rows if abba.get(k) is not None}
+        f["confirmed_by"] = e.get("job_url")
         f["perf"] = {k: (f["confirmed"][k] if k in f["confirmed"] else v) for k, v in (f.get("perf_cross") or f.get("perf") or {}).items()}
         f.update(decision="promote", reason="confirmed by ABBA job " + e["run"] + ": " + ", ".join(f"{k} {v:+.1f} %" for k, v in f["confirmed"].items()))
     else:
@@ -1936,9 +1945,20 @@ def device_evidence(st, e, info_cache):
     ev["delta_pct"] = {k: round((new_rows[k] / old_rows[k] - 1) * 100, 1) for k in EVIDENCE_ROWS
                        if new_rows.get(k) and old_rows.get(k) and k != "spec_acceptance"}
     conf = e.get("confirmed") or {}
-    ev["confirmed"] = {SDK_METRICS[k]: v for k, v in conf.items() if k in SDK_METRICS}
-    ev["regressions"] = [{"row": k, "pct": v, "confirmed_abba_pct": ev["confirmed"].get(k), "explanation": None}
-                         for k, v in sorted(ev["delta_pct"].items()) if v < -SDK_REGRESSION * 100]
+    ev["confirmed"] = {SDK_METRICS.get(k, k): v for k, v in conf.items()}
+    if e.get("confirmed_by"):
+        ev["confirmed_by"] = e["confirmed_by"]
+    exact = {k: (m.get(k) or {}).get("new_vs_card") for k in ev["delta_pct"]}
+    ev["regressions"] = []
+    for k in sorted(ev["delta_pct"]):
+        if not exact.get(k) or exact[k] - 1 >= -SDK_REGRESSION:
+            continue
+        c = ev["confirmed"].get(k)
+        expl = None
+        if c is not None and c >= -SDK_REGRESSION * 100 and e.get("confirmed_by"):   # the ratchet's same-job ABBA settled it: a generated explanation
+            expl = {"text": f"same-job ABBA (the same programs on hrx-loom {o_sdk(st)} and {target_sdk(st.d)}): {c:+.1f} %, within the band; "
+                            f"the {ev['delta_pct'][k]:+.1f} % against the previous card is the difference between two jobs", "url": e["confirmed_by"]}
+        ev["regressions"].append({"row": k, "pct": ev["delta_pct"][k], "confirmed_abba_pct": c, "explanation": expl})
     summ = {}
     try:
         summ = json.load(open(os.path.join(d, "summary.json"))).get("results", {})
@@ -1956,6 +1976,10 @@ def device_evidence(st, e, info_cache):
     ev["spec_acceptance"] = {"old": old_rows.get("spec_acceptance"), "new": new_rows["spec_acceptance"], "per_row": {k: x.get("new") for k, x in acc.items()},
                              "raw": raw}
     return ev
+
+
+def o_sdk(st):
+    return st.d["opts"].get("old_sdk") or "the old SDK"
 
 
 def device_status(e):
