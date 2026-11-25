@@ -8,7 +8,7 @@
  "llamacpp": "b1374",
  "jobs": [
   {
-   "name": "sf-ornith35b-strix",
+   "name": "sf-ornith35b-strix-2",
    "runner": "strix",
    "card": "loom-fun/bartowski-Ornith-1.5-35B-A3B-loom",
    "memory_bytes": 49000000000,
@@ -27,8 +27,11 @@
      "sdk": "0.3.0"
     },
     {
-     "name": "kit",
-     "build": {},
+     "name": "segnd",
+     "build": {
+      "SEG_D256": "1",
+      "SEG_WMMA": "1"
+     },
      "build_args": [
       "--memory-gib",
       "4096"
@@ -49,48 +52,81 @@
      "sdk": "0.3.0"
     },
     {
-     "name": "kvo",
+     "name": "funnd",
+     "card": "loom-fun/bartowski-Ornith-1.5-35B-A3B-loom",
+     "sdk": "0.2.0",
+     "execution": {
+      "draft_depth": 0
+     }
+    },
+    {
+     "name": "fz3nd",
+     "card": "loom-fun/bartowski-Ornith-1.5-35B-A3B-loom",
+     "sdk": "0.3.0",
+     "execution": {
+      "draft_depth": 0
+     }
+    },
+    {
+     "name": "segndnd",
      "build": {
-      "ATTN_GQA_D256": "1"
+      "SEG_D256": "1",
+      "SEG_WMMA": "1"
      },
      "build_args": [
       "--memory-gib",
       "4096"
      ],
-     "sdk": "0.3.0"
+     "sdk": "0.3.0",
+     "execution": {
+      "draft_depth": 0
+     }
+    },
+    {
+     "name": "segnd",
+     "build": {
+      "SEG_D256": "1",
+      "SEG_WMMA": "1",
+      "SPEC_CTX_MAX": "0"
+     },
+     "build_args": [
+      "--memory-gib",
+      "4096"
+     ],
+     "sdk": "0.3.0",
+     "execution": {
+      "draft_depth": 0
+     }
     }
    ],
    "steps": [
     "perf:fun:1",
     "perf:fz3:1",
-    "perf:kit:1",
+    "perf:segnd:1",
     "perf:seg:1",
-    "perf:kvo:1",
     "perf:fun:1",
-    "perf:kvo:1",
     "perf:seg:1",
-    "perf:kit:1",
+    "perf:segnd:1",
     "perf:fz3:1",
     "perf:fun:1:long",
     "perf:fz3:1:long",
-    "perf:kit:1:long",
+    "perf:segnd:1:long",
     "perf:seg:1:long",
-    "perf:kvo:1:long",
     "perf:fun:1:long",
-    "perf:kvo:1:long",
     "perf:seg:1:long",
-    "perf:kit:1:long",
+    "perf:segnd:1:long",
     "perf:fz3:1:long",
-    "perf:kit:1:long",
+    "perf:segnd:1:long",
     "perf:seg:1:long",
-    "perf:kvo:1:long",
     "perf:fun:1:long",
     "perf:fz3:1:long",
-    "profile:fz3:dec32k",
-    "profile:seg:dec32k",
+    "perf:segnd:1:long",
+    "perf:fz3:1:long",
+    "perf:fun:1:long",
+    "perf:seg:1:long",
+    "smoke:segnd",
     "smoke:seg",
-    "smoke:kvo",
-    "ktest:seg"
+    "ktest:segnd"
    ],
    "sdk": "0.3.0"
   }
