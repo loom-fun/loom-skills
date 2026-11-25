@@ -875,7 +875,7 @@ func.def public pure inline @flash_next_hc_projection_rows(%packet: index, %acti
 
 func.def pure inline @hc_quantized_range() -> (index, index) {
   %lower_exclusive = index.constant 1024 : index
-  %upper_inclusive = index.constant 2048 : index
+  %upper_inclusive = index.constant 8192 : index
   func.return %lower_exclusive, %upper_inclusive : index, index
 }
 
