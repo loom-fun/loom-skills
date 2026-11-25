@@ -397,7 +397,7 @@ kit_for() {   # kit_for VARIANT REF -> builds D/<variant>/kit from REF's starter
     PL=$D/$v/src/skills/loom-port-llm; KBV[$v]=$D/$v/src/skills/loom-kb; echo "starter from $ref ($(git -C "$here" log -1 --format=%h:%s "$ref" | cut -c1-80))"
   fi
   if [ "$kit" != - ]; then "$PL/reference/apply_example.sh" "$kit" "$D/$v/kit" | tail -1 >/dev/null || return 1
-  else cp -r "$PL/starter" "$D/$v/kit"; fi
+  else cp -r "$PL/starter" "$D/$v/kit" && { [ ! -f "$D/$v/kit/kit_source.py" ] || python3 "$D/$v/kit/kit_source.py" write "$D/$v/kit" --skills-dir "$PL" >/dev/null; } || return 1; fi
   KIT[$v]=$D/$v/kit
 }
 for v in $variants; do
