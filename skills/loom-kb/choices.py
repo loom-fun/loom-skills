@@ -518,6 +518,10 @@ CHOICE("moe.route.unroll", "int", 4, "MOE_ROUTE_U", doc="Experts per wave scored
 CHOICE("moe.route.tokens_per_wg", "int", 0, "ROUTE_TR", doc="Router tokens per workgroup (0: the largest of 1/2/4/8 whose LDS fits 48 KiB). "
        "A count whose x rows fit 64 KiB but not with the logits (8 at hidden 2048, 256 experts) keeps the logits in registers: same sums, half the weight reads of 4.",
        **_MO)
+CHOICE("moe.route.decode_split", "bool", False, "MOE_ROUTE_DSPLIT", kernels=["g_moe_route", "g_moe_route_lg", "g_moe_route_tk"],
+       rows=ROWS_DECODE + ROWS_STREAMS, from_pr="qwen35b lane",
+       doc="Decode-shaped epochs score the router once per epoch (g_moe_route_lg: one wave per 4 experts over every token) into a scratch, "
+           "then g_moe_route_tk does g_moe_route's softmax + top-k per token: each router weight read once per epoch; bit-identical ids/weights.")
 CHOICE("moe.fold", "bool", True, "MOE_FOLD", doc="Fold the routing weights into the expert matvec.", **_MO)
 CHOICE("moe.prefill.skip_empty", "bool", True, "MOE_SKIP_EMPTY", doc="Waves of empty expert tiles exit early.", **_MO)
 CHOICE("moe.prefill.prefetch", "bool", True, "MOE_PREFETCH", doc="Stage prefetch in the grouped expert GEMMs.", **_MO)
