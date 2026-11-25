@@ -58,7 +58,7 @@ else:
         class _Repacked:
             def __init__(self, t):
                 self.name, self.shape, self.tensor_type = t.name, t.shape, gguf_ext.PTQ1_0
-                self.src = np.asarray(t.data).view(np.uint8)
+                self.src = np.asarray(t.data).view(np.uint8).reshape(-1)
                 self.data = gguf_ext.q2_0_to_ptq1_0(self.src.reshape(-1, 36)).reshape(-1)
         T = {n: (_Repacked(t) if t.tensor_type.name == "Q2_0" and len(t.shape) == 2 and int(t.shape[0]) % 128 == 0 else t) for n, t in T.items()}
     def raw(name): return np.asarray(T[name].data).view(np.int8).reshape(-1)
