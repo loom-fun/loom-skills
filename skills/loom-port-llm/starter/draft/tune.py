@@ -9,7 +9,7 @@ candidate is served alone and timed on decode-heavy requests (short essay, code,
 a code edit that returns most of its input as agents' file edits do, and one decode after the 32k-token document (the card's
 decode_32k row; the largest that fits a shorter context); greedy, client-side tokens/s) and, with a multi-row preset, on `rows` concurrent essays (streams4).
 Each candidate's margin is its worst row relative to depth 0. A drafter is used only if no row is slower than 0.98 x depth 0
-(prose, long-document and 4-stream decode are the card's headline rows: low-acceptance drafting loses 20-40 % there) and
+(the 4-stream row is measured but not a criterion: SKIP_ROWS) (prose and long-document decode are the card's headline rows: low-acceptance drafting loses 20-40 % there) and
 its single-stream rate (harmonic mean) beats no drafting by at least 3 %; the best margin wins; its kind/depth go to cfg["drafter"] and pkg/ is rebuilt with it
 (build.py --draft auto reads them). Before it is kept, the fastest candidate must pass a concurrency check and the
 spec gate's equivalence check (loom-benchmark spec_check.py: the same requests at the candidate depth and at
@@ -160,12 +160,18 @@ def single_rate(rows):
     return statistics.harmonic_mean(v) if v else 0.0
 
 
+# The 4-stream row is not a drafting criterion: the card measures 4 streams with drafting off on both engines (methodology
+# baselines rule, variant nodraft), and the drafted package gates drafting by occupancy. Ternary Bonsai 27B (#1416): MTP depth 3
+# decoded 46 vs 24.6 tok/s single-stream but was dropped for a gated 4-stream row 5.6 % under the no-draft package's.
+SKIP_ROWS = ("streams4",)
+
+
 def margin(rows, base_rows):
-    """The candidate's worst row relative to depth 0 (min over the rows depth 0 measured; 0.0 when a row is missing)."""
-    return min((rows.get(k, 0.0) / t for k, t in base_rows.items() if t), default=0.0)
+    """The candidate's worst row relative to depth 0 (min over the rows depth 0 measured, SKIP_ROWS aside; 0.0 when a row is missing)."""
+    return min((rows.get(k, 0.0) / t for k, t in base_rows.items() if t and k not in SKIP_ROWS), default=0.0)
 
 
-CARD_ROWS = ("work0", "long", "streams4")   # the card's decode (perf.py's prose essay), decode_32k and 4-stream rows
+CARD_ROWS = ("work0", "long")   # the card's decode (perf.py's prose essay) and decode_32k rows (4 streams: SKIP_ROWS)
 
 
 def geomean_margin(rows, base_rows, refs=None):
@@ -214,7 +220,7 @@ def load_llama_refs(cfg):
 def llama_margin(rows, refs):
     """The worst row relative to llama.cpp's rate for that row (work* -> decode, long -> decode_32k, streams4 -> c4)."""
     ref = lambda k: refs.get("c4" if k == "streams4" else "decode_32k" if k == "long" else "decode")
-    return min((t / ref(k) for k, t in rows.items() if ref(k)), default=0.0)
+    return min((t / ref(k) for k, t in rows.items() if ref(k) and k not in SKIP_ROWS), default=0.0)
 
 
 def concurrent_ok(url, model, chat):
