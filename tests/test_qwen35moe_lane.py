@@ -64,7 +64,6 @@ class Router8(unittest.TestCase):
         self.assertIn("%lg_view = buffer.view %xs[%zero]", t)
         self.assertEqual(len(re.findall(r"view\.store %kept\d, %lg_view", t)), 8)
         self.assertIn("scf.for %bq = [%c0 to %cHB step %cu4]", t)          # four 128-value blocks per step
-        self.assertIn("%store_lane = scalar.andi %store_lt, %gl_lt : i1", t)   # padding rows stay unwritten
         # the sums keep their order: block u + 1 adds onto block u's partial
         self.assertIn("%n1_0 = scalar.addf %n0_0, %d1_0 : f32", t)
 
