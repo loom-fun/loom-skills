@@ -216,6 +216,68 @@
     "c4:c2nd"
    ],
    "memory_bytes_r9700": 34000000000
+  },
+  {
+   "name": "rg-cancel-joyai-strix",
+   "runner": "strix",
+   "card": "loom-fun/jdopensource-JoyAI-LLM-Flash-loom@b4787e7927e3863b612b50c13c69207efaa7806e",
+   "memory_bytes": 47000000000,
+   "kit": "deepseek2",
+   "llamacpp": "b1386",
+   "sdk": "0.3.0",
+   "env": {
+    "LOOM_ADMIT_CANCEL_WAIT": "900"
+   },
+   "variants": [
+    {
+     "name": "fun",
+     "sdk": "card",
+     "programs_sha256": "bf2c516bdedc09998b86e9a48e240b4a7cde001881c77fcb0c3c4b5d530c28c6",
+     "card": "loom-fun/jdopensource-JoyAI-LLM-Flash-loom@b4787e7927e3863b612b50c13c69207efaa7806e"
+    },
+    {
+     "name": "staging",
+     "sdk": "0.3.0",
+     "programs_sha256": "bf2c516bdedc09998b86e9a48e240b4a7cde001881c77fcb0c3c4b5d530c28c6"
+    }
+   ],
+   "steps": [
+    "admit:fun",
+    "admit:staging",
+    "admit:staging",
+    "admit:fun"
+   ]
+  },
+  {
+   "name": "rg-cancel-ornith9b-strix",
+   "runner": "strix",
+   "card": "loom-fun/bartowski-Ornith-1.5-9B-loom@fd3c6efebabc4ea9502c296326402a079bb84827",
+   "memory_bytes": 32000000000,
+   "kit": null,
+   "llamacpp": "b1374",
+   "sdk": "0.3.0",
+   "env": {
+    "LOOM_ADMIT_CANCEL_WAIT": "900"
+   },
+   "variants": [
+    {
+     "name": "fun",
+     "sdk": "card",
+     "programs_sha256": "8966d3a22644212b1c594e39d9d2b2194ac4b821e0c9e5d8149685dba3241ee8",
+     "card": "loom-fun/bartowski-Ornith-1.5-9B-loom@fd3c6efebabc4ea9502c296326402a079bb84827"
+    },
+    {
+     "name": "staging",
+     "sdk": "0.3.0",
+     "programs_sha256": "8966d3a22644212b1c594e39d9d2b2194ac4b821e0c9e5d8149685dba3241ee8"
+    }
+   ],
+   "steps": [
+    "admit:fun",
+    "admit:staging",
+    "admit:staging",
+    "admit:fun"
+   ]
   }
  ]
 }
