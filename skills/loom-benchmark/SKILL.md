@@ -8,8 +8,9 @@ description: Correctness and performance methodology for Loom models vs llama.cp
 There are no needle-in-a-haystack gates: long-context retrieval is not part of the correctness gates (the 1k-32k goldens
 cover long prefill and KV paging). One cheap check remains, the **native-context admission probe** (`ctx_admit.py`, run
 by `gates.sh` at `quick` and `full`): one request of about the package's native context is sent, must be admitted by
-loom-serve (not refused with a 4xx/503) and is then cancelled. It is a check, not a gate: no gate row, no card row;
-`gates.json` records it under `context_admit` and a refusal fails the run and the audit.
+loom-serve (not refused with a 4xx/503) and is then cancelled. It is a check, not a gate: no gate row;
+`gates.json` records it under `context_admit`, a refusal fails the run and the audit, and the card states the result
+per GPU under its correctness table (`make_info.py gates` carries it into info.json `devices.<gpu>.admission`).
 
 **Bundled paths ? first shell action.** Before running commands, set `LOOM_SKILL_DIR` in the shell to the
 absolute directory containing **this** `SKILL.md`, using its path from the skill listing or read tool.
@@ -294,7 +295,10 @@ Rules:
 **Speculative decoding in reports.** Say which drafter the package uses (`llm_config.json` `draft`), show the
 tuning table (`bench/draft_tune.json`: decode tok/s per method and depth, including no drafting) and the
 acceptance rate from the `spec` gate log. Decode numbers with drafting depend on the text: report them on the
-standard workloads and say so.
+standard workloads and say so. hrx-loom 0.3 serving a service ABI 1 controller counts no proposals (`/metrics` has
+`draft_accepted_inputs` and `decode_tokens` but no `draft_proposed_tokens`): the harness then reports drafted tokens
+accepted per verification pass (accepted / (decoded positions - accepted), `bench_common.per_pass_between`), never a
+share derived from the configured draft depth, and the card says why.
 
 **Benchmark methodology (normative: [`reference/methodology.md`](reference/methodology.md)).** One drafting choice per model, the same on
 Loom and llama.cpp ROCm + Vulkan (MTP head in the card's GGUF > exact-model DFlash/assistant drafter > none; never n-gram; from
@@ -349,3 +353,17 @@ source for the report's numbers.
 ### Hugging Face model card (loom-fun repos)
 
 The generated card sections, rows, publishing and republishing rules: `kb.py route --topic benchmark` (loom-kb).
+
+A card on a new hrx-loom version (`make_info.py build --help`):
+- The delta line is generated: `make_info.py build --previous-card card:REPO@REVISION=OLD/info.json` stores the published
+  card's values (and `migration=...` the migration-only build's, for programs changed beyond the migration);
+  `--delta-explanations` or `--sdk-evidence` adds the reason of every regression beyond 3 %. The card lists every metric
+  of every re-measured GPU; a regression without a reason renders "unexplained" and fails the lint.
+- Rows and gates measured on another SDK than the Quick start's pin are marked "measured on SDK X, not re-qualified on Y"
+  (`card.carried` "mark", the default) or left out ("drop"); never a plain pass. A gate the previous card also failed
+  is shown as pre-existing.
+- `card/lint_card.py DIR` (CI: `card/test/check.sh` goldens, `tests/test_card_sdk030.py`) fails a card that cites a
+  failed or unknown run, has no delta line or an unexplained regression, drops the acceptance row without a reason,
+  lacks the admission check, has inconsistent versions or "unknown" in its Versions line, is not exactly the
+  generator's render, or holds files or staging text outside the card format (`card/card_files.py`, which
+  `publish_package.py upload` enforces for the production org).

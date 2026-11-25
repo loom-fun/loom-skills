@@ -128,7 +128,7 @@ from card_lib import (DEFAULT_GPU, DRAFTED_ROWS, EVIDENCE_ID, GPUS, METRIC_KEYS,
                       programs_sha256, require_valid, fixed_pool_capacity, gpu_preset_execution, gpu_preset_name, with_gpu_preset, served_context, fit_served_context, upstream_facts, with_gate_features, write_json,
                       SERVE_HEADROOM, registry, fit_rows, non_targets, load_device_results, validate_device_results, with_device_preset, DEVICE_RESULTS_ID, card_serve_args, quick_start, serves,
                       historical_xsj_gate, sdk_serve_args, xsj_enabled, xsj_evidence_errors, xsj_measurement_errors, xsj_vulkan_comparison_errors,
-                      CAVEAT_MAX, DEVICE_RESULTS_DIR, QUICK_START_QUALIFICATION, qualified_bare_quick_start, text_errors)
+                      CAVEAT_MAX, DEVICE_RESULTS_DIR, QUICK_START_QUALIFICATION, qualified_bare_quick_start, text_errors, previous_values)
 
 
 # ---------------------------------------------------------------- sources
@@ -462,6 +462,7 @@ def cmd_build(a):
         return G.setdefault(gpu, {"baseline": None, "sessions": [], "gates": {}, "baselines": {}, "roofline": None, "meta": {}, "data": False,
                                   "remeasure": None})
     card_features = {}   # evidence-established feature statuses (import_card.py: greedy-only sampling)
+    old_delta = None
     sources = Sources()
     if a.from_info:   # a published card: its data first, then the new evidence on top
         old = load_info(a.from_info)   # loom-card/2: its one GPU is strix-halo
@@ -503,6 +504,8 @@ def cmd_build(a):
                 st["gates"][name] = ((g.get("date") or "", -1), None, g)
             st["roofline"] = dev.get("roofline")
             st["remeasure"] = dev.get("remeasure")
+            if dev.get("admission"):
+                st["admission"] = dev["admission"]
         if a.report is None:
             a.report = old.get("report")
         if a.status is None:
@@ -511,6 +514,7 @@ def cmd_build(a):
             a.next_steps = old.get("next_steps")
         if a.promotion_hold is None:
             a.promotion_hold = old.get("promotion_hold")
+        old_delta = old.get("sdk_delta")
     for spec in a.perf_from or []:   # GPU=INFO.json: that card's performance on GPU (sessions, baselines and their sources) as published
         gpu, _, path = spec.partition("=")
         if gpu not in GPUS or not path:
@@ -595,6 +599,12 @@ def cmd_build(a):
             new = ((g.get("time") or "", i), g, None)
             if g["name"] not in gst["gates"] or gate_supersedes(new, gst["gates"][g["name"]]):
                 gst["gates"][g["name"]] = new
+        if ev.get("admission"):   # the native-context admission check of a gates run: the latest per GPU
+            x = ev["admission"]
+            ast_ = gpu_state(ev.get("gpu") or evidence_gpu(ev, x["source"]))
+            ast_["data"] = True
+            if not ast_.get("admission") or (x.get("date") or "") >= (ast_["admission"].get("date") or ""):
+                ast_["admission"] = dict(x, source=sources.add(x["source"]))
         if ev.get("remeasure"):   # make_info.py remeasure: a same-runner A/B of this package against the build the table shows
             mst = gpu_state(evidence_gpu(ev))
             mst["data"] = True
@@ -729,6 +739,8 @@ def cmd_build(a):
                     d["performance"]["baselines"] = st["baselines"]
             if st["roofline"]:
                 d["roofline"] = st["roofline"]
+            if st.get("admission"):
+                d["admission"] = st["admission"]
             if st.get("remeasure") and st["remeasure"]["programs_sha256"] == programs_sha256(a.pkg):   # about this package only
                 d["remeasure"] = st["remeasure"]
                 for k, imp in (st["remeasure"].get("improved") or {}).items():   # confirmed faster in 2 runs: the card value is the runs' mean
@@ -770,11 +782,34 @@ def cmd_build(a):
         info["next_steps"] = a.next_steps
     if a.promotion_hold:
         info["promotion_hold"] = a.promotion_hold
+    jobs = {}
+    if a.sdk_evidence:   # the sweep's record of this model: explanations of its regressions and its jobs' conclusions
+        if a.sdk_evidence.get("schema") != "sdk-evidence/1":
+            sys.exit("--sdk-evidence: not an sdk-evidence/1 file")
+        model = (a.sdk_evidence.get("models") or {}).get(a.repo.split("/")[-1]) or {}
+        ex = {}
+        for gpu, dev in (model.get("devices") or {}).items():
+            if dev.get("job_url") and dev.get("conclusion"):
+                jobs[dev["job_url"]] = dev["conclusion"]
+            for r in dev.get("regressions") or []:
+                e = r.get("explanation")
+                if e:
+                    ex.setdefault(gpu, {})[r["row"]] = e if isinstance(e, dict) else {"text": e, "url": dev.get("job_url")}
+        if ex:
+            a.delta_explanations = {"card": {**ex, **((a.delta_explanations or {}).get("card") or {})},
+                                    **{k: v for k, v in (a.delta_explanations or {}).items() if k != "card"}}
+    for src in info["sources"].values():
+        if src.get("url") in jobs:
+            src["conclusion"] = jobs[src["url"]]
+    delta = sdk_delta(a, old_delta)
+    if delta:
+        info["sdk_delta"] = delta
     used = {s["source"] for d in devices.values() for s in (d.get("performance") or {}).get("sessions", [])}
     used |= {m["baseline_from"]["source"] for d in devices.values() for s in (d.get("performance") or {}).get("sessions", [])
              for m in s["metrics"].values() if m.get("baseline_from")}
     used |= {b["session"]["source"] for d in devices.values() for b in ((d.get("performance") or {}).get("baselines") or {}).values()}
     used |= {g["source"] for d in devices.values() for g in (d.get("gates") or {}).values()}
+    used |= {d["admission"]["source"] for d in devices.values() if d.get("admission")}
     for d in devices.values():
         r = d.get("remeasure")
         while r:   # a chained re-measure (identical on top of a re-measured build) keeps its previous blocks' sources
@@ -790,6 +825,45 @@ def cmd_build(a):
         with open(a.o, "w", encoding="utf-8", newline="\n") as f:
             f.write(out)
         print(f"wrote {a.o}", file=sys.stderr)
+
+
+def sdk_delta(a, old_delta):
+    """info.json sdk_delta: --from-info's comparisons, replaced per label by --previous-card, with --delta-explanations
+    merged in. Only the earlier cards' stored values are kept; render_card.py computes the delta line from them."""
+    comps = {c["label"]: c for c in (old_delta or {}).get("comparisons", [])}
+    for spec in a.previous_card or []:
+        head, sep, path = spec.partition("=")
+        label, _, where = head.partition(":")
+        if not sep or label not in ("card", "migration") or (label == "card") != bool(where):
+            sys.exit(f"--previous-card {spec}: expected card:REPO@REVISION=INFO.json or migration=INFO.json")
+        old = load_info(path)
+        require_valid(old, path)
+        c = {"label": label}
+        if label == "card":
+            repo, _, rev = where.partition("@")
+            if not re.fullmatch(r"[0-9a-f]{40}", rev):
+                sys.exit(f"--previous-card {spec}: REVISION must be the 40-hex commit of the earlier card")
+            c.update(repo=repo, revision=rev)
+        c["devices"] = previous_values(old)
+        if not c["devices"]:
+            sys.exit(f"--previous-card {spec}: {path} shows no Loom values")
+        if comps.get(label, {}).get("explanations"):
+            c["explanations"] = comps[label]["explanations"]
+        comps[label] = c
+    for label, by_gpu in (a.delta_explanations or {}).items():
+        if label not in comps:
+            sys.exit(f"--delta-explanations: no {label} comparison (pass --previous-card {label}...)")
+        ex = comps[label].setdefault("explanations", {})
+        for gpu, rows in by_gpu.items():
+            for k, e in rows.items():
+                if not isinstance(e, dict) or not e.get("text"):
+                    sys.exit(f"--delta-explanations {label}.{gpu}.{k}: needs a text")
+                errs = text_errors(f"--delta-explanations {label}.{gpu}.{k}", e["text"], CAVEAT_MAX)
+                if errs:   # one short factual line from the evidence, like a caveat: no narrative
+                    sys.exit("\n".join(errs))
+                ex.setdefault(gpu, {})[k] = {"text": e["text"], "url": e.get("url")}
+    order = {"card": 0, "migration": 1}
+    return {"comparisons": sorted(comps.values(), key=lambda c: order[c["label"]])} if comps else None
 
 
 # ---------------------------------------------------------------- perf logs -> evidence
@@ -1063,6 +1137,10 @@ def cmd_perf(a):
             m["baseline_runs"] = runs_of(k, bs, a.c4_llama)
         metrics[k] = m
     with_acceptance(metrics, lacc)
+    if a.draft_metrics and not extra:
+        acc = draft_metrics_acceptance(a.draft_metrics)
+        if acc:
+            metrics["spec_acceptance"] = acc
     if a.baseline_from_info:
         if extra or llama_rows:
             sys.exit("--baseline-from-info replaces the llama.cpp logs: give a Loom-only job's files")
@@ -1117,7 +1195,31 @@ def cmd_perf(a):
     if a.differs and "baseline" in perf:   # the main baseline too: a Loom-side note or a cell llama.cpp cannot run (rule: never silent)
         perf["baseline"]["differs"] = a.differs
     write_json(a.o, {"evidence": EVIDENCE_ID, **gpu_key(a, session["source"]), "performance": perf})
-    print(f"wrote {a.o}: " + ", ".join(f"{k} {m.get('loom')}/{m['baseline']}" for k, m in metrics.items()), file=sys.stderr)
+    print(f"wrote {a.o}: " + ", ".join(f"{k} {m.get('loom')}/{m.get('baseline')}" for k, m in metrics.items()), file=sys.stderr)
+
+
+def draft_metrics_acceptance(paths):
+    """spec_acceptance of a perf session from loom-serve /metrics dumps (cumulative per serve session): {"loom": share
+    of proposals} when the SDK counts proposals, else {"loom": None, "unreported": "proposals", "accepted_per_pass": x}
+    (bench_common.per_pass_between); the median over the dumps that decoded drafted tokens, or None."""
+    from draft_telemetry import acceptance_between, draft_counters, per_pass_between, proposals_unreported
+    shares, passes, unreported = [], [], False
+    for p in paths:
+        v = draft_counters(open(p, encoding="utf-8", errors="replace").read())
+        if not v.get("decode_tokens"):
+            continue
+        if proposals_unreported(v):
+            unreported = True
+            if per_pass_between({}, v) is not None:
+                passes.append(per_pass_between({}, v))
+        elif acceptance_between({}, v) is not None:
+            shares.append(acceptance_between({}, v))
+    if shares and not unreported:
+        return {"loom": round(statistics.median(shares), 3)}
+    if unreported:
+        return {"loom": None, "unreported": "proposals",
+                **({"accepted_per_pass": round(statistics.median(passes), 3)} if passes else {})}
+    return None
 
 
 def power_block(path, mode):
@@ -1133,6 +1235,7 @@ def power_block(path, mode):
 # ---------------------------------------------------------------- gate results -> evidence
 
 ACCEPT = re.compile(r"acceptance (\d+(?:\.\d+)?)% of (\d+) proposals")
+UNREPORTED = re.compile(r"acceptance not reported \((\d+) drafted tokens accepted(?: in (\d+) verification passes, ([0-9.]+) per pass)?")   # spec_check.py: no proposal count
 
 
 def gates_from_file(path, time, level):
@@ -1160,13 +1263,43 @@ def gates_from_file(path, time, level):
     sys.exit(f"{path}: no gates.json, GATES line or 'N/M passed' line found")
 
 
+def admission_of(path):
+    """The native-context admission check of a gates.json (gates.sh "context_admit": ctx_admit.py's verdict) as the
+    card records it ({admitted, tokens, context, detail, date}), or None (another file, or a run without the check)."""
+    try:
+        g = json.loads(open(path, encoding="utf-8").read())
+    except (OSError, ValueError):
+        return None
+    x = g.get("context_admit") if isinstance(g, dict) else None
+    if not isinstance(x, dict) or "admitted" not in x:
+        return None
+    return {"admitted": bool(x["admitted"]), "tokens": x.get("tokens"), "context": x.get("context"),
+            "detail": x.get("detail"), "date": (g.get("ts") or "")[:10] or None}
+
+
 def acceptance(paths):
     """The spec gate's acceptance fraction from the first file that reports one, or None."""
+    m = acceptance_metric(paths)
+    return m["loom"] if m else None
+
+
+def acceptance_metric(paths):
+    """The spec gate's spec_acceptance card metric from the first file that reports one: {"loom": fraction}, or
+    {"loom": None, "unreported": "proposals", "accepted_per_pass": x} when spec_check.py found accepted drafted tokens
+    but no proposal count (the SDK does not report it for the package's controller; bench_common.proposals_unreported):
+    the accepted drafted tokens per verification pass instead (bench_common.per_pass_between), or None."""
     for p in paths:
         if p and os.path.isfile(p):
-            found = ACCEPT.findall(open(p, encoding="utf-8", errors="replace").read())
+            body = open(p, encoding="utf-8", errors="replace").read()
+            found = ACCEPT.findall(body)
             if found:
-                return round(float(found[-1][0]) / 100, 3)
+                return {"loom": round(float(found[-1][0]) / 100, 3)}
+            found = UNREPORTED.findall(body)
+            if found:
+                m = {"loom": None, "unreported": "proposals"}
+                if found[-1][2]:
+                    m["accepted_per_pass"] = round(float(found[-1][2]), 3)
+                return m
     return None
 
 
@@ -1198,14 +1331,19 @@ def cmd_gates(a):
             d = os.path.dirname(os.path.abspath(path))
             logs += [os.path.join(d, "gates_spec.log"), path if path.endswith(".out") else os.path.join(d, "gates.out")]
     ev = {"evidence": EVIDENCE_ID, **gpu_key(a, src), "gates": out}
-    acc = acceptance(logs) if spec_date and a.source_kind in PERF_SOURCE_KINDS else None
+    acc = acceptance_metric(logs) if spec_date and a.source_kind in PERF_SOURCE_KINDS else None
     if acc is not None:
         ev["performance"] = {"session": {"date": spec_date, "source": src, "runs": {"decode_prefill": None, "streams4": None},
                                          "commands": [], "programs_sha256": psha,
-                                         "metrics": {"spec_acceptance": {"loom": acc}}}}
+                                         "metrics": {"spec_acceptance": acc}}}
+    admit = [admission_of(p) for p in a.files]
+    admit = next((x for x in admit if x), None)
+    if admit:
+        ev["admission"] = dict(admit, source=src, programs_sha256=psha)
     write_json(a.o, ev)
     print(f"wrote {a.o}: " + ", ".join(f"{g['name']}={g['status']}" for g in out)
-          + (f", spec_acceptance={acc}" if acc is not None else ""), file=sys.stderr)
+          + (f", spec_acceptance={acc}" if acc is not None else "")
+          + (f", context admission {'admitted' if admit['admitted'] else 'refused'}" if admit else ""), file=sys.stderr)
 
 
 # ---------------------------------------------------------------- same-runner re-measure (A/B) -> evidence
@@ -1480,7 +1618,17 @@ def main(argv=None):
                    "from another card's info.json (the staging flow: the loom-fun card's Strix table, with a remeasure evidence)")
     b.add_argument("--status", choices=["paused", "active"], help="paused: work on this model has stopped (active: clears it)")
     b.add_argument("--next-steps", type=next_steps_file, help="a file of next steps, one per line (empty: none)")
-    b.add_argument("--promotion-hold", type=load_json, help="JSON record of a confirmed same-runner SDK regression that holds production promotion")
+    b.add_argument("--promotion-hold", type=load_json, help="(retired: the delta line is generated from --previous-card) kept only so an older info.json still validates")
+    b.add_argument("--previous-card", action="append", metavar="card:REPO@REVISION=INFO.json | migration=INFO.json",
+                   help="an earlier card of this package whose stored Loom values the delta line compares with (repeat): card = the published "
+                   "card this one replaces (its repo and revision), migration = this package's migration-only card on the new SDK (frozen "
+                   "programs; no link, it is never published as the production card). Replaces --from-info's comparison of the same label")
+    b.add_argument("--sdk-evidence", type=load_json, metavar="EVIDENCE.json",
+                   help="an sdk-evidence/1 file (fleet/regen.py evidence): this card's regression explanations (as --delta-explanations "
+                   "card) and the conclusion of every job it cites (recorded on the sources; render_card.py refuses a failed one)")
+    b.add_argument("--delta-explanations", type=load_json, metavar="FILE.json",
+                   help='{"card"|"migration": {GPU: {METRIC: {"text": ..., "url": ...}}}}: why a metric regressed beyond the band, from '
+                   "evidence (a confirming rerun, a root cause); merged over --from-info's")
     b.add_argument("--upstream", choices=["probe", "none"], default=os.environ.get("LOOM_CARD_UPSTREAM", "probe"),
                    help="probe: ask Hugging Face what the upstream model has (vision: an mmproj or vision_config; audio: audio_* "
                    "config keys; an older package: the GGUF chat template), for the features that are n/a when it has none; "
@@ -1494,6 +1642,10 @@ def main(argv=None):
     p.add_argument("--llama-jsonl")
     p.add_argument("--c4-loom")
     p.add_argument("--c4-llama")
+    p.add_argument("--draft-metrics", nargs="*", metavar="METRICS.txt",
+                   help="loom-serve /metrics dumps taken at the end of each Loom serve session (devlab_perf.sh metrics_*.txt): the "
+                   "session's spec_acceptance from its drafting counters, the share of proposals, or drafted tokens accepted per "
+                   "verification pass when the SDK counts no proposals (median over the dumps that decoded)")
     p.add_argument("--baseline-from-info", help="a Loom-only job: the llama.cpp rows are the ones this published info.json shows for --gpu (see the module docstring)")
     p.add_argument("--baseline-name", default="llama.cpp")
     p.add_argument("--baseline-version", help="the baseline build, e.g. llamacpp-rocm/b1355 (a bare bNNNN tag is expanded)")

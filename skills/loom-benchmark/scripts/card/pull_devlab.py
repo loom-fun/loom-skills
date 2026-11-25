@@ -31,7 +31,7 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from card_lib import DEFAULT_GPU, EVIDENCE_ID, GPUS, registry, load_json, programs_sha256, write_json  # noqa: E402
-from make_info import acceptance  # noqa: E402
+from make_info import acceptance_metric  # noqa: E402
 
 GH_REPO = "loom-fun/loom-skills"
 WORKFLOW = "nightly-gates.yml"
@@ -67,19 +67,26 @@ def evidence(found, rid, hrx_loom=None, gpu=None):
     """The evidence file of a run's finished jobs for one card: found = [(summary.json, gates.json, job dir, job URL)].
     Every gate of every job; the spec gate's acceptance (gates_spec.log, else gates.out) as a spec_acceptance-only
     session stamped with the job's programs_sha256, the latest job's that reports one."""
-    gates, session = [], None
+    gates, session, admission = [], None, None
     for s, g, d, url in sorted(found, key=lambda x: x[1].get("ts") or ""):
         src = {"kind": "devlab", "run": str(rid), "url": url, "device": s.get("device"),
                "hrx_loom": s.get("hrx_loom") or hrx_loom}
         for name, x in sorted(g.get("gates", {}).items()):
             gates.append({"name": name, "status": "pass" if x.get("pass") else "fail", "level": g.get("level"),
                           "time": g.get("ts"), "source": src, "detail": None, "programs_sha256": s.get("programs_sha256")})
-        acc = acceptance([os.path.join(d, "gates_spec.log"), os.path.join(d, "gates.out")]) if "spec" in g.get("gates", {}) else None
+        acc = acceptance_metric([os.path.join(d, "gates_spec.log"), os.path.join(d, "gates.out")]) if "spec" in g.get("gates", {}) else None
         if acc is not None:   # the latest job's (sorted by time)
             session = {"date": (g.get("ts") or "")[:10] or None, "source": src,
                        "runs": {"decode_prefill": None, "streams4": None}, "commands": [],
-                       "programs_sha256": s.get("programs_sha256"), "metrics": {"spec_acceptance": {"loom": acc}}}
+                       "programs_sha256": s.get("programs_sha256"), "metrics": {"spec_acceptance": acc}}
+        x = g.get("context_admit")
+        if isinstance(x, dict) and "admitted" in x:   # the latest job's native-context admission check
+            admission = {"admitted": bool(x["admitted"]), "tokens": x.get("tokens"), "context": x.get("context"),
+                         "detail": x.get("detail"), "date": (g.get("ts") or "")[:10] or None, "source": src,
+                         "programs_sha256": s.get("programs_sha256")}
     ev = {"evidence": EVIDENCE_ID, **({"gpu": gpu} if gpu else {}), "gates": gates}
+    if admission:
+        ev["admission"] = admission
     if session:
         ev["performance"] = {"session": session}
     return ev
@@ -167,7 +174,7 @@ def main(argv=None):
     gates, session = ev["gates"], (ev.get("performance") or {}).get("session")
     write_json(a.o, ev)
     print(f"wrote {a.o}: run {rid}, " + ", ".join(f"{x['level']}:{x['name']}={x['status']}" for x in gates)
-          + (f", spec_acceptance={session['metrics']['spec_acceptance']['loom']}" if session else ""), file=sys.stderr)
+          + (f", spec_acceptance={session['metrics']['spec_acceptance']}" if session else ""), file=sys.stderr)
 
 
 if __name__ == "__main__":

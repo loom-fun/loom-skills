@@ -1,0 +1,3 @@
+PASS attention_chain
+FAIL moe_gemm_12 (max abs err 0.31 > 0.05)
+120/121 passed

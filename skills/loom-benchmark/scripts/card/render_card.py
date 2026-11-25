@@ -27,7 +27,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from card_lib import (DEFAULT_GPU, FEATURES, GATE_NAMES, GATES, GPUS, HF, LOOM_URL, METHOD, METRIC_KEYS, METRICS, SCHEMA_ID, SKILLS_URL,  # noqa: E402
                       TIMED, PRELOAD_FLAG, preload_mode, card_gpus, card_metrics, derived_tags, beyond_context, gate_applies, generator_commit, gpu_context, gpu_memory, recorded_quick_start, serves,
                       gpu_view, has_results, has_runner, load_info, load_json, load_package, metric_applies, native_context, over_context,
-                      package_facts, programs_sha256, require_valid, stale_metrics, with_gate_features, historical_xsj_gate, sdk_uses_file_parameters, xsj_enabled)
+                      package_facts, programs_sha256, require_valid, stale_metrics, with_gate_features, historical_xsj_gate, sdk_uses_file_parameters, xsj_enabled,
+                      DELTA_BAND, DELTA_NAMES, GOOD_CONCLUSIONS, UNRECORDED_SDK, carried_sdk, delta_rows, drop_carried, previous_gate, sdk_at_least, sdk_version)
 from matched_spec import TIE_BAND, classification  # noqa: E402
 
 YES, NO, NA, MISSING = "✅", "❌", "—", "—"
@@ -36,6 +37,7 @@ UNKNOWN = "?"   # a feature that could not be determined: neither supported, nor
 SUP = "¹²³⁴⁵⁶⁷⁸⁹"
 ABOVE = "‡"   # a Loom value above its modeled ceiling
 STALE = "†"   # a Loom value measured on programs other than this repository's (card_lib.stale_metrics)
+CARRIED = "§"   # a Loom value measured on another hrx-loom version than the Quick start installs (card_lib.carried_sdk)
 SHORT = {"decode": "decode", "decode_2k": "decode at 2k", "decode_32k": "decode at 32k", "streams4": "4 streams"}
 
 
@@ -121,6 +123,21 @@ def package_sdk(gen, versions):
     if gen:
         return sdk_text(gen.get("hrx_loom"))
     return sdk_text((versions.get("package") or {}).get("hrx_loom"))
+
+
+def versions_sdk(gen, versions, pin):
+    """The Versions line's hrx-loom: the SDK the Quick start installs and the card's sessions ran (the pin), with the SDK
+    that generated the programs when that is another version (frozen programs migrated to a new SDK). The same version:
+    the generator's identity, or the pin's when only the pin records its hrx-system commit."""
+    stamp = (gen or {}).get("hrx_loom") if gen else (versions.get("package") or {}).get("hrx_loom")
+    gv, pv = sdk_version(stamp), sdk_version(pin)
+    if not pv:
+        return package_sdk(gen, versions)
+    if gv and gv != pv:
+        return f"{sdk_text(pin)}; programs generated with hrx-loom `{gv}`"
+    if gv and (stamp.get("hrx_system_sha") or not pin.get("hrx_system_sha")):
+        return package_sdk(gen, versions)
+    return sdk_text(pin)
 
 
 LEARN_MORE = "Learn more on the [Loom ecosystem website](https://loom-fun.github.io/loom-dev/)."
@@ -423,10 +440,22 @@ def feature_detail(key, f):
     return "supported"
 
 
+def refuse_failed(info):
+    """A card never cites a run that did not succeed: exits when a source the card uses records a conclusion other
+    than success (make_info.py records it from the job; lint_card.py checks the ones that do not record it)."""
+    bad = sorted(f"{sid} ({src['url'] or src['run']}: {src['conclusion']})" for sid, src in info["sources"].items()
+                 if src.get("conclusion") and src["conclusion"] not in GOOD_CONCLUSIONS)
+    if bad:
+        sys.exit("render_card.py: the card cites runs that did not succeed (not evidence): " + "; ".join(bad))
+
+
 def load(d, programs):
     info = load_info(os.path.join(d, "info.json"))
     require_valid(info, programs=programs or "")
+    refuse_failed(info)
     facts = package_facts(load_package(d))
+    if info["card"].get("carried") == "drop":   # values and gates measured on another SDK than the pin are not shown
+        info = drop_carried(info, required_sdk(facts, info["versions"], info["sources"]))
     feats = {k: dict(v) for k, v in facts["features"].items()}
     gates = all_gates(info, programs)
     feats = with_gate_features(feats, facts["kind"], gates)
@@ -624,8 +653,21 @@ def remeasure_lines(rm, g, sources, on):
     return L
 
 
-def perf_section(L, info, facts, feats, d, g, here, ctx):
-    """One GPU's performance table, methodology and footnotes (appended to L). ctx: the tokens per request that GPU serves."""
+def carried_text(old, pin):
+    """The marker phrase of a value or gate measured on another hrx-loom version than the pin."""
+    return (f"measured on an SDK the run did not record" if old == UNRECORDED_SDK else f"measured on SDK {old}") + f", not re-qualified on {sdk_version(pin)}"
+
+
+ACCEPTANCE_UNREPORTED = ("hrx-loom {v} reports no drafter proposal count for this package's service ABI 1 controller "
+                         "(`proposed_tokens` is null), so the share of proposals accepted is not measured; it is never derived from "
+                         "the configured draft depth, which is a ceiling.")
+ACCEPTANCE_PER_PASS = ("Drafted tokens accepted per verification pass during the measuring session's requests: accepted drafted "
+                       "tokens / verification passes, from loom-serve's counters (passes = decoded positions - accepted drafted tokens). ")
+
+
+def perf_section(L, info, facts, feats, d, g, here, ctx, pin=None):
+    """One GPU's performance table, methodology and footnotes (appended to L). ctx: the tokens per request that GPU serves;
+    pin: the hrx-loom identity the Quick start installs (values measured on another version are marked, CARRIED)."""
     kind = facts["kind"]
     view = gpu_view(info, g)
     sources, perf = info["sources"], view.get("performance") or {"baseline": {"name": "llama.cpp", "version": None, "args": None}, "sessions": []}
@@ -649,15 +691,24 @@ def perf_section(L, info, facts, feats, d, g, here, ctx):
           + "".join(f"| {n} " for n in xnames.values()) + "|",
           "|---|---|---|---|---|---|" + "---|" * len(extra)]
 
+    carried = []   # the other SDK versions values of this table were measured on
+
     def marked(key, v, i, stale_keys):
-        """A value with its session's footnote mark (sessions other than the primary one) and the stale mark."""
+        """A value with its session's footnote mark (sessions other than the primary one), the stale mark and the
+        carried mark (measured on another SDK than the pin)."""
         out = num(key, v)
+        sm = sessions[i]["metrics"].get(key, {}) if i is not None else {}
+        if key == "spec_acceptance" and v is None and sm.get("unreported"):
+            out = f"{sm['accepted_per_pass']:.2f} per pass" if sm.get("accepted_per_pass") is not None else "not reported"
         if i is not None and (sessions[i]["source"], sessions[i]["date"]) != pkey:
             nk = (sessions[i]["source"], sessions[i]["date"])
             if nk not in notes:
                 notes.append(nk)
             out += f" {mark(notes.index(nk) + 1)}"
-        return out + (f" {STALE}" if key in stale_keys else "")
+        old = carried_sdk(info, sessions[i]["source"], pin) if i is not None and v is not None else None
+        if old and old not in carried:
+            carried.append(old)
+        return out + (f" {STALE}" if key in stale_keys else "") + (f" {CARRIED}" if old else "")
     above = []
     for key, label in METRICS:
         if not metric_applies(key, kind, feats, view, ctx):
@@ -778,9 +829,17 @@ def perf_section(L, info, facts, feats, d, g, here, ctx):
     for sha in sorted(set(stale.values())):
         L.append(f"- {STALE} Measured on programs other than this repository's (sha256 {short(sha)}, this repository's "
                  f"{short(here)}): the value describes another build of the package until a session re-measures it.")
+    for old in carried:
+        L.append(f"- {CARRIED} {carried_text(old, pin)[0].upper()}{carried_text(old, pin)[1:]} (the SDK the Quick start installs).")
     if metric_applies("spec_acceptance", kind, feats):
-        L.append("- Drafted tokens accepted: the share of the drafter's proposed tokens the model accepted during the "
-                 "`spec` gate's requests.")
+        m, i = shown.get("spec_acceptance", ({}, None))
+        if m.get("unreported") == "proposals" and m.get("loom") is None:
+            v = sdk_version(sources[sessions[i]["source"]].get("hrx_loom")) or "this version"
+            L.append("- " + (ACCEPTANCE_PER_PASS if m.get("accepted_per_pass") is not None else "Drafted tokens accepted: not reported. ")
+                     + ACCEPTANCE_UNREPORTED.format(v=v))
+        else:
+            L.append("- Drafted tokens accepted: the share of the drafter's proposed tokens the model accepted during the "
+                     "`spec` gate's requests.")
     if above:
         bw = ((view.get("roofline") or {}).get("device") or {}).get("bandwidth_bytes_per_s") or 216e9
         L.append(f"- {ABOVE} measured above the modeled ceiling; the roofline is an estimate ({bw / 1e9:.0f} GB/s effective bandwidth).")
@@ -798,30 +857,52 @@ def perf_section(L, info, facts, feats, d, g, here, ctx):
                                                        f"model's native {ctx}-token context") + ")" if oc else "") + ".", ""]
 
 
-def sdk_performance_comparison(info, directory, programs, *, summary=False):
-    hold = info.get("promotion_hold")
-    path = os.path.join(directory, "sdk-qualification.json")
-    if not hold and os.path.isfile(path):
-        qualification = load_json(path)
-        if qualification.get("programs_sha256") == programs:
-            hold = qualification.get("sdk_performance_comparison")
-    if not hold:
-        return []
-    labels = {"prefill_1k": "1k prefill", "prefill_2k": "2k prefill", "prefill_8k": "8k prefill",
-              "prefill_16k": "16k prefill", "prefill_32k": "32k prefill", "decode_32k": "32k decode",
-              "decode_2k": "2k decode", "decode": "Decode", "streams4": "Four-stream throughput"}
-    device = hold.get("device_name") or GPUS[hold["device"]]["name"]
-    if summary:
-        changes = ", ".join(f"{labels.get(name, name)} {row['percent']:+.2f}%" for name, row in hold["rows"].items())
-        return [f"On {device}, throughput changed from hrx-loom {hold['old_sdk']} to {hold['new_sdk']} ({changes}). "
-                f"[Same-runner comparison]({hold['comparison_url']})", ""]
-    lines = ["## SDK performance comparison", "",
-             f"A same-runner comparison on {device} measured the following changes from hrx-loom {hold['old_sdk']} to {hold['new_sdk']}. "
-             f"The control used frozen production revision `{hold['production_revision']}`. [DevLab A/B run {hold['comparison_run']}]({hold['comparison_url']})", "",
-             "| Metric | Previous (tok/s) | Current (tok/s) | Change |", "| --- | ---: | ---: | ---: |"]
-    lines += [f"| {labels.get(name, name)} | {row['previous']:,.1f} | {row['current']:,.1f} | {row['percent']:+.2f}% |"
-              for name, row in hold["rows"].items()]
-    return lines + [""]
+def delta_lines(info, pin, solo, depth=None):
+    """The delta line of each earlier card (info.json sdk_delta, card_lib.delta_rows): every metric of every GPU this card
+    re-measured on its own SDK, against that card's stored value. A regression beyond DELTA_BAND is numbered and followed
+    by its explanation from evidence, or "unexplained" (lint_card.py refuses to publish that)."""
+    L = []
+    for c in (info.get("sdk_delta") or {}).get("comparisons") or []:
+        rows = delta_rows(info, pin, c, depth)
+        if not rows:
+            continue
+        olds = sorted({d["hrx_loom"] for g, d in c["devices"].items() if g in rows and d.get("hrx_loom")})
+        if c["label"] == "card":
+            L += [f"**Change from the previous card** ([revision `{c['revision'][:7]}`]({HF}/{c['repo']}/tree/{c['revision']})"
+                  + (f", hrx-loom {' / '.join(olds)}" if olds else "") + f"; this card: hrx-loom {sdk_version(pin)}):", ""]
+        else:
+            L += [f"**Change from the migration-only build** (this package's previous programs on hrx-loom {sdk_version(pin)}):", ""]
+        notes = []
+        for g, rs in rows.items():
+            parts = []
+            for r in rs:
+                name = DELTA_NAMES[r["metric"]]
+                if r["metric"] == "spec_acceptance" and r.get("per_pass"):   # SDK 0.2's share x depth = its accepted per pass
+                    pp = r["per_pass"]
+                    parts.append(f"{name} per verification pass {pp['old']:.2f} → {pp['new']:.2f} ({r['change'] * 100:+.1f} %; the previous "
+                                 f"card's {pct_of(r['old'])} of depth-{depth} proposals as SDK {olds[0] if olds else 'its'} counted them)")
+                elif r["metric"] == "spec_acceptance":
+                    new = ("not reported" if r["unreported"] else "not re-measured" if r["missing"]
+                           else pct_of(r["new"]) if r["new"] is not None else "not measured")
+                    parts.append(f"{name} {pct_of(r['old']) if r['old'] is not None else MISSING} → {new}")
+                elif r["change"] is None:
+                    parts.append(f"{name} " + ("not re-measured" if r["missing"] else "new" if r["old"] is None else "not measured"))
+                else:
+                    t = f"{name} {r['change'] * 100:+.1f} %"
+                    if r["regression"]:
+                        notes.append((g, r))
+                        t += f" {mark(len(notes))}"
+                    parts.append(t)
+            L.append(("- " if solo and len(rows) == 1 else f"- {GPUS[g]['short']}: ") + ", ".join(parts) + ".")
+        for i, (g, r) in enumerate(notes, 1):
+            e = r["explanation"]
+            why = (e["text"].rstrip(".") + (f" ([evidence]({e['url']}))" if e.get("url") else "")) if e else "unexplained"
+            L.append(f"- {mark(i)} {GPUS[g]['short']} {DELTA_NAMES[r['metric']]} {r['change'] * 100:+.1f} % "
+                     f"({num(r['metric'], r['old'])} → {num(r['metric'], r['new'])} tok/s): {why}.")
+        L.append(f"- Change: (this card / previous card - 1) × 100 % of the Loom value; beyond -{DELTA_BAND * 100:g} % a regression needs a "
+                 "confirmed explanation.")
+        L.append("")
+    return L
 
 
 def render(d):
@@ -859,7 +940,7 @@ def render(d):
 
     pin = required_sdk(facts, versions, sources)
     fetch_output = [f"--output={output}"]
-    if not (pin and pin.get("hrx_loom") == "0.3.0" and pin.get("source") in ("pypi", "release")):
+    if not (pin and sdk_at_least(pin, 0, 3) and pin.get("source") in ("pypi", "release")):
         fetch_output.insert(0, "--materialize=copy")
 
     def fetch_for(g):   # the fetch command of a GPU: its preset (the R9700's own when the package has one)
@@ -970,9 +1051,9 @@ def render(d):
     first = next(iter(live), None)
     bname = ((info["devices"][first].get("performance") or {}).get("baseline") or {}).get("name", "llama.cpp") if first else "llama.cpp"
     L += [f"## Performance vs {bname}", ""]
-    L += sdk_performance_comparison(info, d, here, summary=True)
+    L += delta_lines(info, pin, solo, (facts["spec"] or (None, None))[1])
     if solo:
-        perf_section(L, info, facts, feats, d, live[0], here, gpu_context(info, live[0], native))
+        perf_section(L, info, facts, feats, d, live[0], here, gpu_context(info, live[0], native), pin)
     else:
         for g in gpus:
             if g in shared:
@@ -982,7 +1063,7 @@ def render(d):
                   f"### {GPUS[g]['short']} / {' / '.join(GPUS[m]['short'].removeprefix('Radeon ') for m in members)} "
                   f"({GPUS[g]['arch']}, {' / '.join([GPUS[g]['memory']] + [GPUS[m]['memory'] for m in members])})", ""]
             if has_results(info["devices"][g]):
-                perf_section(L, info, facts, feats, d, g, here, gpu_context(info, g, native))
+                perf_section(L, info, facts, feats, d, g, here, gpu_context(info, g, native), pin)
                 for m in members:
                     L += [f"The {GPUS[m]['name']} shares this section: it runs the same programs, and the numbers above were measured on the {GPUS[g]['name']}.", ""]
             else:
@@ -1037,8 +1118,14 @@ def render(d):
             return f"{NO} fail on a previous build (sha256 {short(gsha)}), not re-run on this package {mark(ev.index(key) + 1)}"
         if key not in ev:
             ev.append(key)
-        res = (f"{YES} pass" if gt["status"] == "pass" else f"{NO} fail")
-        return res + (f" ({gt['detail']})" if gt["detail"] else "") + f" {mark(ev.index(key) + 1)}"
+        old = carried_sdk(info, gt["source"], pin)
+        if old and gt["status"] == "pass":   # a pass on another SDK is never shown as a plain pass under this pin
+            return f"{UNKNOWN} pass" + (f" ({gt['detail']})" if gt["detail"] else "") + f", {carried_text(old, pin)} {mark(ev.index(key) + 1)}"
+        res = (f"{YES} pass" if gt["status"] == "pass" else f"{NO} fail" + (f" on SDK {old}" if old else ""))
+        prev = previous_gate(info, g, name) if gt["status"] == "fail" and not old else None
+        pre = (", pre-existing: the previous card failed it too" + (f" ({prev['detail']})" if prev.get("detail") else "")
+               if prev and prev["status"] == "fail" else "")
+        return res + (f" ({gt['detail']})" if gt["detail"] else "") + pre + f" {mark(ev.index(key) + 1)}"
     vision_details = [(gpu_view(info, g)["gates"].get("vision", {}).get("detail") or "") for g in cols]
     for name, desc in GATES:
         if name == "vision" and (c["file"].endswith(".safetensors") or any(d.startswith("vLLM ") for d in vision_details)):
@@ -1050,6 +1137,20 @@ def render(d):
         lv = f", LEVEL={level}" if level else ""
         L.append(f"- {mark(i)} {src_text(s)}{lv}, {text(date)}; device {source_device_text(s)}; "
                  f"hrx-loom {sdk_text(s['hrx_loom'])}.")
+    for g in cols:   # the native-context admission check of each GPU's latest gates run (gates.sh context_admit): a check, not a gate
+        x = info["devices"][g].get("admission") if has_results(info["devices"][g]) else None
+        if not x:
+            continue
+        src = sources[x["source"]]
+        old = carried_sdk(info, x["source"], pin)
+        where = "" if solo else f" on the {GPUS[g]['short']}"
+        verdict = (f"admitted a {x['tokens']:,}-token request" if x["admitted"] and x.get("tokens") else "admitted" if x["admitted"]
+                   else "refused the request")
+        L.append(f"- Context admission{where}: one request filling the {x['context']:,}-token context "
+                 if x.get("context") else f"- Context admission{where}: one request filling the served context ")
+        L[-1] += (f"{verdict}" + (f" ({x['detail']})" if x.get("detail") and not x["admitted"] else "")
+                  + ("; the server did not cancel it within 60 s" if x["admitted"] and "did not cancel" in (x.get("detail") or "") else "")
+                  + (f"; {carried_text(old, pin)}" if old else "") + f"; {src_text(src)}, {text(x['date'])}.")
     L += ["- Gates are the loom-benchmark correctness gates (`gates.sh`); a gate without a recorded run shows no evidence.", ""]
 
     # ---- files
@@ -1060,14 +1161,12 @@ def render(d):
           "- `llm_config.json`: the configuration the programs were generated from.",
           "- `info.json`: the measurements, gate evidence and versions this card shows; everything else comes from the "
           "files above."]
-    if os.path.isfile(os.path.join(d, "sdk-qualification.json")):
-        L.append("- [SDK qualification](sdk-qualification.json) records the package comparison evidence.")
     if info.get("report") == "generated":
         L.append("- `REPORT.md`: how the values above were measured: setup, commands and the value of every run.")
     elif info.get("report") == "attached":
         L.append("- `REPORT.md`: the report written when this package was made.")
     L += ["", f"Versions: card schema `{SCHEMA_ID}`; loom-skills {skills_text(facts['generator'], versions)}; "
-              f"hrx-loom {package_sdk(facts['generator'], versions)}; card generator "
+              f"hrx-loom {versions_sdk(facts['generator'], versions, pin)}; card generator "
               f"{short(versions['card_generator']) if versions['card_generator'] != 'unknown' else 'unknown'}.", "",
           "Source files, fetched by `loom-fetch` from their own repositories:", ""]
     for role, x in (("checkpoint", c), ("drafter", facts["drafter"]), ("projector", facts["projector"])):
@@ -1274,7 +1373,8 @@ def render_report(d):
                            + " (model path, host and port left out).")
     L = [f"# {facts['name']} for AMD Loom: measurement report", "",
          f"How the values on this repository's model card were measured. Generated from `info.json` (schema "
-         f"`{SCHEMA_ID}`) by the loom-skills card generator; the card's README.md is rendered from the same data.", "", *sdk_performance_comparison(info, d, here),
+         f"`{SCHEMA_ID}`) by the loom-skills card generator; the card's README.md is rendered from the same data.", "",
+         *delta_lines(info, required_sdk(facts, versions, info["sources"]), solo, (facts["spec"] or (None, None))[1]),
          "## Setup", "",
          f"- Package: this repository. Programs generated by loom-skills {skills_text(facts['generator'], versions)} with "
          f"hrx-loom {package_sdk(facts['generator'], versions)}.",

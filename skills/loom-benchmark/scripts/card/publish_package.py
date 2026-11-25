@@ -20,6 +20,8 @@
       the Hub API's model sha): the upload fails if the repo has moved since (another worker published), instead
       of overwriting that card; re-read info.json and rebuild. Needs huggingface_hub and a write token (HF_TOKEN or
       ~/.cache/huggingface/token).
+      To the production org the package must pass card_files.check_package (only card-format files, no staging or
+      qualification-record text); run lint_card.py on it first for the evidence checks.
       XSJ cards require local programs and exact generated README.md and REPORT.md even for --card-only and
       --dry-run. Current XSJ measurements must match the preset and serve flags from the validated device results
       (fleet/devices by default, or LOOM_DEVICE_RESULTS). A real card-only upload also checks the pinned parent's programs.
@@ -290,6 +292,11 @@ def parse_upload_receipt(output, repo, parent_commit, endpoint=None):
 def cmd_upload(a):
     a.repo = target_repo(a.org, a.repo)
     xsj_programs = check_card_text(a.out, a.repo)
+    if a.repo.split("/")[0] == DEFAULT_ORG:   # a production card holds only card-format files and no staging text (lint_card.py runs the rest)
+        from card_files import check_package
+        problems = check_package(a.out) if not a.card_only else [p for p in check_package(a.out) if p.split(":")[0] in CARD]
+        if problems:
+            sys.exit(f"{a.out}: not a production-form card:\n  " + "\n  ".join(problems))
     local = {os.path.relpath(os.path.join(r, f), a.out).replace(os.sep, "/") for r, _, fs in os.walk(a.out) for f in fs}
     if a.dry_run:
         files = sorted(f for f in local if not a.card_only or f in CARD)

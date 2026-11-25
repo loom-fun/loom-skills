@@ -72,6 +72,7 @@ class ContextRows(unittest.TestCase):
         bench.thinking_extra = lambda setting: {}
         bench.server_draft_counters = lambda url: {}
         bench.acceptance_between = bench.long_prompt = bench.perf_metrics = lambda *args: None
+        bench.accepted_between = bench.per_pass_between = bench.proposals_unreported = lambda *args: None
 
         def stream(url, model, messages, max_tokens, extra):
             nominal = re.search(r"dctx(\d+)\]", messages[0]["content"])
