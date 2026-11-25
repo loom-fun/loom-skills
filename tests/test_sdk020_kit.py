@@ -131,7 +131,8 @@ class PinTests(unittest.TestCase):
         sys.path.insert(0, str(ROOT / "skills" / "loom-setup" / "scripts"))
         import sdk_pin
         pin = kit_source.SDK_PIN
-        self.assertEqual(pin["hrx_loom"], "0.2.0")
+        self.assertEqual(pin, sdk_pin.release_pin())   # one source of truth: the newest verified release
+        self.assertEqual(pin["hrx_loom"], sdk_pin.newest_verified())
         self.assertEqual(pin["source"], "pypi")   # the stable release is on PyPI; sdk_pin.py still reads source "release" (pre-releases)
         self.assertRegex(pin["wheel_sha256"], r"^[0-9a-f]{64}$")
         self.assertRegex(pin["hrx_system_sha"], r"^[0-9a-f]{40}$")

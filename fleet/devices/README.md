@@ -66,9 +66,11 @@ the 16 GB class; below that -> not supported yet. The same rule is in `skills/lo
 
 ## Host-dependent serve flags
 
-`serve_args` is what the card prints after `loom-serve`, so a flag a stock host needs belongs there. gfx1150:
-`--parameter_mode=preload` on a stock Ubuntu host (8 MiB locked memory), where hrx-loom 0.2.0's default parameter mode fails at the first
-request; the cause and the other fixes are in `skills/loom-kb/device/rdna3/gfx1150/README.md`.
+`serve_args` is what the card prints after `loom-serve`, so a flag a stock host needs belongs there. gfx1150 on hrx-loom 0.2.0 needed
+`--parameter_mode=preload` on a stock Ubuntu host (8 MiB locked memory): 0.2.0's default parameter mode fails at the first request
+(historical; the cause and the other fixes are in `skills/loom-kb/device/rdna3/gfx1150/README.md`). hrx-loom 0.3.0 defaults to the
+buffered `file` mode and the flag is dropped from Quick starts (`skills/loom-migrate/versions/v0.2.0-to-v0.3.0.md`, "Parameter loading"):
+a device entry for a 0.3.0 card carries a host flag only when a stock-host run on 0.3.0 shows it is still needed.
 
 ## Filling a file
 
