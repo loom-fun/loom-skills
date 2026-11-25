@@ -1,46 +1,39 @@
 {
- "_comment": "R9700 per-model measurement (r9700_jobs.py): one job per model on one R9700 runner; loom-fun-staging card, llama.cpp ROCm b1375 + Vulkan b12211 with the matched drafting, reduced-context models served at served_context. Does not fit: none",
+ "_comment": "R9700 A/B (ab_jobs.py): per model one job on one R9700 runner, old package (fun) vs new package (staging), served as the new card's R9700 Quick start, same prompts and settings; compare with strix_ab_compare.py. Does not fit: none",
  "runner": "r9700",
  "memory_bytes": 34000000000,
  "llama_spec": "matched",
  "jobs": [
   {
-   "name": "unsloth-qwen3-0-6b-loom",
-   "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
-   "kit": null,
+   "name": "rab-ggml-org-lfm3-omni-2b-loom",
+   "runner": "r9700",
+   "repeat_rows": 3,
+   "card": "loom-fun-staging/ggml-org-LFM3-Omni-2B-loom@48923d72e1bca83633b4b17e1d3e27c5c7fc2f7a",
+   "require_preset_r9700": true,
+   "memory_bytes_r9700": 10000000000,
+   "kit": "lfm2moe",
    "llamacpp": "b1375",
    "llamacpp_vulkan": "b12211",
-   "memory_bytes_r9700": 17000000000,
    "variants": [
     {
-     "name": "card",
-     "build": {}
-    },
-    {
-     "name": "nodraft",
-     "build": {},
+     "name": "staging",
+     "cap_pool": 1317888,
      "execution": {
-      "draft_depth": 0
-     }
+      "prefill_capacity": 4096
+     },
+     "sdk": "0.3.0",
+     "require_preset_r9700": false,
+     "card": "loom-fun-staging/ggml-org-LFM3-Omni-2B-loom@48923d72e1bca83633b4b17e1d3e27c5c7fc2f7a",
+     "programs_sha256": "20b13baecb279f1ea79b0cdcd264c1fca0bb6774a16b7a93e891b74b832c0c53"
     }
    ],
    "steps": [
-    "func:card",
-    "ktest:card",
-    "gates:card:dev",
-    "perf:card:3",
-    "perf:card:3:long",
-    "c4:nodraft",
-    "llama@rocm.np1:3",
-    "llama@rocm.np1:3:long",
-    "llamac4@rocm.nodraft",
-    "llama@vulkan.np1:3",
-    "llama@vulkan.np1:3:long",
-    "llamac4@vulkan.perslot.nodraft"
-   ]
+    "gates:staging:full"
+   ],
+   "sdk": "0.3.0"
   }
  ],
- "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
+ "card": "loom-fun-staging/ggml-org-LFM3-Omni-2B-loom@48923d72e1bca83633b4b17e1d3e27c5c7fc2f7a",
  "kit": null,
  "llamacpp": "b1375",
  "llamacpp_vulkan": "b12211"
