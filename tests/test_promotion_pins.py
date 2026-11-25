@@ -27,6 +27,8 @@ PIN, HEAD, TARGET, RETURNED = "a" * 40, "b" * 40, "c" * 40, "d" * 40
 
 
 class PromotionPinsTests(unittest.TestCase):
+    card_problems = []
+
     def flow(self, directory, pin=None, execute=False, target_extras=False):
         api = Mock()
         api.endpoint = "https://huggingface.co"
@@ -51,7 +53,8 @@ class PromotionPinsTests(unittest.TestCase):
         run = Mock(side_effect=command)
         # The fake module ensures these tests never import a live Hub client or perform network I/O.
         with patch.dict(sys.modules, {"huggingface_hub": SimpleNamespace(snapshot_download=fetch)}), \
-                patch.object(PROMOTE.subprocess, "run", run):
+                patch.object(PROMOTE.subprocess, "run", run), \
+                patch.object(PROMOTE, "card_file_problems", lambda directory: self.card_problems):
             result = PROMOTE.promote(api, SLUG, directory, execute, pin, TARGET if execute else None)
         return result, api, fetch, run
 
@@ -163,6 +166,18 @@ class PromotionPinsTests(unittest.TestCase):
         self.assertEqual(result["files"]["removed"], ["independent.txt"])
         self.assertEqual(result["executed"], "skipped: checks failed")
         self.assertFalse(any("upload" in c.args[0] and "--dry-run" not in c.args[0] for c in run.call_args_list))
+
+    def test_card_file_problems_block_upload(self):
+        self.card_problems = ["sdk-qualification.json is not a card file"]
+        with tempfile.TemporaryDirectory() as td:
+            result, _, _, run = self.flow(str(Path(td) / "work"), PIN, execute=True)
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["executed"], "skipped: checks failed")
+        self.assertFalse(any("upload" in c.args[0] and "--dry-run" not in c.args[0] for c in run.call_args_list))
+
+    def test_missing_check_is_a_problem(self):
+        with patch.object(PROMOTE, "HERE", "/nonexistent"):
+            self.assertIn("missing", PROMOTE.card_file_problems("/tmp")[0])
 
 
 class UploadSafetyTests(unittest.TestCase):
