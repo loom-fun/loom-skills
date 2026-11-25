@@ -5,7 +5,11 @@
    "name": "bonsai27b",
    "spec": "prism-ml/Ternary-Bonsai-2.5-27B-GGUF:Ternary-Bonsai-2.5-27B-Q2_0-mtp.gguf",
    "reference": "auto",
-   "model_id": "prism-ml/Ternary-Bonsai-2.5-27B"
+   "model_id": "prism-ml/Ternary-Bonsai-2.5-27B",
+   "env": {
+    "TUNE_BASELINE": "{\"decode\": 34.7, \"decode_32k\": 28.4, \"c4\": 62.7}"
+   },
+   "_comment": "TUNE_BASELINE: this model's llama.cpp ROCm b1387 card rows (MTP n-max 3; run 45535242750), so the drafting choice is scored against llama.cpp (draft/tune.py)"
   }
  ]
 }
