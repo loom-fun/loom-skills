@@ -549,6 +549,7 @@ case "$got" in "dry run: would upload "*"to https://huggingface.co/loom-fun-stag
 py "$C/publish_package.py" upload "$tmp/r9700_two" --repo loom-fun/unsloth-Qwen3-0.6B-loom --dry-run >/dev/null 2>&1 \
   && { echo "FAIL publish: a staging card was accepted for the default org (loom-fun)"; bad=1; } \
   || echo "OK   publish: a card of another repo than the target is refused (default org loom-fun)"
+py "$C/render_card.py" "$tmp/r9700_none" 2>/dev/null   # a production upload carries the rendered card (card_files.check_package)
 py "$C/publish_package.py" upload "$tmp/r9700_none" --repo unsloth-Qwen3-0.6B-loom --dry-run 2>&1 | grep -q "huggingface.co/loom-fun/unsloth-Qwen3-0.6B-loom" \
   && echo "OK   publish: the default org is loom-fun (a bare NAME works)" || { echo "FAIL publish: default org"; bad=1; }
 # the GPU an evidence file belongs to: its "gpu", else the one its source's device names, else strix-halo
