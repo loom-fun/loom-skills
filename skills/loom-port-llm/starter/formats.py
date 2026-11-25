@@ -31,7 +31,7 @@ ICODES = frozenset({"q8_0", "q4_k", "q5_k", "q6_k", "q5_0", "ptq1_0"} | ({"mxfp4
 # IQ4_XS / IQ4_NL (choice decode.iq4.act_q8, env IQ4_Q8): opt-in by scope; @g_iq4_<fmt>_icodes (signed kvalues codes, one scale per
 # 32 values, no minimum), as llama.cpp's vec_dot_iq4_xs_q8_1 / vec_dot_iq4_nl_q8_1. Dense matvecs take the int8 path.
 # Formats whose int8 dot is codes x one scale (no minimum, no second scale): q8_0-like in gen_llm.iq_decode / iq_dot.
-ONE_SCALE = frozenset({"q8_0", "mxfp4s", "iq4_xs", "iq4_nl", "ptq1_0"})
+ONE_SCALE = frozenset({"q8_0", "mxfp4s", "iq4_xs", "iq4_nl"})
 # Formats stored as two tensors (weight plane + scale plane): a call site passes two views, the second named <weight>_sc.
 SPLIT = frozenset({"mxfp4s"})
 SCALE_DIV = {"mxfp4s": 16}   # nibble-plane bytes per scale-plane byte

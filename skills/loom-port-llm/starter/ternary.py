@@ -18,18 +18,26 @@ import re
 BLK = 1024   # prism.hadamard.block_size this module implements (inspect_gguf.py records it; asserted in setup())
 
 PTQ1_0_HELPERS = r"""
-// PTQ1_0 trit codes of 16 bytes at weight 3^n (%p): ((q * 3^n mod 256) * 3) >> 8 is 0 below 86, 1 below 171, else 2; code = trit - 1.
-func.def inline @g_ptq1_0_tc16(%b: vector<16xi8>, %p: vector<16xi8>) -> (vector<16xi8>) {
-  %m = vector.muli %b, %p : vector<16xi8>
-  %t1 = vector.splati 86 : vector<16xi8>
-  %t2 = vector.splati -85 : vector<16xi8>
-  %ge1 = vector.cmpi uge, %m, %t1 : vector<16xi8> -> vector<16xi1>
-  %ge2 = vector.cmpi uge, %m, %t2 : vector<16xi8> -> vector<16xi1>
-  %one = vector.splati 1 : vector<16xi8>
-  %zero = vector.splati 0 : vector<16xi8>
-  %mone = vector.splati -1 : vector<16xi8>
-  %a = vector.select %ge1, %zero, %mone : vector<16xi8>
-  %c = vector.select %ge2, %one, %a : vector<16xi8>
+// PTQ1_0 trits (0, 1, 2) of 16 bytes at weight 3^n (%p, per 16-bit lane: the even and odd bytes of a lane pair take the same power):
+// ((q * 3^n mod 256) * 3) >> 8, on 16-bit lanes (even bytes, then odd bytes), so no byte is widened alone.
+func.def inline @g_ptq1_0_tcw(%b: vector<16xi8>, %p: vector<8xi16>) -> (vector<16xi8>) {
+  %w = vector.bitcast %b : vector<16xi8> to vector<8xi16>
+  %ff = vector.splati 255 : vector<8xi16>
+  %c8 = vector.splati 8 : vector<8xi16>
+  %c3 = vector.splati 3 : vector<8xi16>
+  %e = vector.andi %w, %ff : vector<8xi16>
+  %o = vector.shrui %w, %c8 : vector<8xi16>
+  %me = vector.muli %e, %p : vector<8xi16>
+  %mo = vector.muli %o, %p : vector<8xi16>
+  %me8 = vector.andi %me, %ff : vector<8xi16>
+  %mo8 = vector.andi %mo, %ff : vector<8xi16>
+  %te3 = vector.muli %me8, %c3 : vector<8xi16>
+  %to3 = vector.muli %mo8, %c3 : vector<8xi16>
+  %te = vector.shrui %te3, %c8 : vector<8xi16>
+  %to = vector.shrui %to3, %c8 : vector<8xi16>
+  %tos = vector.shli %to, %c8 : vector<8xi16>
+  %t = vector.ori %te, %tos : vector<8xi16>
+  %c = vector.bitcast %t : vector<8xi16> to vector<16xi8>
   func.return %c : vector<16xi8>
 }
 
@@ -38,7 +46,7 @@ func.def inline @g_ptq1_0_tc16(%b: vector<16xi8>, %p: vector<16xi8>) -> (vector<
 // Branch-free (lanes of one wave hold different groups of a block): each half of the group is 16 bytes x 16 powers of 3, picked by
 // selects: g0 = A*1 | A*3, g1 = A*9 | A*27, g2 = A*81 | B*(1,3), g3 = B*(9,27) | B*81, Q*(1,1,3,3,9,9,27,27)  (A = bytes 0..15, B =
 // bytes 16..23 twice, Q = bytes 24, 25 four times).
-func.def inline @g_ptq1_0_icodes(%w: buffer, %origin: offset, %group: index) -> (vector<32xi8>, f32) {
+func.def inline @g_ptq1_0_icodes(%w: buffer, %origin: offset, %group: index) -> (vector<32xi8>, f32, f32) {
   %c1 = index.constant 1 : index
   %c2 = index.constant 2 : index
   %c3 = index.constant 3 : index
@@ -72,29 +80,32 @@ func.def inline @g_ptq1_0_icodes(%w: buffer, %origin: offset, %group: index) -> 
   %lo = vector.select %m3, %bb, %a : vector<16xi8>
   %hi_23 = vector.select %m2, %bb, %bq : vector<16xi8>
   %hi = vector.select %ml1, %a, %hi_23 : vector<16xi8>
-  %i1 = scalar.constant 1 : i8
-  %i3 = scalar.constant 3 : i8
-  %i9 = scalar.constant 9 : i8
-  %i27 = scalar.constant 27 : i8
-  %i81 = scalar.constant 81 : i8
-  %v1 = vector.splat %i1 : vector<16xi8>
-  %v3 = vector.splat %i3 : vector<16xi8>
-  %v9 = vector.splat %i9 : vector<16xi8>
-  %v27 = vector.splat %i27 : vector<16xi8>
-  %v81 = vector.splat %i81 : vector<16xi8>
-  %p3lo = vector.from_elements %i9, %i9, %i9, %i9, %i9, %i9, %i9, %i9, %i27, %i27, %i27, %i27, %i27, %i27, %i27, %i27 : vector<16xi8>
-  %p2hi = vector.from_elements %i1, %i1, %i1, %i1, %i1, %i1, %i1, %i1, %i3, %i3, %i3, %i3, %i3, %i3, %i3, %i3 : vector<16xi8>
-  %p3hi = vector.from_elements %i81, %i81, %i81, %i81, %i81, %i81, %i81, %i81, %i1, %i1, %i3, %i3, %i9, %i9, %i27, %i27 : vector<16xi8>
-  %plo_01 = vector.select %m1, %v9, %v1 : vector<16xi8>
-  %plo_012 = vector.select %m2, %v81, %plo_01 : vector<16xi8>
-  %plo = vector.select %m3, %p3lo, %plo_012 : vector<16xi8>
-  %phi_01 = vector.select %m1, %v27, %v3 : vector<16xi8>
-  %phi_012 = vector.select %m2, %p2hi, %phi_01 : vector<16xi8>
-  %phi = vector.select %m3, %p3hi, %phi_012 : vector<16xi8>
-  %clo = func.call @g_ptq1_0_tc16(%lo, %plo) : (vector<16xi8>, vector<16xi8>) -> (vector<16xi8>)
-  %chi = func.call @g_ptq1_0_tc16(%hi, %phi) : (vector<16xi8>, vector<16xi8>) -> (vector<16xi8>)
+  %i1 = scalar.constant 1 : i16
+  %i3 = scalar.constant 3 : i16
+  %i9 = scalar.constant 9 : i16
+  %i27 = scalar.constant 27 : i16
+  %i81 = scalar.constant 81 : i16
+  %v1 = vector.splat %i1 : vector<8xi16>
+  %v3 = vector.splat %i3 : vector<8xi16>
+  %v9 = vector.splat %i9 : vector<8xi16>
+  %v27 = vector.splat %i27 : vector<8xi16>
+  %v81 = vector.splat %i81 : vector<8xi16>
+  %p3lo = vector.from_elements %i9, %i9, %i9, %i9, %i27, %i27, %i27, %i27 : vector<8xi16>
+  %p2hi = vector.from_elements %i1, %i1, %i1, %i1, %i3, %i3, %i3, %i3 : vector<8xi16>
+  %p3hi = vector.from_elements %i81, %i81, %i81, %i81, %i1, %i3, %i9, %i27 : vector<8xi16>
+  %n1 = vector.splat %is1 : vector<8xi1>
+  %n2 = vector.splat %is2 : vector<8xi1>
+  %n3 = vector.splat %is3 : vector<8xi1>
+  %plo_01 = vector.select %n1, %v9, %v1 : vector<8xi16>
+  %plo_012 = vector.select %n2, %v81, %plo_01 : vector<8xi16>
+  %plo = vector.select %n3, %p3lo, %plo_012 : vector<8xi16>
+  %phi_01 = vector.select %n1, %v27, %v3 : vector<8xi16>
+  %phi_012 = vector.select %n2, %p2hi, %phi_01 : vector<8xi16>
+  %phi = vector.select %n3, %p3hi, %phi_012 : vector<8xi16>
+  %clo = func.call @g_ptq1_0_tcw(%lo, %plo) : (vector<16xi8>, vector<8xi16>) -> (vector<16xi8>)
+  %chi = func.call @g_ptq1_0_tcw(%hi, %phi) : (vector<16xi8>, vector<8xi16>) -> (vector<16xi8>)
   %codes = vector.concat<0> %clo, %chi : vector<16xi8>, vector<16xi8> -> vector<32xi8>
-  func.return %codes, %d : vector<32xi8>, f32
+  func.return %codes, %d, %d : vector<32xi8>, f32, f32
 }
 
 // Values 16h..16h+15 of a block (h = 0..7): h < 5: bytes 0..15 at 3^h; h = 5: bytes 16..23 twice at (1 x8, 3 x8); h = 6: the same at
@@ -132,40 +143,46 @@ func.def inline @g_ptq1_0_half16(%w: buffer, %origin: offset, %h: index) -> (vec
   %m7 = vector.splat %is7 : vector<16xi1>
   %bsel = vector.select %m7, %bq, %bb : vector<16xi8>
   %bytes = vector.select %m5, %bsel, %a : vector<16xi8>
-  %i1 = scalar.constant 1 : i8
-  %i3 = scalar.constant 3 : i8
-  %i9 = scalar.constant 9 : i8
-  %i27 = scalar.constant 27 : i8
-  %i81 = scalar.constant 81 : i8
+  %i1 = scalar.constant 1 : i16
+  %i3 = scalar.constant 3 : i16
+  %i9 = scalar.constant 9 : i16
+  %i27 = scalar.constant 27 : i16
+  %i81 = scalar.constant 81 : i16
   %is1 = index.cmp eq, %h, %c1 : index
   %is2 = index.cmp eq, %h, %c2 : index
   %is3 = index.cmp eq, %h, %c3 : index
   %is4 = index.cmp eq, %h, %c4 : index
-  %s1 = scf.select %is1, %i3, %i1 : i8
-  %s2 = scf.select %is2, %i9, %s1 : i8
-  %s3 = scf.select %is3, %i27, %s2 : i8
-  %s4 = scf.select %is4, %i81, %s3 : i8
-  %ps = vector.splat %s4 : vector<16xi8>
-  %p5 = vector.from_elements %i1, %i1, %i1, %i1, %i1, %i1, %i1, %i1, %i3, %i3, %i3, %i3, %i3, %i3, %i3, %i3 : vector<16xi8>
-  %p6 = vector.from_elements %i9, %i9, %i9, %i9, %i9, %i9, %i9, %i9, %i27, %i27, %i27, %i27, %i27, %i27, %i27, %i27 : vector<16xi8>
-  %p7 = vector.from_elements %i81, %i81, %i81, %i81, %i81, %i81, %i81, %i81, %i1, %i1, %i3, %i3, %i9, %i9, %i27, %i27 : vector<16xi8>
-  %p67 = vector.select %m7, %p7, %p6 : vector<16xi8>
+  %s1 = scf.select %is1, %i3, %i1 : i16
+  %s2 = scf.select %is2, %i9, %s1 : i16
+  %s3 = scf.select %is3, %i27, %s2 : i16
+  %s4 = scf.select %is4, %i81, %s3 : i16
+  %ps = vector.splat %s4 : vector<8xi16>
+  %p5 = vector.from_elements %i1, %i1, %i1, %i1, %i3, %i3, %i3, %i3 : vector<8xi16>
+  %p6 = vector.from_elements %i9, %i9, %i9, %i9, %i27, %i27, %i27, %i27 : vector<8xi16>
+  %p7 = vector.from_elements %i81, %i81, %i81, %i81, %i1, %i3, %i9, %i27 : vector<8xi16>
+  %n7 = vector.splat %is7 : vector<8xi1>
+  %p67 = vector.select %n7, %p7, %p6 : vector<8xi16>
   %is5 = index.cmp eq, %h, %c5 : index
-  %m5e = vector.splat %is5 : vector<16xi1>
-  %p567 = vector.select %m5e, %p5, %p67 : vector<16xi8>
-  %pw = vector.select %m5, %p567, %ps : vector<16xi8>
-  %codes = func.call @g_ptq1_0_tc16(%bytes, %pw) : (vector<16xi8>, vector<16xi8>) -> (vector<16xi8>)
+  %n5e = vector.splat %is5 : vector<8xi1>
+  %p567 = vector.select %n5e, %p5, %p67 : vector<8xi16>
+  %n5 = vector.splat %ge5 : vector<8xi1>
+  %pw = vector.select %n5, %p567, %ps : vector<8xi16>
+  %codes = func.call @g_ptq1_0_tcw(%bytes, %pw) : (vector<16xi8>, vector<8xi16>) -> (vector<16xi8>)
   %f = vector.sitofp %codes : vector<16xi8> to vector<16xf32>
+  %one = vector.splatf 1.0 : vector<16xf32>
+  %fc = vector.subf %f, %one : vector<16xf32>
   %ds = vector.splat %d : vector<16xf32>
-  %values = vector.mulf %f, %ds : vector<16xf32>
+  %values = vector.mulf %fc, %ds : vector<16xf32>
   func.return %values : vector<16xf32>
 }
 
 func.def inline @g_ptq1_0_values(%w: buffer, %origin: offset, %group: index) -> (vector<32xf32>) {
-  %codes, %d = func.call @g_ptq1_0_icodes(%w, %origin, %group) : (buffer, offset, index) -> (vector<32xi8>, f32)
+  %codes, %d, %dm = func.call @g_ptq1_0_icodes(%w, %origin, %group) : (buffer, offset, index) -> (vector<32xi8>, f32, f32)
   %f = vector.sitofp %codes : vector<32xi8> to vector<32xf32>
+  %one = vector.splatf 1.0 : vector<32xf32>
+  %c = vector.subf %f, %one : vector<32xf32>
   %ds = vector.splat %d : vector<32xf32>
-  %values = vector.mulf %f, %ds : vector<32xf32>
+  %values = vector.mulf %c, %ds : vector<32xf32>
   func.return %values : vector<32xf32>
 }
 """
@@ -641,14 +658,14 @@ def _block_codes(pfx):
       %{pfx}h4 = vector.concat<0> %{pfx}h2, %{pfx}h2 : vector<2xi8>, vector<2xi8> -> vector<4xi8>
       %{pfx}h8 = vector.concat<0> %{pfx}h4, %{pfx}h4 : vector<4xi8>, vector<4xi8> -> vector<8xi8>
       %{pfx}bq = vector.concat<0> %{pfx}b8, %{pfx}h8 : vector<8xi8>, vector<8xi8> -> vector<16xi8>
-      %{pfx}x0 = func.call @g_ptq1_0_tc16(%{pfx}a, %tp1) : (vector<16xi8>, vector<16xi8>) -> (vector<16xi8>)
-      %{pfx}x1 = func.call @g_ptq1_0_tc16(%{pfx}a, %tp3) : (vector<16xi8>, vector<16xi8>) -> (vector<16xi8>)
-      %{pfx}x2 = func.call @g_ptq1_0_tc16(%{pfx}a, %tp9) : (vector<16xi8>, vector<16xi8>) -> (vector<16xi8>)
-      %{pfx}x3 = func.call @g_ptq1_0_tc16(%{pfx}a, %tp27) : (vector<16xi8>, vector<16xi8>) -> (vector<16xi8>)
-      %{pfx}x4 = func.call @g_ptq1_0_tc16(%{pfx}a, %tp81) : (vector<16xi8>, vector<16xi8>) -> (vector<16xi8>)
-      %{pfx}x5 = func.call @g_ptq1_0_tc16(%{pfx}bb, %tp2hi) : (vector<16xi8>, vector<16xi8>) -> (vector<16xi8>)
-      %{pfx}x6 = func.call @g_ptq1_0_tc16(%{pfx}bb, %tp3lo) : (vector<16xi8>, vector<16xi8>) -> (vector<16xi8>)
-      %{pfx}x7 = func.call @g_ptq1_0_tc16(%{pfx}bq, %tp3hi) : (vector<16xi8>, vector<16xi8>) -> (vector<16xi8>)
+      %{pfx}x0 = func.call @g_ptq1_0_tcw(%{pfx}a, %tp1) : (vector<16xi8>, vector<8xi16>) -> (vector<16xi8>)
+      %{pfx}x1 = func.call @g_ptq1_0_tcw(%{pfx}a, %tp3) : (vector<16xi8>, vector<8xi16>) -> (vector<16xi8>)
+      %{pfx}x2 = func.call @g_ptq1_0_tcw(%{pfx}a, %tp9) : (vector<16xi8>, vector<8xi16>) -> (vector<16xi8>)
+      %{pfx}x3 = func.call @g_ptq1_0_tcw(%{pfx}a, %tp27) : (vector<16xi8>, vector<8xi16>) -> (vector<16xi8>)
+      %{pfx}x4 = func.call @g_ptq1_0_tcw(%{pfx}a, %tp81) : (vector<16xi8>, vector<8xi16>) -> (vector<16xi8>)
+      %{pfx}x5 = func.call @g_ptq1_0_tcw(%{pfx}bb, %tp2hi) : (vector<16xi8>, vector<8xi16>) -> (vector<16xi8>)
+      %{pfx}x6 = func.call @g_ptq1_0_tcw(%{pfx}bb, %tp3lo) : (vector<16xi8>, vector<8xi16>) -> (vector<16xi8>)
+      %{pfx}x7 = func.call @g_ptq1_0_tcw(%{pfx}bq, %tp3hi) : (vector<16xi8>, vector<8xi16>) -> (vector<16xi8>)
       %{pfx}c0 = vector.concat<0> %{pfx}x0, %{pfx}x1 : vector<16xi8>, vector<16xi8> -> vector<32xi8>
       %{pfx}c1 = vector.concat<0> %{pfx}x2, %{pfx}x3 : vector<16xi8>, vector<16xi8> -> vector<32xi8>
       %{pfx}c2 = vector.concat<0> %{pfx}x4, %{pfx}x5 : vector<16xi8>, vector<16xi8> -> vector<32xi8>
@@ -656,19 +673,19 @@ def _block_codes(pfx):
 """
 
 
-_TP = """  %ti1 = scalar.constant 1 : i8
-  %ti3 = scalar.constant 3 : i8
-  %ti9 = scalar.constant 9 : i8
-  %ti27 = scalar.constant 27 : i8
-  %ti81 = scalar.constant 81 : i8
-  %tp1 = vector.splat %ti1 : vector<16xi8>
-  %tp3 = vector.splat %ti3 : vector<16xi8>
-  %tp9 = vector.splat %ti9 : vector<16xi8>
-  %tp27 = vector.splat %ti27 : vector<16xi8>
-  %tp81 = vector.splat %ti81 : vector<16xi8>
-  %tp3lo = vector.from_elements %ti9, %ti9, %ti9, %ti9, %ti9, %ti9, %ti9, %ti9, %ti27, %ti27, %ti27, %ti27, %ti27, %ti27, %ti27, %ti27 : vector<16xi8>
-  %tp2hi = vector.from_elements %ti1, %ti1, %ti1, %ti1, %ti1, %ti1, %ti1, %ti1, %ti3, %ti3, %ti3, %ti3, %ti3, %ti3, %ti3, %ti3 : vector<16xi8>
-  %tp3hi = vector.from_elements %ti81, %ti81, %ti81, %ti81, %ti81, %ti81, %ti81, %ti81, %ti1, %ti1, %ti3, %ti3, %ti9, %ti9, %ti27, %ti27 : vector<16xi8>
+_TP = """  %ti1 = scalar.constant 1 : i16
+  %ti3 = scalar.constant 3 : i16
+  %ti9 = scalar.constant 9 : i16
+  %ti27 = scalar.constant 27 : i16
+  %ti81 = scalar.constant 81 : i16
+  %tp1 = vector.splat %ti1 : vector<8xi16>
+  %tp3 = vector.splat %ti3 : vector<8xi16>
+  %tp9 = vector.splat %ti9 : vector<8xi16>
+  %tp27 = vector.splat %ti27 : vector<8xi16>
+  %tp81 = vector.splat %ti81 : vector<8xi16>
+  %tp3lo = vector.from_elements %ti9, %ti9, %ti9, %ti9, %ti27, %ti27, %ti27, %ti27 : vector<8xi16>
+  %tp2hi = vector.from_elements %ti1, %ti1, %ti1, %ti1, %ti3, %ti3, %ti3, %ti3 : vector<8xi16>
+  %tp3hi = vector.from_elements %ti81, %ti81, %ti81, %ti81, %ti1, %ti3, %ti9, %ti27 : vector<8xi16>
 """
 
 
@@ -706,14 +723,16 @@ def mv_block(name, K, R, TG, mode="store"):
       %qb{j} = vector.bitcast %q{j} : vector<32xi32> to vector<128xi8>""")
         for g in range(4):
             body.append(f"""      %qg{j}_{g} = vector.slice %qb{j}[{32 * g}] : vector<128xi8> -> vector<32xi8>
-      %da{j}_{g} = vector.extract %m{j}[{2 * g}] : vector<8xf32> -> f32""")
+      %da{j}_{g} = vector.extract %m{j}[{2 * g}] : vector<8xf32> -> f32
+      %xs{j}_{g} = vector.extract %m{j}[{2 * g + 1}] : vector<8xf32> -> f32""")
         for wi in range(nw):
             terms = []
             for g in range(4):
                 body.append(f"""      %dp{wi}_{j}_{g} = vector.dot4i<s8s8> %b{wi}c{g}, %qg{j}_{g}, %zero8i : vector<32xi8>, vector<32xi8>, vector<8xi32>
       %di{wi}_{j}_{g} = vector.reduce<addi> %dp{wi}_{j}_{g}, %zero_i : vector<8xi32>, i32
       %df{wi}_{j}_{g} = scalar.sitofp %di{wi}_{j}_{g} : i32 to f32
-      %ds{wi}_{j}_{g} = scalar.mulf %df{wi}_{j}_{g}, %da{j}_{g} : f32""")
+      %dc{wi}_{j}_{g} = scalar.subf %df{wi}_{j}_{g}, %xs{j}_{g} : f32
+      %ds{wi}_{j}_{g} = scalar.mulf %dc{wi}_{j}_{g}, %da{j}_{g} : f32""")
                 terms.append(f"%ds{wi}_{j}_{g}")
             body.append(f"""      %s01_{wi}_{j} = scalar.addf {terms[0]}, {terms[1]} : f32
       %s23_{wi}_{j} = scalar.addf {terms[2]}, {terms[3]} : f32
