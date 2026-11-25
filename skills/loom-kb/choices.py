@@ -235,6 +235,11 @@ CHOICE("decode.attn.segment.max_tokens", "int", None, "SEG_TS_MAX", rows=["decod
 _MV = dict(kernels=["g_mv*"], rows=ROWS_DECODE + ROWS_STREAMS)
 CHOICE("decode.mv.act_q8", "bool", True, "ACT_Q8", kernels=["g_quant_q8", "g_mv*_q8", "g_head_mv*"], rows=ROWS_ALL,
        doc="Dense decode matvecs read int8 activations (integer dot4), like llama.cpp mul_mat_vec_q.")
+CHOICE("decode.mv.act_q8_max_tokens", "int", 63, "ACT_Q8_MAX_T", kernels=["g_mv*_q8*", "g_mv_*_t4*"], rows=[], from_pr="pf-misc",
+       doc="With decode.mv.act_q8: the largest epoch (tokens) whose dense matvecs read int8 activations; longer epochs under the GEMM "
+           "threshold (64 tokens: short-prompt prefill) read f32 activations. 16 keeps decode, batched decode and 4-stream verify "
+           "on the int8 kernels and removes the q8_1 rounding from 17..63-token prompts (Qwen3-1.7B: it flipped the first token "
+           "of a 22-token prompt against a float64 forward of the GGUF).")
 CHOICE("decode.mv.butterfly_perm", "bool", True, "MV_BFLY_PERM", doc="Butterfly permutation in the int8 matvec reduction.", **_MV)
 CHOICE("decode.mv.head_chunk", "int", 16, "MV_CHUNK", kernels=["g_head_mv*"], rows=ROWS_DECODE + ROWS_STREAMS,
        doc="Chunks of the int8 head matvec (8 measured no faster).")

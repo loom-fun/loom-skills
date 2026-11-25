@@ -517,6 +517,12 @@ func.def inline @g_q8_0_values(%w: buffer, %origin: offset, %group: index) -> (v
 # integer dot4 products, as llama.cpp's mul_mat_vec_q does. The 1/4/8/16-token variants share the per-token
 # arithmetic and the wave-sum tree (bfly_store), so decode and verify round identically. ACT_Q8=0: f32 activations.
 ACT_Q8 = os.environ.get("ACT_Q8", "1") == "1"
+# choice decode.mv.act_q8_max_tokens (ACT_Q8_MAX_T): with ACT_Q8, the largest epoch (tokens) whose dense matvecs read int8
+# activations; longer epochs below the GEMM threshold (64), i.e. short-prompt prefill, read the f32 activations (the 4-token
+# f32 kernels). 63 (default): every matvec epoch is int8. 16 keeps decode, batched decode and drafting verify (4 streams at
+# depth 3) bit-identical to the default and prefills 17..63-token prompts without the int8 rounding.
+ACT_Q8_MAX_T = int(os.environ.get("ACT_Q8_MAX_T", "63"))
+assert 1 <= ACT_Q8_MAX_T <= 63, f"ACT_Q8_MAX_T={ACT_Q8_MAX_T}: 1..63"
 # IQ_FMTS (formats.ICODES): the formats with an @g_<fmt>_icodes helper (Q5_0: Q5_0 below, emitted when used)
 ICODES = r"""
 // Integer weight codes of one 32-value group for the Q8 activation matvec (ACT_Q8).
@@ -4616,13 +4622,31 @@ def linear(fmt, x, s, w, wsize, y, k, n, kval, mode="store", gemm_only=False, wi
       scf.if %single {{
         kernel.launch @{mv_name(fmt, kval, mode == "swiglu", n, 1, iq)}[{n}, %t]{mv_args}
       }} else {{
-        {mv_wide_tokens(fmt, kval, mode == "swiglu", n, mv_args) if iq else
+        {act_q8_cap(mv_wide_tokens(fmt, kval, mode == "swiglu", n, mv_args),
+                    lambda: f"kernel.launch @{mv_name(fmt, kval, mode == 'swiglu', n, 4)}[{n}, %t]{mv_args.replace(f', %zero_i32, {x16}q,', f', %zero_i32, {x},')}") if iq else
          f"kernel.launch @{mv_name(fmt, kval, mode == 'swiglu', n, 4)}[{n}, %t]{mv_args}"}
       }}
     }}"""
 
 
 _LIN = [0]
+
+
+def act_q8_cap(int8_launch, f32_launch):
+    """decode.mv.act_q8_max_tokens: the int8 multi-token launch up to ACT_Q8_MAX_T tokens, the f32 one above (the
+    default 63 covers every matvec epoch: the int8 launch alone). f32_launch: a callable, so that the default registers
+    no f32 kernel."""
+    if ACT_Q8_MAX_T >= 63:
+        return int8_launch
+    _LIN[0] += 1
+    k = _LIN[0]
+    return f"""%cq_l{k} = index.constant {ACT_Q8_MAX_T} : index
+        %leq_l{k} = index.cmp ule, %t, %cq_l{k} : index
+        scf.if %leq_l{k} {{
+          {int8_launch}
+        }} else {{
+          {f32_launch()}
+        }}"""
 
 
 def mv_wide_tokens(fmt, kval, sw, n, mv_args):
@@ -5217,13 +5241,29 @@ def lin2(fmt, x, s, wa, wb, wsize, ya, yb, k, n, kval, width=None):
     a2 = f"({n}, %t, %zero_i32, {x16}q, {wa}, {wb}, {ya}, {yb}) : [index, index](index, index, i32, buffer, view<{wsize}xi8>, view<{wsize}xi8>, buffer, buffer)"
     gemm = lambda w, y: linear(fmt, x, s, w, wsize, y, k, n, kval, gemm_only=True, width=width)
     USED_GEMM.setdefault(fmt, set()).add("store")
-    _LIN[0] += 1
-    c = _LIN[0]
+    if ACT_Q8_MAX_T < 63:   # decode.mv.act_q8_max_tokens: the f32 4-token kernels above the cap
+        f32 = lambda w, y: (f"kernel.launch @{mv_name(fmt, kval, False, n, 4)}[{n}, %t]({n}, %t, %zero_i32, {x}, {w}, {y}) : "
+                            f"[index, index](index, index, i32, buffer, view<{wsize}xi8>, buffer)")
+        pair = lin2_int8(fmt, x16, wa, wb, wsize, ya, yb, n, kval, a1, a2)
+        return f"""scf.if %gemm {{
+      {gemm(wa, ya)}
+      {gemm(wb, yb)}
+    }} else {{
+      {act_q8_cap(pair, lambda: f32(wa, ya) + chr(10) + "          " + f32(wb, yb))}
+    }}"""
     return f"""scf.if %gemm {{
       {gemm(wa, ya)}
       {gemm(wb, yb)}
     }} else {{
-      %c4_p{c} = index.constant 4 : index
+      {lin2_int8(fmt, x16, wa, wb, wsize, ya, yb, n, kval, a1, a2)}
+    }}"""
+
+
+def lin2_int8(fmt, x16, wa, wb, wsize, ya, yb, n, kval, a1, a2):
+    """lin2's int8 matvec launches (1 to 63 tokens): separate 1/4-token launches, the pair kernel at 8 and 16 tokens."""
+    _LIN[0] += 1
+    c = _LIN[0]
+    return f"""%c4_p{c} = index.constant 4 : index
       %le4_p{c} = index.cmp ule, %t, %c4_p{c} : index
       scf.if %le4_p{c} {{
         scf.if %single {{
@@ -5241,8 +5281,7 @@ def lin2(fmt, x, s, wa, wb, wsize, ya, yb, k, n, kval, width=None):
         }} else {{
           kernel.launch @{mv_name(fmt, kval, 2, n, 16, True)}[{n}, %t]{a2}
         }}
-      }}
-    }}"""
+      }}"""
 
 
 def lin_mv(fmt, x, w, wsize, y, n, kval):
