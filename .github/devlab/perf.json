@@ -1,5 +1,5 @@
 {
- "_comment": "Flash-Next prefill lane (#1417): baseline on SDK 0.3.0 - frozen 0.2.0 programs vs the library v0.3.0 ABI 2 catalog at prefill 4096/16384/32768, fixed vs elastic backing; per-kernel profile",
+ "_comment": "Flash-Next prefill lane (#1417) round 1: prefill chunk 8192/12288; A = 64-row expert records for short packets; B = int8 hyperconnection projections up to 8192-token packets",
  "card": "loom-fun/unsloth-Qwen3.8-Flash-Next-loom@d847c21bc93c0c6bc45752a9edaf91d80ac74490",
  "sdk": "0.3.0",
  "kit": "qwen4exp",
@@ -11,64 +11,82 @@
  },
  "jobs": [
   {
-   "name": "flash-base",
+   "name": "flash-r1",
    "variants": [
     {
-     "name": "frozen",
-     "sdk": "0.3.0"
-    },
-    {
-     "name": "abi2",
+     "name": "base",
      "build": {},
      "sdk": "0.3.0"
     },
     {
-     "name": "p16",
+     "name": "p8k",
      "build": {},
      "sdk": "0.3.0",
      "execution": {
-      "prefill_capacity": 16384
+      "prefill_capacity": 8192
      }
     },
     {
-     "name": "p16e",
+     "name": "a8k",
      "build": {},
+     "ref": "ff05e5e6b41ea8f8904713afa1b97bb563e549ae",
      "sdk": "0.3.0",
-     "elastic": true,
-     "memory_bytes": "none",
      "execution": {
-      "prefill_capacity": 16384
+      "prefill_capacity": 8192
      }
     },
     {
-     "name": "p32",
+     "name": "b8k",
+     "build": {},
+     "ref": "55934c674c95800546ae917d96db7a6e09ed0cf4",
+     "sdk": "0.3.0",
+     "execution": {
+      "prefill_capacity": 8192
+     }
+    },
+    {
+     "name": "ab8k",
+     "build": {},
+     "ref": "14d1fd6fd62acc39e530149714683193d6d20f91",
+     "sdk": "0.3.0",
+     "execution": {
+      "prefill_capacity": 8192
+     }
+    },
+    {
+     "name": "p12k",
      "build": {},
      "sdk": "0.3.0",
      "execution": {
-      "prefill_capacity": 32768
+      "prefill_capacity": 12288
      }
     }
    ],
    "steps": [
-    "perf:frozen:1",
-    "perf:frozen:1:long",
-    "perf:abi2:1",
-    "perf:abi2:1:long",
-    "perf:p16:1",
-    "perf:p16:1:long",
-    "perf:p16e:1",
-    "perf:p16e:1:long",
-    "perf:p16e:1",
-    "perf:p16e:1:long",
-    "perf:p16:1",
-    "perf:p16:1:long",
-    "perf:abi2:1",
-    "perf:abi2:1:long",
-    "perf:frozen:1",
-    "perf:frozen:1:long",
-    "profile:p16",
-    "perf:p32:1",
-    "perf:p32:1:long"
+    "smoke:ab8k",
+    "perf:base:1",
+    "perf:base:1:long",
+    "perf:p8k:1",
+    "perf:p8k:1:long",
+    "perf:a8k:1",
+    "perf:a8k:1:long",
+    "perf:b8k:1",
+    "perf:b8k:1:long",
+    "perf:ab8k:1",
+    "perf:ab8k:1:long",
+    "perf:ab8k:1",
+    "perf:ab8k:1:long",
+    "perf:b8k:1",
+    "perf:b8k:1:long",
+    "perf:a8k:1",
+    "perf:a8k:1:long",
+    "perf:p8k:1",
+    "perf:p8k:1:long",
+    "perf:base:1",
+    "perf:base:1:long",
+    "profile:ab8k:pf2k,pf8k",
+    "perf:p12k:1:long",
+    "perf:p12k:1"
    ]
   }
  ]
