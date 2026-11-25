@@ -221,13 +221,33 @@ DFL_TQ = 8      # block tokens per wave (a power of two; x DFL_KU keys = values 
 DFL_KU = 2      # context keys per iteration
 
 
+def split_window():
+    """draft.dflash.split_window (DFL_SPLIT_WIN): a sliding-window drafter (dflash.attention.sliding_window) also takes the split-K
+    context attention; every split covers the last `window` context positions before the block (the window of its first token)
+    instead of a per-token window, so later block tokens see up to block - 1 older keys. Proposals only."""
+    return os.environ.get("DFL_SPLIT_WIN", "") not in ("", "0", "off", "no", "false")
+
+
 def split_enabled(F):
-    return DFL_SPLITS > 0 and not (F["window"] or 0) and not F.get("conv")
+    return DFL_SPLITS > 0 and (not (F["window"] or 0) or split_window()) and not F.get("conv")
 
 
 def ctx_split_kernel(F, QH, KVH, D, POSB, g):
     """g_dfl_ctx_split: the context part of the draft attention, split-K (see DFL_SPLITS)."""
     S, TQ, KU, GQ, DPL = DFL_SPLITS, DFL_TQ, DFL_KU, QH // KVH, D // 32
+    W = F["window"] or 0
+    ctx_range = ("""    %per_p = index.add %ctx_count, %cSl : index
+    %per = index.div %per_p, %cSs : index
+    %lo_r = index.mul %split, %per : index""" if not W else f"""    %cwt = index.constant {W - 1} : index
+    %earl = index.max %ctx_count, %cwt : index
+    %ctx_lo0 = index.sub %earl, %cwt : index
+    %ctx_lo = index.assume %ctx_lo0 [range(%ctx_lo0, 0, 262143)] : index
+    %ctx_n0 = index.sub %ctx_count, %ctx_lo : index
+    %ctx_n = index.assume %ctx_n0 [range(%ctx_n0, 0, {W - 1})] : index
+    %per_p = index.add %ctx_n, %cSl : index
+    %per = index.div %per_p, %cSs : index
+    %lo_rr = index.mul %split, %per : index
+    %lo_r = index.add %ctx_lo, %lo_rr : index""")
     t = [f"""
 // Context part of the draft attention, split-K: workgroup (block token, KV head, split), wave = query head of the
 // KV head. The workgroup of a chunk's first token (block offset % {TQ} == 0) scores the chunk's tokens against each
@@ -302,9 +322,7 @@ kernel.def export("g_dfl_ctx_split") @g_dfl_ctx_split(%tokens: index) {{
     %plane_stride = index.scale %pool, %pos_bytes : index, offset -> offset
     %cSs = index.constant {S} : index
     %cSl = index.constant {S - 1} : index
-    %per_p = index.add %ctx_count, %cSl : index
-    %per = index.div %per_p, %cSs : index
-    %lo_r = index.mul %split, %per : index
+@@CTX_RANGE@@
     %s_lo = index.min %lo_r, %ctx_count : index
     %hi_r = index.add %lo_r, %per : index
     %s_hi = index.min %hi_r, %ctx_count : index
@@ -396,7 +414,7 @@ kernel.def export("g_dfl_ctx_split") @g_dfl_ctx_split(%tokens: index) {{
     }}
 """)
     t.append("    }\n  }\n  kernel.return\n}\n")
-    return "".join(t)
+    return "".join(t).replace("@@CTX_RANGE@@", ctx_range)
 
 
 def split_combine(text, QH, KVH, D):

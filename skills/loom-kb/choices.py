@@ -760,6 +760,9 @@ CHOICE("decode.head.piece_rows", "int", 16384, "HEAD_PIECE_ROWS", kernels=["g_he
        doc="Rows per prepared piece of a pieced head (draft.propose.head_pieces, decode.head.verify); a multiple of 128.", **{})
 CHOICE("draft.dflash.splits", "int", 32, "DFL_SPLITS", kernels=["g_dfl_attention", "g_dfl_ctx_split"], rows=ROWS_DECODE,
        doc="DFlash context-attention splits.")
+CHOICE("draft.dflash.split_window", "bool", False, "DFL_SPLIT_WIN", kernels=["g_dfl_attention", "g_dfl_ctx_split"], rows=ROWS_DECODE, from_pr="qwen35 lane",
+       doc="A sliding-window DFlash drafter takes the split-K context attention too (g_dfl_ctx_split: keys loaded once per 8 block tokens "
+           "instead of once per (block token, query head)); every split covers the window of the block's first token. Proposals only.")
 CHOICE("draft.dflash.prep_weights", "bool", True, "DRAFTER_PREP", kernels=["g_dfl_*"], rows=ROWS_DECODE + ROWS_STREAMS,
        doc="A BF16/F16 drafter is used as Q8_0 at load (draft_weights.loom); False: as is.")
 CHOICE("draft.ngram.max", "int", 4, "NGRAM_MAX", kernels=["g_ng_propose"], rows=ROWS_DECODE + ROWS_STREAMS,
