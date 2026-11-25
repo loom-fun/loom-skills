@@ -58,7 +58,10 @@ command.def @flash_next_routed_experts(%record_rows: index, %active_tokens: inde
   %c1 = index.constant 1 : index
   %c3 = index.constant 3 : index
   %matrix_rows = index.constant 128 : index
-  %matrix = index.cmp eq, %record_rows, %matrix_rows : index
+  %small_matrix_rows = index.constant 64 : index
+  %matrix = index.cmp uge, %record_rows, %small_matrix_rows : index
+  // Only the 128-row block schedule consumes the prepacked F16 operand.
+  %block_records = index.cmp eq, %record_rows, %matrix_rows : index
   %bucketed = index.cmp ne, %record_rows, %c1 : index
   %neural_enabled = index.cmp ne, %active_tokens, %c0 : index
   %routing = scf.if %bucketed -> (buffer) {
@@ -94,7 +97,8 @@ command.def @flash_next_routed_experts(%record_rows: index, %active_tokens: inde
       %up_weight = command.parameter %parameters, "blk.{}.ffn_up_exps.weight"[%layer] : view<512x640x10x176xi8>
       scf.if %bucketed {
         scf.if %matrix {
-          %prepacked = func.call pure @expert_gate_input_is_prepacked() : () -> (i1)
+          %prepacked_shape = func.call pure @expert_gate_input_is_prepacked() : () -> (i1)
+          %prepacked = scalar.andi %prepacked_shape, %block_records : i1
           %operand = scf.if %prepacked -> (buffer) {
             %row_bytes = index.constant 5120 : offset
             %packed_bytes = index.scale %tokens, %row_bytes : index, offset -> offset
@@ -116,7 +120,8 @@ command.def @flash_next_routed_experts(%record_rows: index, %active_tokens: inde
       %up_weight = command.parameter %parameters, "blk.{}.ffn_up_exps.weight"[%layer] : view<512x640x10x144xi8>
       scf.if %bucketed {
         scf.if %matrix {
-          %prepacked = func.call pure @expert_gate_input_is_prepacked() : () -> (i1)
+          %prepacked_shape = func.call pure @expert_gate_input_is_prepacked() : () -> (i1)
+          %prepacked = scalar.andi %prepacked_shape, %block_records : i1
           %operand = scf.if %prepacked -> (buffer) {
             %row_bytes = index.constant 5120 : offset
             %packed_bytes = index.scale %tokens, %row_bytes : index, offset -> offset
@@ -190,20 +195,30 @@ command.def public @flash_next_experts(%workload_count: index, %layer: index) la
   %direct_count = scf.select %use_records, %none, %workload_count : index
   %record_count = scf.select %use_records, %workload_count, %none : index
   %grouped_count = scf.select %use_matrix, %none, %record_count : index
-  %matrix_count = scf.select %use_matrix, %record_count, %none : index
+  %all_matrix_count = scf.select %use_matrix, %record_count, %none : index
+  // Short packets (about 64 routes per expert or fewer) use 64-row records.
+  %small_matrix_rows = index.constant 64 : index
+  %small_packet = index.constant 2304 : index
+  %small = index.cmp ule, %workload_count, %small_packet : index
+  %small_matrix_count = scf.select %small, %all_matrix_count, %none : index
+  %matrix_count = scf.select %small, %none, %all_matrix_count : index
 
   %rank_row_bytes = index.constant 40 : offset
   %rank_bytes = index.scale %tokens, %rank_row_bytes : index, offset -> offset
   %grouped_records, %grouped_fields, %grouped_bytes = func.call pure @expert_record_extent(%tokens, %grouped_rows) : (index, index) -> (index, index, offset)
   %matrix_records, %matrix_fields, %matrix_bytes = func.call pure @expert_record_extent(%tokens, %matrix_rows) : (index, index) -> (index, index, offset)
   %grouped_is_larger = index.cmp ugt, %grouped_bytes, %matrix_bytes : offset
-  %task_bytes = scf.select %grouped_is_larger, %grouped_bytes, %matrix_bytes : offset
+  %large_task_bytes = scf.select %grouped_is_larger, %grouped_bytes, %matrix_bytes : offset
+  %small_records, %small_fields, %small_bytes = func.call pure @expert_record_extent(%tokens, %small_matrix_rows) : (index, index) -> (index, index, offset)
+  %small_is_larger = index.cmp ugt, %small_bytes, %large_task_bytes : offset
+  %task_bytes = scf.select %small_is_larger, %small_bytes, %large_task_bytes : offset
   %ranks = buffer.alloca<global> align(16) %rank_bytes : buffer
   %tasks = buffer.alloca<global> align(16) %task_bytes : buffer
   command.concurrent {
     command.launch @flash_next_routed_experts[%direct_rows, %direct_count, %layer](%parameters, %span, %input, %ids, %ranks, %tasks, %hidden, %down) : [index, index, index](buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
     command.launch @flash_next_routed_experts[%grouped_rows, %grouped_count, %layer](%parameters, %span, %input, %ids, %ranks, %tasks, %hidden, %down) : [index, index, index](buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
     command.launch @flash_next_routed_experts[%matrix_rows, %matrix_count, %layer](%parameters, %span, %input, %ids, %ranks, %tasks, %hidden, %down) : [index, index, index](buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+    command.launch @flash_next_routed_experts[%small_matrix_rows, %small_matrix_count, %layer](%parameters, %span, %input, %ids, %ranks, %tasks, %hidden, %down) : [index, index, index](buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
   }
   %shared_gate_weight = command.parameter %parameters, "blk.{}.ffn_gate_shexp.weight"[%layer] : view<640x80x34xi8>
   %shared_up_weight = command.parameter %parameters, "blk.{}.ffn_up_shexp.weight"[%layer] : view<640x80x34xi8>
