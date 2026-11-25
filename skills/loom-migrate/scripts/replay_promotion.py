@@ -4,8 +4,8 @@
 The release scope is data, never code: `--eligible` maps each promoted slug to its exact `staging_revision` and
 `target_revision` plus optional per-package exceptions (`retain_target_files`, `delete_target_files` + `rollback_tag`,
 `image_readme_refresh`); `--held` maps each production repo that is NOT promoted to its `reason` (and optionally
-`tag_revision`, the exact production head that still gets the outgoing SDK tag). Every production `*-loom` repo must be
-in exactly one of the two files (a repo published after the snapshot fails the release instead of being left behind).
+`tag_revision`, the exact production head that still gets the outgoing SDK tag). Every model repo of the production org
+must be in exactly one of the two files (a repo published after the snapshot fails the release instead of being left behind).
 
   prepare  --eligible E.json --held H.json --sdk X.Y.Z --outgoing-tag vA.B.C --bundle DIR
            [--loom-fetch PATH] [--only SLUG...]
@@ -36,7 +36,6 @@ ENDPOINT = "https://huggingface.co"
 REVISION = r"[0-9a-f]{40}"
 SHA256 = r"[0-9a-f]{64}"
 SLUG = r"[A-Za-z0-9][A-Za-z0-9._-]*"
-LOOM_REPO = re.compile(r".+-loom(?:-[A-Za-z0-9._-]+)?")
 HUB_ATTRIBUTES = ".gitattributes"
 CARD_SCRIPTS = Path(__file__).resolve().parents[2] / "loom-benchmark" / "scripts" / "card"
 FETCH = re.compile(r"(?m)^([ \t]*loom-fetch[ \t]+)(?:([\x22\x27])([^\r\n]*?)\2|([^\s]+))")
@@ -142,8 +141,9 @@ def held_rows(held):
 
 
 def production_inventory(api):
+    """Every model repo of the production org (not only `*-loom` names: hand-written packages may be named otherwise)."""
     models = read_hub(lambda token, **kw: list(api.list_models(token=token, **kw)), None, author=PRODUCTION, limit=10000)
-    return sorted(name for name in (m.id.split("/", 1)[1] for m in models) if LOOM_REPO.fullmatch(name))
+    return sorted(m.id.split("/", 1)[1] for m in models)
 
 
 def check_scope(pins, held, inventory):

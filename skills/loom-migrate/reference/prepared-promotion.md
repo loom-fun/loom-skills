@@ -22,7 +22,7 @@ only the owner-approved steps 1 and 3 of the runbook write.
 - `held.json`: `{SLUG: {"reason": TEXT, "tag_revision": SHA?}}`: every production repo that is not promoted, with the owner's
   reason. `tag_revision` (the repo's exact current head) still gives it the outgoing tag.
 
-Every production `*-loom` repo (including suffixed names such as `...-loom-r9700`) must be in exactly one of the two files.
+Every model repo of the production org (whatever its name: `...-loom-r9700` and hand-written packages without the `-loom` suffix included) must be in exactly one of the two files.
 A repo published after the snapshot therefore stops the release instead of being left behind; so does a repo that is in the
 inputs but no longer in production.
 

@@ -75,7 +75,7 @@ Order matters: each step's proof is the next step's precondition. Big outputs go
    Loom and llama.cpp come from different jobs on the same runner type.
 6. **Publish to the staging org** (`loom-fleet` `reference/publish.md`): each card shows its own new-SDK measurement and the delta line
    against the old card; publish partial progress; verify the live card (session and programs hash). Never production.
-   **Before promotion** (owner's go-ahead), freeze `eligible.json` and `held.json` (every production repo in exactly one) and
+   **Before promotion** (owner's go-ahead), freeze `eligible.json` and `held.json` (every model repo of the production org in exactly one) and
    prepare the reviewed bundle: `scripts/replay_promotion.py prepare` composes the exact production bytes, checks them with the
    card file-set check, and plans the OUTGOING SDK tag at each production parent so the old card stays addressable at
    `.../resolve/v<old>/model.json` ([reviewed bundle procedure](reference/prepared-promotion.md)). After approval, in this order

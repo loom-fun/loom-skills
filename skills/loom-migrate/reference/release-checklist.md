@@ -62,7 +62,7 @@ Every change outside loom-skills is a reviewed pull request, never a direct comm
 ## 5. Promotion, in order (owner's go)
 Before approval, freeze the release inputs (`eligible.json` from the qualification evidence, `held.json` with the owner's reason
 for every production repo not promoted) and prepare the bundle with `scripts/replay_promotion.py prepare` (the reviewed bundle
-procedure, [prepared-promotion.md](prepared-promotion.md)). Every production `*-loom` repo is in exactly one of the two files.
+procedure, [prepared-promotion.md](prepared-promotion.md)). Every model repo of the production org is in exactly one of the two files.
 The owner approves one manifest SHA256; it covers the package bytes, the parents and the outgoing tag plan. The bundle's
 generated `RELEASE.md` repeats these steps with that SHA256.
 
