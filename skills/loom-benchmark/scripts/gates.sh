@@ -19,10 +19,10 @@
 #   NO_LLAMA=1  no llama.cpp runs this model: reference-free checks only (consistency, agent rendering/
 #               reuse/calls, sampling semantics); report correctness as unverified.
 #   LEVEL=full  (default; the final build, once): quick. QUICK=1 is an alias for LEVEL=quick.
-# Context admission (quick and full; a check, not a gate: no gate row, no card row): ctx_admit.py sends one request of
+# Context admission (quick and full; a check, not a gate: no gate row; the card states the result per GPU under its correctness table, make_info.py gates carries it into info.json devices.GPU.admission): ctx_admit.py sends one request of
 # ~the package's native context_capacity and cancels it once the server has accepted it (seconds, no long prefill). A
 # refusal (4xx/503: a KV pool or memory budget below the context) fails the run: gates.json "context_admit"
-# {"admitted", "tokens", "context", "detail"} (make_info.py ignores it), a "CONTEXT_ADMIT FAIL ..." line precedes the GATES line, which says FAIL (exit 1).
+# {"admitted", "tokens", "context", "detail"}, a "CONTEXT_ADMIT FAIL ..." line precedes the GATES line, which says FAIL (exit 1).
 # SAFETENSORS PACKAGES (llm_config.json source.kind == "safetensors", e.g. Quark MXFP4): the reference engine is vLLM (ROCm) serving the
 # checkpoint with its own quantization config, through vllm_shim.py (a llama-server look-alike: every gate below is unchanged, "llama.cpp"
 # in this file and its logs then means the reference server). GGUF is the 3rd argument for a GGUF package; here it is the checkpoint
