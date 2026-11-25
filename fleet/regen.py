@@ -1474,6 +1474,11 @@ def package_one(st, slug, canon, sha, dry, env, prefill_changes=None, source_car
     if source_card:
         reference = os.path.join(W, "staging")
         hf_snapshot_small(repo, rev, reference)
+        for f in ("info.json", "README.md", "REPORT.md"):   # the card files stay the staging repo's until the card step (a production snapshot's name loom-fun)
+            if os.path.isfile(os.path.join(reference, f)):
+                shutil.copy2(os.path.join(reference, f), os.path.join(out, f))
+            elif os.path.isfile(os.path.join(out, f)):
+                os.remove(os.path.join(out, f))
         qualification = os.path.join(reference, card_lib.QUICK_START_QUALIFICATION)
         if os.path.isfile(qualification):
             # Keep the receipt. Card generation applies it only to the exact measured settings.
