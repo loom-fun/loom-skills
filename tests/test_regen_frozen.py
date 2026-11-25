@@ -425,6 +425,12 @@ class ProductionFacts(unittest.TestCase):
             self.assertTrue(f["programs_sha256"])
 
 
+class PackageGenerator(unittest.TestCase):
+    def test_recovered_or_hand_written(self):
+        self.assertEqual(regen.package_generator({"generator": "a" * 40}), {"commit": "a" * 40, "recovered": True, "basis": "production card"})
+        self.assertEqual(regen.package_generator({"generator": None}), {"commit": None, "basis": "hand-written package, no generator"})
+
+
 class FrozenAssembleAndLint(unittest.TestCase):
     def test_only_the_pin_and_the_staging_main_wording_change(self):
         cfg = {"sdk": {"hrx_loom": "0.2.0"}, "resolved": {"x": {"evidence": "verified on staging main (run 1)"}}, "gguf": "m.gguf"}
