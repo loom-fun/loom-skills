@@ -145,9 +145,8 @@
  },
  "serve": {
   "args": [
-   "--pool_backing=fixed"
-  ],
-  "committed_bytes": 97000000000
+   "--pool_backing=elastic"
+  ]
  },
  "model_id": "unsloth-Qwen3.8-Flash-Next-loom",
  "catalog": {

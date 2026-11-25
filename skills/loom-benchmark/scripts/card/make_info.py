@@ -128,7 +128,7 @@ from card_lib import (DEFAULT_GPU, DRAFTED_ROWS, EVIDENCE_ID, GPUS, METRIC_KEYS,
                       gpu_view, load_info, load_json, load_package, metric_applies, native_context, over_context, package_facts,
                       programs_sha256, require_valid, fixed_pool_capacity, gpu_preset_execution, gpu_preset_name, with_gpu_preset, served_context, fit_served_context, upstream_facts, with_gate_features, write_json,
                       SERVE_HEADROOM, registry, fit_rows, non_targets, load_device_results, validate_device_results, with_device_preset, DEVICE_RESULTS_ID, card_serve_args, quick_start, serves,
-                      emulated_gate_errors, historical_xsj_gate, sdk_serve_args, xsj_enabled, xsj_evidence_errors, xsj_measurement_errors, xsj_vulkan_comparison_errors,
+                      emulated_gate_errors, historical_xsj_gate, sdk_serve_args, package_pool_backing, xsj_enabled, xsj_evidence_errors, xsj_measurement_errors, xsj_vulkan_comparison_errors,
                       CAVEAT_MAX, DEVICE_RESULTS_DIR, QUICK_START_QUALIFICATION, qualified_bare_quick_start, text_errors, previous_values, stamped, SESSION_ACCEPTANCE_ROWS,
                       new_port_problem, sdk_version)
 
@@ -772,7 +772,8 @@ def cmd_build(a):
             print(f"{path}: ignoring unreadable Quick start qualification ({exc})", file=sys.stderr)
     for gpu in [g for g in devices if serves(info, g)] or [g for g in devices if g == DEFAULT_GPU]:
         if "serve_args" in devices[gpu]:
-            devices[gpu]["serve_args"] = sdk_serve_args(devices[gpu]["serve_args"], served.get("sdk"))
+            args = sdk_serve_args(devices[gpu]["serve_args"], served.get("sdk"))
+            devices[gpu]["serve_args"] = package_pool_backing(args, served.get("serve"))
         control = quick_start(info, served, gpu)
         qualified = qualified_bare_quick_start(a.pkg, served_package, info["repo"], gpu, control, measured_programs, qualification)
         if isinstance(qualification, dict) and qualification.get("gpu") == gpu and qualified is None:

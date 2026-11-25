@@ -870,6 +870,13 @@ QUICK_START_DEVICE = "amdgpu://?completion_spin_ns=4294967295"   # the active wa
 QUICK_START_QUALIFICATION = "quick-start-qualification.json"
 
 
+def package_pool_backing(device_args, serve):
+    """Honor a package's elastic pool requirement when the device normally selects fixed backing."""
+    if "--pool_backing=elastic" in ((serve or {}).get("args") or []):
+        return ["--pool_backing=elastic" if arg == "--pool_backing=fixed" else arg for arg in device_args]
+    return device_args
+
+
 def quick_start(info, facts, gpu):
     """How the card's Quick start serves the package on a GPU: the preset loom-fetch takes, the loom-serve --device URI and every other
     loom-serve flag after --model. make_info.py build records it as the GPU's devices entry quick_start, which the README renders and other
@@ -877,7 +884,7 @@ def quick_start(info, facts, gpu):
     args = []
     pkg_serve = (facts.get("serve") or {}).get("args")   # llm_config.json "serve": flags the package must be served with
     sdk = facts.get("sdk")
-    gpu_serve = info_serve_args(info, gpu, facts.get("weight_bytes"), sdk)
+    gpu_serve = package_pool_backing(info_serve_args(info, gpu, facts.get("weight_bytes"), sdk), facts.get("serve"))
     explicit_args = "serve_args" in ((info.get("devices") or {}).get(gpu) or {})
     memory = gpu_memory(info, facts["memory_bytes"], gpu)
     if gpu_serve or pkg_serve:
@@ -990,7 +997,8 @@ def package_serve_args(gpu, pkg_dir, sdk=None):
     """card_serve_args for the package in a directory (model.json + model.json.lock): what its card's Quick start serves it with on the GPU
     (devlab_perf.sh serve_alone serves with the same flags). A package whose lock sizes are unknown has unknown weights: only a GPU with no weight limit preloads."""
     pf = load_package(pkg_dir)
-    return card_serve_args(gpu, package_weight_bytes(pf["model"], pf["lock"]), sdk or pf["cfg"].get("sdk"))
+    args = card_serve_args(gpu, package_weight_bytes(pf["model"], pf["lock"]), sdk or pf["cfg"].get("sdk"))
+    return package_pool_backing(args, pf["cfg"].get("serve"))
 
 
 def has_runner(gpu):

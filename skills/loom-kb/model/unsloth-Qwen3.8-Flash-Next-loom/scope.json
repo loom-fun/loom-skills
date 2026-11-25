@@ -1,0 +1,22 @@
+{
+ "scope": "model/unsloth-Qwen3.8-Flash-Next-loom",
+ "match": {
+  "slug": [
+   "unsloth-Qwen3.8-Flash-Next-loom"
+  ]
+ },
+ "owner": "kb",
+ "choices": [
+  {
+   "when": {
+    "devices": [
+     "strix-halo"
+    ]
+   },
+   "set": {
+    "exec.prefill_capacity": 8192
+   },
+   "evidence": "#1417: Strix chunk-8192 qualification. Fixed backing failed to allocate the 11 GB epoch arena in DevLab run 45539678433."
+  }
+ ]
+}

@@ -38,6 +38,22 @@ class PreloadRule(unittest.TestCase):
         info = {"devices": {"gfx1150": {"serve_args": ["--memory_bytes=1"]}}}
         self.assertEqual(card_lib.info_serve_args(info, "gfx1150", 1), ["--memory_bytes=1"])
 
+    def test_package_elastic_backing_matches_card_and_devlab(self):
+        with tempfile.TemporaryDirectory() as directory:
+            shutil.copytree(os.path.join(FLINT, "pkg"), directory, dirs_exist_ok=True)
+            path = os.path.join(directory, "llm_config.json")
+            config = card_lib.load_json(path)
+            config.update(serve={"args": ["--pool_backing=elastic"]}, sdk={"hrx_loom": "0.3.0"})
+            card_lib.write_json(path, config)
+            facts = card_lib.package_facts(card_lib.load_package(directory))
+            gpu = "strix-halo"
+            runtime_args = card_lib.package_serve_args(gpu, directory)
+            self.assertEqual(runtime_args, ["--pool_backing=elastic"])
+            for entry in ({}, {"serve_args": ["--pool_backing=fixed"]}):
+                with self.subTest(entry=entry):
+                    info = {"devices": {gpu: entry}}
+                    self.assertEqual(card_lib.quick_start(info, facts, gpu)["args"], runtime_args)
+
     def test_weight_bytes_sums_every_parameter_file_once(self):
         pf = card_lib.load_package(os.path.join(FLINT, "pkg"))
         self.assertEqual(card_lib.package_weight_bytes(pf["model"], pf["lock"]), 23387911136 + 239808192)   # not the tokenizer
