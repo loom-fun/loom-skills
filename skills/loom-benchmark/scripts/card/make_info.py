@@ -1137,6 +1137,10 @@ def cmd_perf(a):
             m["baseline_runs"] = runs_of(k, bs, a.c4_llama)
         metrics[k] = m
     with_acceptance(metrics, lacc)
+    if a.draft_metrics and not extra:
+        acc = draft_metrics_acceptance(a.draft_metrics)
+        if acc:
+            metrics["spec_acceptance"] = acc
     if a.baseline_from_info:
         if extra or llama_rows:
             sys.exit("--baseline-from-info replaces the llama.cpp logs: give a Loom-only job's files")
@@ -1194,6 +1198,30 @@ def cmd_perf(a):
     print(f"wrote {a.o}: " + ", ".join(f"{k} {m.get('loom')}/{m['baseline']}" for k, m in metrics.items()), file=sys.stderr)
 
 
+def draft_metrics_acceptance(paths):
+    """spec_acceptance of a perf session from loom-serve /metrics dumps (cumulative per serve session): {"loom": share
+    of proposals} when the SDK counts proposals, else {"loom": None, "unreported": "proposals", "accepted_per_pass": x}
+    (bench_common.per_pass_between); the median over the dumps that decoded drafted tokens, or None."""
+    from bench_common import acceptance_between, draft_counters, per_pass_between, proposals_unreported
+    shares, passes, unreported = [], [], False
+    for p in paths:
+        v = draft_counters(open(p, encoding="utf-8", errors="replace").read())
+        if not v.get("decode_tokens"):
+            continue
+        if proposals_unreported(v):
+            unreported = True
+            if per_pass_between({}, v) is not None:
+                passes.append(per_pass_between({}, v))
+        elif acceptance_between({}, v) is not None:
+            shares.append(acceptance_between({}, v))
+    if shares and not unreported:
+        return {"loom": round(statistics.median(shares), 3)}
+    if unreported:
+        return {"loom": None, "unreported": "proposals",
+                **({"accepted_per_pass": round(statistics.median(passes), 3)} if passes else {})}
+    return None
+
+
 def power_block(path, mode):
     """The power evidence of a local session (.github/scripts/power_steps.py's power_steps.json): per engine the median W and GHz of
     its busy samples, and the steps outside the expected band."""
@@ -1207,7 +1235,7 @@ def power_block(path, mode):
 # ---------------------------------------------------------------- gate results -> evidence
 
 ACCEPT = re.compile(r"acceptance (\d+(?:\.\d+)?)% of (\d+) proposals")
-UNREPORTED = re.compile(r"acceptance not reported \((\d+) drafted tokens accepted")   # spec_check.py: the SDK counts no proposals
+UNREPORTED = re.compile(r"acceptance not reported \((\d+) drafted tokens accepted(?: in (\d+) verification passes, ([0-9.]+) per pass)?")   # spec_check.py: no proposal count
 
 
 def gates_from_file(path, time, level):
@@ -1257,16 +1285,21 @@ def acceptance(paths):
 
 def acceptance_metric(paths):
     """The spec gate's spec_acceptance card metric from the first file that reports one: {"loom": fraction}, or
-    {"loom": None, "unreported": "proposals"} when spec_check.py found accepted drafted tokens but no proposal count
-    (the SDK does not report it for the package's controller; bench_common.proposals_unreported), or None."""
+    {"loom": None, "unreported": "proposals", "accepted_per_pass": x} when spec_check.py found accepted drafted tokens
+    but no proposal count (the SDK does not report it for the package's controller; bench_common.proposals_unreported):
+    the accepted drafted tokens per verification pass instead (bench_common.per_pass_between), or None."""
     for p in paths:
         if p and os.path.isfile(p):
             body = open(p, encoding="utf-8", errors="replace").read()
             found = ACCEPT.findall(body)
             if found:
                 return {"loom": round(float(found[-1][0]) / 100, 3)}
-            if UNREPORTED.search(body):
-                return {"loom": None, "unreported": "proposals"}
+            found = UNREPORTED.findall(body)
+            if found:
+                m = {"loom": None, "unreported": "proposals"}
+                if found[-1][2]:
+                    m["accepted_per_pass"] = round(float(found[-1][2]), 3)
+                return m
     return None
 
 
@@ -1609,6 +1642,10 @@ def main(argv=None):
     p.add_argument("--llama-jsonl")
     p.add_argument("--c4-loom")
     p.add_argument("--c4-llama")
+    p.add_argument("--draft-metrics", nargs="*", metavar="METRICS.txt",
+                   help="loom-serve /metrics dumps taken at the end of each Loom serve session (devlab_perf.sh metrics_*.txt): the "
+                   "session's spec_acceptance from its drafting counters, the share of proposals, or drafted tokens accepted per "
+                   "verification pass when the SDK counts no proposals (median over the dumps that decoded)")
     p.add_argument("--baseline-from-info", help="a Loom-only job: the llama.cpp rows are the ones this published info.json shows for --gpu (see the module docstring)")
     p.add_argument("--baseline-name", default="llama.cpp")
     p.add_argument("--baseline-version", help="the baseline build, e.g. llamacpp-rocm/b1355 (a bare bNNNN tag is expanded)")

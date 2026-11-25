@@ -278,6 +278,7 @@
       "date": "2026-11-25",
       "metrics": {
        "spec_acceptance": {
+        "accepted_per_pass": 1.249,
         "loom": null,
         "unreported": "proposals"
        }

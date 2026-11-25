@@ -659,8 +659,10 @@ def carried_text(old, pin):
 
 
 ACCEPTANCE_UNREPORTED = ("hrx-loom {v} reports no drafter proposal count for this package's service ABI 1 controller "
-                         "(`proposed_tokens` is null), so the acceptance is not measured; it is never derived from the configured "
-                         "draft depth. The `spec` gate checks that drafted replies equal undrafted ones.")
+                         "(`proposed_tokens` is null), so the share of proposals accepted is not measured; it is never derived from "
+                         "the configured draft depth, which is a ceiling.")
+ACCEPTANCE_PER_PASS = ("Drafted tokens accepted per verification pass during the measuring session's requests: accepted drafted "
+                       "tokens / verification passes, from loom-serve's counters (passes = decoded positions - accepted drafted tokens). ")
 
 
 def perf_section(L, info, facts, feats, d, g, here, ctx, pin=None):
@@ -695,8 +697,9 @@ def perf_section(L, info, facts, feats, d, g, here, ctx, pin=None):
         """A value with its session's footnote mark (sessions other than the primary one), the stale mark and the
         carried mark (measured on another SDK than the pin)."""
         out = num(key, v)
-        if key == "spec_acceptance" and v is None and i is not None and sessions[i]["metrics"].get(key, {}).get("unreported"):
-            out = "not reported"
+        sm = sessions[i]["metrics"].get(key, {}) if i is not None else {}
+        if key == "spec_acceptance" and v is None and sm.get("unreported"):
+            out = f"{sm['accepted_per_pass']:.2f} per pass" if sm.get("accepted_per_pass") is not None else "not reported"
         if i is not None and (sessions[i]["source"], sessions[i]["date"]) != pkey:
             nk = (sessions[i]["source"], sessions[i]["date"])
             if nk not in notes:
@@ -831,8 +834,9 @@ def perf_section(L, info, facts, feats, d, g, here, ctx, pin=None):
     if metric_applies("spec_acceptance", kind, feats):
         m, i = shown.get("spec_acceptance", ({}, None))
         if m.get("unreported") == "proposals" and m.get("loom") is None:
-            L.append("- Drafted tokens accepted: not reported. "
-                     + ACCEPTANCE_UNREPORTED.format(v=sdk_version(sources[sessions[i]["source"]].get("hrx_loom")) or "this version"))
+            v = sdk_version(sources[sessions[i]["source"]].get("hrx_loom")) or "this version"
+            L.append("- " + (ACCEPTANCE_PER_PASS if m.get("accepted_per_pass") is not None else "Drafted tokens accepted: not reported. ")
+                     + ACCEPTANCE_UNREPORTED.format(v=v))
         else:
             L.append("- Drafted tokens accepted: the share of the drafter's proposed tokens the model accepted during the "
                      "`spec` gate's requests.")
@@ -853,13 +857,13 @@ def perf_section(L, info, facts, feats, d, g, here, ctx, pin=None):
                                                        f"model's native {ctx}-token context") + ")" if oc else "") + ".", ""]
 
 
-def delta_lines(info, pin, solo):
+def delta_lines(info, pin, solo, depth=None):
     """The delta line of each earlier card (info.json sdk_delta, card_lib.delta_rows): every metric of every GPU this card
     re-measured on its own SDK, against that card's stored value. A regression beyond DELTA_BAND is numbered and followed
     by its explanation from evidence, or "unexplained" (lint_card.py refuses to publish that)."""
     L = []
     for c in (info.get("sdk_delta") or {}).get("comparisons") or []:
-        rows = delta_rows(info, pin, c)
+        rows = delta_rows(info, pin, c, depth)
         if not rows:
             continue
         olds = sorted({d["hrx_loom"] for g, d in c["devices"].items() if g in rows and d.get("hrx_loom")})
@@ -873,7 +877,11 @@ def delta_lines(info, pin, solo):
             parts = []
             for r in rs:
                 name = DELTA_NAMES[r["metric"]]
-                if r["metric"] == "spec_acceptance":
+                if r["metric"] == "spec_acceptance" and r.get("per_pass"):   # SDK 0.2's share x depth = its accepted per pass
+                    pp = r["per_pass"]
+                    parts.append(f"{name} per verification pass {pp['old']:.2f} → {pp['new']:.2f} ({r['change'] * 100:+.1f} %; the previous "
+                                 f"card's {pct_of(r['old'])} of depth-{depth} proposals as SDK {olds[0] if olds else 'its'} counted them)")
+                elif r["metric"] == "spec_acceptance":
                     new = ("not reported" if r["unreported"] else "not re-measured" if r["missing"]
                            else pct_of(r["new"]) if r["new"] is not None else "not measured")
                     parts.append(f"{name} {pct_of(r['old']) if r['old'] is not None else MISSING} → {new}")
@@ -1043,7 +1051,7 @@ def render(d):
     first = next(iter(live), None)
     bname = ((info["devices"][first].get("performance") or {}).get("baseline") or {}).get("name", "llama.cpp") if first else "llama.cpp"
     L += [f"## Performance vs {bname}", ""]
-    L += delta_lines(info, pin, solo)
+    L += delta_lines(info, pin, solo, (facts["spec"] or (None, None))[1])
     if solo:
         perf_section(L, info, facts, feats, d, live[0], here, gpu_context(info, live[0], native), pin)
     else:
@@ -1366,7 +1374,7 @@ def render_report(d):
     L = [f"# {facts['name']} for AMD Loom: measurement report", "",
          f"How the values on this repository's model card were measured. Generated from `info.json` (schema "
          f"`{SCHEMA_ID}`) by the loom-skills card generator; the card's README.md is rendered from the same data.", "",
-         *delta_lines(info, required_sdk(facts, versions, info["sources"]), solo),
+         *delta_lines(info, required_sdk(facts, versions, info["sources"]), solo, (facts["spec"] or (None, None))[1]),
          "## Setup", "",
          f"- Package: this repository. Programs generated by loom-skills {skills_text(facts['generator'], versions)} with "
          f"hrx-loom {package_sdk(facts['generator'], versions)}.",

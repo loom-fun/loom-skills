@@ -51,18 +51,18 @@ PROMPTS = [
 
 
 DOC_SIZES = (1000, 2000, 8000, 16000, 32000)
-DRAFT_COUNTERS = ("draft_proposed_tokens", "draft_accepted_inputs")
+DRAFT_COUNTERS = ("draft_proposed_tokens", "draft_accepted_inputs", "decode_tokens")
 
 
 def draft_counters(text):
-    """loom-serve's cumulative speculative decoding counters {draft_proposed_tokens, draft_accepted_inputs} from its
-    /metrics text ({} when it has none: no drafting, or llama-server)."""
+    """loom-serve's cumulative speculative decoding counters {draft_proposed_tokens, draft_accepted_inputs,
+    decode_tokens} from its /metrics text ({} when it has no drafting counter: no drafting, or llama-server)."""
     vals = {}
     for line in (text or "").splitlines():
         for k in DRAFT_COUNTERS:
             if f'field="{k}"' in line:
                 vals[k] = float(line.split()[-1])
-    return vals
+    return vals if any(k.startswith("draft_") for k in vals) else {}
 
 
 def server_draft_counters(url):
@@ -96,6 +96,19 @@ def accepted_between(before, after):
     if "draft_accepted_inputs" not in after:
         return None
     return int(after["draft_accepted_inputs"] - before.get("draft_accepted_inputs", 0))
+
+
+def per_pass_between(before, after):
+    """Drafted tokens accepted per verification pass between two draft_counters() snapshots, from the counters the SDK
+    reports without a proposal count: each decode position is a verified anchor or an accepted drafted token
+    (hrx-loom's text statistics: accepted = consumed - known - verifications, decode_tokens = consumed of decode spans),
+    so verification passes = decode_tokens - draft_accepted_inputs. None without both counters or without a pass.
+    No draft depth is involved: the depth is a ceiling, not a count of what the drafter presented."""
+    if "decode_tokens" not in after or "draft_accepted_inputs" not in after:
+        return None
+    acc = after["draft_accepted_inputs"] - before.get("draft_accepted_inputs", 0)
+    passes = after["decode_tokens"] - before.get("decode_tokens", 0) - acc
+    return round(acc / passes, 3) if passes > 0 else None
 
 
 def perf_metrics(row):

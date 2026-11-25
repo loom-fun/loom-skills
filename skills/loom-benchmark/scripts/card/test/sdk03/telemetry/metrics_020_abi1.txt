@@ -1,0 +1,141 @@
+# HELP loom_serve_model_queued_requests Requests outside the active invocation or cohort.
+# TYPE loom_serve_model_queued_requests gauge
+loom_serve_model_queued_requests{model="Qwen/Qwen3.5-4B",kind="text",incarnation="1"} 0
+# HELP loom_serve_model_active_requests Requests owned by the active invocation or cohort, not hardware utilization.
+# TYPE loom_serve_model_active_requests gauge
+loom_serve_model_active_requests{model="Qwen/Qwen3.5-4B",kind="text",incarnation="1"} 0
+# HELP loom_serve_model_phase Current scheduler ownership phase.
+# TYPE loom_serve_model_phase gauge
+loom_serve_model_phase{model="Qwen/Qwen3.5-4B",kind="text",incarnation="1",phase="idle"} 1
+# HELP loom_serve_model_oldest_queued_age_seconds Time since the oldest queued request was accepted, or zero if empty.
+# TYPE loom_serve_model_oldest_queued_age_seconds gauge
+loom_serve_model_oldest_queued_age_seconds{model="Qwen/Qwen3.5-4B",kind="text",incarnation="1"} 0
+# HELP loom_serve_model_oldest_active_age_seconds Time since the oldest active request was accepted, including prior queue residence, or zero if empty.
+# TYPE loom_serve_model_oldest_active_age_seconds gauge
+loom_serve_model_oldest_active_age_seconds{model="Qwen/Qwen3.5-4B",kind="text",incarnation="1"} 0
+# HELP loom_serve_model_held_requests Requests held outside model admission.
+# TYPE loom_serve_model_held_requests gauge
+# HELP loom_serve_model_admission_open Whether new requests may enter the model.
+# TYPE loom_serve_model_admission_open gauge
+loom_serve_model_held_requests{model="Qwen/Qwen3.5-4B",kind="text",incarnation="1"} 0
+loom_serve_model_admission_open{model="Qwen/Qwen3.5-4B",kind="text",incarnation="1"} 1
+# HELP loom_serve_model_parameter_pins Accepted-consumer and explicit-retention pins, excluding persistent policy.
+# TYPE loom_serve_model_parameter_pins gauge
+# HELP loom_serve_model_parameter_admission_waiting Whether new work is waiting for parameter admission.
+# TYPE loom_serve_model_parameter_admission_waiting gauge
+# HELP loom_serve_model_parameter_admission_waits_total Distinct parameter admission waits, not repeated polls or request count.
+# TYPE loom_serve_model_parameter_admission_waits_total counter
+# HELP loom_serve_model_parameter_admission_wait_seconds_total Time waiting for parameter admission, including cancelled and open waits.
+# TYPE loom_serve_model_parameter_admission_wait_seconds_total counter
+# HELP loom_serve_model_parameter_admission_wait_age_seconds Current parameter admission wait age, or zero when not waiting.
+# TYPE loom_serve_model_parameter_admission_wait_age_seconds gauge
+loom_serve_model_parameter_pins{model="Qwen/Qwen3.5-4B",kind="text",incarnation="1",component="primary"} 0
+loom_serve_model_parameter_admission_waiting{model="Qwen/Qwen3.5-4B",kind="text",incarnation="1",component="primary"} 0
+loom_serve_model_parameter_admission_waits_total{model="Qwen/Qwen3.5-4B",kind="text",incarnation="1",component="primary"} 0
+loom_serve_model_parameter_admission_wait_seconds_total{model="Qwen/Qwen3.5-4B",kind="text",incarnation="1",component="primary"} 0
+loom_serve_model_parameter_admission_wait_age_seconds{model="Qwen/Qwen3.5-4B",kind="text",incarnation="1",component="primary"} 0
+# HELP loom_serve_server_counters_available Every model publishes work counters.
+# TYPE loom_serve_server_counters_available gauge
+loom_serve_server_counters_available 1
+# HELP loom_serve_model_requests_total Requests reaching a model protocol, including rejections.
+# TYPE loom_serve_model_requests_total counter
+loom_serve_model_requests_total{model="Qwen/Qwen3.5-4B",kind="text",incarnation="1"} 16
+# HELP loom_serve_server_requests_total Requests reaching a model protocol, including rejections.
+# TYPE loom_serve_server_requests_total counter
+loom_serve_server_requests_total 16
+# HELP loom_serve_model_completed_total Successful responses copied into the HTTP carrier.
+# TYPE loom_serve_model_completed_total counter
+loom_serve_model_completed_total{model="Qwen/Qwen3.5-4B",kind="text",incarnation="1"} 16
+# HELP loom_serve_server_completed_total Successful responses copied into the HTTP carrier.
+# TYPE loom_serve_server_completed_total counter
+loom_serve_server_completed_total 16
+# HELP loom_serve_model_rejected_total Protocol, source validation or capacity rejections.
+# TYPE loom_serve_model_rejected_total counter
+loom_serve_model_rejected_total{model="Qwen/Qwen3.5-4B",kind="text",incarnation="1"} 0
+# HELP loom_serve_server_rejected_total Protocol, source validation or capacity rejections.
+# TYPE loom_serve_server_rejected_total counter
+loom_serve_server_rejected_total 0
+# HELP loom_serve_model_cancelled_total Requests abandoned by peers or orderly shutdown.
+# TYPE loom_serve_model_cancelled_total counter
+loom_serve_model_cancelled_total{model="Qwen/Qwen3.5-4B",kind="text",incarnation="1"} 0
+# HELP loom_serve_server_cancelled_total Requests abandoned by peers or orderly shutdown.
+# TYPE loom_serve_server_cancelled_total counter
+loom_serve_server_cancelled_total 0
+# HELP loom_serve_model_failed_total Requests terminated by transport or execution failures.
+# TYPE loom_serve_model_failed_total counter
+loom_serve_model_failed_total{model="Qwen/Qwen3.5-4B",kind="text",incarnation="1"} 0
+# HELP loom_serve_server_failed_total Requests terminated by transport or execution failures.
+# TYPE loom_serve_server_failed_total counter
+loom_serve_server_failed_total 0
+# HELP loom_serve_model_input_tokens_total Tokens in completed model work, including abandoned work.
+# TYPE loom_serve_model_input_tokens_total counter
+loom_serve_model_input_tokens_total{model="Qwen/Qwen3.5-4B",kind="text",incarnation="1"} 24885
+# HELP loom_serve_server_input_tokens_total Tokens in completed model work, including abandoned work.
+# TYPE loom_serve_server_input_tokens_total counter
+loom_serve_server_input_tokens_total 24885
+# HELP loom_serve_model_output_tokens_total Selected model output tokens, including EOS.
+# TYPE loom_serve_model_output_tokens_total counter
+loom_serve_model_output_tokens_total{model="Qwen/Qwen3.5-4B",kind="text",incarnation="1"} 1409
+# HELP loom_serve_server_output_tokens_total Selected model output tokens, including EOS.
+# TYPE loom_serve_server_output_tokens_total counter
+loom_serve_server_output_tokens_total 1409
+# HELP loom_serve_model_batches_total Completed model invocations or cohorts, not HTTP requests.
+# TYPE loom_serve_model_batches_total counter
+loom_serve_model_batches_total{model="Qwen/Qwen3.5-4B",kind="text",incarnation="1"} 694
+# HELP loom_serve_server_batches_total Completed model invocations or cohorts, not HTTP requests.
+# TYPE loom_serve_server_batches_total counter
+loom_serve_server_batches_total 694
+# HELP loom_serve_server_latency_available Every model publishes request latency distributions.
+# TYPE loom_serve_server_latency_available gauge
+loom_serve_server_latency_available 1
+# HELP loom_serve_model_request_duration_seconds Model protocol receipt through terminal owner retirement, not peer receipt.
+# TYPE loom_serve_model_request_duration_seconds histogram
+# HELP loom_serve_model_first_output_seconds Model protocol receipt through first meaningful output accepted by the carrier, not peer receipt.
+# TYPE loom_serve_model_first_output_seconds histogram
+loom_serve_model_request_duration_seconds_count{model="Qwen/Qwen3.5-4B",kind="text",incarnation="1",outcome="completed"} 16
+loom_serve_model_request_duration_seconds_sum{model="Qwen/Qwen3.5-4B",kind="text",incarnation="1",outcome="completed"} 9.95530092
+loom_serve_model_request_duration_seconds_count{model="Qwen/Qwen3.5-4B",kind="text",incarnation="1",outcome="rejected"} 0
+loom_serve_model_request_duration_seconds_sum{model="Qwen/Qwen3.5-4B",kind="text",incarnation="1",outcome="rejected"} 0
+loom_serve_model_request_duration_seconds_count{model="Qwen/Qwen3.5-4B",kind="text",incarnation="1",outcome="cancelled"} 0
+loom_serve_model_request_duration_seconds_sum{model="Qwen/Qwen3.5-4B",kind="text",incarnation="1",outcome="cancelled"} 0
+loom_serve_model_request_duration_seconds_count{model="Qwen/Qwen3.5-4B",kind="text",incarnation="1",outcome="failed"} 0
+loom_serve_model_request_duration_seconds_sum{model="Qwen/Qwen3.5-4B",kind="text",incarnation="1",outcome="failed"} 0
+loom_serve_model_first_output_seconds_count{model="Qwen/Qwen3.5-4B",kind="text",incarnation="1"} 16
+loom_serve_model_first_output_seconds_sum{model="Qwen/Qwen3.5-4B",kind="text",incarnation="1"} 2.75757471
+# HELP loom_serve_server_request_duration_seconds Model protocol receipt through terminal owner retirement, including removed registrations.
+# TYPE loom_serve_server_request_duration_seconds histogram
+# HELP loom_serve_server_first_output_seconds Model protocol receipt through first meaningful output accepted by the carrier, including removed registrations.
+# TYPE loom_serve_server_first_output_seconds histogram
+loom_serve_server_request_duration_seconds_count{outcome="completed"} 16
+loom_serve_server_request_duration_seconds_sum{outcome="completed"} 9.95530092
+loom_serve_server_request_duration_seconds_count{outcome="rejected"} 0
+loom_serve_server_request_duration_seconds_sum{outcome="rejected"} 0
+loom_serve_server_request_duration_seconds_count{outcome="cancelled"} 0
+loom_serve_server_request_duration_seconds_sum{outcome="cancelled"} 0
+loom_serve_server_request_duration_seconds_count{outcome="failed"} 0
+loom_serve_server_request_duration_seconds_sum{outcome="failed"} 0
+loom_serve_server_first_output_seconds_count{} 16
+loom_serve_server_first_output_seconds_sum{} 2.75757471
+# HELP loom_serve_model_observation Source-defined current ownership; unit identifies the value scale.
+# TYPE loom_serve_model_observation gauge
+# HELP loom_serve_model_observation_total Source-defined cumulative work within this incarnation; unit identifies the value scale.
+# TYPE loom_serve_model_observation_total counter
+loom_serve_model_observation{model="Qwen/Qwen3.5-4B",kind="text",incarnation="1",topic="text",schema="1",field="prefill_rows",unit="requests"} 0
+loom_serve_model_observation{model="Qwen/Qwen3.5-4B",kind="text",incarnation="1",topic="text",schema="1",field="decode_rows",unit="requests"} 0
+loom_serve_model_observation{model="Qwen/Qwen3.5-4B",kind="text",incarnation="1",topic="text",schema="1",field="backpressured_rows",unit="requests"} 0
+loom_serve_model_observation{model="Qwen/Qwen3.5-4B",kind="text",incarnation="1",topic="text",schema="1",field="session_capacity",unit="sessions"} 4
+loom_serve_model_observation{model="Qwen/Qwen3.5-4B",kind="text",incarnation="1",topic="text",schema="1",field="pool_capacity",unit="tokens"} 262144
+loom_serve_model_observation{model="Qwen/Qwen3.5-4B",kind="text",incarnation="1",topic="text",schema="1",field="pool_resident",unit="tokens"} 9616
+loom_serve_model_observation{model="Qwen/Qwen3.5-4B",kind="text",incarnation="1",topic="text",schema="1",field="pool_reserved",unit="tokens"} 0
+loom_serve_model_observation{model="Qwen/Qwen3.5-4B",kind="text",incarnation="1",topic="text",schema="1",field="session_cache_endpoints",unit="sessions"} 0
+loom_serve_model_observation{model="Qwen/Qwen3.5-4B",kind="text",incarnation="1",topic="text",schema="1",field="prefix_cache_endpoints",unit="prefixes"} 2
+loom_serve_model_observation{model="Qwen/Qwen3.5-4B",kind="text",incarnation="1",topic="text",schema="1",field="checkpoint_host_bytes",unit="bytes"} 0
+loom_serve_model_observation{model="Qwen/Qwen3.5-4B",kind="text",incarnation="1",topic="text",schema="1",field="elastic_state_committed_bytes",unit="bytes"} 0
+loom_serve_model_observation{model="Qwen/Qwen3.5-4B",kind="text",incarnation="1",topic="text",schema="1",field="elastic_state_reserved_bytes",unit="bytes"} 0
+loom_serve_model_observation_total{model="Qwen/Qwen3.5-4B",kind="text",incarnation="1",topic="text",schema="1",field="completed_epochs",unit="epochs"} 694
+loom_serve_model_observation_total{model="Qwen/Qwen3.5-4B",kind="text",incarnation="1",topic="text",schema="1",field="traversals",unit="traversals"} 694
+loom_serve_model_observation_total{model="Qwen/Qwen3.5-4B",kind="text",incarnation="1",topic="text",schema="1",field="prefill_tokens",unit="tokens"} 23492
+loom_serve_model_observation_total{model="Qwen/Qwen3.5-4B",kind="text",incarnation="1",topic="text",schema="1",field="decode_tokens",unit="tokens"} 1393
+loom_serve_model_observation_total{model="Qwen/Qwen3.5-4B",kind="text",incarnation="1",topic="text",schema="1",field="model_duration",unit="nanoseconds"} 9831722014
+loom_serve_model_observation_total{model="Qwen/Qwen3.5-4B",kind="text",incarnation="1",topic="text",schema="1",field="draft_proposed_tokens",unit="tokens"} 1971
+loom_serve_model_observation_total{model="Qwen/Qwen3.5-4B",kind="text",incarnation="1",topic="text",schema="1",field="draft_accepted_inputs",unit="tokens"} 736

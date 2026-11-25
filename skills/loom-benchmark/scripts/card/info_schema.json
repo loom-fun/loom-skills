@@ -305,6 +305,7 @@
      "properties": {"date": {"type": ["string", "null"], "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"}, "source": {"type": "string"}}
     },
     "acceptance": {"type": "number", "minimum": 0, "maximum": 1, "description": "speculative decoding: accepted / proposed drafted tokens of this metric's own Loom requests (median over the sessions of each session's median, mean of the runs in a session without aggregate; perf.py, c4_steady.py), the acceptance its roofline ceiling counts"},
+    "accepted_per_pass": {"type": "number", "minimum": 0, "description": "spec_acceptance with unreported proposals: drafted tokens accepted per verification pass (accepted / (decode_tokens - accepted) from loom-serve's counters; bench_common.per_pass_between), measured without the draft depth"},
     "unreported": {"enum": ["proposals"], "description": "spec_acceptance only, with loom null: proposals = the SDK counted accepted drafted tokens but no proposals for this package's controller (hrx-loom 0.3 with a service ABI 1 controller; bench_common.proposals_unreported); never derived from the configured draft depth"}
    }
   },

@@ -1,0 +1,12 @@
+{"label": "staging", "kind": "loom", "time": "2026-11-23 21:26:13", "thinking": "off", "warmup_decode_tps": 81.97, "completion_tokens": {"decode_tps": [300], "decode_tps_2k": [256]}, "decode_tps": 87.99, "prefill": [{"prompt_tokens": 1141, "prefill_tps": 2218.0, "min": 2212.3, "max": 2220.8, "n": 5}, {"prompt_tokens": 2218, "prefill_tps": 2502.4, "min": 2501.3, "max": 2505.3, "n": 5}], "decode_tps_2k": 76.09}
+{"session_end": "staging"}
+{"label": "staging", "kind": "loom", "time": "2026-11-23 21:26:44", "thinking": "off", "warmup_decode_tps": 82.86, "completion_tokens": {"decode_tps": [300], "decode_tps_2k": [256]}, "decode_tps": 86.89, "prefill": [{"prompt_tokens": 1141, "prefill_tps": 2208.6, "min": 2206.3, "max": 2214.7, "n": 5}, {"prompt_tokens": 2220, "prefill_tps": 2492.5, "min": 2482.4, "max": 2492.9, "n": 5}], "decode_tps_2k": 72.2}
+{"session_end": "staging"}
+{"label": "staging", "kind": "loom", "time": "2026-11-23 21:28:18", "thinking": "off", "warmup_decode_tps": 84.94, "completion_tokens": {"decode_tps": [300], "decode_tps_2k": [256]}, "decode_tps": 87.78, "prefill": [{"prompt_tokens": 1141, "prefill_tps": 2210.2, "min": 2208.7, "max": 2214.9, "n": 5}, {"prompt_tokens": 2218, "prefill_tps": 2497.1, "min": 2495.0, "max": 2500.7, "n": 5}], "decode_tps_2k": 80.21}
+{"session_end": "staging"}
+{"label": "staging", "kind": "loom", "time": "2026-11-23 21:28:49", "thinking": "off", "warmup_decode_tps": 83.31, "prefill_long": [{"prompt_tokens": 8178, "prefill_tps": 2682.2}, {"prompt_tokens": 16612, "prefill_tps": 2444.9}, {"prompt_tokens": 33406, "prefill_tps": 2115.5}], "nonce": "1795469329.2945452", "completion_tokens": {"decode_tps_32k": [128]}, "decode_tps_32k": 70.0}
+{"session_end": "staging"}
+{"label": "staging", "kind": "loom", "time": "2026-11-23 21:31:52", "thinking": "off", "warmup_decode_tps": 82.71, "prefill_long": [{"prompt_tokens": 8177, "prefill_tps": 2680.1}, {"prompt_tokens": 16611, "prefill_tps": 2431.7}, {"prompt_tokens": 33405, "prefill_tps": 2104.5}], "nonce": "1795469512.460049", "completion_tokens": {"decode_tps_32k": [128]}, "decode_tps_32k": 71.1}
+{"session_end": "staging"}
+{"label": "staging", "kind": "loom", "time": "2026-11-23 21:32:52", "thinking": "off", "warmup_decode_tps": 80.24, "prefill_long": [{"prompt_tokens": 8178, "prefill_tps": 2671.1}, {"prompt_tokens": 16612, "prefill_tps": 2428.4}, {"prompt_tokens": 33406, "prefill_tps": 2100.4}], "nonce": "1795469572.0843055", "completion_tokens": {"decode_tps_32k": [128]}, "decode_tps_32k": 67.62}
+{"session_end": "staging"}

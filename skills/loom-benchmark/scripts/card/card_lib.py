@@ -1445,10 +1445,13 @@ def previous_gate(info, gpu, name):
     return None
 
 
-def delta_rows(info, pin, comparison):
+def delta_rows(info, pin, comparison, depth=None):
     """The delta line of one sdk_delta comparison: {gpu: [row]} for every GPU of the comparison this card re-measured
     on the pin's SDK; a row {metric, old, new, change, unreported, regression, explanation} per metric either side has
-    (change: the relative change, spec_acceptance the change in points; None when one side has no value)."""
+    (change: the relative change, spec_acceptance the change in points; None when one side has no value).
+    spec_acceptance measured as accepted tokens per verification pass (unreported proposals) is compared with the
+    earlier card's share of proposals x the draft depth (depth): SDK 0.2 counted every verification as depth proposals,
+    so that product is exactly its accepted tokens per pass (row per_pass: {old, new})."""
     out = {}
     expl = comparison.get("explanations") or {}
     for gpu, prev in comparison["devices"].items():
@@ -1468,11 +1471,14 @@ def delta_rows(info, pin, comparison):
             old = prev["metrics"].get(k)
             m = current[k][0] if k in current else {}
             new = m.get("loom")
-            change = None
+            change, per_pass = None, None
             if old is not None and new is not None:
                 change = round(new - old, 4) if k == "spec_acceptance" else round(new / old - 1, 4) if old else None
+            elif k == "spec_acceptance" and old is not None and m.get("accepted_per_pass") is not None and depth:
+                per_pass = {"old": round(old * depth, 3), "new": m["accepted_per_pass"]}
+                change = round(per_pass["new"] / per_pass["old"] - 1, 4) if per_pass["old"] else None
             regression = change is not None and k != "spec_acceptance" and change < -DELTA_BAND
-            rows.append({"metric": k, "old": old, "new": new, "change": change, "unreported": m.get("unreported"),
+            rows.append({"metric": k, "old": old, "new": new, "change": change, "unreported": m.get("unreported"), "per_pass": per_pass,
                          "missing": k not in current, "regression": regression,
                          "explanation": (expl.get(gpu) or {}).get(k)})
         out[gpu] = rows

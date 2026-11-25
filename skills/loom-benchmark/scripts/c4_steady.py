@@ -16,7 +16,7 @@ import sys
 import threading
 import time
 
-from bench_common import acceptance_between, accepted_between, proposals_unreported, server_draft_counters, stream, thinking_extra
+from bench_common import acceptance_between, accepted_between, per_pass_between, proposals_unreported, server_draft_counters, stream, thinking_extra
 
 ap = argparse.ArgumentParser()
 ap.add_argument("url")
@@ -58,7 +58,7 @@ def one_pass():
     after = server_draft_counters(a.url) if before else {}
     acc = acceptance_between(before, after) if before else None
     if acc is None and before and proposals_unreported(after):   # the SDK counts no proposals: the accepted count only
-        acc = {"draft_accepted": accepted_between(before, after)}
+        acc = {"draft_accepted": accepted_between(before, after), "accepted_per_pass": per_pass_between(before, after)}
     bad = [f"stream {i}: {err}" for i, err in enumerate(errors) if err]
     bad += [f"stream {i}: no tokens" for i in range(a.n) if not errors[i] and not (tokens[i] and events[i])]
     if bad:

@@ -39,7 +39,7 @@ curl http://127.0.0.1:8080/v1/chat/completions \
 
 **Change from the previous card** ([revision `89abcde`](https://huggingface.co/loom-fun/ggml-org-Flint-loom/tree/89abcdef0123456789abcdef0123456789abcdef), hrx-loom 0.1.0; this card: hrx-loom 0.3.0):
 
-- decode +0.7 %, decode at 2k +0.0 %, decode at 32k +0.0 %, prefill 1k -15.0 % ¹, prefill 2k -4.0 % ², prefill 8k +0.0 %, prefill 16k +0.0 %, prefill 32k +0.0 %, 4 streams +0.0 %, drafted tokens accepted 68 % → not reported.
+- decode +0.7 %, decode at 2k +0.0 %, decode at 32k +0.0 %, prefill 1k -15.0 % ¹, prefill 2k -4.0 % ², prefill 8k +0.0 %, prefill 16k +0.0 %, prefill 32k +0.0 %, 4 streams +0.0 %, drafted tokens accepted per verification pass 2.04 → 1.25 (-38.8 %; the previous card's 68 % of depth-3 proposals as SDK 0.1.0 counted them).
 - ¹ Strix Halo prefill 1k -15.0 % (956.9 → 813.6 tok/s): confirmed by a same-runner rerun of both SDKs (fixture) ([evidence](https://github.com/loom-fun/loom-skills/actions/runs/3103/job/3104)).
 - ² Strix Halo prefill 2k -4.0 % (1316.4 → 1263.8 tok/s): unexplained.
 - Change: (this card / previous card - 1) × 100 % of the Loom value; beyond -3 % a regression needs a confirmed explanation.
@@ -55,7 +55,7 @@ curl http://127.0.0.1:8080/v1/chat/completions \
 | prefill tok/s, 16k document | 929.3 | 1359.0 | +46 % | 9014.9 | 15 % |
 | prefill tok/s, 32k document | 667.6 | 1193.9 | +79 % | 7040.8 | 17 % |
 | 4 streams, aggregate decode tok/s | 124.2 | 134.2 | +8 % | 301.8 | 44 % |
-| speculative decoding, drafted tokens accepted | — | not reported ¹ | — | n/a | n/a |
+| speculative decoding, drafted tokens accepted | — | 1.25 per pass ¹ | — | n/a | n/a |
 
 **Methodology**
 
@@ -69,7 +69,7 @@ curl http://127.0.0.1:8080/v1/chat/completions \
 - Margin vs best llama.cpp: (Loom / max(ROCm, Vulkan) - 1) × 100 %, using the available measured tokens/s for each row on this GPU. With only one valid backend, that backend is used; with neither, the margin is not measured. Raw backend values and their measurement sources are retained below and in the table.
 - Measured 2026-11-25; device AMD RYZEN AI MAX+ 395 w/ Radeon 8060S, AMD Radeon 8060S Graphics, Ubuntu 26.04; hrx-loom `0.3.0` (hrx-system `e2c41a7`); source: DevLab Dispatch run 3101.
 - ¹ Measured 2026-11-25; device AMD RYZEN AI MAX+ 395 w/ Radeon 8060S, AMD Radeon 8060S Graphics, Ubuntu 26.04; hrx-loom `0.3.0` (hrx-system `e2c41a7`); source: DevLab Dispatch run 3102.
-- Drafted tokens accepted: not reported. hrx-loom 0.3.0 reports no drafter proposal count for this package's service ABI 1 controller (`proposed_tokens` is null), so the acceptance is not measured; it is never derived from the configured draft depth. The `spec` gate checks that drafted replies equal undrafted ones.
+- Drafted tokens accepted per verification pass during the measuring session's requests: accepted drafted tokens / verification passes, from loom-serve's counters (passes = decoded positions - accepted drafted tokens). hrx-loom 0.3.0 reports no drafter proposal count for this package's service ABI 1 controller (`proposed_tokens` is null), so the share of proposals accepted is not measured; it is never derived from the configured draft depth, which is a ceiling.
 - Roofline: the hardware ceiling for this GGUF on AMD Ryzen AI Max+ 395 "Strix Halo" (gfx1151) at 216 GB/s and 59 TFLOP/s, from loom-roofline `roofline.py` (loom-skills `0123456`); single-pass ceiling (no acceptance measured on this package) for decode, decode at 2k, decode at 32k; 4 streams run without drafting, so its ceiling is single-pass.
 - — not measured; n/a not applicable.
 

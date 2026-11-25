@@ -37,6 +37,11 @@ from card_files import check_package  # noqa: E402
 from card_lib import (DELTA_BAND, METRIC_KEYS, card_gpus, card_metrics, carried_sdk, delta_rows, free_text_errors, gpu_view,  # noqa: E402
                       has_results, load_info, load_package, metric_applies, package_facts, requalified, sdk_version, validate)
 
+def read(path):
+    with open(path, encoding="utf-8", errors="replace") as f:
+        return f.read()
+
+
 RUN = re.compile(r"https://github\.com/([\w.-]+/[\w.-]+)/actions/runs/(\d+)(?:/job/(\d+))?")
 STAGING_ORG, PROD_ORG = "loom-fun-staging", "loom-fun"
 
@@ -75,7 +80,7 @@ def compose(card, form):
     for name in os.listdir(card):
         src = os.path.join(card, name)
         if name in ("README.md", "info.json") and os.path.isfile(src):
-            text = open(src, encoding="utf-8").read()
+            text = read(src)
             if name == "README.md":   # the fetch lines of this repo's staging copy
                 text = re.sub(rf"(loom-fetch \S*?){STAGING_ORG}/", rf"\1{PROD_ORG}/", text)
             else:
@@ -104,7 +109,7 @@ def cited_runs(card, info):
     for name in ("README.md", "REPORT.md"):
         p = os.path.join(card, name)
         if os.path.isfile(p):
-            for m in RUN.finditer(open(p, encoding="utf-8", errors="replace").read()):
+            for m in RUN.finditer(read(p)):
                 out.append((name, m.group(1), m.group(2), m.group(3), None))
     seen, uniq = set(), []
     for x in out:
@@ -145,7 +150,7 @@ PIN = re.compile(r"hrx-loom\[hf\](?:==|\s*@[^'\"]*hrx_loom-)([0-9][\w.]*?)(?:[\"
 
 def version_problems(card, info, pin):
     out = []
-    readme = open(os.path.join(card, "README.md"), encoding="utf-8").read()
+    readme = read(os.path.join(card, "README.md"))
     qs = readme.split("## Performance")[0]
     pins = sorted(set(PIN.findall(qs)))
     if len(pins) > 1:
@@ -171,19 +176,15 @@ def version_problems(card, info, pin):
 
 def render_problems(card, generator):
     """README.md (and REPORT.md when generated) as render_card.py renders the card's files."""
-    tmp = tempfile.mkdtemp(prefix="lint-render-")
-    try:
-        cp = subprocess.run([sys.executable, "-I", os.path.join(generator, "render_card.py"), "--check", card,
-                             os.path.join(card, "README.md")], capture_output=True, text=True, timeout=300,
-                            env=dict(os.environ, LOOM_CARD_UPSTREAM="none"))
-        if cp.returncode == 0:
-            return []
-        diff = [ln[5:] for ln in cp.stdout.splitlines() if ln.startswith("DIFF ")]
-        if diff:
-            return [f"{os.path.basename(p)}: not what the card generator renders from the card's files (hand-written or stale text)" for p in diff]
-        return [f"render_card.py refuses the card: {(cp.stderr.strip().splitlines() or ['?'])[-1]}"]
-    finally:
-        shutil.rmtree(tmp, ignore_errors=True)
+    cp = subprocess.run([sys.executable, "-I", os.path.join(generator, "render_card.py"), "--check", card,
+                         os.path.join(card, "README.md")], capture_output=True, text=True, timeout=300,
+                        env=dict(os.environ, LOOM_CARD_UPSTREAM="none"))
+    if cp.returncode == 0:
+        return []
+    diff = [ln[5:] for ln in cp.stdout.splitlines() if ln.startswith("DIFF ")]
+    if diff:
+        return [f"{os.path.basename(p)}: not what the card generator renders from the card's files (hand-written or stale text)" for p in diff]
+    return [f"render_card.py refuses the card: {(cp.stderr.strip().splitlines() or ['?'])[-1]}"]
 
 
 def info_problems(card, info, facts, feats, pin):
@@ -284,7 +285,7 @@ def main(argv=None):
     runs, report, bad = Runs(a.offline), {}, 0
     for d in a.dirs:
         listing = os.path.join(d, a.listing) if a.listing else None
-        files = [ln for ln in open(listing).read().split("\n") if ln] if listing and os.path.isfile(listing) else None
+        files = [ln for ln in read(listing).split("\n") if ln] if listing and os.path.isfile(listing) else None
         res = lint(d, a.form, runs, a.generator, files)
         report[d] = res
         for k, probs in res.items():

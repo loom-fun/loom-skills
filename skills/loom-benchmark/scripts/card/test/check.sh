@@ -484,8 +484,9 @@ py "$C/render_card.py" "$tmp/gpus4_pypi_030" 2>/dev/null
 py -c "import sys; r = open(sys.argv[1] + '/README.md', encoding='utf-8').read().split('## Quick start', 1)[1].split('## Send a request', 1)[0]
 expected = ['loom-fetch huggingface:loom-fun-staging/unsloth-Qwen3-0.6B-loom:' + p + ' --output=Qwen3-0.6B' for p in ('chat', 'chat-r9700', 'chat-16gb', 'chat-gfx1150')]
 assert [line for line in r.splitlines() if line.startswith('loom-fetch ')] == expected, r
-assert '--materialize' not in r and r.count('pipx install \"hrx-loom[hf]==0.3.0\"') == 4, r" "$tmp/gpus4_pypi_030" \
-  && echo "OK   gpus4: exact SDK 0.3.0 Quick starts omit the copy flag on every GPU" \
+assert '--materialize' not in r and r.count('pipx install \"hrx-loom[hf]==0.3.0\"') == 4, r
+assert '--parameter_mode=preload' not in r and r.count('loom-serve ') == 4, 'SDK 0.3 retired preload: no GPU (runner-less ones included) serves with it'" "$tmp/gpus4_pypi_030" \
+  && echo "OK   gpus4: exact SDK 0.3.0 Quick starts omit the copy flag and preload on every GPU" \
   || { echo "FAIL gpus4: PyPI 0.3.0 Quick start"; bad=1; }
 py -c "from pathlib import Path; import sys; sys.path.insert(0, sys.argv[1]); from loom_factory import quick_start_fetch
 for directory, source, old_card, copy in (
@@ -645,7 +646,7 @@ py -c "import sys; sys.path.insert(0, sys.argv[1]); import card_lib as c
 i = c.load_json(sys.argv[2]); d = i['devices']['strix-halo']
 assert c.validate(i) == [], c.validate(i)
 m = {k: v for k, (v, _) in c.card_metrics(c.gpu_view(i, 'strix-halo')).items()}
-assert m['spec_acceptance'] == {'loom': None, 'unreported': 'proposals'}, m['spec_acceptance']
+assert m['spec_acceptance'] == {'loom': None, 'unreported': 'proposals', 'accepted_per_pass': 1.249}, m['spec_acceptance']
 assert d['admission']['admitted'] and d['admission']['tokens'] == 65410
 rows = c.delta_rows(i, {'hrx_loom': '0.3.0'}, i['sdk_delta']['comparisons'][0])['strix-halo']
 reg = [r['metric'] for r in rows if r['regression']]
