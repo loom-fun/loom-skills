@@ -771,6 +771,11 @@ CHOICE("sampling.final_softcap", "bool", False, "FINAL_SOFTCAP", kernels=["g_hea
 CHOICE("feature.logits_export", "bool", True, "LLM_LOGITS", kernels=["g_logits_export"], rows=[], from_pr="loom-skills#736",
        doc="The package carries the opt-in logits readback (g_logits_export, a card-config-guarded tail of @llm_advance, a guarded larger "
            "outputs allocation). Off by default at load (card config llm.logits); False drops the code from the package.")
+CHOICE("chat.input_measure", "bool", False, "LLM_INPUT_MEASURE", kernels=["program"], rows=[], from_pr="sdk030 sdkcap",
+       doc="prepare_input follows the SDK 0.3.0 complete-conversation count contract (starter/input_measure.py): above the capacity it "
+           "returns no tokens and the count (the server rejects a generation request itself, HTTP 400) and capacity -1 measures, so "
+           "POST /v1/chat/completions/input_tokens counts a conversation beyond the window instead of answering 400. Host-side only: "
+           "no device program changes. Needs hrx-loom >= 0.3.0 at serve time for the measuring probe (0.2.0 never sends -1).")
 
 # ======================================================================================================================
 # Not choices: everything else the generators and their tools read from the environment
