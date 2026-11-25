@@ -1102,6 +1102,15 @@ class StandaloneLogits(unittest.TestCase):
                 args = run.call_args.args[0]
                 self.assertIn(str((root / "logits_staging.json").resolve()), args)
                 self.assertIn(job["html_url"], args)
+                (root / "gates_staging").mkdir()
+                write("gates_staging/gates.json", {"level": "full", "gates": {"consistency": {"pass": False}}})
+                write("summary.json", {"job": "measurement", "runner": "runner",
+                                       "results": {"logits:staging": "FAIL", "gates:staging:full": "GATES FAIL"}})
+                self.assertEqual(regen.standalone_gates(spec, TEXT, "radeon-r9700", t, t, full=True), "ev_full.json")
+                self.assertIn(str((root / "gates_staging/gates.json").resolve()), run.call_args.args[0])
+                write("gates_staging/gates.json", {"level": "dev", "gates": {"consistency": {"pass": True}}})
+                with self.assertRaisesRegex(RuntimeError, "full suite"):
+                    regen.standalone_gates(spec, TEXT, "radeon-r9700", t, t, full=True)
                 with self.assertRaisesRegex(RuntimeError, "completed device"):
                     regen.standalone_logits(spec, TEXT, "strix-halo", t, t)
                 with self.assertRaisesRegex(RuntimeError, "pinned revision"):
