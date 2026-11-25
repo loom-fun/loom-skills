@@ -1364,6 +1364,36 @@ def sdk_version(x):
     return x.get("hrx_loom") if isinstance(x, dict) else None
 
 
+VERSIONS_DIR = os.path.normpath(os.path.join(HERE, "..", "..", "..", "loom-migrate", "versions"))
+
+
+def production_inventory(sdk, versions_dir=None):
+    """The accepted production inventory of the SDK migration TO version SDK (skills/loom-migrate/versions/vOLD-to-vSDK-production.json,
+    {org/repo: revision}) as (OLD, inventory), or None when this checkout has none."""
+    d = versions_dir or VERSIONS_DIR
+    hits = sorted(f for f in (os.listdir(d) if sdk and os.path.isdir(d) else []) if re.fullmatch(rf"v(.+)-to-v{re.escape(sdk)}-production\.json", f))
+    if not hits:
+        return None
+    return re.match(r"v(.+?)-to-v", hits[-1]).group(1), load_json(os.path.join(d, hits[-1]))
+
+
+def new_port_problem(repo, sdk, versions_dir=None):
+    """Why REPO (org/NAME, any org: staging cards keep the production names) is NOT a new port in SDK SDK, or None when it is: a new
+    port is a repository absent from the production inventory of the migration to SDK (it had no card on the previous SDK)."""
+    inv = production_inventory(sdk, versions_dir)
+    if inv is None:
+        return f"no production inventory of the migration to hrx-loom {sdk} in this checkout (skills/loom-migrate/versions)"
+    name = repo.rsplit("/", 1)[-1]
+    hit = next((r for r in inv[1] if r.rsplit("/", 1)[-1] == name), None)
+    return f"{hit} is in the hrx-loom {inv[0]} production inventory (it has a previous card to compare)" if hit else None
+
+
+def new_port_line(sdk, versions_dir=None):
+    """The delta line of a new port (info.json sdk_delta.new_port), generated: the previous SDK comes from the inventory's file name."""
+    inv = production_inventory(sdk, versions_dir)
+    return f"New port in SDK {sdk}: no SDK {inv[0] if inv else 'earlier'} card to compare."
+
+
 def sdk_at_least(x, major, minor):
     """Whether an hrx-loom identity or version string is major.minor or later (range-based, never == one release)."""
     v = x if isinstance(x, str) else sdk_version(x)
