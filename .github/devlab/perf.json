@@ -1,47 +1,221 @@
 {
- "_comment": "R9700 per-model measurement (r9700_jobs.py): one job per model on one R9700 runner; loom-fun-staging card, llama.cpp ROCm b1375 + Vulkan b12211 with the matched drafting, reduced-context models served at served_context. Does not fit: none",
- "runner": "r9700",
- "memory_bytes": 34000000000,
+ "_comment": "sdk030 #1400 root cause (eng regress): per-dispatch device time and per-verify-pass wall time of the frozen package on hrx-loom 0.2.0 vs 0.3.0 in one job (fixed-prompt profiles dec/dec2k/dec32k, undrafted ABBA, more drafted sessions) + a catalog control (hrx-loom-library Qwen3.8-27B at the tag matching each SDK). Diagnostic only, never card evidence.",
+ "runner": "strix",
+ "memory_bytes": 41000000000,
  "llama_spec": "matched",
+ "card": "loom-fun/InternScience-Sage-A1.5-loom@bfa32772063c03a549b3452520d3110e0d978f2f",
+ "kit": null,
+ "llamacpp": "b1374",
  "jobs": [
   {
-   "name": "unsloth-qwen3-0-6b-loom",
-   "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
+   "name": "rg-sage-strix",
+   "runner": "strix",
+   "card": "loom-fun/InternScience-Sage-A1.5-loom@bfa32772063c03a549b3452520d3110e0d978f2f",
+   "memory_bytes": 41000000000,
    "kit": null,
-   "llamacpp": "b1375",
-   "llamacpp_vulkan": "b12211",
-   "memory_bytes_r9700": 17000000000,
+   "llamacpp": "b1374",
+   "sdk": "0.3.0",
    "variants": [
     {
-     "name": "card",
-     "build": {}
+     "name": "fun",
+     "sdk": "card",
+     "programs_sha256": "b84b9c64d8af6d0c8889cb4e85a93b3e9f3ee0db2618d251063552175b0c019a",
+     "card": "loom-fun/InternScience-Sage-A1.5-loom@bfa32772063c03a549b3452520d3110e0d978f2f"
     },
     {
-     "name": "nodraft",
-     "build": {},
+     "name": "staging",
+     "sdk": "0.3.0",
+     "programs_sha256": "b84b9c64d8af6d0c8889cb4e85a93b3e9f3ee0db2618d251063552175b0c019a"
+    },
+    {
+     "name": "funnd",
+     "sdk": "card",
+     "programs_sha256": "b84b9c64d8af6d0c8889cb4e85a93b3e9f3ee0db2618d251063552175b0c019a",
+     "card": "loom-fun/InternScience-Sage-A1.5-loom@bfa32772063c03a549b3452520d3110e0d978f2f",
+     "execution": {
+      "draft_depth": 0
+     }
+    },
+    {
+     "name": "stagingnd",
+     "sdk": "0.3.0",
+     "programs_sha256": "b84b9c64d8af6d0c8889cb4e85a93b3e9f3ee0db2618d251063552175b0c019a",
      "execution": {
       "draft_depth": 0
      }
     }
    ],
    "steps": [
-    "func:card",
-    "ktest:card",
-    "gates:card:dev",
-    "perf:card:3",
-    "perf:card:3:long",
-    "c4:nodraft",
-    "llama@rocm.np1:3",
-    "llama@rocm.np1:3:long",
-    "llamac4@rocm.nodraft",
-    "llama@vulkan.np1:3",
-    "llama@vulkan.np1:3:long",
-    "llamac4@vulkan.perslot.nodraft"
+    "profile:fun:dec,dec2k,dec32k",
+    "profile:staging:dec,dec2k,dec32k",
+    "profile:staging:dec2k",
+    "profile:fun:dec2k",
+    "perf:funnd:1",
+    "perf:stagingnd:1",
+    "perf:stagingnd:1",
+    "perf:funnd:1",
+    "perf:funnd:1",
+    "perf:stagingnd:1",
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:fun:1",
+    "perf:fun:1",
+    "perf:staging:1"
    ]
+  },
+  {
+   "name": "rg-catalog-strix",
+   "runner": "strix",
+   "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
+   "memory_bytes": 41000000000,
+   "kit": null,
+   "llamacpp": "b1374",
+   "sdk": "0.3.0",
+   "variants": [
+    {
+     "name": "c2",
+     "catalog": "github:ROCm/hrx-loom-library@v0.2.0",
+     "model": "Qwen/Qwen3.8-27B",
+     "preset": "chat",
+     "sdk": "0.2.0",
+     "execution": {
+      "context_capacity": 40960
+     }
+    },
+    {
+     "name": "c3",
+     "catalog": "github:ROCm/hrx-loom-library@v0.3.0",
+     "model": "Qwen/Qwen3.8-27B",
+     "preset": "chat",
+     "sdk": "0.3.0",
+     "execution": {
+      "context_capacity": 40960
+     }
+    },
+    {
+     "name": "c2nd",
+     "catalog": "github:ROCm/hrx-loom-library@v0.2.0",
+     "model": "Qwen/Qwen3.8-27B",
+     "preset": "chat",
+     "sdk": "0.2.0",
+     "execution": {
+      "context_capacity": 40960,
+      "draft_depth": 0
+     }
+    },
+    {
+     "name": "c3nd",
+     "catalog": "github:ROCm/hrx-loom-library@v0.3.0",
+     "model": "Qwen/Qwen3.8-27B",
+     "preset": "chat",
+     "sdk": "0.3.0",
+     "execution": {
+      "context_capacity": 40960,
+      "draft_depth": 0
+     }
+    }
+   ],
+   "steps": [
+    "perf:c2:1",
+    "perf:c3:1",
+    "perf:c3:1",
+    "perf:c2:1",
+    "perf:c2:1",
+    "perf:c3:1",
+    "perf:c2:1:long",
+    "perf:c3:1:long",
+    "perf:c3:1:long",
+    "perf:c2:1:long",
+    "perf:c2nd:1",
+    "perf:c3nd:1",
+    "perf:c3nd:1",
+    "perf:c2nd:1",
+    "profile:c2:dec,dec2k,pf8k",
+    "profile:c3:dec,dec2k,pf8k",
+    "c4:c2nd",
+    "c4:c3nd",
+    "c4:c3nd",
+    "c4:c2nd"
+   ]
+  },
+  {
+   "name": "rg-catalog-r9700",
+   "runner": "r9700",
+   "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
+   "memory_bytes": 34000000000,
+   "kit": null,
+   "llamacpp": "b1375",
+   "sdk": "0.3.0",
+   "variants": [
+    {
+     "name": "c2",
+     "catalog": "github:ROCm/hrx-loom-library@v0.2.0",
+     "model": "Qwen/Qwen3.8-27B",
+     "preset": "chat",
+     "sdk": "0.2.0",
+     "execution": {
+      "context_capacity": 40960
+     }
+    },
+    {
+     "name": "c3",
+     "catalog": "github:ROCm/hrx-loom-library@v0.3.0",
+     "model": "Qwen/Qwen3.8-27B",
+     "preset": "chat",
+     "sdk": "0.3.0",
+     "execution": {
+      "context_capacity": 40960
+     }
+    },
+    {
+     "name": "c2nd",
+     "catalog": "github:ROCm/hrx-loom-library@v0.2.0",
+     "model": "Qwen/Qwen3.8-27B",
+     "preset": "chat",
+     "sdk": "0.2.0",
+     "execution": {
+      "context_capacity": 40960,
+      "draft_depth": 0
+     }
+    },
+    {
+     "name": "c3nd",
+     "catalog": "github:ROCm/hrx-loom-library@v0.3.0",
+     "model": "Qwen/Qwen3.8-27B",
+     "preset": "chat",
+     "sdk": "0.3.0",
+     "execution": {
+      "context_capacity": 40960,
+      "draft_depth": 0
+     }
+    }
+   ],
+   "steps": [
+    "perf:c2:1",
+    "perf:c3:1",
+    "perf:c3:1",
+    "perf:c2:1",
+    "perf:c2:1",
+    "perf:c3:1",
+    "perf:c2:1:long",
+    "perf:c3:1:long",
+    "perf:c3:1:long",
+    "perf:c2:1:long",
+    "perf:c2nd:1",
+    "perf:c3nd:1",
+    "perf:c3nd:1",
+    "perf:c2nd:1",
+    "profile:c2:dec,dec2k,pf8k",
+    "profile:c3:dec,dec2k,pf8k",
+    "c4:c2nd",
+    "c4:c3nd",
+    "c4:c3nd",
+    "c4:c2nd"
+   ],
+   "memory_bytes_r9700": 34000000000
   }
- ],
- "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
- "kit": null,
- "llamacpp": "b1375",
- "llamacpp_vulkan": "b12211"
+ ]
 }
