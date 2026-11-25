@@ -154,10 +154,6 @@ class Ratchet(unittest.TestCase):
         self.assertFalse(L.is_bimodal("unsloth-Qwen3-0.6B-loom", m))
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class RunnerGuard(unittest.TestCase):
     def c(self, old_vs_card, ratios=None):
         c = cmp(ratios or {"decode": 1.0, "prefill_8k": 1.0})
@@ -197,3 +193,7 @@ class RunnerGuard(unittest.TestCase):
         c["gate_status"] = {"ktest:staging": "FAIL"}
         self.assertEqual(V.model_verdict(c, "m", None, METH)["verdict"], "gate_fail")
         self.assertEqual(P.check("m", "strix-halo", [c], None, METH)["decision"], "hold")
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -190,10 +190,6 @@ class KernelTestSelectTests(unittest.TestCase):
                 self.assertTrue(out.exists() and out.stat().st_size > 0, f"{arch}: {r.stdout}{r.stderr}")
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class ApplyDirTests(unittest.TestCase):
     def test_cross_file_launch_fails_loudly(self):
         with tempfile.TemporaryDirectory() as d:
@@ -255,3 +251,7 @@ class EncodingsFirstTests(unittest.TestCase):
                 dual_target.encodings_first(enc)
         finally:
             os.environ.pop("LOOM_LIBRARY_SPLIT") if old is None else os.environ.__setitem__("LOOM_LIBRARY_SPLIT", old)
+
+
+if __name__ == "__main__":
+    unittest.main()

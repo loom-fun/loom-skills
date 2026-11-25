@@ -430,11 +430,6 @@ class ReleaseWriterTests(unittest.TestCase):
             self.assertNotIn("REPAIRS", text)
             self.assertNotIn("OUT_OF_SCOPE", text)
 
-
-if __name__ == "__main__":
-    unittest.main()
-
-
     def test_held_repo_outgoing_tag_is_verified_before_any_write(self):
         sha = self.release.prepare()
         hub = self.release.hub
@@ -468,8 +463,9 @@ if __name__ == "__main__":
     def test_foreign_commit_between_preflight_and_commit_refuses(self):
         sha = self.release.prepare()
         self.release.tag(sha)
-        hub, repo = self.release.hub, f"loom-fun/{SLUG}"
-        hub.before_commit = lambda: hub.add(repo, production_text(SLUG), "racing foreign commit")
+        first_slug = min(self.release.rows)  # replay commits packages in slug order
+        hub, repo = self.release.hub, f"loom-fun/{first_slug}"
+        hub.before_commit = lambda: hub.add(repo, production_text(first_slug), "racing foreign commit")
         with self.assertRaisesRegex(RuntimeError, "412 parent commit mismatch"):
             self.release.replay(sha)
         self.assertEqual(hub.writes, [])
@@ -490,7 +486,8 @@ if __name__ == "__main__":
         sha = self.release.prepare()
         self.release.tag(sha)
         real = promotion.digest
-        flipped = self.release.bundle / "packages" / SLUG / "REPORT.md"
+        first_slug = min(self.release.rows)  # inject the fault before the first package write
+        flipped = self.release.bundle / "packages" / first_slug / "REPORT.md"
         original = flipped.read_bytes()
         calls = []
 
@@ -519,3 +516,7 @@ if __name__ == "__main__":
                "delete_target_files": {"program/a.loom": "f" * 64}, "rollback_tag": None}
         with self.assertRaisesRegex(ValueError, "rollback tag"):
             list(promotion.records({"x-loom": row}))
+
+
+if __name__ == "__main__":
+    unittest.main()
