@@ -340,6 +340,8 @@ def parser(device=None):
     ap.add_argument("--programs", choices=("build", "production"), default="build",
                     help="with --sdk-ab: build = the new package is built in the job from this checkout; production = every variant serves the pinned "
                          "published package (the frozen programs; see above)")
+    ap.add_argument("--old-frozen", action="store_true", help="with --sdk-ab and --old-sdk = --new-sdk: the old side is the frozen production package "
+                    "(refs programs_sha256, checked) and gets func, ktest, gates and admission too: the job is also its migration evidence (see old_frozen)")
     ap.add_argument("--old-sdk", default="0.1.0")
     ap.add_argument("--new-sdk", default=sdk_pin.newest_verified(), help="default: the newest verified release (sdk_pin.VERIFIED_RELEASES)")
     ap.add_argument("--suffix", default="", help="appended to the job name (a confirming re-run: -r2)")
@@ -384,6 +386,25 @@ def frozen(doc, old_sdk, new_sdk, refs):
     if doc.get("_comment"):
         doc["_comment"] += (f" Frozen programs (--programs production): staging = the published package at its pinned revision on hrx-loom {new_sdk}, "
                             f"fun = the same package on {old_sdk}; nothing is built, the programs hash is checked before measuring.")
+    return doc
+
+
+def old_frozen(doc, refs, gates):
+    """--old-frozen (with --sdk-ab, a programs-only A/B on one SDK): the old side is the frozen production package; each old variant carries its
+    programs hash (devlab_perf.sh refuses another) and the job also runs func, ktest, gates and the admission probe on it, so ONE job is both the
+    kit build's A/B and the frozen package's migration evidence (fleet/regen.py share). The new side gets its admission probe too."""
+    for j in doc["jobs"]:
+        slug = j["card"].split("/")[-1].split("@")[0]
+        want = (refs.get(slug) or {}).get("programs_sha256")
+        if not want:
+            sys.exit(f"{slug}: --old-frozen needs the production programs hash in its refs entry (\"programs_sha256\")")
+        for v in j["variants"]:
+            if v["name"] in ("fun", "funnd"):
+                v["programs_sha256"] = want
+        extra = ["func:fun", "ktest:fun", *([f"gates:fun:{gates}"] if gates else []), "admit:fun", "admit:staging"]
+        j["steps"] += [x for x in extra if x not in j["steps"]]
+    if doc.get("_comment"):
+        doc["_comment"] += " Old side frozen (--old-frozen): fun serves the production programs (hash checked) with its own func, ktest, gates and admission."
     return doc
 
 
@@ -453,8 +474,12 @@ def build_replicas(a):
         sdk_ab(doc, a.old_sdk, a.new_sdk, card_lib.registry.device(a.device)["runner"]["key"])
         if a.loom_only:
             loom_only(doc)
+        if a.old_frozen:
+            old_frozen(doc, json.load(open(a.refs)) if a.refs else {}, a.gates)
     elif a.loom_only or a.programs == "production":
         sys.exit("--loom-only and --programs production are forms of --sdk-ab")
+    if a.old_frozen and (not a.sdk_ab or a.programs == "production" or a.loom_only or a.old_sdk != a.new_sdk):
+        sys.exit("--old-frozen is a form of --sdk-ab with a built new side on the old side's SDK (--old-sdk = --new-sdk)")
     if a.replicas > 1:
         doc["_comment"] += f" {a.replicas} replicas per model (jobs ...-r2 ...): independent runs on different runners (the ratchet's confirming run)."
     return doc

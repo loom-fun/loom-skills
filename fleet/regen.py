@@ -323,6 +323,8 @@ def generator_cmd(st, device, slugs, suffix=""):
             cmd += ["--sdk-ab", "--old-sdk", old_sdk, "--new-sdk", target_sdk(st)] + ([] if suffix else ["--loom-only"])
         if st["mode"] in SDK_MODES and d.get("programs") == "production":
             cmd += ["--programs", "production"]   # every variant serves the pinned production package (frozen programs), nothing built
+        if d.get("old_frozen") and not suffix:
+            cmd += ["--old-frozen"]   # the frozen old side gets its gates too (a confirming job measures rows only)
         if d.get("refs"):
             cmd += ["--refs", d["refs"]]
         if device != "strix-halo" and not d.get("no_baselines") and st["mode"] == "ab":
@@ -478,6 +480,9 @@ def cmd_plan(a):
         die("--programs production is a form of --mode sdk-loom / sdk-ab")
     if a.old_sdk == "target" and (a.mode not in SDK_MODES or production):
         die("--old-sdk target compares a BUILT package with the old one on the same SDK: --mode sdk-ab / sdk-loom with --programs build")
+    a.old_frozen = getattr(a, "old_frozen", False)
+    if a.old_frozen and (a.mode != "sdk-ab" or a.old_sdk != "target" or production):
+        die("--old-frozen is a form of --mode sdk-ab --old-sdk target (the old side is the frozen production package)")
     # a verified target with a production inventory (skills/loom-migrate/versions/vOLD-to-vNEW-production.json): the old side is the production
     # package at its accepted revision, never a staging history walk
     inventory = inventory_path(new_sdk) if a.mode in SDK_MODES and release_pin(new_sdk) else None
@@ -536,7 +541,7 @@ def cmd_plan(a):
                 revision = accepted[published]
                 reference = f"{published}@{revision}"
                 refs[s] = {"old": reference, "new": reference}
-                if production:   # the frozen package: its programs hash (checked by the job before measuring), kind, the devices its card claims
+                if production or a.old_frozen:   # the frozen package: its programs hash (checked by the job before measuring), kind, the devices its card claims
                     try:
                         f = production_facts(published, revision, os.path.join(work, "production"))
                     except Exception as x:
@@ -570,7 +575,8 @@ def cmd_plan(a):
                    **({"programs": "production", "inventory": repo_rel(inventory),
                                            "old_sdk": inventory_old_version(inventory), "held": held} if production else {}),
                    **({"replicas": a.replicas} if a.replicas > 1 else {}), **({"sequential": True} if a.sequential else {}),
-                   **({"no_baselines": True} if a.no_baselines else {}), **({"bundle": a.bundle} if a.bundle else {}),
+                   **({"no_baselines": True} if a.no_baselines else {}), **({"old_frozen": True} if a.old_frozen else {}),
+                   **({"bundle": a.bundle} if a.bundle else {}),
                    **({"bundle": {"build": {"extension": f"loom-fun/loom-gufo-extension@{a.bundle_build[0]}", "gufo": f"loom-fun/gufo@{a.bundle_build[1]}"}}}
                       if a.bundle_build else {}),
                    **({"bundle": {"run": a.bundle_run}} if a.bundle_run else {})},
@@ -783,6 +789,8 @@ def job_dir(st, name):
 
 
 def download(st, name, e):
+    if e.get("shared_dir"):   # a migration job measured inside a phase-2 job (regen.py share): its view was written when that job was collected
+        return e["shared_dir"]
     d = job_dir(st, name)
     shutil.rmtree(d, ignore_errors=True)   # a fresh directory per job (a stale file would be read as this job's)
     os.makedirs(os.path.dirname(d), exist_ok=True)
@@ -1088,9 +1096,113 @@ def cmd_collect(a):
         collect_one(st, name, e)
         st.log(f"{e['slug']} {e['device']} r{e['round']}: {e['stage']} ({e.get('decision')}) {e.get('reason', '')[:140]}")
         st.save()
+        if e.get("phase1"):
+            feed_phase1(e)
         n += 1
     if not n:
         print("no finished jobs to collect")
+
+
+# ---------------------------------------------------------------- share (one job: the kit build's A/B and the frozen package's migration evidence)
+
+OLD_VARIANT = re.compile(r"(?<=[_:-])fun(nd)?(?=[./_:-]|$)")   # the old side's variant token in a job file name or step name
+NEW_VARIANT = re.compile(r"(?<=[_:-])staging(nd)?(?=[./_:-]|$)")
+
+
+def phase1_view(src, dst):
+    """The frozen side of a --old-frozen phase-2 job directory SRC, written to DST as a migration (sdk-loom) job would have written it: every file of
+    the old variants (fun, funnd) renamed to staging / stagingnd, the new (built) variants' files left out, summary.json and the step tables keep
+    the old side's steps (renamed) and the shared ones (no textmatch: the migration job compares no two packages)."""
+    shutil.rmtree(dst, ignore_errors=True)
+    os.makedirs(dst)
+    def step_kept(k):
+        return k.split(":")[0] != "textmatch" and not NEW_VARIANT.search(k)
+    for root, dirs, files in os.walk(src):
+        rel = os.path.relpath(root, src)
+        top = rel.split(os.sep)[0]
+        if rel != "." and NEW_VARIANT.search("_" + top):
+            dirs[:] = []
+            continue
+        out_root = os.path.join(dst, OLD_VARIANT.sub(lambda m: "staging" + (m.group(1) or ""), "_" + rel)[1:]) if rel != "." else dst
+        os.makedirs(out_root, exist_ok=True)
+        for f in files:
+            if rel == "." and NEW_VARIANT.search("_" + f):
+                continue
+            target = os.path.join(out_root, OLD_VARIANT.sub(lambda m: "staging" + (m.group(1) or ""), "_" + f)[1:] if rel == "." else f)
+            path = os.path.join(root, f)
+            if rel == "." and f == "summary.json":
+                doc = json.load(open(path))
+                doc["results"] = {OLD_VARIANT.sub(lambda m: "staging" + (m.group(1) or ""), k): re.sub(r"^fun(nd)?\b", lambda m: "staging" + (m.group(1) or ""), v)
+                                  if isinstance(v, str) else v for k, v in (doc.get("results") or {}).items() if step_kept(k)}
+                json.dump(doc, open(target, "w"), indent=1)
+            elif rel == "." and f in ("results.tsv", "step_times.tsv"):
+                lines = [ln for ln in open(path).read().splitlines() if step_kept(ln.split("\t")[0])]
+                open(target, "w").write("".join(OLD_VARIANT.sub(lambda m: "staging" + (m.group(1) or ""), ln.split("\t")[0]) + ln[len(ln.split("\t")[0]):] + "\n"
+                                                for ln in lines))
+            else:
+                shutil.copy2(path, target)
+    return dst
+
+
+def feed_phase1(e):
+    """A collected --old-frozen phase-2 job e: its frozen side becomes the result of the migration job it stands for (e["phase1"]: state, job)."""
+    link = e["phase1"]
+    sw = State(link["state"])
+    f = sw.jobs.get(link["job"])
+    if not f or f.get("stage") != "shared":
+        return
+    if e.get("conclusion") != "success" or not os.path.isfile(os.path.join(e.get("dir") or "", "summary.json")):
+        f.update(stage="needs_decision", reason=f"the phase-2 job that measures this migration did not complete ({e.get('job_url')}): plan its own job")
+    else:
+        view = phase1_view(e["dir"], job_dir(sw, link["job"]))
+        f.update(stage="done", shared_dir=view, **{k: e.get(k) for k in ("run", "job_url", "started", "completed", "conclusion")})
+    sw.log(f"{f['slug']} {f['device']}: measured by the phase-2 job {e.get('job_url')} ({f['stage']})")
+    sw.save()
+
+
+def cmd_share(a):
+    """One job per model and device instead of two: each not-yet-running migration job of SWEEP (--programs production) whose model and device have a
+    --old-frozen job in P2STATE (planned or queued) is detached from its batch and marked "shared"; the phase-2 job, when collected, writes the frozen
+    side as that job's result (feed_phase1). --cancel: then force-cancel every SWEEP run whose jobs are all shared or finished."""
+    sw, p2 = State(a.sweep), State(a.p2)
+    if sw.d["opts"].get("programs") != "production" or not p2.d["opts"].get("old_frozen"):
+        die("share: SWEEP must be a --programs production state and P2STATE a --old-frozen one")
+    by = {(e["slug"], e["device"]): n for n, e in sw.jobs.items() if not e.get("prev") and e["stage"] in ("planned", "submitted", "queued")}
+    n = 0
+    for name, e in p2.jobs.items():
+        if e.get("prev") or e["stage"] not in ("planned", "submitted", "queued") or e.get("phase1"):
+            continue
+        k = (e["slug"], e["device"])
+        if k not in by:
+            continue
+        f = sw.jobs[by[k]]
+        for b in sw.d["batches"]:
+            if by[k] in b["jobs"]:
+                b["jobs"].remove(by[k])
+                if not b["jobs"] and b["stage"] == "planned":
+                    b["stage"] = "dropped"   # every job of it is measured elsewhere: never submitted
+        f.update(stage="shared", shared={"state": p2.path, "job": name})
+        e["phase1"] = {"state": sw.path, "job": by[k]}
+        n += 1
+    sw.log(f"share: {n} migration jobs measured by {p2.path}")
+    if not a.dry_run:
+        sw.save()
+        p2.save()
+    print(f"{n} migration jobs shared with {os.path.basename(p2.path)}")
+    cancel = []
+    for b in sw.d["batches"]:
+        if not b.get("run") or b["stage"] == "planned" or b.get("cancelled"):
+            continue
+        detached = [n_ for n_, e in sw.jobs.items() if e.get("shared") and e.get("batch") == b["id"]]
+        if detached and not any(sw.jobs[j]["stage"] in ("submitted", "queued", "running") for j in b["jobs"]):
+            cancel.append(b)
+    for b in cancel:
+        print(f"run {b['run']}: every job shared or finished" + ("" if a.cancel and not a.dry_run else " (cancel with --cancel)"))
+        if a.cancel and not a.dry_run:
+            sh(["gh", "run", "cancel", str(b["run"]), "-R", REPO], check=False)
+            b["cancelled"] = now()
+    if cancel and a.cancel and not a.dry_run:
+        sw.save()
 
 
 # ---------------------------------------------------------------- rerun (confirming -r2 jobs)
@@ -2382,6 +2494,8 @@ def main(argv=None):
     p.add_argument("--replicas", type=int, default=1, help="ab mode: runs of the A/B per model in ONE submission (2 = the ratchet's confirming run as a parallel "
                    "replica on another runner; collect decides on the pair). A targeted change: 2")
     p.add_argument("--sequential", action="store_true", help="ab mode: 2+2 sessions, each job extends itself to 6+6 where a row is within 2 points of its reject threshold")
+    p.add_argument("--old-frozen", action="store_true", help="--mode sdk-ab --old-sdk target: the old side is the frozen production package (hash "
+                   "checked) with its own func, ktest, gates and admission, so each job is also that package's migration evidence (regen.py share)")
     p.add_argument("--no-baselines", action="store_true", help="ab mode on a device with a memory pool: no llama.cpp re-measure (a targeted change compares Loom with Loom; "
                    "about 40 percent of a small model's job)")
     p.add_argument("--priority", action="store_true", help="the batches of this plan go to the head of the next submit wave and ignore --max-inflight (a targeted job, not a sweep)")
@@ -2417,6 +2531,12 @@ def main(argv=None):
     q = sub.add_parser("verify", help="--programs production: check the published staging cards (programs, pin, cited job, lint_card.py)")
     q.add_argument("state")
     q.set_defaults(fn=cmd_verify)
+    q = sub.add_parser("share", help="one job instead of two: migration jobs of SWEEP measured by the --old-frozen phase-2 jobs of P2STATE")
+    q.add_argument("sweep")
+    q.add_argument("p2")
+    q.add_argument("--cancel", action="store_true", help="force-cancel the SWEEP runs whose jobs are all shared or finished")
+    q.add_argument("--dry-run", action="store_true")
+    q.set_defaults(fn=cmd_share)
     q = sub.add_parser("kit-verdict", help="phase 2: per model, ship the kit programs (every device's A/B passed) or keep the frozen ones (the card says why)")
     q.add_argument("sweep", help="the phase-1 --programs production state (its published cards)")
     q.add_argument("states", nargs="+", help="the phase-2 states (--mode sdk-ab --old-sdk target)")
