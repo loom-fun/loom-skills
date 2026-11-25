@@ -720,19 +720,26 @@ def apply_run_jobs(st, b, run, jobs):
 def cmd_poll(a):
     st = State(a.state)
     pending = 0
-    for b in st.d["batches"]:
+    seen = []   # (batch id, run, jobs): the network part first, then ONE locked read-modify-write, so a step that saved the state meanwhile
+    for b in st.d["batches"]:   # (collect, rerun, accept: possibly in another shell) keeps its changes
         if b["stage"] == "planned":
-            pending += len(b["jobs"])
             continue
-        if not b.get("run"):
-            b["run"] = find_run(b)
-        if b.get("run"):
-            jobs = gh_json(["run", "view", str(b["run"]), "-R", REPO, "--json", "status,conclusion,jobs"])
-            apply_run_jobs(st, b, b["run"], jobs["jobs"])
+        run = b.get("run") or find_run(b)
+        if run:
+            seen.append((b["id"], run, gh_json(["run", "view", str(run), "-R", REPO, "--json", "status,conclusion,jobs"])["jobs"]))
+    with locked(st.path):
+        st.d = json.load(open(st.path))
+        for bid, run, jobs in seen:
+            b = next(x for x in st.d["batches"] if x["id"] == bid)
+            b["run"] = run
+            apply_run_jobs(st, b, run, jobs)
+        tmp = st.path + ".tmp"
+        json.dump(st.d, open(tmp, "w"), indent=1, sort_keys=True)
+        os.replace(tmp, st.path)
+    pending += sum(len(b["jobs"]) for b in st.d["batches"] if b["stage"] == "planned")
     for e in st.jobs.values():
         if e["stage"] in ("planned", "submitted", "queued", "running"):
             pending += 1
-    st.save()
     print_table(st)
     sys.exit(10 if pending else 0)
 
