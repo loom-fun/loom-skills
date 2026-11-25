@@ -799,6 +799,62 @@ class KitVerdict(unittest.TestCase):
                                                     "top": [[12, -0.05], [11, -4.5]]})
             self.assertIsNone(regen.kit_near_tie(e, cmp))
 
+    def test_scoped_failed_gate_evidence(self):
+        gpu = "strix-halo"
+        row = {"staging": "staging/model", "staging_revision": "r", "programs_sha256": H, "qualification": {gpu: {}}}
+        url = "https://github.com/loom-fun/loom-skills/actions/runs/123/job/456"
+        gate = {"status": "fail", "programs_sha256": H, "source": "measured"}
+        sdk = regen.SDK_NEW
+        src = {"kind": "devlab", "url": url, "device": {"gpu": "gfx1151"}, "hrx_loom": regen.release_pin(sdk)}
+        gates = {"logits": gate}
+        info = {"devices": {gpu: {"gates": gates}}, "sources": {"measured": src}}
+        accepted = {gpu: {"logits": "owner decision"}}
+        with mock.patch.object(regen, "hf_file"), mock.patch.object(regen.card_lib, "load_info", return_value=info):
+            def check(decisions, required=None):
+                return regen.check_staged_qualification(row, kit=False, sdk=sdk, accepted=decisions, required=required)
+            self.assertIsNone(check(accepted))
+            self.assertEqual(row.pop("accepted_failures"), {gpu: {"logits": {"decision": "owner decision", "url": url}}})
+            for decisions in ({}, {"other": accepted[gpu]}, {gpu: {"vision": "owner decision"}}):
+                self.assertIn("failed gates: logits", check(decisions))
+            for target, field, value in ((src, "url", ""), (src, "kind", "local"), (gate, "programs_sha256", "old"),
+                                         (src, "device", {"gpu": "gfx1201"}), (src, "hrx_loom", {"hrx_loom": sdk, "wheel_sha256": "wrong"})):
+                with mock.patch.dict(target, {field: value}):
+                    self.assertIn("lacks current runner evidence", check(accepted))
+            with mock.patch.dict(gates, {"vision": dict(gate)}):
+                self.assertIn("failed gates: vision", check(accepted))
+            gate["status"] = "pass"
+            self.assertIn("omits", check(accepted, {gpu: ["logits"]}))
+            self.assertIsNone(check(accepted))
+            self.assertNotIn("accepted_failures", row)
+
+    def test_exact_failure_decision_file(self):
+        entry = {"slug": "example", "gpu": "strix-halo", "gate": "kernel_tests", "decision": "owner decision"}
+        with tempfile.TemporaryDirectory() as t:
+            path = os.path.join(t, "decisions.json")
+            with open(path, "w") as f:
+                json.dump([entry], f)
+            self.assertEqual(regen.load_accepted_failures(path), {"example": {"strix-halo": {"kernel_tests": "owner decision"}}})
+            for invalid in ([entry, entry], [dict(entry, slug="*")], [dict(entry, decision="")], {"example": entry}):
+                with open(path, "w") as f:
+                    json.dump(invalid, f)
+                with self.assertRaises(SystemExit):
+                    regen.load_accepted_failures(path)
+
+    def test_reconsider_only_published_measured_failures(self):
+        entry = {"slug": "example", "device": "strix-halo", "stage": "published", "decision": "promote",
+                 "verified": {"ok": True}, "shown_failed": {"failed": ["ktest:staging"], "not_run": []}}
+        accepted = {"example": {"strix-halo": {"kernel_tests": "owner decision"}}}
+        def status(job, decisions=accepted):
+            row = {"status": "failed", "sdk": {"verified": True}, "admission": {"result": "ADMITTED"}}
+            doc = {"models": {"example": {"devices": {"strix-halo": row}}}}
+            regen.review_shown_failures(doc, SimpleNamespace(jobs={"e": job}), decisions)
+            return row
+        self.assertEqual(status(entry)["required_shown_failures"], ["kernel_tests"])
+        for kwargs in ({"decision": "hold"}, {"stage": "ingested"}, {"verified": {"ok": False}},
+                       {"shown_failed": {"failed": ["ktest:staging"], "not_run": ["agent"]}}):
+            self.assertEqual(status(dict(entry, **kwargs))["status"], "failed")
+        self.assertEqual(status(entry, {"another": accepted["example"]})["status"], "failed")
+
     def test_release_full_suite_checks_measured_names_level_and_programs(self):
         row = {"staging": "staging/test", "staging_revision": "r", "programs_sha256": H,
                "qualification": {"strix-halo": {}}}
