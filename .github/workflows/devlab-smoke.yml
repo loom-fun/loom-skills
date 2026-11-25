@@ -1,0 +1,111 @@
+name: devlab-smoke
+# Release smoke of published cards on AMD DevLab Dispatch runners (Linux Strix Halo and R9700, Windows Strix Halo): each card's
+# own Quick start for the job's GPU, then one chat and one tool call (.github/scripts/devlab_smoke.py). Linux jobs serve under a
+# stock 8 MiB memlock as the runner's non-root user, so they double as the stock-host Quick start check. Jobs come from
+# .github/devlab/smoke.json, written by fleet/smoke_plan.py (release-checklist.md sections 2 and 3). Runs on a pull request
+# labeled `devlab-smoke` (every push re-runs it).
+on:
+  pull_request:
+    types: [labeled, synchronize]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: devlab-smoke-${{ github.ref }}-${{ github.event.label.name }}   # a skipped event for another label must not cancel this label's run
+  cancel-in-progress: true
+
+jobs:
+  plan:
+    if: >-
+      contains(github.event.pull_request.labels.*.name, 'devlab-smoke') &&
+      (github.event.action != 'labeled' || github.event.label.name == 'devlab-smoke')
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.pick.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - id: pick
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+          jobs = json.load(open(".github/devlab/smoke.json"))["jobs"]
+          inc = [{"name": j["name"], "os": j["os"], "runs_on": j["runs_on"],
+                  "timeout": int(min(360, 30 + 2 * j.get("minutes", 60)))} for j in jobs]
+          print("matrix=" + json.dumps({"include": inc}))
+          PY
+
+  smoke:
+    needs: plan
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.runs_on }}
+    timeout-minutes: ${{ matrix.timeout }}
+    env:
+      HF_TOKEN: ${{ secrets.HF_TOKEN }}
+      HF_HUB_DOWNLOAD_TIMEOUT: "120"
+      HF_HUB_ETAG_TIMEOUT: "60"
+      PYTHONUTF8: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          sparse-checkout: .github
+      - name: "smoke (Linux): ${{ matrix.name }}"
+        if: matrix.os == 'linux'
+        run: |
+          w="$RUNNER_TEMP/smoke-${{ matrix.name }}"; rm -rf "$w"
+          echo "SMOKE_OUT=$w/out" >> "$GITHUB_ENV"; echo "SMOKE_WORK=$w/work" >> "$GITHUB_ENV"
+          python3 .github/scripts/devlab_smoke.py .github/devlab/smoke.json "${{ matrix.name }}" "$w/work" "$w/out"
+      - name: "smoke (Windows): ${{ matrix.name }}"
+        if: matrix.os == 'windows'
+        shell: powershell
+        run: |
+          $w = Join-Path $env:RUNNER_TEMP "sm-${{ matrix.name }}"
+          if (Test-Path $w) { Remove-Item -Recurse -Force $w }
+          "SMOKE_OUT=$w\out" >> $env:GITHUB_ENV; "SMOKE_WORK=$w\work" >> $env:GITHUB_ENV
+          python .github/scripts/devlab_smoke.py .github/devlab/smoke.json "${{ matrix.name }}" "$w\work" "$w\out"
+          if ($LASTEXITCODE -ne 0) { throw "devlab_smoke.py exited $LASTEXITCODE" }
+      - name: upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-${{ matrix.name }}
+          path: ${{ env.SMOKE_OUT }}
+          retention-days: 30
+      - name: clean up (Linux)
+        if: always() && matrix.os == 'linux'
+        run: rm -rf "$SMOKE_WORK"
+      - name: clean up (Windows)
+        if: always() && matrix.os == 'windows'
+        shell: powershell
+        run: if ($env:SMOKE_WORK -and (Test-Path $env:SMOKE_WORK)) { Remove-Item -Recurse -Force $env:SMOKE_WORK -ErrorAction SilentlyContinue }
+
+  summary:
+    needs: [plan, smoke]
+    if: always() && needs.plan.result == 'success'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: smoke-*
+          path: results
+      - name: checks per card
+        run: |
+          python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import glob, json
+          print("| job | card @ revision | failed checks | passed |\n|---|---|---|---|")
+          for f in sorted(glob.glob("results/*/summary.json")):
+              s = json.load(open(f))
+              for slug, r in s["cards"].items():
+                  ch = r.get("checks", {})
+                  bad = [f"{k}: {v[6:200]}" for k, v in ch.items() if v.startswith("fail")]
+                  ok = sum(v == "pass" for v in ch.values())
+                  print(f"| {s['job']['name']} | {slug} @ {str(r.get('revision'))[:8]} | {'<br>'.join(bad) or 'none'} | {ok} |")
+              if s.get("hook"):
+                  print(f"| {s['job']['name']} | hook {s['hook']['script']} | {s['hook']['result'][:300]} | |")
+          PY

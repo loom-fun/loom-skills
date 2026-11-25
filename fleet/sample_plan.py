@@ -88,7 +88,7 @@ class Fleet:
         return {r for r in b if r in L.ROWS}   # a '_state' entry (does not fit, unsupported) has no rows
 
 
-def plan(impact, gpus, fleet, history=None, today=None, granularity="fine"):
+def plan(impact, gpus, fleet, history=None, today=None, granularity="fine", prefer="heaviest"):
     history = history or {}
     today = today or datetime.date.today().isoformat()
     mod = L.normalize_impact(impact)
@@ -116,7 +116,11 @@ def plan(impact, gpus, fleet, history=None, today=None, granularity="fine"):
             if have is not None:
                 rows = [r for r in rows if r in have]
             ksig = {**sig, "arch": "*"} if granularity == "shape" else sig    # shape: the kernel instantiation signature without the arch family
-            key = L.stratum_key(ksig, fams if granularity != "coarse" else [], fmts if granularity != "coarse" else [], gpu)
+            if granularity == "arch":   # arch: what serving exercises (programs of the arch, draft kind, MoE, projector), not the shapes
+                ksig = {**sig, "head_dim": "*", "G": "*", "kv_bucket": "*",
+                        "moe": (sig.get("moe") or "dense") + ("+vision" if sig.get("vision") else "")}
+            flat = granularity in ("coarse", "arch")
+            key = L.stratum_key(ksig, [] if flat else fams, [] if flat else fmts, gpu)
             st = strata.setdefault((key, gpu), [])
             st.append({"slug": slug, "sig": sig, "rows": rows, "families": fams, "kernels": sorted(k["name"] for k in ks),
                        "w": fleet.weights(slug)})
@@ -124,7 +128,7 @@ def plan(impact, gpus, fleet, history=None, today=None, granularity="fine"):
     for (key, gpu), members in sorted(strata.items(), key=lambda kv: kv[0]):
         if key == "__skipped__":
             continue
-        out.append(select(key, gpu, members, history, today))
+        out.append(select(key, gpu, members, history, today, prefer))
     skipped = [{"gpu": g, **x} for (k, g), v in strata.items() if k == "__skipped__" for x in v]
     return out, skipped
 
@@ -138,7 +142,7 @@ def weight_score(member):
     return (hid, s.get("context") or 0)
 
 
-def select(key, gpu, members, history, today):
+def select(key, gpu, members, history, today, prefer="heaviest"):
     union_rows = sorted({r for m in members for r in m["rows"]}, key=L.ROWS.index)
     cands = list(members)
     notes = []
@@ -148,10 +152,16 @@ def select(key, gpu, members, history, today):
             notes.append("sub-1B members not sampled for decode rows: " + ", ".join(m["slug"] for m in cands if m not in big))
             cands = big
     hist = history.get("models", {})
-    # least recently measured first (never = ''), then the heaviest member of the changed kernel
-    cands.sort(key=lambda m: (hist.get(f"{m['slug']}|{gpu}", ""), tuple(-x for x in weight_score(m)), m["slug"]))
+    # least recently measured first (never = ''), then the heaviest member of the changed kernel (prefer="lightest": the smallest
+    # weights, for functional checks such as the release smoke, where the stratum's programs matter and runner time is the cost)
+    if prefer == "lightest":
+        cands.sort(key=lambda m: (hist.get(f"{m['slug']}|{gpu}", ""), bool(m["w"]) and m["w"] < SUB_1B_BYTES, m["w"] or 1e15,
+                                  weight_score(m), m["slug"]))   # a sub-1B member only when it is the only kind (weak at tool calls)
+    else:
+        cands.sort(key=lambda m: (hist.get(f"{m['slug']}|{gpu}", ""), tuple(-x for x in weight_score(m)), m["slug"]))
     reps = [cands[0]]
-    why = {cands[0]["slug"]: ["least recently measured" if hist.get(f"{cands[0]['slug']}|{gpu}", "") else "heaviest for the changed kernel"]}
+    why = {cands[0]["slug"]: ["least recently measured" if hist.get(f"{cands[0]['slug']}|{gpu}", "")
+                              else ("smallest weights" if prefer == "lightest" else "heaviest for the changed kernel")]}
     if len(cands) > 1:
         hs = [m["sig"].get("hidden") or 0 for m in cands]
         kvs = [m["sig"].get("kv_heads") or 0 for m in cands]
@@ -279,14 +289,17 @@ def main():
     ap.add_argument("--refs", help="ab_jobs.py --refs MAP.json: {slug: {old: ORG/REPO@REV, new: ORG/REPO@REV}}: old = the published package (baseline), "
                     "new = the candidate uploaded for the head build")
     ap.add_argument("--sessions", type=int, default=2)
-    ap.add_argument("--granularity", choices=["fine", "coarse", "shape"], default="fine",
+    ap.add_argument("--granularity", choices=["fine", "coarse", "shape", "arch"], default="fine",
                     help="fine (default, the plan): arch, shape, draft kind, dense/MoE, changed kernel families and formats; "
-                         "coarse: without the changed kernel families; shape: without the arch family (the kernel instantiation signature)")
+                         "coarse: without the changed kernel families; shape: without the arch family (the kernel instantiation signature); "
+                         "arch: arch, draft kind, dense/MoE and projector only (functional checks: fleet/smoke_plan.py)")
+    ap.add_argument("--prefer", choices=["heaviest", "lightest"], default="heaviest",
+                    help="representative: heaviest for the changed kernel (default, perf canaries) or smallest weights (functional checks)")
     a = ap.parse_args()
     gpus = [g for g in a.gpus.split(",") if g]
     fleet = Fleet(a.configs, a.fit, a.baselines)
     hist = load_json(a.history, {}) if a.history else {}
-    strata, skipped = plan(json.load(open(a.impact)), gpus, fleet, hist, granularity=a.granularity)
+    strata, skipped = plan(json.load(open(a.impact)), gpus, fleet, hist, granularity=a.granularity, prefer=a.prefer)
     res = {"impact": a.impact, "gpus": gpus, "strata": strata, "skipped": skipped, "totals": totals(strata)}
     if a.json:
         json.dump(res, open(a.json, "w"), indent=1)
