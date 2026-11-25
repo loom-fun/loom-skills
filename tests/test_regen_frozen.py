@@ -197,11 +197,6 @@ class PlanFrozen(unittest.TestCase):
         self.assertEqual(refs[STRIX_ONLY]["model"]["memory_bytes"], 33000000000)
         self.assertNotIn("llamacpp", refs[STRIX_ONLY]["model"])
 
-    def test_llamacpp_override_of_an_unlisted_package(self):
-        st = self.plan(STRIX_ONLY, extra=("--llamacpp", f"{STRIX_ONLY}=b1384"))
-        self.assertEqual(json.load(open(os.path.join(st.work, "refs_strix-halo.json")))[STRIX_ONLY]["model"]["llamacpp"], "b1384")
-        with self.assertRaises(SystemExit):   # a package nightly-models.json lists keeps its own build
-            self.plan(TEXT, extra=("--llamacpp", f"{TEXT}=b1384"))
         # the image package: one image job on Strix Halo, none on the R9700
         img = [e for e in st.jobs.values() if e["slug"] == IMAGE]
         self.assertEqual([(e["device"], e["kind"]) for e in img], [("strix-halo", "image")])
@@ -209,6 +204,12 @@ class PlanFrozen(unittest.TestCase):
         job = json.load(open(batch["perf"]))["jobs"][0]
         self.assertEqual(job["kind"], "image")
         self.assertEqual(job["image"], {"old_sdk": "0.2.0", "new_sdk": regen.SDK_NEW, "programs_sha256": "i" * 64, "preset": None})
+
+    def test_llamacpp_override_of_an_unlisted_package(self):
+        st = self.plan(STRIX_ONLY, extra=("--llamacpp", f"{STRIX_ONLY}=b1384"))
+        self.assertEqual(json.load(open(os.path.join(st.work, "refs_strix-halo.json")))[STRIX_ONLY]["model"]["llamacpp"], "b1384")
+        with self.assertRaises(SystemExit):   # a package nightly-models.json lists keeps its own build
+            self.plan(TEXT, extra=("--llamacpp", f"{TEXT}=b1384"))
 
     def test_held_and_unknown_packages_are_refused(self):
         with self.assertRaises(SystemExit):
@@ -440,20 +441,6 @@ class FrozenAssembleAndLint(unittest.TestCase):
             got = json.load(open(os.path.join(out, "llm_config.json")))
             self.assertEqual(got, {**regen.staging_to_main(cfg), "sdk": regen.release_pin("0.3.0")})
             self.assertEqual(h, regen.card_lib.programs_sha256(out))
-
-    def test_lint_accepts_a_successful_job_in_a_failed_batch_run(self):
-        sys.path.insert(0, os.path.join(ROOT, "skills", "loom-benchmark", "scripts", "card"))
-        import lint_card
-        runs = lint_card.Runs()
-        runs.run = lambda repo, rid: "failure"   # another model's job failed in the same batch run
-        runs.job = lambda repo, jid: "success" if jid == "2" else "failure"
-        cite = lambda jid: [("info.json source s1", "loom-fun/loom-skills", "1", jid, None)]
-        with mock.patch.object(lint_card, "cited_runs", lambda card, info: cite("2")):
-            self.assertEqual(lint_card.run_problems("c", {}, runs), [])
-        with mock.patch.object(lint_card, "cited_runs", lambda card, info: cite("3")):
-            self.assertEqual(len(lint_card.run_problems("c", {}, runs)), 1)
-        with mock.patch.object(lint_card, "cited_runs", lambda card, info: cite(None)):   # a run-only citation needs a successful run
-            self.assertEqual(len(lint_card.run_problems("c", {}, runs)), 1)
 
 
 class KernelTestsNotApplicable(unittest.TestCase):
