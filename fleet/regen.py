@@ -891,7 +891,11 @@ def sdk_decide(st, name, e, cmp_path, use_prev=True):
     # decode, prefill and 4stream must be measured on both sides; only the long-context row may be absent on BOTH (beyond the context both serve
     # on this device, e.g. a 32k row on a 32k card): that is "not measured", not missing. A failed perf step on both sides still reruns.
     m = cmp.get("metrics") or {}
-    gone = [k for k, v in perf.items() if v is None and (k != "longctx" or (m.get(SDK_METRICS[k]) or {}).get("old") is not None)]
+    # a targeted ABBA confirmation (sdk-loom -r2): a row absent on both sides that its sweep job did not measure either (the card has none on this
+    # device, e.g. no 8k prefill at a small served context) is not measured, not missing
+    first_rows = set(st.jobs[e["prev"]].get("rows_pct") or {}) if e.get("prev") and st.d.get("mode") == "sdk-loom" else None
+    gone = [k for k, v in perf.items() if v is None and (k != "longctx" or (m.get(SDK_METRICS[k]) or {}).get("old") is not None)
+            and not (first_rows is not None and SDK_METRICS[k] not in first_rows and (m.get(SDK_METRICS[k]) or {}).get("old") is None)]
     newonly = [k for k, v in perf.items() if v is None and (m.get(SDK_METRICS[k]) or {}).get("old") is None and (m.get(SDK_METRICS[k]) or {}).get("new") is not None]
     if newonly:
         reasons.append(f"served only on the new SDK (no old value to compare): {', '.join(newonly)}")
@@ -1391,8 +1395,9 @@ def ingest_full(st, name, e, W):
         run_tool([f"{S}/make_info.py", "gates", "--gpu", dev, "--time", end, *gfiles, "--package", out, *src, "--device", "dev.json", "--hrx-loom", hrx,
                   "-o", "ev_gates.json"], W)
         ev.append("ev_gates.json")
+    stub = roofline_stub(slug, out, W)
     run_tool([f"{S}/make_info.py", "roofline", "--gpu", dev, "--device", card_lib.registry.device(dev)["roofline"]["default"], "--package", out,
-              "--evidence", "ev_perf.json", "-o", "ev_roof.json"], W)
+              "--evidence", "ev_perf.json", *(["--gguf", stub] if stub else []), "-o", "ev_roof.json"], W)
     ev.append("ev_roof.json")
     if production:   # the frozen package carries no generator stamp of this branch: the production card's, named as such
         json.dump({"evidence": "loom-card-evidence/2", "gpu": dev,
@@ -1428,6 +1433,25 @@ def ingest_full(st, name, e, W):
     msg = card_message(e, dev, run, loom_only, sdk, target_sdk(st.d))
     parent = rev if verified or dry else hf_head(f"{st.d['opts']['new_org']}/{slug}")
     return out, parent, msg
+
+
+def roofline_stub(slug, pkg, W):
+    """The roofline reads only the checkpoint's GGUF header: when the pinned checkpoint is not in the Hugging Face cache (never downloaded for a
+    card), a header-only sparse stub from the fleet's dump (fleet/SLUG/gguf/FILE.json.gz, gguf_stub.py) with the original name; None otherwise."""
+    try:
+        ck = card_lib.package_facts(card_lib.load_package(pkg))["checkpoint"]
+    except Exception:
+        return None
+    hub = os.path.join(os.environ.get("HF_HOME", os.path.expanduser("~/.cache/huggingface")), "hub")
+    if not ck or not ck.get("file") or (ck.get("revision") and os.path.exists(
+            os.path.join(hub, "models--" + ck["repo"].replace("/", "--"), "snapshots", ck["revision"], ck["file"]))):
+        return None
+    dump = os.path.join(HERE, slug, "gguf", ck["file"] + ".json.gz")
+    if not os.path.isfile(dump):
+        return None
+    import gguf_stub
+    os.makedirs(os.path.join(W, "gguf"), exist_ok=True)
+    return gguf_stub.write_stub(gguf_stub.load(dump), os.path.join(W, "gguf", ck["file"]))
 
 
 _MAKE_INFO_HELP = {}
