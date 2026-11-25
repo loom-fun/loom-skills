@@ -1,47 +1,255 @@
 {
- "_comment": "R9700 per-model measurement (r9700_jobs.py): one job per model on one R9700 runner; loom-fun-staging card, llama.cpp ROCm b1375 + Vulkan b12211 with the matched drafting, reduced-context models served at served_context. Does not fit: none",
- "runner": "r9700",
- "memory_bytes": 34000000000,
- "llama_spec": "matched",
+ "_comment": "sdkcap kit A/B on SDK 0.3.0: kit build vs kit build with telemetry.proposal_counts (publish_epoch reports proposals: /metrics draft_proposed_tokens and perf.py acceptance); ABBA perf + c4, no gates.",
+ "memory_bytes": 100000000000,
+ "llamacpp": "b1375",
  "jobs": [
   {
-   "name": "unsloth-qwen3-0-6b-loom",
-   "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
+   "name": "pc-strix-qwen3-8b",
+   "card": "loom-fun/unsloth-Qwen3-8B-loom",
    "kit": null,
-   "llamacpp": "b1375",
-   "llamacpp_vulkan": "b12211",
-   "memory_bytes_r9700": 17000000000,
+   "runner": "strix",
+   "sdk": "0.3.0",
    "variants": [
     {
-     "name": "card",
+     "name": "kit",
      "build": {}
     },
     {
-     "name": "nodraft",
-     "build": {},
-     "execution": {
-      "draft_depth": 0
+     "name": "pc",
+     "build": {
+      "LLM_PROPOSAL_COUNTS": "1"
      }
     }
    ],
    "steps": [
-    "func:card",
-    "ktest:card",
-    "gates:card:dev",
-    "perf:card:3",
-    "perf:card:3:long",
-    "c4:nodraft",
-    "llama@rocm.np1:3",
-    "llama@rocm.np1:3:long",
-    "llamac4@rocm.nodraft",
-    "llama@vulkan.np1:3",
-    "llama@vulkan.np1:3:long",
-    "llamac4@vulkan.perslot.nodraft"
+    "smoke:kit",
+    "smoke:pc",
+    "perf:kit:1",
+    "perf:pc:1",
+    "perf:pc:1",
+    "perf:kit:1",
+    "c4:kit",
+    "c4:pc",
+    "c4:pc",
+    "c4:kit"
+   ]
+  },
+  {
+   "name": "pc-strix-qwen3-5-4b",
+   "card": "loom-fun/unsloth-Qwen3.5-4B-loom",
+   "kit": null,
+   "runner": "strix",
+   "sdk": "0.3.0",
+   "variants": [
+    {
+     "name": "kit",
+     "build": {}
+    },
+    {
+     "name": "pc",
+     "build": {
+      "LLM_PROPOSAL_COUNTS": "1"
+     }
+    }
+   ],
+   "steps": [
+    "smoke:kit",
+    "smoke:pc",
+    "perf:kit:1",
+    "perf:pc:1",
+    "perf:pc:1",
+    "perf:kit:1",
+    "c4:kit",
+    "c4:pc",
+    "c4:pc",
+    "c4:kit"
+   ]
+  },
+  {
+   "name": "pc-strix-gemma-4-e2b",
+   "card": "loom-fun/unsloth-gemma-4-E2B-it-loom",
+   "kit": "gemma4",
+   "runner": "strix",
+   "sdk": "0.3.0",
+   "variants": [
+    {
+     "name": "kit",
+     "build": {}
+    },
+    {
+     "name": "pc",
+     "build": {
+      "LLM_PROPOSAL_COUNTS": "1"
+     }
+    }
+   ],
+   "steps": [
+    "smoke:kit",
+    "smoke:pc",
+    "perf:kit:1",
+    "perf:pc:1",
+    "perf:pc:1",
+    "perf:kit:1",
+    "c4:kit",
+    "c4:pc",
+    "c4:pc",
+    "c4:kit"
+   ]
+  },
+  {
+   "name": "pc-strix-coder-30b-a3b",
+   "card": "loom-fun/ggml-org-Qwen3-Coder-30B-A3B-Instruct-loom",
+   "kit": null,
+   "runner": "strix",
+   "sdk": "0.3.0",
+   "variants": [
+    {
+     "name": "kit",
+     "build": {}
+    },
+    {
+     "name": "pc",
+     "build": {
+      "LLM_PROPOSAL_COUNTS": "1"
+     }
+    }
+   ],
+   "steps": [
+    "smoke:kit",
+    "smoke:pc",
+    "perf:kit:1",
+    "perf:pc:1",
+    "perf:pc:1",
+    "perf:kit:1",
+    "c4:kit",
+    "c4:pc",
+    "c4:pc",
+    "c4:kit"
+   ]
+  },
+  {
+   "name": "pc-r9700-qwen3-8b",
+   "card": "loom-fun/unsloth-Qwen3-8B-loom",
+   "kit": null,
+   "runner": "r9700",
+   "sdk": "0.3.0",
+   "variants": [
+    {
+     "name": "kit",
+     "build": {}
+    },
+    {
+     "name": "pc",
+     "build": {
+      "LLM_PROPOSAL_COUNTS": "1"
+     }
+    }
+   ],
+   "steps": [
+    "smoke:kit",
+    "smoke:pc",
+    "perf:kit:1",
+    "perf:pc:1",
+    "perf:pc:1",
+    "perf:kit:1",
+    "c4:kit",
+    "c4:pc",
+    "c4:pc",
+    "c4:kit"
+   ]
+  },
+  {
+   "name": "pc-r9700-qwen3-5-4b",
+   "card": "loom-fun/unsloth-Qwen3.5-4B-loom",
+   "kit": null,
+   "runner": "r9700",
+   "sdk": "0.3.0",
+   "variants": [
+    {
+     "name": "kit",
+     "build": {}
+    },
+    {
+     "name": "pc",
+     "build": {
+      "LLM_PROPOSAL_COUNTS": "1"
+     }
+    }
+   ],
+   "steps": [
+    "smoke:kit",
+    "smoke:pc",
+    "perf:kit:1",
+    "perf:pc:1",
+    "perf:pc:1",
+    "perf:kit:1",
+    "c4:kit",
+    "c4:pc",
+    "c4:pc",
+    "c4:kit"
+   ]
+  },
+  {
+   "name": "pc-r9700-gemma-4-e2b",
+   "card": "loom-fun/unsloth-gemma-4-E2B-it-loom",
+   "kit": "gemma4",
+   "runner": "r9700",
+   "sdk": "0.3.0",
+   "variants": [
+    {
+     "name": "kit",
+     "build": {}
+    },
+    {
+     "name": "pc",
+     "build": {
+      "LLM_PROPOSAL_COUNTS": "1"
+     }
+    }
+   ],
+   "steps": [
+    "smoke:kit",
+    "smoke:pc",
+    "perf:kit:1",
+    "perf:pc:1",
+    "perf:pc:1",
+    "perf:kit:1",
+    "c4:kit",
+    "c4:pc",
+    "c4:pc",
+    "c4:kit"
+   ]
+  },
+  {
+   "name": "pc-r9700-coder-30b-a3b",
+   "card": "loom-fun/ggml-org-Qwen3-Coder-30B-A3B-Instruct-loom",
+   "kit": null,
+   "runner": "r9700",
+   "sdk": "0.3.0",
+   "variants": [
+    {
+     "name": "kit",
+     "build": {}
+    },
+    {
+     "name": "pc",
+     "build": {
+      "LLM_PROPOSAL_COUNTS": "1"
+     }
+    }
+   ],
+   "steps": [
+    "smoke:kit",
+    "smoke:pc",
+    "perf:kit:1",
+    "perf:pc:1",
+    "perf:pc:1",
+    "perf:kit:1",
+    "c4:kit",
+    "c4:pc",
+    "c4:pc",
+    "c4:kit"
    ]
   }
- ],
- "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
- "kit": null,
- "llamacpp": "b1375",
- "llamacpp_vulkan": "b12211"
+ ]
 }
