@@ -21,7 +21,7 @@ binary approval).
 
 ```bash
 bash "${LOOM_SKILL_DIR}/scripts/install_loom.sh" ~/loom          # verified hrx-loom 0.3.0 wheel and matching catalog
-bash "${LOOM_SKILL_DIR}/scripts/install_loom.sh" ~/loom-0.2.0 0.2.0   # legacy pinned release
+bash "${LOOM_SKILL_DIR}/scripts/install_loom.sh" ~/loom-0.2.0 0.2.0   # a previous release, for reproducing a package pinned to it
 bash "${LOOM_SKILL_DIR}/scripts/install_loom.sh" ~/loom 0.1.0      # hrx-loom 0.1.0 from PyPI (packages without an SDK pin)
 bash "${LOOM_SKILL_DIR}/scripts/install_loom.sh" ~/loom 0.2.0rc1    # a GitHub pre-release (sha256-verified against its SHA256SUMS)
 bash "${LOOM_SKILL_DIR}/scripts/install_loom.sh" ~/loom latest     # newest PyPI release
@@ -112,7 +112,7 @@ Use unique NAMEs. `stop.sh` refuses to kill a PID that is not a loom-serve.
 Raw form: `loom-serve '--device=amdgpu://?completion_spin_ns=4294967295' --listen=127.0.0.1:PORT
 --model=pkg/model.json --workers=8 --pool_backing=fixed [--preset=NAME]` (the card's serving on Strix Halo and the R9700: the preset's `context_capacity`
 KV and the weights are committed up front). The elastic option, for several models sharing one budget: `--memory_bytes=N [--parameter_idle_ms=60000]` instead of
-`--pool_backing=fixed` (hrx-loom 0.2.0's elastic backing is 5-8 % slower on Strix prefill).
+`--pool_backing=fixed` (measured on hrx-loom 0.2.0: elastic backing was 5-8 % slower on Strix prefill; not re-measured on 0.3.0, so treat it as the 0.2.0 figure).
 
 **Active wait (the default on `amdgpu`).** `serve.sh` turns `amdgpu` into
 `amdgpu://?completion_spin_ns=4294967295`: while GPU work is in flight, Loom's `amd-gpu-retire` thread spins on the

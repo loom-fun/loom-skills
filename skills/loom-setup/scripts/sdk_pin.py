@@ -2,8 +2,8 @@
 """A package's Loom SDK pin: the hrx-loom wheel it needs.
 
 A package carries
-  "sdk": {"hrx_loom": "0.2.0", "source": "pypi", "hrx_system_sha": "...", "wheel_sha256": "..."}
-in its llm_config.json (written by build/catalog.py from the kit's catalog.json, or by `stamp`). source is "pypi" (0.2.0 and 0.1.0), "release" (a
+  "sdk": {"hrx_loom": "0.3.0", "source": "pypi", "hrx_system_sha": "...", "wheel_sha256": "..."}
+in its llm_config.json (written by build/catalog.py from the kit's catalog.json, or by `stamp`). source is "pypi" (every stable release), "release" (a
 ROCm/hrx-system GitHub release, for pre-releases such as 0.2.0rc1; no expiry), or "ci" (a development artifact; expires after ~90 days, "expires").
 A package WITHOUT a pin was built before pins existed and means hrx-loom 0.1.0 (PyPI), explicitly: the published
 v0.1.0 cards keep running on 0.1.0 while the installer default is 0.3.0.
@@ -36,6 +36,20 @@ VERIFIED_RELEASES = {
         },
     },
 }
+
+
+def newest_verified():
+    """The newest verified release's version (numeric order): the SDK every emitter and default targets."""
+    return max(VERIFIED_RELEASES, key=lambda v: tuple(int(x) for x in v.split(".")))
+
+
+def release_pin(version=None):
+    """The package pin of a verified release (default: the newest): what a generator writes to llm_config.json "sdk".
+    The wheel digest is the Linux wheel's; matches() and verify_release_wheel() also accept the Windows wheel of the same release."""
+    version = version or newest_verified()
+    release = VERIFIED_RELEASES[version]
+    return {"hrx_loom": version, "source": "pypi",
+            "wheel_sha256": release["wheels"]["manylinux_2_39_x86_64"], "hrx_system_sha": release["hrx_system_sha"]}
 
 
 def verify_release_wheel(filename, digest):

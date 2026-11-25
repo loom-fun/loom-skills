@@ -17,6 +17,10 @@ sys.path.insert(0, os.path.join(ROOT, "skills", "loom-benchmark", "scripts", "ca
 sys.path.insert(0, SCRIPTS)
 import card_lib  # noqa: E402
 import ab_jobs  # noqa: E402
+sys.path.insert(0, os.path.join(ROOT, "skills", "loom-setup", "scripts"))
+import sdk_pin  # noqa: E402
+
+NEWEST = sdk_pin.newest_verified()   # the --new-sdk default
 
 FAST, SLOW = "unsloth-Qwen3-0.6B-loom", "ggml-org-Qwen3-4B-loom"
 
@@ -112,9 +116,9 @@ class SdkAb(unittest.TestCase):
     def test_strix_variants_name_their_sdk_and_the_new_one_is_built(self):
         j = self.jobs("strix-halo")
         v = {x["name"]: x for x in j["variants"]}
-        self.assertEqual(j["sdk"], "0.2.0")
+        self.assertEqual(j["sdk"], NEWEST)
         self.assertEqual((v["fun"]["sdk"], v["funnd"]["sdk"]), ("0.1.0", "0.1.0"))
-        self.assertEqual((v["staging"]["sdk"], v["stagingnd"]["sdk"]), ("0.2.0", "0.2.0"))
+        self.assertEqual((v["staging"]["sdk"], v["stagingnd"]["sdk"]), (NEWEST, NEWEST))
         self.assertEqual(v["fun"]["card"], f"loom-fun-staging/{FAST}@abc")
         for n in ("staging", "stagingnd"):
             self.assertEqual(v[n]["build"], {})
@@ -154,7 +158,7 @@ class SdkAb(unittest.TestCase):
         for device in ("strix-halo", "radeon-r9700"):
             j = self.loom_only(device)
             self.assertEqual({v["name"] for v in j["variants"]}, {"staging", "stagingnd"})
-            self.assertEqual(j["sdk"], "0.2.0")
+            self.assertEqual(j["sdk"], NEWEST)
             steps = j["steps"]
             self.assertEqual([s for s in steps if s.startswith("perf:") and ":long" not in s], ["perf:staging:1"] * 6)   # the fast model's 6 sessions, as the ABBA job
             self.assertEqual([s for s in steps if s.startswith("c4:")], ["c4:stagingnd"] * 4)

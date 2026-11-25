@@ -22,14 +22,35 @@ import os
 import subprocess
 import sys
 
-# The SDK the kit's programs need: written to llm_config.json "sdk" (the schema of loom-setup/scripts/sdk_pin.py). 0.2.0 is on PyPI
-# (a pre-release such as 0.2.0rc1 was a GitHub release instead): the wheel is pinned by sha256 and the commit is the v0.2.0 tag of ROCm/hrx-system.
-SDK_PIN = {"hrx_loom": "0.2.0", "source": "pypi",
-           "wheel_sha256": "5148f9e3a264af400ec4bae38bd7b06bf551d28cc33b7a61d67f7bcefa590438",
-           "hrx_system_sha": "0cd370f2baaa0cfef47cc23007f1a109906f8a52"}
-
 HERE = os.path.dirname(os.path.abspath(__file__))
 SKILL_REL = os.path.join("skills", "loom-port-llm")
+
+
+def _load_sdk_pin(skills_dir=None):
+    """The SDK the kit's programs need: the newest verified release of loom-setup/scripts/sdk_pin.py (the one source of truth), written to
+    llm_config.json "sdk". The kit is copied out of the repository, so `write` records the pin in KIT_SOURCE and a copy reads it there."""
+    import importlib.util
+    here_sdk = os.path.join(skills_dir or os.path.join(HERE, ".."), "..", "loom-setup", "scripts", "sdk_pin.py")
+    if os.path.isfile(here_sdk):
+        spec = importlib.util.spec_from_file_location("sdk_pin", here_sdk)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod.release_pin()
+    try:
+        with open(os.path.join(HERE, "KIT_SOURCE"), encoding="utf-8") as f:
+            pin = json.load(f).get("sdk_pin")
+    except (OSError, ValueError):
+        pin = None
+    if not pin:
+        raise RuntimeError("kit_source: no SDK pin: run `kit_source.py write KIT --skills-dir <loom-port-llm skill>` from the loom-skills checkout")
+    return pin
+
+
+def __getattr__(name):   # SDK_PIN is resolved on first use, so `write` can run in a fresh copy that has no KIT_SOURCE yet
+    if name == "SDK_PIN":
+        globals()["SDK_PIN"] = pin = _load_sdk_pin()
+        return pin
+    raise AttributeError(name)
 
 
 def kit_sha256(kit):
@@ -107,9 +128,13 @@ def main(argv=None):
         print(json.dumps(generator_stamp(a.kit), indent=1, sort_keys=True))
         return
     commit, dirty = git_commit(a.skills_dir)
+    try:
+        sdk_pin = _load_sdk_pin(a.skills_dir)
+    except RuntimeError:   # a skills tree without loom-setup: the kit has no pin, and a build that needs SDK_PIN says so
+        sdk_pin = None
     kb = os.path.abspath(os.path.join(a.skills_dir, "..", "loom-kb"))   # the knowledge base beside the skill the kit came from
     ks = {"skills_commit": commit or "unknown", "dirty": dirty, "example": a.example, "kit_sha256": kit_sha256(a.kit),
-          "kb_root": kb if os.path.isdir(kb) else None}
+          "kb_root": kb if os.path.isdir(kb) else None, **({"sdk_pin": sdk_pin} if sdk_pin else {})}
     with open(os.path.join(a.kit, "KIT_SOURCE"), "w", encoding="utf-8", newline="\n") as f:
         f.write(json.dumps(ks, indent=1, sort_keys=True) + "\n")
     print(f"KIT_SOURCE: loom-skills {ks['skills_commit'][:12]}{' (local changes)' if dirty else ''}", file=sys.stderr)

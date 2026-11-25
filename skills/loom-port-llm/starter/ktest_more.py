@@ -30,24 +30,6 @@ def _rms(v, eps):
     return v / np.sqrt((v * v).mean(-1, keepdims=True) + eps)
 
 
-def grouped_q4_k_f16(data):
-    """Decode packed Q4_K weights using the grouped WMMA kernels' FP16 operation order."""
-    from gguf.quants import Q4_K
-
-    blocks = np.ascontiguousarray(data).reshape(-1, 144)
-    scale = blocks[:, :2].copy().view("<f2").astype(np.float32)
-    minimum = blocks[:, 2:4].copy().view("<f2").astype(np.float32)
-    scale_code, minimum_code = Q4_K.get_scale_min(blocks[:, 4:16])
-    scale = (scale * scale_code).astype(np.float16).astype(np.float64)
-    minimum = (minimum * minimum_code).astype(np.float16).astype(np.float64)
-    packed = blocks[:, 16:].reshape(-1, 4, 32)
-    codes = np.empty((len(blocks), 8, 32), dtype=np.uint8)
-    codes[:, 0::2] = packed & 15
-    codes[:, 1::2] = packed >> 4
-    # One rounding after the fused multiply-add. Widened inputs avoid an extra FP16 product rounding.
-    return (codes * scale[:, :, None] - minimum[:, :, None]).astype(np.float16)
-
-
 def post_add_norm_case(save, rng, k, scaled):
     """g_post_add_norm[_s]: x += rmsnorm(y) * w_post (post norms; else x += y), x *= the layer scale for _s; h = rmsnorm(x) * w_next."""
     H = int(_const(k, "count"))

@@ -1,7 +1,7 @@
 # Q4_0 expert qualification pilot
 
 Run `.github/devlab/moe_q4_0-kbench.json` through `devlab-kbench.yml`. It pins
-SDK 0.2.0 and has one Strix Halo and one R9700 job. The generator builds the
+SDK 0.3.0 and has one Strix Halo and one R9700 job. The generator builds the
 current Gemma kit and extracts its GEGLU transforms; no model weights or
 previous checkpoint numerics are used.
 
