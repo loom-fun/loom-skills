@@ -29,6 +29,10 @@ class Helpers(unittest.TestCase):
         self.assertTrue(fp.residual_ok(r))
         self.assertFalse(fp.residual_ok(fp.residual(BASE, NEW.replace("c\n", "c\nd\n"))))   # a line outside any block
 
+    def test_residual_of_a_base_with_the_capability_compares_in_full(self):
+        self.assertEqual(fp.residual(NEW, NEW), [])
+        self.assertFalse(fp.residual_ok(fp.residual(NEW, NEW.replace("%x = 1", "%x = 2"))))   # a change inside a block of a base that has them
+
     def test_measured_programs_prefers_the_remeasure_block_then_the_newest_gate(self):
         info = {"devices": {"g": {"performance": {"sessions": []}, "gates": {"x": {"programs_sha256": "old", "date": "2026-11-01"}, "y": {"programs_sha256": "new", "date": "2026-11-09"}}},
                             "h": {"performance": {"sessions": []}, "remeasure": {"programs_sha256": "rm"}, "gates": {"x": {"programs_sha256": "g"}}},
@@ -60,6 +64,13 @@ class Helpers(unittest.TestCase):
         out, problems = fp.merge_llm_config(d_old, {"chat": 1, "draft": {"kind": "assist", "gguf": "d.gguf"}}, "REF")
         self.assertEqual((out["draft"]["gguf"], problems), ("d.gguf", []))
         self.assertTrue(fp.merge_llm_config(d_old, {"chat": 1, "draft": {"kind": "assist", "gguf": "e.gguf"}}, "REF")[1])
+
+    def test_llm_config_merge_keeps_a_newer_sdk_pin(self):
+        pin = lambda v: {"hrx_loom": v, "source": "pypi"}
+        out, problems = fp.merge_llm_config({"chat": 1, "sdk": pin("0.3.0")}, {"chat": 1, "sdk": pin("0.2.0")}, "REF")
+        self.assertEqual((out["sdk"]["hrx_loom"], problems), ("0.3.0", []))
+        self.assertTrue(fp.merge_llm_config({"chat": 1, "sdk": pin("0.2.0")}, {"chat": 1, "sdk": pin("0.3.0")}, "REF")[1])   # an older kept pin
+        self.assertTrue(fp.merge_llm_config({"chat": 1}, {"chat": 1, "sdk": pin("0.2.0")}, "REF")[1])                    # no pin kept
 
 
 class JobOf(unittest.TestCase):

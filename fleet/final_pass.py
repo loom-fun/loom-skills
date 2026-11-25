@@ -100,9 +100,11 @@ def strip_logits(text):
 
 
 def residual(base_text, new_text):
-    """the lines that differ between BASE and NEW once NEW's logits blocks are removed (unified diff body, no context)"""
+    """the lines that differ between BASE and NEW once NEW's logits blocks are removed (unified diff body, no context). A BASE that already
+    carries the capability (a fix inside the readback, e.g. gemma4's final softcap in g_logits_export) is compared with NEW in full: its
+    logits blocks must not move either."""
     a = base_text.splitlines()
-    b = strip_logits(new_text).splitlines()
+    b = (new_text if LOGITS_BLOCK.search(base_text) else strip_logits(new_text)).splitlines()
     return [x for x in difflib.unified_diff(a, b, lineterm="", n=0) if x[:1] in "+-" and not x.startswith(("+++", "---"))]
 
 
@@ -170,13 +172,30 @@ def same_but_path(old, new):
             and os.path.basename(str(old.get("gguf"))) == os.path.basename(str(new.get("gguf"))))
 
 
+def pin_version(pin):
+    """(major, minor, patch) of an llm_config "sdk" pin ({"hrx_loom": "0.3.0", ...}), None without one"""
+    v = (pin or {}).get("hrx_loom") if isinstance(pin, dict) else None
+    try:
+        return tuple(int(x) for x in str(v).split(".")[:3]) if v else None
+    except ValueError:
+        return None
+
+
+def pin_newer_or_same(old, new):
+    """OLD (the staging package's pin, kept) is a release at least as new as NEW's (the build at REF stamps its kit's pin): an SDK migration's card
+    re-pinned its frozen programs; the carried package keeps that pin (its logits job runs on it). An older or missing OLD pin is a change."""
+    a, b = pin_version(old), pin_version(new)
+    return a is not None and b is not None and a >= b
+
+
 def merge_llm_config(old, new, ref):
     """OLD (staging's llm_config.json) with the new build's "resolved" block and the generator stamped with REF; (merged, problems): anything else
     that differs between the two is a problem (a changed chat/serve setting is not a carried-over package)."""
     out = json.loads(json.dumps(old))
     if same_but_path(old.get("draft"), new.get("draft")):   # an older stamp kept the build machine's path of the drafter GGUF: the file name is the value
         out["draft"] = new["draft"]
-    diff = sorted(k for k in set(old) | set(new) if k not in ("generator", "resolved") and out.get(k) != new.get(k))
+    diff = sorted(k for k in set(old) | set(new) if k not in ("generator", "resolved") and out.get(k) != new.get(k)
+                  and not (k == "sdk" and pin_newer_or_same(out.get(k), new.get(k))))
     if "resolved" in new:
         out["resolved"] = new["resolved"]
     if "generator" in out:
