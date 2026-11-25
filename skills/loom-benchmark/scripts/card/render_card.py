@@ -879,8 +879,12 @@ def delta_lines(info, pin, solo, depth=None):
                 name = DELTA_NAMES[r["metric"]]
                 if r["metric"] == "spec_acceptance" and r.get("per_pass"):   # SDK 0.2's share x depth = its accepted per pass
                     pp = r["per_pass"]
-                    parts.append(f"{name} per verification pass {pp['old']:.2f} → {pp['new']:.2f} ({r['change'] * 100:+.1f} %; the previous "
-                                 f"card's {pct_of(r['old'])} of depth-{depth} proposals as SDK {olds[0] if olds else 'its'} counted them)")
+                    parts.append(f"{name} per verification pass {pp['old']:.2f} → {pp['new']:.2f} ({r['change'] * 100:+.1f} %; both in the "
+                                 f"performance session's decode requests, the previous card's share of depth-{depth} proposals as SDK "
+                                 f"{olds[0] if olds else 'its'} counted them)")
+                elif r["metric"] == "spec_acceptance" and r.get("different_workloads"):
+                    parts.append(f"{name}: previous card {pct_of(r['old'])} of proposals in its speculative-decoding gate, this card "
+                                 f"{r['accepted_per_pass']:.2f} per verification pass in the performance session (different workloads, no delta)")
                 elif r["metric"] == "spec_acceptance":
                     new = ("not reported" if r["unreported"] else "not re-measured" if r["missing"]
                            else pct_of(r["new"]) if r["new"] is not None else "not measured")

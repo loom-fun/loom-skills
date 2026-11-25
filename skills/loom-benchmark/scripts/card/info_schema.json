@@ -72,6 +72,7 @@
      "devices": {"type": "object", "additionalProperties": {"type": "object", "additionalProperties": false, "required": ["hrx_loom", "metrics"],
       "properties": {"hrx_loom": {"type": ["string", "null"], "description": "the hrx-loom version the earlier card measured this GPU's values with (null: not recorded, or several)"},
                      "metrics": {"type": "object", "additionalProperties": {"type": ["number", "null"]}},
+                     "session_acceptance": {"type": "number", "description": "the earlier card's drafted-token acceptance in its perf session (median over its decode rows): the same workload the new card's accepted-per-pass value measures; metrics.spec_acceptance is the spec gate's, another prompt set"},
                      "gates": {"type": "object", "description": "the earlier card's gate results on this GPU: a gate this card fails that it failed too is shown as pre-existing",
                                "additionalProperties": {"type": "object", "additionalProperties": false, "required": ["status", "detail"],
                                                         "properties": {"status": {"enum": ["pass", "fail"]}, "detail": {"type": ["string", "null"]}}}}}}},

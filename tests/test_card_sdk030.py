@@ -191,5 +191,38 @@ class Lint(unittest.TestCase):
             self.assertTrue(res["admission"], res)
 
 
+class AcceptanceDelta(unittest.TestCase):
+    """The acceptance delta compares one quantity from one workload (perf-session acceptance) on both sides."""
+    def info(self):
+        return json.loads((CARD / "test/sdk03/expected/info.json").read_text(encoding="utf-8"))
+
+    def row(self, info, depth=3):
+        pin = {"hrx_loom": "0.3.0"}
+        rows = card_lib.delta_rows(info, pin, info["sdk_delta"]["comparisons"][0], depth)["strix-halo"]
+        return next(r for r in rows if r["metric"] == "spec_acceptance")
+
+    def test_perf_session_old_side(self):
+        info = self.info()
+        self.assertEqual(info["sdk_delta"]["comparisons"][0]["devices"]["strix-halo"]["session_acceptance"], 0.325)
+        r = self.row(info)
+        self.assertEqual(r["per_pass"], {"old": 0.975, "new": 1.249})   # not the spec gate's 68 % x 3 = 2.04
+        self.assertFalse(r["different_workloads"])
+        self.assertEqual(r["change"], round(1.249 / 0.975 - 1, 4))
+
+    def test_spec_gate_only_old_card_has_no_delta(self):
+        info = self.info()
+        del info["sdk_delta"]["comparisons"][0]["devices"]["strix-halo"]["session_acceptance"]
+        r = self.row(info)
+        self.assertTrue(r["different_workloads"])
+        self.assertIsNone(r["change"])
+        self.assertIsNone(r["per_pass"])
+        self.assertEqual((r["old"], r["accepted_per_pass"]), (0.68, 1.249))
+        import render_card
+        text = "\n".join(render_card.delta_lines(info, {"hrx_loom": "0.3.0"}, True, 3))
+        self.assertIn("68 % of proposals in its speculative-decoding gate, this card 1.25 per verification pass in the performance "
+                      "session (different workloads, no delta)", text)
+        self.assertNotIn("-38.8", text)
+
+
 if __name__ == "__main__":
     unittest.main()

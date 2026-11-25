@@ -654,6 +654,8 @@ reg = [r['metric'] for r in rows if r['regression']]
 assert reg == ['prefill_1k', 'prefill_2k'], reg
 assert [r['metric'] for r in rows if r['regression'] and r['explanation']] == ['prefill_1k']
 acc = next(r for r in rows if r['metric'] == 'spec_acceptance'); assert acc['old'] == 0.68 and acc['unreported'] == 'proposals', acc
+rows3 = c.delta_rows(i, {'hrx_loom': '0.3.0'}, i['sdk_delta']['comparisons'][0], 3)['strix-halo']
+acc = next(r for r in rows3 if r['metric'] == 'spec_acceptance'); assert acc['per_pass'] == {'old': 0.975, 'new': 1.249} and not acc['different_workloads'], acc
 assert c.previous_gate(i, 'strix-halo', 'kernel_tests')['status'] == 'fail' and d['gates']['kernel_tests']['detail'].startswith('120/121')" "$C" "$tmp/sdk03/info.json" \
   && echo "OK   sdk03: unreported acceptance, admission, delta rows vs the 0.2-era card" || { echo "FAIL sdk03: info.json"; bad=1; }
 # card.carried "drop": the sdk02 card's values and gates measured on SDK 0.1.0 (not its pin 0.2.0rc1) are not shown; the GPU keeps its Quick start
