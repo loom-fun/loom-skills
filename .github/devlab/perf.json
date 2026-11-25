@@ -1,11 +1,11 @@
 {
- "_comment": "pf-ornith: Ornith-1.5-122B Strix, prefill.gemm.kq_deq_f32: fun = kit build at d632f23125c8ab1ba8732e17d2638b5970570ee3 (sdk030 base), staging = kit build at f38393018ef4c37f5ebce835bc244e39971d7732 (the rule on); ktest + logits on both, perf ABBA, gates once on staging",
+ "_comment": "pf-ornith x2: Ornith-1.5-122B Strix, prefill.gemm.kq_zero_point: fun = kit build at d632f23125c8ab1ba8732e17d2638b5970570ee3 (sdk030 base), staging = kit build at f4ba93cbb776e413e09694e23397f971e7b11831; card context (LOOM_MEMORY_CAP_GIB 100), ktest + perf ABBA 3+3 short and long + gates once on staging",
  "runner": "strix",
  "memory_bytes": 106000000000,
  "llama_spec": "matched",
  "jobs": [
   {
-   "name": "pfo-122b-strix",
+   "name": "pfo2-122b-strix",
    "runner": "strix",
    "card": "loom-fun-staging/bartowski-Ornith-1.5-122B-loom",
    "memory_bytes": 106000000000,
@@ -21,32 +21,30 @@
     {
      "name": "staging",
      "build": {},
-     "ref": "f38393018ef4c37f5ebce835bc244e39971d7732"
+     "ref": "f4ba93cbb776e413e09694e23397f971e7b11831"
     }
    ],
    "steps": [
-    "ktest:fun",
     "ktest:staging",
     "perf:fun:1",
     "perf:staging:1",
     "perf:staging:1",
     "perf:fun:1",
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:staging:1:long",
+    "perf:fun:1:long",
     "perf:fun:1:long",
     "perf:staging:1:long",
     "perf:staging:1:long",
     "perf:fun:1:long",
     "textmatch:fun",
     "textmatch:staging",
-    "logits:fun",
-    "logits:staging",
     "func:staging",
     "gates:staging:dev"
    ],
-   "bundle": {
-    "build": {
-     "extension": "loom-fun/loom-gufo-extension@45b2bc0062e73d9fcce8d3d71be9a85a2bfe448f",
-     "gufo": "loom-fun/gufo@2255d6f3754f530af1d178097abe48c436104908"
-    }
+   "env": {
+    "LOOM_MEMORY_CAP_GIB": "100"
    }
   }
  ],
