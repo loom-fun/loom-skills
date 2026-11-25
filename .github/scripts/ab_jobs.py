@@ -37,6 +37,12 @@ them (the fun half of perf / c4, textmatch) are dropped, so the job serves the p
 card job's session count), c4 on stagingnd, func, ktest and gates. No llama.cpp steps (run without --baselines). The deltas against the old card are taken
 from the card's published Loom rows by the caller; a targeted ABBA confirmation is this tool's normal --sdk-ab job.
 
+--programs production (with --sdk-ab): the FROZEN form of the SDK migration (fleet/regen.py plan --programs production): nothing is built.
+Every variant serves the published package at the --refs revision (the production card at the accepted inventory revision, byte for byte): `staging` /
+`stagingnd` on --new-sdk, `fun` / `funnd` (the ABBA confirmation; dropped by --loom-only) the SAME package on --old-sdk ("card" = its own pin). The refs
+entry's "programs_sha256" is set on every variant: devlab_perf.sh refuses to measure a variant whose fetched programs hash differs. A refs entry may carry
+"model" (a .github/nightly-models.json-shaped entry) for a package that file does not list (a hand-written port).
+
 --preset (job_presets.py): full (default; what regen.py and a card regeneration need) | iterate (build + ktest + perf + c4 + text match, NO gates, one
 smoke request instead of func: the loop of an optimization) | final (func + ktest + gates:LEVEL once on `staging`, no perf, the unchanged base not built).
 
@@ -240,7 +246,7 @@ def build(a):
         fit = card_lib.fit_rows(fit_path, a.device, ROOT)   # sizing + verdict from the table, the serving settings from the scope rules (exec.*)
     jobs, skipped = [], []
     for slug in a.slugs:
-        m = models[slug]
+        m = model_entry(models, refs, slug)
         old = (refs.get(slug) or {}).get("old") or ref(a.old_org, slug, a.old_rev)
         new = (refs.get(slug) or {}).get("new") or ref(a.new_org, slug, a.new_rev)
         # a fast model's decode rate is bimodal per serve session (Qwen3-0.6B: ~297 or ~330 tok/s, both packages): more sessions per side
@@ -329,6 +335,9 @@ def parser(device=None):
     ap.add_argument("--llama-reps", type=int, default=None, help="llama.cpp runs per 1-stream row (default: 2 on Strix Halo; on the R9700 the Loom session count, as r9700_jobs.py)")
     ap.add_argument("--sdk-ab", action="store_true", help="the SDK A/B of a migration: old = the published card on --old-sdk, new = the package built in the job on --new-sdk (see above)")
     ap.add_argument("--loom-only", action="store_true", help="with --sdk-ab: only the new package on --new-sdk (no old-card variant, no llama.cpp, no textmatch); see above")
+    ap.add_argument("--programs", choices=("build", "production"), default="build",
+                    help="with --sdk-ab: build = the new package is built in the job from this checkout; production = every variant serves the pinned "
+                         "published package (the frozen programs; see above)")
     ap.add_argument("--old-sdk", default="0.1.0")
     ap.add_argument("--new-sdk", default="0.2.0")
     ap.add_argument("--suffix", default="", help="appended to the job name (a confirming re-run: -r2)")
@@ -338,6 +347,40 @@ def parser(device=None):
     ap.add_argument("--sequential", action="store_true", help="methodology.json 'sequential': start at 2+2 sessions, the job extends itself to 6+6 where a "
                     "row's ratio is within 2 points of its reject threshold (a step 'extend:TO:HAVE:ROT', devlab_perf.sh + ab_extend.py); a fast model keeps its 6")
     return ap
+
+
+def model_entry(models, refs, slug):
+    """The .github/nightly-models.json entry of SLUG, else the refs entry's "model" (a package that file does not list), else exit."""
+    m = models.get(slug) or (refs.get(slug) or {}).get("model")
+    if not m:
+        sys.exit(f"{slug}: not in .github/nightly-models.json and its refs entry carries no \"model\"")
+    return m
+
+
+def frozen(doc, old_sdk, new_sdk, refs):
+    """--programs production: every variant serves the published package at its pinned revision (nothing built). staging / stagingnd keep the generator's
+    serving settings (a device preset or the fit row's served context) on new_sdk; fun / funnd become the same package with the same settings on old_sdk
+    (the same-job ABBA of the SDK alone). Each variant carries the expected programs hash (devlab_perf.sh refuses another)."""
+    for j in doc["jobs"]:
+        slug = j["card"].split("/")[-1].split("@")[0]
+        want = (refs.get(slug) or {}).get("programs_sha256")
+        if not want:
+            sys.exit(f"{slug}: --programs production needs the production programs hash in its refs entry (\"programs_sha256\")")
+        j["sdk"] = new_sdk
+        by = {v["name"]: v for v in j["variants"]}
+        for old, new in (("fun", "staging"), ("funnd", "stagingnd")):
+            n = by[new]
+            n.pop("build", None)
+            n.pop("card", None)   # the job's card: the pinned production revision
+            n["sdk"] = new_sdk
+            n["programs_sha256"] = want
+            card = (refs.get(slug) or {}).get("old") or j["card"]
+            by[old].clear()
+            by[old].update({**{k: v for k, v in n.items() if k != "name"}, "name": old, "card": card, "sdk": old_sdk})
+    if doc.get("_comment"):
+        doc["_comment"] += (f" Frozen programs (--programs production): staging = the published package at its pinned revision on hrx-loom {new_sdk}, "
+                            f"fun = the same package on {old_sdk}; nothing is built, the programs hash is checked before measuring.")
+    return doc
 
 
 def sdk_ab(doc, old_sdk, new_sdk, key):
@@ -395,12 +438,16 @@ def build_replicas(a):
         if a.preset == "final":
             more = [job_presets.trim_variants(j) for j in more]
         doc["jobs"] += more
-    if a.sdk_ab:
+    if a.sdk_ab and a.programs == "production":
+        frozen(doc, a.old_sdk, a.new_sdk, json.load(open(a.refs)) if a.refs else {})
+        if a.loom_only:
+            loom_only(doc)
+    elif a.sdk_ab:
         sdk_ab(doc, a.old_sdk, a.new_sdk, card_lib.registry.device(a.device)["runner"]["key"])
         if a.loom_only:
             loom_only(doc)
-    elif a.loom_only:
-        sys.exit("--loom-only is a form of --sdk-ab")
+    elif a.loom_only or a.programs == "production":
+        sys.exit("--loom-only and --programs production are forms of --sdk-ab")
     if a.replicas > 1:
         doc["_comment"] += f" {a.replicas} replicas per model (jobs ...-r2 ...): independent runs on different runners (the ratchet's confirming run)."
     return doc
