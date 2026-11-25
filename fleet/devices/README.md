@@ -18,14 +18,14 @@ One data file and one KB device node per memory class of the same die, not per p
 
 | class | device id | VRAM (as the driver reports it) | products | preset | serve flags |
 |---|---|---|---|---|---|
-| 32 GB | `radeon-r9700` | >= 30 GiB | Radeon AI PRO R9700 | `chat-r9700` | `--pool_backing=fixed` + preload |
-| 16 GB | `gfx1201-16gb` | 14 to 30 GiB | RX 9070 XT, RX 9070 | `chat-16gb` | `--memory_bytes=15000000000 --state_slab_bytes=4mib --weight_slab_bytes=64mib` + preload |
+| 32 GB | `radeon-r9700` | >= 30 GiB | Radeon AI PRO R9700 | `chat-r9700` | `--pool_backing=fixed` + preload (0.2.0 pins only; the renderer drops it for 0.3.0) |
+| 16 GB | `gfx1201-16gb` | 14 to 30 GiB | RX 9070 XT, RX 9070 | `chat-16gb` | `--memory_bytes=15000000000 --state_slab_bytes=4mib --weight_slab_bytes=64mib` + preload (0.2.0 pins only; the renderer drops it for 0.3.0) |
 | below 14 GiB | not supported yet | | | | a 12 GB class can be added later from the `build.py` fit plus one measurement |
 
 **Selection rule** (for Lemonade, Weaver and the site): arch `gfx1201` and VRAM >= 30 GiB -> the 32 GB class; 14 GiB <= VRAM < 30 GiB ->
 the 16 GB class; below that -> not supported yet. The same rule is in `skills/loom-kb/device/rdna4/README.md`. The 16 GB class's file is
 `gfx1201-16gb.json` (provenance names the Radeon RX 9070 XT machine that measured it). A file written before the rename
-(`rx9070xt.json`, `"device": "radeon-rx9070xt"`) is still read: `card_lib.LEGACY_DEVICE_IDS` maps that id to `gfx1201-16gb`. Per-model `serve_args` in such a file are printed as they are, so drop them there: without them the class flags (registry + preload rule) apply.
+(`rx9070xt.json`, `"device": "radeon-rx9070xt"`) is still read: `card_lib.LEGACY_DEVICE_IDS` maps that id to `gfx1201-16gb`. Per-model `serve_args` in such a file are printed as they are, so drop them there: without them the class flags (registry + preload rule, preload on 0.2.0 pins only) apply.
 
 ## File
 
@@ -49,7 +49,7 @@ the 16 GB class; below that -> not supported yet. The same rule is in `skills/lo
 | `date` (required) | when `fits` and `max_context` were established |
 | `max_context` | tokens per request the GPU admits (required when `fits`). Below the native context: the card says `serves up to N tokens per request` and `served_context` is recorded |
 | `native_context` | informational |
-| `serve_args` | the `loom-serve` flags the Quick start prints for this GPU and model, e.g. `["--memory_bytes=15000000000", "--state_slab_bytes=4mib"]`, printed as they are. `[]`: the package's own memory budget (like gfx1150). Absent: the GPU's registry flags (`device.json` card.serve_args) plus `--parameter_mode=preload` where the device's `card.preload_max_weight_bytes` rule says so (the gfx1201 classes: every package) |
+| `serve_args` | the `loom-serve` flags the Quick start prints for this GPU and model, e.g. `["--memory_bytes=15000000000", "--state_slab_bytes=4mib"]`, printed as they are. `[]`: the package's own memory budget (like gfx1150). Absent: the GPU's registry flags (`device.json` card.serve_args) plus `--parameter_mode=preload` on 0.2.0 pins where the device's `card.preload_max_weight_bytes` rule says so (the gfx1201 classes: every package; hrx-loom 0.3.0 removed the flag and the renderer drops it) |
 | `execution` | preset overrides over the base preset (`prefill_capacity`, `context_capacity`, `rows`, `draft_depth`); written into the GPU's preset together with `context_capacity` = `max_context` |
 | `evidence` | when measured: `loom-card-evidence/2` documents from `make_info.py perf`, `gates` or `roofline`. For devices registered as XSJ-only, use a leased `xsj` source for performance sessions and gates. For other devices in this directory, performance uses a `machine` source and gates can use `machine` or `local`. |
 | `note` | one factual line for file readers (not printed) |
