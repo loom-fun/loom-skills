@@ -149,10 +149,6 @@ class FlashTrims(unittest.TestCase):
         self.assertTrue(all("select" not in o for o in out))
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class FlashKeySplitD256(unittest.TestCase):
     """gen_flash2s.py FLASH2_B=2 / 3 at head_dim 256 with 6 query heads per KV head (Qwen3.5-class 27B): the key-split loop of flash2_b2.py."""
     CFG = ROOT / "fleet/amd-Qwen3.8-27B-Quark-AWQ-MXFP4-loom/llm_config.json"
@@ -269,3 +265,7 @@ class FlashSwaTwinTwoHeads(unittest.TestCase):
         self.assertIn("%clanes = index.constant 128 : index", r4_16)   # 2 heads x 2 waves of 128 dims
         self.assertNotEqual(r4_16, r4_0)
         self.assertEqual(g11_16, g11_0)                             # the gfx11 kernel is unchanged
+
+
+if __name__ == "__main__":
+    unittest.main()

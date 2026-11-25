@@ -220,13 +220,13 @@ class RunnerHelpersTest(unittest.TestCase):
         self.assertEqual(P.image_request(img)["seed"], 1)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class HookCredentials(unittest.TestCase):
     def test_hooks_get_no_credentials(self):
         """a smoke hook builds and runs another repository's code: devlab_smoke.py strips HF and GitHub tokens from its environment"""
         src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".github", "scripts", "devlab_smoke.py")).read()
         self.assertIn('k.startswith("HF_TOKEN") or k in ("GITHUB_TOKEN", "GH_TOKEN")', src)
         self.assertIn("henv.pop(k)", src)
+
+
+if __name__ == "__main__":
+    unittest.main()

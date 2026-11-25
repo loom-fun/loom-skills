@@ -57,12 +57,12 @@ class WaitModel(unittest.TestCase):
         self.assertEqual(wait_model.main(["http://127.0.0.1:1", "--wait", "0.3", "--retry", "0.05"]), 1)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class Wired(unittest.TestCase):
     def test_every_loom_serve_start_waits_for_the_first_answer(self):
         for rel in (".github/scripts/devlab_perf.sh", "skills/loom-benchmark/scripts/_lib.sh"):
             text = open(os.path.join(ROOT, rel)).read()
             self.assertIn("wait_model.py", text, rel)   # serve_alone (every step) and gates.sh's loom_up (the restarts after the reference fill)
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -230,10 +230,6 @@ class NotSupported(unittest.TestCase):
             self.assertNotIn("logits", j["gates"])        # never a pass or a fail without the bundle
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class GufoGate(unittest.TestCase):
     def test_gate(self):
         import gufo_gate
@@ -244,3 +240,7 @@ class GufoGate(unittest.TestCase):
         self.assertFalse(gufo_gate.gate({"results": c["results"] + [{"check": "g", "status": "gap"}]}, lc, 0)[0])   # a gap is a miss with --logits
         self.assertFalse(gufo_gate.gate(c, {"results": [{"check": "x", "status": "fail"}]}, 0)[0])
         self.assertFalse(gufo_gate.gate(None, lc, 0)[0])
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -480,10 +480,6 @@ class DevlabPerfFrozenCheck(unittest.TestCase):
         self.assertIn('${SERVED_PRESET:+--preset "$SERVED_PRESET"}', src)   # the probe uses the served (device) preset's context
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class ProductionFacts(unittest.TestCase):
     def test_small_files_give_hash_kind_claims_and_generator(self):
         with tempfile.TemporaryDirectory() as cache:
@@ -1121,3 +1117,7 @@ class StandaloneLogits(unittest.TestCase):
                 (root / "programs_sha256_staging.txt").write_text("bad")
                 with self.assertRaisesRegex(RuntimeError, "different programs"):
                     regen.standalone_logits(spec, TEXT, "radeon-r9700", t, t)
+
+
+if __name__ == "__main__":
+    unittest.main()
