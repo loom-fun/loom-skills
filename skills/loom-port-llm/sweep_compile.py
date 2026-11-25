@@ -191,9 +191,12 @@ def build(slug, pkgdir, work, extra=()):
         rc, out = sh(["bash", f"{HERE}/reference/apply_example.sh", ex, kit], work)
         if rc:
             return False, "apply_example: " + out[-300:], None
-    else:
-        shutil.copytree(STARTER, kit)
     py = sys.executable
+    if not ex:   # a plain copy of the starter records its SDK pin (KIT_SOURCE), as apply_example.sh does: the copy has no loom-setup beside it
+        shutil.copytree(STARTER, kit)
+        rc, out = sh([py, f"{kit}/kit_source.py", "write", kit, "--skills-dir", HERE], work)
+        if rc:
+            return False, "kit_source: " + out[-300:], None
     fresh = os.path.join(work, "fresh.json")
     if st:   # header and small files by HTTP range reads of the pinned revision (no weights); weights_bytes comes from the header sizes
         rc, out = sh([py, f"{kit}/inspect_safetensors.py", src["repo"], fresh, "--revision", src.get("revision") or "main"], work)
