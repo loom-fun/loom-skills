@@ -2555,7 +2555,7 @@ def eligibility(doc, head=None):
     held = {s: dict(v, reason=v.get("reason") or "held out of this release") for s, v in doc.get("held", {}).items()}
     for slug, m in sorted(doc["models"].items()):
         devs = m["devices"]
-        runner = {d: v for d, v in devs.items() if v["status"] not in ("no_runner", "not_claimed")}
+        runner = {d: v for d, v in devs.items() if v["status"] not in ("no_runner", "not_claimed", "policy_carried")}
         bad = {d: f"{v['status']}: {(v.get('reason') or '')[:160]}" for d, v in runner.items() if v["status"] != "qualified"}
         if not runner:
             bad["-"] = "no device with a DevLab runner was qualified"
@@ -2594,7 +2594,9 @@ def eligibility(doc, head=None):
                                   **({"image": {**{k: v["image"].get(k) for k in IMAGE_VERDICT},
                                                 "deterministic": {s: v["image"][s]["deterministic"] for s in ("old", "new")}}}
                                      if m["kind"] == "image" else {})} for d, v in sorted(qual.items())},
-            "carried_devices": sorted(d for d, v in devs.items() if v["status"] == "no_runner"),
+            "carried_devices": sorted(d for d, v in devs.items() if v["status"] in ("no_runner", "policy_carried")),
+            **({"carried_device_decisions": carried} if (carried := {d: v["carry_decision"] for d, v in devs.items()
+                                                                      if v["status"] == "policy_carried"}) else {}),
             "gates_not_rerun": {d: v["gates_not_run"] for d, v in sorted(qual.items()) if v.get("gates_not_run")},
             "staging": f"{STAGING_ORG}/{slug}", "staging_revision": latest, "kind": m["kind"]}
     return eligible, held, pending
@@ -2717,11 +2719,63 @@ def review_shown_failures(doc, sweep, decisions):
             row.update(status="qualified", required_shown_failures=sorted(names))
 
 
-def check_staged_qualification(row, *, kit, sdk=None, full_suites=None, accepted=None, required=None):
+def release_carried_devices(doc, sweep, decisions):
+    """Make unmeasured, frozen device rows candidates for verification against their outgoing card."""
+    for job in sweep.jobs.values():
+        gpu, slug = job["device"], job["slug"]
+        allow = decisions.get(slug, {}).get(gpu, {})
+        if "device" not in allow or job.get("prev") or job["stage"] not in ("shared", "planned"):
+            continue
+        model = doc["models"][slug]
+        row = model["devices"][gpu]
+        if (row["status"] in ("pending", "needs_decision") and not job.get("dir") and not job.get("decision")
+                and not job.get("cmp") and row.get("reason") != "phase-2 ship or keep decision pending"
+                and slug not in lane_owned(sweep) | program_holds(sweep)
+                and model["programs_sha256"] == sweep.d["opts"]["refs_all"][slug]["programs_sha256"]):
+            row.update(status="policy_carried", carry_decision=allow["device"])
+
+
+def historical_row(info, row, sdk, *, older_gate=False):
+    """Compare a row and the immutable source it names, independently of local source IDs."""
+    measured = card_lib.source_sdk(info, row.get("source")) if isinstance(row, dict) else None
+    if not measured or not sdk or (measured != sdk and (not older_gate or version_key(measured) > version_key(sdk))):
+        raise ValueError("historical row has missing or different SDK provenance")
+    return {**row, "source": info["sources"][row["source"]]}
+
+
+def check_carried_device(old, current, gpu, sdk, accepted):
+    """The effective performance rows and gates must still be the outgoing device's actual measurements."""
+    before = card_lib.gpu_view(old, gpu)
+    after = card_lib.gpu_view(current, gpu)
+    def measurements(info, view):
+        sessions = (view.get("performance") or {}).get("sessions", [])
+        metrics = {k: (v, historical_row(info, {f: sessions[i].get(f) for f in ("source", "date", "programs_sha256")}, sdk))
+                   for k, (v, i) in card_lib.card_metrics(view).items()}
+        gates = {k: historical_row(info, g, sdk, older_gate=True) for k, g in view["gates"].items()}
+        return metrics, gates
+    metrics, gates = measurements(old, before)
+    if not metrics or not gates or (metrics, gates) != measurements(current, after):
+        return f"{gpu}: carried device does not preserve its outgoing measurements"
+    failed = {k for k, g in gates.items() if g["status"] == "fail"}
+    if failed - accepted.keys():
+        return f"{gpu}: unaccepted failures on the carried device: {', '.join(sorted(failed - accepted.keys()))}"
+    return None
+
+
+def check_staged_qualification(row, *, kit, sdk=None, full_suites=None, accepted=None, required=None, carry=None, previous_sdk=None):
     """Check the pinned text card for failing gates and, for shipped kits, the exact measured sessions."""
     try:
         info = card_lib.load_info(hf_file(row["staging"], "info.json", row["staging_revision"]))
-        applied = {}
+        applied, carried_gates = {}, {}
+        old = None
+        if carry:
+            old = card_lib.load_info(hf_file(row["production"], "info.json", row["frozen_production_revision"]))
+            if (info.get("card") or {}).get("carried") == "drop":
+                return "the staging card hides historical measurements"
+        for gpu in row.get("carried_device_decisions", {}):
+            problem = check_carried_device(old, info, gpu, previous_sdk, (accepted or {}).get(gpu, {}))
+            if problem:
+                return problem
         for gpu, qual in row["qualification"].items():
             view = card_lib.gpu_view(info, gpu)
             failed = sorted(name for name, gate in (view.get("gates") or {}).items() if gate["status"] == "fail")
@@ -2731,10 +2785,24 @@ def check_staged_qualification(row, *, kit, sdk=None, full_suites=None, accepted
                 return f"{gpu}: final staging card shows failed gates: {', '.join(unlisted)}"
             if set((required or {}).get(gpu, ())) - set(failed):
                 return f"{gpu}: the final staging card omits a recorded failure"
+            permitted = (carry or {}).get(gpu, {})
+            retained = set()
+            for name, gate in (view.get("gates") or {}).items():
+                if name not in permitted or not sdk or not card_lib.carried_sdk(info, gate.get("source"), sdk):
+                    continue
+                before = card_lib.gpu_view(old, gpu)["gates"].get(name)
+                if historical_row(old, before, previous_sdk, older_gate=True) != historical_row(info, gate, previous_sdk, older_gate=True):
+                    return f"{gpu}: carried gate differs from its outgoing measurement: {name}"
+                retained.add(name)
+                carried_gates.setdefault(gpu, {})[name] = {"decision": permitted[name], "sdk": card_lib.source_sdk(info, gate["source"]),
+                                                          "source": info["sources"][gate["source"]]}
             for name in failed:
                 gate = view["gates"][name]
                 src = info["sources"].get(gate.get("source")) or {}
                 url = src.get("url") or ""
+                if name in retained:
+                    applied.setdefault(gpu, {})[name] = {"decision": decisions[name], "url": url, "sdk": card_lib.source_sdk(info, gate["source"])}
+                    continue
                 pin = release_pin(sdk) or {}
                 if (not pin.get("wheel_sha256") or (src.get("hrx_loom") or {}).get("wheel_sha256") != pin["wheel_sha256"]
                         or card_lib.gpu_from_device(src.get("device")) != gpu or card_lib.source_sdk(info, gate.get("source")) != sdk
@@ -2745,7 +2813,7 @@ def check_staged_qualification(row, *, kit, sdk=None, full_suites=None, accepted
                 applied.setdefault(gpu, {})[name] = {"decision": decisions[name], "url": url}
             if sdk and gpu not in (row.get("gates_not_rerun") or {}):
                 carried = sorted(name for name, gate in (view.get("gates") or {}).items()
-                                 if card_lib.carried_sdk(info, gate.get("source"), sdk))
+                                 if name not in retained and card_lib.carried_sdk(info, gate.get("source"), sdk))
                 if carried:
                     return f"{gpu}: runner gates still measured on an earlier or unknown SDK: {', '.join(carried)}"
             if full_suites is not None and gpu not in (row.get("gates_not_rerun") or {}):
@@ -2761,6 +2829,8 @@ def check_staged_qualification(row, *, kit, sdk=None, full_suites=None, accepted
             if not any(s.get("programs_sha256") == row["programs_sha256"] and
                        (info["sources"].get(s.get("source")) or {}).get("url") == qual["url"] for s in sessions):
                 return f"{gpu}: final staging card lacks the measured kit session"
+        if carried_gates:
+            row["carried_gates"] = carried_gates
         if applied:
             row["accepted_failures"] = applied
     except Exception as err:   # an unreadable Hub revision cannot qualify
@@ -2772,10 +2842,13 @@ def cmd_eligible(a):
     st = State(a.state)
     doc = build_evidence(st)
     states = [State(path) for path in (getattr(a, "kit_state", None) or [])]
+    carry = load_accepted_failures(getattr(a, "carried_evidence", None))
     accepted = load_accepted_failures(getattr(a, "accepted_failures", None))
     if accepted:
         review_shown_failures(doc, st, accepted)
     shipped = final_kit_qualifications(doc, st, states) if states else set()
+    if carry:
+        release_carried_devices(doc, st, {slug: entries for slug, entries in carry.items() if slug not in shipped})
     held_programs = set().union(*(program_holds(state) for state in [st, *states]))
     for slug in held_programs.intersection(doc["models"]):
         for device in doc["models"][slug]["devices"].values():
@@ -2789,7 +2862,7 @@ def cmd_eligible(a):
                     if getattr(a, "require_full_gates", False) else None)
         required = {gpu: d.get("required_shown_failures", []) for gpu, d in doc["models"][slug]["devices"].items()}
         problem = check_staged_qualification(row, kit=slug in shipped, sdk=doc["sdk"]["new"], full_suites=expected,
-                                             accepted=accepted.get(slug), required=required)
+                                             accepted=accepted.get(slug), required=required, carry=carry.get(slug), previous_sdk=doc["sdk"]["old"])
         if problem:
             pending[slug] = {"production": eligible[slug]["production"], "reasons": {"staging": problem}}
             del eligible[slug]
@@ -3191,6 +3264,7 @@ def main(argv=None):
             q.add_argument("-o", "--out", required=True)
         else:
             q.add_argument("--out-dir", required=True)
+            q.add_argument("--carried-evidence", metavar="FILE", help="exact dated release decisions for historical gates, or gate=device for a whole frozen device")
             q.add_argument("--accepted-failures", metavar="FILE", help="release decisions, a JSON array of {slug, gpu, gate, decision}")
             q.add_argument("--require-full-gates", action="store_true", help="require full-level runner suites on the final program digest")
             q.add_argument("--kit-state", action="append", help="phase-2 state (repeat for every device): qualify the final published programs")

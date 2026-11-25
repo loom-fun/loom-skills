@@ -795,6 +795,49 @@ class KitVerdict(unittest.TestCase):
                                                     "top": [[12, -0.05], [11, -4.5]]})
             self.assertIsNone(regen.kit_near_tie(e, cmp))
 
+    def test_measurement_policy_keeps_gate_provenance_and_explicit_failures(self):
+        gpu = "strix-halo"
+        row = {"production": "old/test", "frozen_production_revision": "old", "staging": "new/test", "staging_revision": "new",
+               "programs_sha256": H, "qualification": {gpu: {}}}
+        source = {"kind": "devlab", "url": "run", "hrx_loom": {"hrx_loom": "old"}}
+        gate = {"status": "fail", "source": "s", "programs_sha256": H}
+        def info(g):
+            return {"devices": {gpu: {"gates": {"logits": g}}}, "sources": {"s": source}}
+        old = info(dict(gate))
+        current = info(gate)
+        def check(carry, accepted=None):
+            with mock.patch.object(regen, "hf_file"), mock.patch.object(regen.card_lib, "load_info", side_effect=[current, old]):
+                return regen.check_staged_qualification(row, kit=False, sdk="new", previous_sdk="old", carry=carry, accepted=accepted)
+        policy = {gpu: {"logits": "owner carry"}}
+        accepted = {gpu: {"logits": "owner accept"}}
+        self.assertIn("failed gates", check(policy))
+        self.assertIsNone(check(policy, accepted))
+        self.assertEqual(row["carried_gates"][gpu]["logits"]["source"], source)
+        self.assertEqual(row["accepted_failures"][gpu]["logits"]["sdk"], "old")
+        gate["detail"] = "changed"
+        self.assertIn("differs", check(policy, accepted))
+        self.assertIn("lacks current", check({"other": policy[gpu]}, accepted))
+        with mock.patch.dict(current, {"card": {"carried": "drop"}}):
+            self.assertIn("hides", check(policy, accepted))
+
+    def test_preserve_effective_rows_on_carried_device(self):
+        gpu = "strix-halo"
+        def info():
+            src = {"hrx_loom": {"hrx_loom": "old"}, "url": "run"}
+            return {"sources": {"src": src}, "devices": {gpu: {"gates": {"g": {"source": "src", "status": "pass"}},
+                    "performance": {"sessions": [{"source": "src", "date": "day", "programs_sha256": H,
+                                                   "metrics": {"decode": {"loom": 42}}}]}}}}
+        old, current = info(), info()
+        self.assertIsNone(regen.check_carried_device(old, current, gpu, "old", {}))
+        current["devices"][gpu]["performance"]["sessions"][0]["metrics"]["decode"]["loom"] = 40
+        self.assertIn("preserve", regen.check_carried_device(old, current, gpu, "old", {}))
+        current = info()
+        current["sources"]["src"]["url"] = "unrelated"
+        self.assertIn("preserve", regen.check_carried_device(old, current, gpu, "old", {}))
+        self.assertRaises(ValueError, regen.check_carried_device, old, current, gpu, "another", {})
+        old["devices"][gpu]["gates"]["g"]["status"] = "fail"
+        self.assertIn("unaccepted", regen.check_carried_device(old, old, gpu, "old", {}))
+
     def test_scoped_failed_gate_evidence(self):
         gpu = "strix-halo"
         row = {"staging": "staging/model", "staging_revision": "r", "programs_sha256": H, "qualification": {gpu: {}}}
