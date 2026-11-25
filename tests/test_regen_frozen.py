@@ -397,3 +397,21 @@ class DevlabPerfFrozenCheck(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ProductionFacts(unittest.TestCase):
+    def test_small_files_give_hash_kind_claims_and_generator(self):
+        with tempfile.TemporaryDirectory() as cache:
+            def snapshot_download(repo, revision, local_dir, allow_patterns):
+                self.assertNotIn("*.gguf", allow_patterns)
+                os.makedirs(os.path.join(local_dir, "program"))
+                open(os.path.join(local_dir, "program", "llm.loom"), "w").write("x")
+                json.dump({"services": {"chat": {"kind": "text"}}, "presets": {}}, open(os.path.join(local_dir, "model.json"), "w"))
+                json.dump({"card": {"memory_bytes": 5, "features": ["draft"]}, "devices": {"strix-halo": {}, "gfx1150": {}},
+                           "versions": {"card_generator": "38b84928d947d45615439ffe54dc3d66899f7b0b"}}, open(os.path.join(local_dir, "info.json"), "w"))
+                json.dump({"sdk": {"hrx_loom": "0.2.0"}, "generator": {"skills_commit": "unknown"}}, open(os.path.join(local_dir, "llm_config.json"), "w"))
+            with mock.patch.dict(sys.modules, {"huggingface_hub": SimpleNamespace(snapshot_download=snapshot_download)}):
+                f = regen.production_facts(f"loom-fun/{STRIX_ONLY}", "b" * 40, cache)
+            self.assertEqual((f["kind"], f["claimed"], f["memory_bytes"]), ("text", ["gfx1150", "strix-halo"], 5))
+            self.assertEqual(f["generator"], "38b84928d947d45615439ffe54dc3d66899f7b0b")   # an "unknown" stamp falls back to the card's generator
+            self.assertTrue(f["programs_sha256"])
