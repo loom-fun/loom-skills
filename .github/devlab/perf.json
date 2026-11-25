@@ -1,62 +1,52 @@
 {
- "_comment": "Ternary Bonsai 27B (#1416) iterate round 1: Q2_0 package (card, no drafting) vs the load-time PTQ1_0 repack with the generic, whole-block and table-decode matvecs; perf + c4 + ktest, profiles of decode. No gates (iterate preset).",
+ "_comment": "Ternary Bonsai 27B (#1416): R9700 card measurement on the MTP card; iterate round 2 (register/shuffle FWHT quantizers HAD_FAST; repack + table decode) on R9700 and Strix Halo",
  "card": "loom-fun-staging/prism-ml-Ternary-Bonsai-2.5-27B-loom",
  "kit": null,
- "memory_bytes": 35000000000,
+ "memory_bytes": 39000000000,
+ "llama_spec": "matched",
+ "llamacpp": "b1387",
+ "llamacpp_vulkan": "b12211",
  "jobs": [
   {
-   "name": "bonsai-r1-strix",
+   "name": "bonsai-r9700-card",
    "card": "loom-fun-staging/prism-ml-Ternary-Bonsai-2.5-27B-loom",
    "kit": null,
-   "memory_bytes": 35000000000,
+   "llamacpp": "b1387",
+   "llamacpp_vulkan": "b12211",
+   "memory_bytes_r9700": 30000000000,
    "variants": [
     {
-     "name": "card"
+     "name": "card",
+     "context": 196608
     },
     {
-     "name": "rp",
-     "build": {
-      "TERNARY_REPACK": "1"
-     }
-    },
-    {
-     "name": "rpblk",
-     "build": {
-      "TERNARY_REPACK": "1",
-      "PTQ1_0_MV": "block"
-     }
-    },
-    {
-     "name": "rplut",
-     "build": {
-      "TERNARY_REPACK": "1",
-      "PTQ1_0_MV": "lut"
+     "name": "nodraft",
+     "context": 196608,
+     "execution": {
+      "draft_depth": 0
      }
     }
    ],
    "steps": [
-    "smoke:card",
-    "ktest:rp",
-    "ktest:rpblk",
-    "ktest:rplut",
-    "perf:card:2",
-    "perf:card:1:long",
-    "c4:card",
-    "perf:rp:2",
-    "perf:rp:1:long",
-    "c4:rp",
-    "perf:rpblk:2",
-    "perf:rpblk:1:long",
-    "c4:rpblk",
-    "perf:rplut:2",
-    "perf:rplut:1:long",
-    "c4:rplut",
-    "profile:card:dec",
-    "profile:rpblk:dec"
-   ]
+    "func:card",
+    "ktest:card",
+    "gates:card:dev",
+    "perf:card:3",
+    "perf:card:3:long",
+    "c4:nodraft",
+    "llama@rocm.np1:3",
+    "llama@rocm.np1:3:long",
+    "llamac4@rocm.nodraft",
+    "llama@vulkan.np1:3",
+    "llama@vulkan.np1:3:long",
+    "llamac4@vulkan.perslot.nodraft",
+    "profile:card"
+   ],
+   "runner": "r9700"
   },
   {
-   "name": "bonsai-r1-r9700",
+   "name": "bonsai-r2-r9700",
+   "runner": "r9700",
    "card": "loom-fun-staging/prism-ml-Ternary-Bonsai-2.5-27B-loom",
    "kit": null,
    "memory_bytes": 30000000000,
@@ -66,50 +56,82 @@
      "context": 65536
     },
     {
-     "name": "rp",
+     "name": "hadfast",
+     "context": 65536,
      "build": {
-      "TERNARY_REPACK": "1"
-     },
-     "context": 65536
+      "HAD_FAST": "1"
+     }
     },
     {
-     "name": "rpblk",
+     "name": "rplut",
+     "context": 65536,
      "build": {
       "TERNARY_REPACK": "1",
-      "PTQ1_0_MV": "block"
-     },
-     "context": 65536
+      "PTQ1_0_MV": "lut",
+      "HAD_FAST": "1"
+     }
+    }
+   ],
+   "steps": [
+    "smoke:card",
+    "ktest:hadfast",
+    "ktest:rplut",
+    "perf:card:2",
+    "perf:hadfast:2",
+    "perf:rplut:2",
+    "perf:card:1:long",
+    "perf:hadfast:1:long",
+    "profile:hadfast"
+   ]
+  },
+  {
+   "name": "bonsai-r2-strix",
+   "card": "loom-fun-staging/prism-ml-Ternary-Bonsai-2.5-27B-loom",
+   "kit": null,
+   "memory_bytes": 39000000000,
+   "variants": [
+    {
+     "name": "card"
+    },
+    {
+     "name": "hadfast",
+     "build": {
+      "HAD_FAST": "1"
+     }
+    },
+    {
+     "name": "rp",
+     "build": {
+      "TERNARY_REPACK": "1",
+      "HAD_FAST": "1"
+     }
     },
     {
      "name": "rplut",
      "build": {
       "TERNARY_REPACK": "1",
-      "PTQ1_0_MV": "lut"
-     },
-     "context": 65536
+      "PTQ1_0_MV": "lut",
+      "HAD_FAST": "1"
+     }
     }
    ],
    "steps": [
     "smoke:card",
+    "ktest:hadfast",
     "ktest:rp",
-    "ktest:rpblk",
     "ktest:rplut",
     "perf:card:2",
     "perf:card:1:long",
-    "c4:card",
+    "perf:hadfast:2",
+    "perf:hadfast:1:long",
     "perf:rp:2",
     "perf:rp:1:long",
-    "c4:rp",
-    "perf:rpblk:2",
-    "perf:rpblk:1:long",
-    "c4:rpblk",
     "perf:rplut:2",
     "perf:rplut:1:long",
-    "c4:rplut",
-    "profile:card:dec",
-    "profile:rpblk:dec"
-   ],
-   "runner": "r9700"
+    "c4:card",
+    "profile:card",
+    "profile:rplut"
+   ]
   }
  ]
 }
