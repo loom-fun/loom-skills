@@ -689,6 +689,27 @@ class LaneOwned(unittest.TestCase):
             self.assertIn("lane-owned", str(ex.exception.code))
 
 
+    def test_program_hold_defers_mixed_batches_before_wave_selection(self):
+        with tempfile.TemporaryDirectory() as t:
+            state = os.path.join(t, "s.json")
+            jobs = {n: {"slug": n, "stage": "planned", "device": "strix-halo"} for n in ("changing", "ready", "other")}
+            batches = [{"id": i, "jobs": names, "stage": "planned", "device": "strix-halo"}
+                       for i, names in enumerate((["changing", "ready"], ["other"]))]
+            with open(state, "w") as f:
+                json.dump({"work": t, "opts": {}, "jobs": jobs, "batches": batches}, f)
+            with open(state + ".program_hold", "w") as f:
+                f.write("changing # waiting for the final program\n")
+            st = regen.State(state)
+            self.assertEqual(regen.program_holds(st), {"changing"})
+            self.assertFalse(regen.lane_owned(st))
+            with mock.patch.object(regen, "submit_batch") as submit:
+                regen.main(["submit", state, "--max-batches", "1"])
+                self.assertEqual(submit.call_args.args[1]["id"], 1)
+                os.remove(state + ".program_hold")
+                regen.main(["submit", state, "--max-batches", "1"])
+                self.assertEqual(submit.call_args.args[1]["id"], 0)
+
+
 class KitVerdict(unittest.TestCase):
     """Phase 2: ship the kit programs of a model only when every device's A/B passes; else keep the frozen ones and re-queue its cards."""
     def write(self, t, name, doc):
@@ -786,13 +807,17 @@ class KitVerdict(unittest.TestCase):
                             for gpu,src in (("strix-halo", "a"), ("radeon-r9700", "b"))}}
         with mock.patch.object(regen, "hf_file", return_value="pinned") as fetch, \
                 mock.patch.object(regen.card_lib, "load_info", return_value=info):
-            self.assertIsNone(regen.check_kit_sessions(row))
+            self.assertIsNone(regen.check_staged_qualification(row, kit=True))
             fetch.assert_called_once_with("staging/test", "info.json", "a" * 40)
+            info["devices"]["strix-halo"]["gates"] = {"logits": {"status": "fail"}}
+            for kit in (False, True):
+                self.assertIn("failed gates: logits", regen.check_staged_qualification(row, kit=kit))
+            info["devices"]["strix-halo"]["gates"]["logits"]["status"] = "pass"
             session = info["devices"]["radeon-r9700"]["performance"]["sessions"][0]
             session["source"] = "a"
-            self.assertIn("radeon-r9700", regen.check_kit_sessions(row))
+            self.assertIn("radeon-r9700", regen.check_staged_qualification(row, kit=True))
             session.update(source="b", programs_sha256="old")
-            self.assertIn("radeon-r9700", regen.check_kit_sessions(row))
+            self.assertIn("radeon-r9700", regen.check_staged_qualification(row, kit=True))
 
     def test_ship_keep_and_wait(self):
         with tempfile.TemporaryDirectory() as t:

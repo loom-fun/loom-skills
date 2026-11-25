@@ -85,6 +85,9 @@ metric record (`sdk-evidence/1`: old card row and session, new row, run, job, co
 SDK, ABBA in one job): `regen.py plan --mode sdk-ab --old-sdk target --no-baselines ...`. For the final staging inventory, pass
 `--kit-state PATH` to `eligible` for each phase-2 state. It checks each shipped device against the measured session on the pinned staging card.
 The separate `evidence` command continues to report the SDK comparison on frozen programs.
+For models awaiting a final program revision, list one slug per line in `STATE.program_hold` on each affected state.
+Submission defers any batch containing a held slug. Split mixed planned batches to run the unaffected models first.
+Remove a slug after its final recipe is ready. Eligibility also checks each runner device for failed gates on the pinned text card.
 
 `regen.py package S.json [--dry-run] [--slugs S...] [--ref REF]` is the step between `collect` and `ingest` (`make_info.py` refuses programs other than the
 ones the job built, so the v0.2 package must be on staging before the card is made). It builds the base once, CPU only (`build_fleet.py --ref origin/<base>

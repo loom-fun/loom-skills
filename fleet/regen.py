@@ -293,9 +293,18 @@ def lane_owned(st):
     """slugs another workstream owns end to end (an optimization lane: its staging package, card and eligible entry): opts.lane_owned plus the
     lines of the sidecar file STATE.lane_owned, which a running driver honours at its next step without a state edit (no lost update of the state
     file under a running step). package, ingest, publish, verify, rerun and submit leave their jobs alone; their jobs keep their stage."""
-    side = st.path + ".lane_owned"
-    lines = [ln.split("#")[0].strip() for ln in open(side)] if os.path.isfile(side) else []
-    return set(st.d["opts"].get("lane_owned") or ()) | {ln for ln in lines if ln}
+    return set(st.d["opts"].get("lane_owned") or ()) | sidecar_slugs(st, "lane_owned")
+
+
+def sidecar_slugs(st, key):
+    path = Path(f"{st.path}.{key}")
+    return {slug for line in path.read_text().splitlines() if (slug := line.partition("#")[0].strip())} if path.is_file() else set()
+
+
+def program_holds(st):
+    """Models waiting for their final program revision; independent of permanent lane ownership."""
+    return sidecar_slugs(st, "program_hold")
+
 
 
 @contextlib.contextmanager
@@ -734,7 +743,9 @@ def max_inflight(opt, device):
 def cmd_submit(a):
     st = State(a.state)
     lane = lane_owned(st)
-    todo = [b for b in st.d["batches"] if b["stage"] == "planned" and not all(st.jobs[j]["slug"] in lane for j in b["jobs"] if j in st.jobs)]
+    held = program_holds(st)
+    todo = [b for b in st.d["batches"] if b["stage"] == "planned" and not all(st.jobs[j]["slug"] in lane for j in b["jobs"] if j in st.jobs)
+            and not any(st.jobs[j]["slug"] in held for j in b["jobs"])]
     todo.sort(key=lambda b: (not b.get("priority"), device_order(b["device"]), b["id"]))   # priority batches, then R9700-class (few runners): their queue is the long one
     if a.max_batches:
         todo = todo[:a.max_batches]
@@ -1257,9 +1268,10 @@ def cmd_share(a):
 def cmd_rerun(a):
     st = State(a.state)
     want = {}
+    excluded = lane_owned(st) | program_holds(st)
     for name, e in st.jobs.items():
         if e["stage"] == "collected" and e.get("decision") in ("rerun", "improved-pending", "confirm") and e["round"] == 1 and not e.get("rerun_of_me") \
-                and e["slug"] not in lane_owned(st):
+                and e["slug"] not in excluded:
             want.setdefault(e["device"], []).append((name, e))
     if not want:
         print("no confirming runs needed")
@@ -1598,7 +1610,8 @@ def cmd_ingest(a):
         todo = [(n, e) for n, e in todo if not e.get("rerun_of_me")]
     if a.slug:
         todo = [(n, e) for n, e in todo if e["slug"] in a.slug]
-    todo = [(n, e) for n, e in todo if e["slug"] not in lane_owned(st)]
+    excluded = lane_owned(st) | program_holds(st)
+    todo = [(n, e) for n, e in todo if e["slug"] not in excluded]
     dry = getattr(a, "dry_run", False)
     if dry and st.d["opts"].get("programs") != "production":
         die("ingest --dry-run builds a --programs production card on the local frozen package (other modes need the staging package)")
@@ -1849,7 +1862,8 @@ def cmd_package(a):
     lane = lane_owned(st)
     if lane & set(a.slugs or ()):
         die(f"lane-owned (their lanes publish them): {', '.join(sorted(lane & set(a.slugs)))}")
-    picked = [(n, e) for n, e in picked if e["slug"] not in lane]
+    excluded = lane | program_holds(st)
+    picked = [(n, e) for n, e in picked if e["slug"] not in excluded]
     if phase2_state(st.d):   # phase 2: a model's kit programs go out only once kit-verdict decided them on every device (one package for all)
         held = sorted({e["slug"] for _, e in picked} - set(st.d["opts"].get("ship") or ()))
         if held:
@@ -1940,9 +1954,9 @@ def cmd_publish(a):
     if org != STAGING_ORG or "/" in org.strip("/") or org == "loom-fun":
         die(f"publish writes {STAGING_ORG} only")
     env = dict(os.environ, PATH=(LOOMBIN + os.pathsep if LOOMBIN else "") + os.environ["PATH"])
-    lane = lane_owned(st)
+    excluded = lane_owned(st) | program_holds(st)
     for name, e in st.jobs.items():
-        if e["stage"] != "ingested" or e["slug"] in lane:
+        if e["stage"] != "ingested" or e["slug"] in excluded:
             continue
         cmd = [PY, f"{CARD}/publish_package.py", "upload", e["card_dir"], "--repo", e["slug"], "--org", org, "--card-only",
                "--parent-commit", e["parent"], "--message", e["message"]]
@@ -2617,29 +2631,41 @@ def final_kit_qualifications(doc, sweep, states):
     return shipped
 
 
-def check_kit_sessions(row):
-    """Verify the published revision has every device's cited job and program digest in its own performance table."""
+def check_staged_qualification(row, *, kit):
+    """Check the pinned text card for failing gates and, for shipped kits, the exact measured sessions."""
     try:
         info = card_lib.load_info(hf_file(row["staging"], "info.json", row["staging_revision"]))
         for gpu, qual in row["qualification"].items():
-            sessions = (card_lib.gpu_view(info, gpu).get("performance") or {}).get("sessions", [])
+            view = card_lib.gpu_view(info, gpu)
+            failed = sorted(name for name, gate in (view.get("gates") or {}).items() if gate["status"] == "fail")
+            if failed:
+                return f"{gpu}: final staging card shows failed gates: {', '.join(failed)}"
+            if not kit:
+                continue
+            sessions = (view.get("performance") or {}).get("sessions", [])
             if not any(s.get("programs_sha256") == row["programs_sha256"] and
                        (info["sources"].get(s.get("source")) or {}).get("url") == qual["url"] for s in sessions):
                 return f"{gpu}: final staging card lacks the measured kit session"
     except Exception as err:   # an unreadable Hub revision cannot qualify
-        return f"cannot validate kit sessions on the published revision: {err}"
+        return f"cannot validate the published card: {err}"
     return None
 
 
 def cmd_eligible(a):
     st = State(a.state)
     doc = build_evidence(st)
-    shipped = set()
-    if getattr(a, "kit_state", None):
-        shipped = final_kit_qualifications(doc, st, [State(path) for path in a.kit_state])
+    states = [State(path) for path in (getattr(a, "kit_state", None) or [])]
+    shipped = final_kit_qualifications(doc, st, states) if states else set()
+    held_programs = set().union(*(program_holds(state) for state in [st, *states]))
+    for slug in held_programs.intersection(doc["models"]):
+        for device in doc["models"][slug]["devices"].values():
+            if device["status"] not in ("no_runner", "not_claimed"):
+                device.update(status="pending", reason="waiting for final program revision and remeasurement")
     eligible, held, pending = eligibility(doc, hf_head)
-    for slug in sorted(shipped.intersection(eligible)):
-        problem = check_kit_sessions(eligible[slug])
+    for slug, row in list(eligible.items()):
+        if row["kind"] != "text":
+            continue
+        problem = check_staged_qualification(row, kit=slug in shipped)
         if problem:
             pending[slug] = {"production": eligible[slug]["production"], "reasons": {"staging": problem}}
             del eligible[slug]
@@ -2787,8 +2813,9 @@ def cmd_kit_verdict(a):
             die(f"{s_.path}: not a phase-2 state (--mode sdk-ab --old-sdk target)")
     out = json.load(open(a.out)) if os.path.isfile(a.out) else {}
     slugs = sorted({e["slug"] for s_ in states for e in s_.jobs.values() if not e.get("prev") and e["stage"] != "skipped"})
+    held_programs = set().union(*(program_holds(s_) for s_ in [sweep, *states]))
     for slug in slugs:
-        if slug in out and not a.redo:
+        if slug in held_programs or slug in out and not a.redo:
             continue
         p1 = [e for e in sweep.jobs.values() if e["slug"] == slug and not e.get("prev") and e["stage"] not in ("skipped",)]
         if not p1 or any(e["stage"] != "published" for e in p1):
