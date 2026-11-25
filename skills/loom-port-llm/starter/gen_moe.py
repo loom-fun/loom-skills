@@ -250,12 +250,12 @@ kernel.def export("g_moe_route") @g_moe_route(%tokens: index) {{
   kernel.return
 }}
 """
-    if split and route_split():
+    if split and route_dsplit_on():
         text += _route_split(text, rloop, H, E, U, wty)
     return text
 
 
-def route_split():
+def route_dsplit_on():
     """moe.route.decode_split (MOE_ROUTE_DSPLIT): decode-shaped epochs score the router in g_moe_route_lg (one wave per (U experts, token): E / U waves
     per token instead of one workgroup per token streaming the whole router) into a logits scratch,
     and g_moe_route_tk (g_moe_route's softmax and top-k, one workgroup per token) reads them. Each expert's logit is the same wave's same

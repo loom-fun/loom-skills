@@ -5806,10 +5806,10 @@ _ROUTE_DEC = re.compile(r"(?m)^(?P<ind>\s*)kernel\.launch @g_moe_route\[%t\]\(%t
 
 
 def route_dsplit_program(program):
-    """moe.route.decode_split (gen_moe.route_split): every decode-shaped g_moe_route launch becomes g_moe_route_lg (logits into the
+    """moe.route.decode_split (gen_moe.route_dsplit_on): every decode-shaped g_moe_route launch becomes g_moe_route_lg (logits into the
     prefill expert-row scratch %ys_sorted, unused in decode-shaped epochs) + g_moe_route_tk. Applied to the generated program text."""
     import gen_moe as _gm
-    if not (MOE and _gm.route_split() and MOE.get("gating") != 3):
+    if not (MOE and _gm.route_dsplit_on() and MOE.get("gating") != 3):
         return program
     return _ROUTE_DEC.sub(lambda m: (f"{m['ind']}kernel.launch @g_moe_route_lg[%t](%t, {m['x']}, {m['w']}, %ys_sorted) : [index](index, buffer, {m['wt']}, buffer)\n"
                                      f"{m['ind']}kernel.launch @g_moe_route_tk[%t](%t, %ys_sorted, {m['b']}, %ids, %wts) : [index](index, buffer, {m['bt']}, buffer, buffer)"), program)
