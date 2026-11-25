@@ -452,9 +452,21 @@ EOF
     # time minus the layer-proportional part is the per-step fixed cost; outputs are garbage, only timing counts)
     vcfg=$(qv "$v" "print(json.dumps(v.get('config') or {}))")
     vcfg=$(hf_sub "$vcfg") || exit 1   # {hf:...} in a config value: e.g. {"assistant": {"gguf": "{hf:...}"}}, a Gemma-4 assistant the card does not ship
-    "$T" - "$D/cfg.json" "$D/$v/cfg.json" "$vcfg" <<'EOF2'
-import json, sys
-c = json.load(open(sys.argv[1])); c.update(json.loads(sys.argv[3])); json.dump(c, open(sys.argv[2], "w"), indent=1)
+    # the drafting gates (drafter ctx_max / occ_min: program constants) of a rebuild are the checkout's build input fleet/<slug>/llm_config.json, as in
+    # fleet/build_fleet.py's canonical build (a lane that moved a gate measured the card's old gate, and its programs hash missed the canonical one)
+    vroot=${KBV[$v]:+${KBV[$v]}/../..}; vroot=${vroot:-$here}
+    "$T" - "$D/cfg.json" "$D/$v/cfg.json" "$vcfg" "$vroot/fleet/${repo##*/}/llm_config.json" <<'EOF2'
+import json, os, sys
+override = json.loads(sys.argv[3])
+c = json.load(open(sys.argv[1]))
+c.update(override)
+if os.path.isfile(sys.argv[4]) and c.get("drafter"):
+    f = json.load(open(sys.argv[4])).get("drafter") or {}
+    for k in ("ctx_max", "occ_min"):
+        if k not in (override.get("drafter") or {}) and k in f and f[k] != c["drafter"].get(k):
+            print(f"drafter.{k}: {c['drafter'].get(k)} -> {f[k]} (fleet/{os.path.basename(os.path.dirname(sys.argv[4]))}/llm_config.json)")
+            c["drafter"][k] = f[k]
+json.dump(c, open(sys.argv[2], "w"), indent=1)
 EOF2
     # the package's slug (the card's repo name) selects the knowledge base's slug-matched model nodes, as fleet/build_fleet.py's canonical build does:
     # without it a model's program-level choices (e.g. Qwen3.6-35B-A3B decode.attn.kv_once.d256 on rdna4) are missing and the programs differ from the published ones
