@@ -1,46 +1,860 @@
 {
- "_comment": "R9700 per-model measurement (r9700_jobs.py): one job per model on one R9700 runner; loom-fun-staging card, llama.cpp ROCm b1375 + Vulkan b12211 with the matched drafting, reduced-context models served at served_context. Does not fit: none",
+ "_comment": "R9700 A/B (ab_jobs.py): per model one job on one R9700 runner, old package (fun) vs new package (staging), served as the new card's R9700 Quick start, same prompts and settings; compare with strix_ab_compare.py. Does not fit: none SDK A/B (--sdk-ab): fun = the published card on hrx-loom 0.3.0, staging = the package built in the job on 0.3.0. Old side frozen (--old-frozen): fun serves the production programs (hash checked) with its own func, ktest, gates and admission.",
  "runner": "r9700",
  "memory_bytes": 34000000000,
  "llama_spec": "matched",
  "jobs": [
   {
-   "name": "unsloth-qwen3-0-6b-loom",
-   "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
+   "name": "rab-unsloth-ornith-1-0-9b-loom",
+   "runner": "r9700",
+   "repeat_rows": 3,
+   "card": "loom-fun/unsloth-Ornith-1.0-9B-loom@dff6b66ed20512c86ec2f847bfe78fc6b5589149",
+   "memory_bytes_r9700": 22000000000,
    "kit": null,
    "llamacpp": "b1375",
    "llamacpp_vulkan": "b12211",
-   "memory_bytes_r9700": 17000000000,
    "variants": [
     {
-     "name": "card",
-     "build": {}
+     "name": "fun",
+     "card": "loom-fun/unsloth-Ornith-1.0-9B-loom@dff6b66ed20512c86ec2f847bfe78fc6b5589149",
+     "cap_pool": 722944,
+     "execution": {},
+     "sdk": "0.3.0",
+     "programs_sha256": "0793c4220b34a0253939042d00917b49fad64149a8c98351623d5fd2fe0e47c5"
     },
     {
-     "name": "nodraft",
+     "name": "staging",
+     "cap_pool": 722944,
      "build": {},
+     "build_args": [
+      "--memory-gib",
+      "4096"
+     ],
+     "sdk": "0.3.0"
+    },
+    {
+     "name": "funnd",
+     "card": "loom-fun/unsloth-Ornith-1.0-9B-loom@dff6b66ed20512c86ec2f847bfe78fc6b5589149",
+     "cap_pool": 722944,
      "execution": {
       "draft_depth": 0
-     }
+     },
+     "sdk": "0.3.0",
+     "programs_sha256": "0793c4220b34a0253939042d00917b49fad64149a8c98351623d5fd2fe0e47c5"
+    },
+    {
+     "name": "stagingnd",
+     "execution": {
+      "draft_depth": 0
+     },
+     "cap_pool": 722944,
+     "build": {},
+     "build_args": [
+      "--memory-gib",
+      "4096"
+     ],
+     "sdk": "0.3.0"
     }
    ],
    "steps": [
-    "func:card",
-    "ktest:card",
-    "gates:card:dev",
-    "perf:card:3",
-    "perf:card:3:long",
-    "c4:nodraft",
-    "llama@rocm.np1:3",
-    "llama@rocm.np1:3:long",
-    "llamac4@rocm.nodraft",
-    "llama@vulkan.np1:3",
-    "llama@vulkan.np1:3:long",
-    "llamac4@vulkan.perslot.nodraft"
-   ]
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:fun:1",
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:fun:1",
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:fun:1",
+    "perf:staging:1:long",
+    "perf:fun:1:long",
+    "perf:fun:1:long",
+    "perf:staging:1:long",
+    "perf:staging:1:long",
+    "perf:fun:1:long",
+    "perf:fun:1:long",
+    "perf:staging:1:long",
+    "perf:staging:1:long",
+    "perf:fun:1:long",
+    "perf:fun:1:long",
+    "perf:staging:1:long",
+    "c4:funnd",
+    "c4:stagingnd",
+    "c4:stagingnd",
+    "c4:funnd",
+    "c4:funnd",
+    "c4:stagingnd",
+    "c4:stagingnd",
+    "c4:funnd",
+    "textmatch:fun",
+    "textmatch:staging",
+    "func:staging",
+    "ktest:staging",
+    "gates:staging:dev",
+    "func:fun",
+    "ktest:fun",
+    "gates:fun:dev",
+    "admit:fun",
+    "admit:staging"
+   ],
+   "sdk": "0.3.0"
+  },
+  {
+   "name": "rab-unsloth-qwen3-0-6b-loom",
+   "runner": "r9700",
+   "repeat_rows": 3,
+   "card": "loom-fun/unsloth-Qwen3-0.6B-loom@564d578f4e487c6fbabd84915439f873651b5953",
+   "require_preset_r9700": true,
+   "memory_bytes_r9700": 17000000000,
+   "kit": null,
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "fun",
+     "card": "loom-fun/unsloth-Qwen3-0.6B-loom@564d578f4e487c6fbabd84915439f873651b5953",
+     "cap_pool": 267264,
+     "execution": {
+      "prefill_capacity": 4096
+     },
+     "sdk": "0.3.0",
+     "programs_sha256": "36be806329b1e49f47cb705f853b61a503c10e49daac939427b3c58a334da243"
+    },
+    {
+     "name": "staging",
+     "cap_pool": 267264,
+     "execution": {
+      "prefill_capacity": 4096
+     },
+     "build": {},
+     "build_args": [
+      "--memory-gib",
+      "4096"
+     ],
+     "sdk": "0.3.0",
+     "require_preset_r9700": false
+    },
+    {
+     "name": "funnd",
+     "card": "loom-fun/unsloth-Qwen3-0.6B-loom@564d578f4e487c6fbabd84915439f873651b5953",
+     "cap_pool": 267264,
+     "execution": {
+      "prefill_capacity": 4096,
+      "draft_depth": 0
+     },
+     "sdk": "0.3.0",
+     "programs_sha256": "36be806329b1e49f47cb705f853b61a503c10e49daac939427b3c58a334da243"
+    },
+    {
+     "name": "stagingnd",
+     "execution": {
+      "prefill_capacity": 4096,
+      "draft_depth": 0
+     },
+     "cap_pool": 267264,
+     "build": {},
+     "build_args": [
+      "--memory-gib",
+      "4096"
+     ],
+     "sdk": "0.3.0",
+     "require_preset_r9700": false
+    }
+   ],
+   "steps": [
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:fun:1",
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:fun:1",
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:fun:1",
+    "perf:staging:1:long",
+    "perf:fun:1:long",
+    "perf:fun:1:long",
+    "perf:staging:1:long",
+    "perf:staging:1:long",
+    "perf:fun:1:long",
+    "perf:fun:1:long",
+    "perf:staging:1:long",
+    "perf:staging:1:long",
+    "perf:fun:1:long",
+    "perf:fun:1:long",
+    "perf:staging:1:long",
+    "c4:funnd",
+    "c4:stagingnd",
+    "c4:stagingnd",
+    "c4:funnd",
+    "c4:funnd",
+    "c4:stagingnd",
+    "c4:stagingnd",
+    "c4:funnd",
+    "textmatch:fun",
+    "textmatch:staging",
+    "func:staging",
+    "ktest:staging",
+    "gates:staging:dev",
+    "func:fun",
+    "ktest:fun",
+    "gates:fun:dev",
+    "admit:fun",
+    "admit:staging"
+   ],
+   "sdk": "0.3.0"
+  },
+  {
+   "name": "rab-unsloth-qwen3-30b-a3b-instruct-2507-",
+   "runner": "r9700",
+   "repeat_rows": 3,
+   "card": "loom-fun/unsloth-Qwen3-30B-A3B-Instruct-2507-loom@c6598438289b2cbb1543e73e90b749136c888797",
+   "require_preset_r9700": true,
+   "memory_bytes_r9700": 34000000000,
+   "served_context": 99328,
+   "kit": null,
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "fun",
+     "card": "loom-fun/unsloth-Qwen3-30B-A3B-Instruct-2507-loom@c6598438289b2cbb1543e73e90b749136c888797",
+     "context": 99328,
+     "cap_pool": 109568,
+     "execution": {
+      "context_capacity": 99328
+     },
+     "sdk": "0.3.0",
+     "programs_sha256": "09e2b605bcb1c65d5a8b11aa8d23893b61de0d25bc959b1863a39fb40d1f3e13"
+    },
+    {
+     "name": "staging",
+     "cap_pool": 109568,
+     "execution": {
+      "context_capacity": 99328
+     },
+     "build": {},
+     "build_args": [
+      "--memory-gib",
+      "4096"
+     ],
+     "sdk": "0.3.0",
+     "require_preset_r9700": false
+    },
+    {
+     "name": "funnd",
+     "card": "loom-fun/unsloth-Qwen3-30B-A3B-Instruct-2507-loom@c6598438289b2cbb1543e73e90b749136c888797",
+     "context": 99328,
+     "cap_pool": 109568,
+     "execution": {
+      "context_capacity": 99328,
+      "draft_depth": 0
+     },
+     "sdk": "0.3.0",
+     "programs_sha256": "09e2b605bcb1c65d5a8b11aa8d23893b61de0d25bc959b1863a39fb40d1f3e13"
+    },
+    {
+     "name": "stagingnd",
+     "execution": {
+      "context_capacity": 99328,
+      "draft_depth": 0
+     },
+     "cap_pool": 109568,
+     "build": {},
+     "build_args": [
+      "--memory-gib",
+      "4096"
+     ],
+     "sdk": "0.3.0",
+     "require_preset_r9700": false
+    }
+   ],
+   "steps": [
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:fun:1",
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:fun:1",
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:fun:1",
+    "perf:staging:1:long",
+    "perf:fun:1:long",
+    "perf:fun:1:long",
+    "perf:staging:1:long",
+    "perf:staging:1:long",
+    "perf:fun:1:long",
+    "perf:fun:1:long",
+    "perf:staging:1:long",
+    "perf:staging:1:long",
+    "perf:fun:1:long",
+    "perf:fun:1:long",
+    "perf:staging:1:long",
+    "c4:funnd",
+    "c4:stagingnd",
+    "c4:stagingnd",
+    "c4:funnd",
+    "c4:funnd",
+    "c4:stagingnd",
+    "c4:stagingnd",
+    "c4:funnd",
+    "textmatch:fun",
+    "textmatch:staging",
+    "func:staging",
+    "ktest:staging",
+    "gates:staging:dev",
+    "func:fun",
+    "ktest:fun",
+    "gates:fun:dev",
+    "admit:fun",
+    "admit:staging"
+   ],
+   "sdk": "0.3.0"
+  },
+  {
+   "name": "rab-unsloth-qwen3-4b-instruct-2507-loom",
+   "runner": "r9700",
+   "repeat_rows": 3,
+   "card": "loom-fun/unsloth-Qwen3-4B-Instruct-2507-loom@d0df214dfcbf73e905ad7930498e110bb5525e3d",
+   "memory_bytes_r9700": 34000000000,
+   "served_context": 196608,
+   "kit": null,
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "fun",
+     "card": "loom-fun/unsloth-Qwen3-4B-Instruct-2507-loom@d0df214dfcbf73e905ad7930498e110bb5525e3d",
+     "context": 196608,
+     "cap_pool": 196608,
+     "execution": {
+      "context_capacity": 196608,
+      "pool_capacity": 196608
+     },
+     "sdk": "0.3.0",
+     "programs_sha256": "46c11c082d8f879e614031f170120d06582c135a02d8b63f1db1e03b2882c4ac"
+    },
+    {
+     "name": "staging",
+     "execution": {
+      "context_capacity": 196608,
+      "pool_capacity": 196608
+     },
+     "cap_pool": 196608,
+     "build": {},
+     "build_args": [
+      "--memory-gib",
+      "4096"
+     ],
+     "sdk": "0.3.0"
+    },
+    {
+     "name": "funnd",
+     "card": "loom-fun/unsloth-Qwen3-4B-Instruct-2507-loom@d0df214dfcbf73e905ad7930498e110bb5525e3d",
+     "context": 196608,
+     "cap_pool": 196608,
+     "execution": {
+      "context_capacity": 196608,
+      "pool_capacity": 196608,
+      "draft_depth": 0
+     },
+     "sdk": "0.3.0",
+     "programs_sha256": "46c11c082d8f879e614031f170120d06582c135a02d8b63f1db1e03b2882c4ac"
+    },
+    {
+     "name": "stagingnd",
+     "execution": {
+      "context_capacity": 196608,
+      "pool_capacity": 196608,
+      "draft_depth": 0
+     },
+     "cap_pool": 196608,
+     "build": {},
+     "build_args": [
+      "--memory-gib",
+      "4096"
+     ],
+     "sdk": "0.3.0"
+    }
+   ],
+   "steps": [
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:fun:1",
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:fun:1",
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:fun:1",
+    "perf:staging:1:long",
+    "perf:fun:1:long",
+    "perf:fun:1:long",
+    "perf:staging:1:long",
+    "perf:staging:1:long",
+    "perf:fun:1:long",
+    "perf:fun:1:long",
+    "perf:staging:1:long",
+    "perf:staging:1:long",
+    "perf:fun:1:long",
+    "perf:fun:1:long",
+    "perf:staging:1:long",
+    "c4:funnd",
+    "c4:stagingnd",
+    "c4:stagingnd",
+    "c4:funnd",
+    "c4:funnd",
+    "c4:stagingnd",
+    "c4:stagingnd",
+    "c4:funnd",
+    "textmatch:fun",
+    "textmatch:staging",
+    "func:staging",
+    "ktest:staging",
+    "gates:staging:dev",
+    "func:fun",
+    "ktest:fun",
+    "gates:fun:dev",
+    "admit:fun",
+    "admit:staging"
+   ],
+   "sdk": "0.3.0"
+  },
+  {
+   "name": "rab-unsloth-qwen3-8b-loom",
+   "runner": "r9700",
+   "repeat_rows": 3,
+   "card": "loom-fun/unsloth-Qwen3-8B-loom@35d393f359b50ec874e5f2d635bcf03fb48d080f",
+   "memory_bytes_r9700": 29000000000,
+   "kit": null,
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "fun",
+     "card": "loom-fun/unsloth-Qwen3-8B-loom@35d393f359b50ec874e5f2d635bcf03fb48d080f",
+     "cap_pool": 148480,
+     "execution": {},
+     "sdk": "0.3.0",
+     "programs_sha256": "ea9aebc58d058e4d9d1d0729f010ee6ebf384a678ec0ef2166bd8339b96adf80"
+    },
+    {
+     "name": "staging",
+     "cap_pool": 148480,
+     "build": {},
+     "build_args": [
+      "--memory-gib",
+      "4096"
+     ],
+     "sdk": "0.3.0"
+    },
+    {
+     "name": "funnd",
+     "card": "loom-fun/unsloth-Qwen3-8B-loom@35d393f359b50ec874e5f2d635bcf03fb48d080f",
+     "cap_pool": 148480,
+     "execution": {
+      "draft_depth": 0
+     },
+     "sdk": "0.3.0",
+     "programs_sha256": "ea9aebc58d058e4d9d1d0729f010ee6ebf384a678ec0ef2166bd8339b96adf80"
+    },
+    {
+     "name": "stagingnd",
+     "execution": {
+      "draft_depth": 0
+     },
+     "cap_pool": 148480,
+     "build": {},
+     "build_args": [
+      "--memory-gib",
+      "4096"
+     ],
+     "sdk": "0.3.0"
+    }
+   ],
+   "steps": [
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:fun:1",
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:fun:1",
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:fun:1",
+    "perf:staging:1:long",
+    "perf:fun:1:long",
+    "perf:fun:1:long",
+    "perf:staging:1:long",
+    "perf:staging:1:long",
+    "perf:fun:1:long",
+    "perf:fun:1:long",
+    "perf:staging:1:long",
+    "perf:staging:1:long",
+    "perf:fun:1:long",
+    "perf:fun:1:long",
+    "perf:staging:1:long",
+    "c4:funnd",
+    "c4:stagingnd",
+    "c4:stagingnd",
+    "c4:funnd",
+    "c4:funnd",
+    "c4:stagingnd",
+    "c4:stagingnd",
+    "c4:funnd",
+    "textmatch:fun",
+    "textmatch:staging",
+    "func:staging",
+    "ktest:staging",
+    "gates:staging:dev",
+    "func:fun",
+    "ktest:fun",
+    "gates:fun:dev",
+    "admit:fun",
+    "admit:staging"
+   ],
+   "sdk": "0.3.0"
+  },
+  {
+   "name": "rab-unsloth-qwen3-vl-4b-instruct-loom",
+   "runner": "r9700",
+   "repeat_rows": 3,
+   "card": "loom-fun/unsloth-Qwen3-VL-4B-Instruct-loom@c9e8f9868c0be8bbef11ee5f7bebf35f2feb419b",
+   "memory_bytes_r9700": 34000000000,
+   "served_context": 187392,
+   "kit": null,
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "fun",
+     "card": "loom-fun/unsloth-Qwen3-VL-4B-Instruct-loom@c9e8f9868c0be8bbef11ee5f7bebf35f2feb419b",
+     "context": 187392,
+     "cap_pool": 187392,
+     "execution": {
+      "context_capacity": 187392,
+      "pool_capacity": 187392
+     },
+     "sdk": "0.3.0",
+     "programs_sha256": "d4227bec6789a6d5fcdc71ca1cdbb91b99271b7f2251fe505c461786cd370ba2"
+    },
+    {
+     "name": "staging",
+     "execution": {
+      "context_capacity": 187392,
+      "pool_capacity": 187392
+     },
+     "cap_pool": 187392,
+     "build": {},
+     "build_args": [
+      "--memory-gib",
+      "4096"
+     ],
+     "sdk": "0.3.0"
+    },
+    {
+     "name": "funnd",
+     "card": "loom-fun/unsloth-Qwen3-VL-4B-Instruct-loom@c9e8f9868c0be8bbef11ee5f7bebf35f2feb419b",
+     "context": 187392,
+     "cap_pool": 187392,
+     "execution": {
+      "context_capacity": 187392,
+      "pool_capacity": 187392,
+      "draft_depth": 0
+     },
+     "sdk": "0.3.0",
+     "programs_sha256": "d4227bec6789a6d5fcdc71ca1cdbb91b99271b7f2251fe505c461786cd370ba2"
+    },
+    {
+     "name": "stagingnd",
+     "execution": {
+      "context_capacity": 187392,
+      "pool_capacity": 187392,
+      "draft_depth": 0
+     },
+     "cap_pool": 187392,
+     "build": {},
+     "build_args": [
+      "--memory-gib",
+      "4096"
+     ],
+     "sdk": "0.3.0"
+    }
+   ],
+   "steps": [
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:fun:1",
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:fun:1",
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:fun:1",
+    "perf:staging:1:long",
+    "perf:fun:1:long",
+    "perf:fun:1:long",
+    "perf:staging:1:long",
+    "perf:staging:1:long",
+    "perf:fun:1:long",
+    "perf:fun:1:long",
+    "perf:staging:1:long",
+    "perf:staging:1:long",
+    "perf:fun:1:long",
+    "perf:fun:1:long",
+    "perf:staging:1:long",
+    "c4:funnd",
+    "c4:stagingnd",
+    "c4:stagingnd",
+    "c4:funnd",
+    "c4:funnd",
+    "c4:stagingnd",
+    "c4:stagingnd",
+    "c4:funnd",
+    "textmatch:fun",
+    "textmatch:staging",
+    "func:staging",
+    "ktest:staging",
+    "gates:staging:dev",
+    "func:fun",
+    "ktest:fun",
+    "gates:fun:dev",
+    "admit:fun",
+    "admit:staging"
+   ],
+   "sdk": "0.3.0"
+  },
+  {
+   "name": "rab-unsloth-qwen3-vl-8b-instruct-loom",
+   "runner": "r9700",
+   "repeat_rows": 3,
+   "card": "loom-fun/unsloth-Qwen3-VL-8B-Instruct-loom@4c126a53d2beabbcd03700071be10ac811b6778a",
+   "memory_bytes_r9700": 34000000000,
+   "served_context": 165888,
+   "kit": null,
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "fun",
+     "card": "loom-fun/unsloth-Qwen3-VL-8B-Instruct-loom@4c126a53d2beabbcd03700071be10ac811b6778a",
+     "context": 165888,
+     "cap_pool": 165888,
+     "execution": {
+      "context_capacity": 165888,
+      "pool_capacity": 165888
+     },
+     "sdk": "0.3.0",
+     "programs_sha256": "97a21a5ff7894734fe68bceebf6b9d0880ff05094c851e602a198fb4c8c9a938"
+    },
+    {
+     "name": "staging",
+     "execution": {
+      "context_capacity": 165888,
+      "pool_capacity": 165888
+     },
+     "cap_pool": 165888,
+     "build": {},
+     "build_args": [
+      "--memory-gib",
+      "4096"
+     ],
+     "sdk": "0.3.0"
+    },
+    {
+     "name": "funnd",
+     "card": "loom-fun/unsloth-Qwen3-VL-8B-Instruct-loom@4c126a53d2beabbcd03700071be10ac811b6778a",
+     "context": 165888,
+     "cap_pool": 165888,
+     "execution": {
+      "context_capacity": 165888,
+      "pool_capacity": 165888,
+      "draft_depth": 0
+     },
+     "sdk": "0.3.0",
+     "programs_sha256": "97a21a5ff7894734fe68bceebf6b9d0880ff05094c851e602a198fb4c8c9a938"
+    },
+    {
+     "name": "stagingnd",
+     "execution": {
+      "context_capacity": 165888,
+      "pool_capacity": 165888,
+      "draft_depth": 0
+     },
+     "cap_pool": 165888,
+     "build": {},
+     "build_args": [
+      "--memory-gib",
+      "4096"
+     ],
+     "sdk": "0.3.0"
+    }
+   ],
+   "steps": [
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:fun:1",
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:fun:1",
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:fun:1",
+    "perf:staging:1:long",
+    "perf:fun:1:long",
+    "perf:fun:1:long",
+    "perf:staging:1:long",
+    "perf:staging:1:long",
+    "perf:fun:1:long",
+    "perf:fun:1:long",
+    "perf:staging:1:long",
+    "perf:staging:1:long",
+    "perf:fun:1:long",
+    "perf:fun:1:long",
+    "perf:staging:1:long",
+    "c4:funnd",
+    "c4:stagingnd",
+    "c4:stagingnd",
+    "c4:funnd",
+    "c4:funnd",
+    "c4:stagingnd",
+    "c4:stagingnd",
+    "c4:funnd",
+    "textmatch:fun",
+    "textmatch:staging",
+    "func:staging",
+    "ktest:staging",
+    "gates:staging:dev",
+    "func:fun",
+    "ktest:fun",
+    "gates:fun:dev",
+    "admit:fun",
+    "admit:staging"
+   ],
+   "sdk": "0.3.0"
+  },
+  {
+   "name": "rab-unsloth-qwen3-5-0-8b-loom",
+   "runner": "r9700",
+   "repeat_rows": 3,
+   "card": "loom-fun/unsloth-Qwen3.5-0.8B-loom@9131414f6d7c0e37a890bb23fb7a1693e82b4db3",
+   "memory_bytes_r9700": 9000000000,
+   "kit": null,
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "fun",
+     "card": "loom-fun/unsloth-Qwen3.5-0.8B-loom@9131414f6d7c0e37a890bb23fb7a1693e82b4db3",
+     "cap_pool": 2494464,
+     "execution": {},
+     "sdk": "0.3.0",
+     "programs_sha256": "48ce4e822989bed05827ba6917112fb53aee436e907225a43a3b62af0d13b1ca"
+    },
+    {
+     "name": "staging",
+     "cap_pool": 2494464,
+     "build": {},
+     "build_args": [
+      "--memory-gib",
+      "4096"
+     ],
+     "sdk": "0.3.0"
+    },
+    {
+     "name": "funnd",
+     "card": "loom-fun/unsloth-Qwen3.5-0.8B-loom@9131414f6d7c0e37a890bb23fb7a1693e82b4db3",
+     "cap_pool": 2494464,
+     "execution": {
+      "draft_depth": 0
+     },
+     "sdk": "0.3.0",
+     "programs_sha256": "48ce4e822989bed05827ba6917112fb53aee436e907225a43a3b62af0d13b1ca"
+    },
+    {
+     "name": "stagingnd",
+     "execution": {
+      "draft_depth": 0
+     },
+     "cap_pool": 2494464,
+     "build": {},
+     "build_args": [
+      "--memory-gib",
+      "4096"
+     ],
+     "sdk": "0.3.0"
+    }
+   ],
+   "steps": [
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:fun:1",
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:fun:1",
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:fun:1",
+    "perf:staging:1:long",
+    "perf:fun:1:long",
+    "perf:fun:1:long",
+    "perf:staging:1:long",
+    "perf:staging:1:long",
+    "perf:fun:1:long",
+    "perf:fun:1:long",
+    "perf:staging:1:long",
+    "perf:staging:1:long",
+    "perf:fun:1:long",
+    "perf:fun:1:long",
+    "perf:staging:1:long",
+    "c4:funnd",
+    "c4:stagingnd",
+    "c4:stagingnd",
+    "c4:funnd",
+    "c4:funnd",
+    "c4:stagingnd",
+    "c4:stagingnd",
+    "c4:funnd",
+    "textmatch:fun",
+    "textmatch:staging",
+    "func:staging",
+    "ktest:staging",
+    "gates:staging:dev",
+    "func:fun",
+    "ktest:fun",
+    "gates:fun:dev",
+    "admit:fun",
+    "admit:staging"
+   ],
+   "sdk": "0.3.0"
   }
  ],
- "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
+ "card": "loom-fun/unsloth-Ornith-1.0-9B-loom@dff6b66ed20512c86ec2f847bfe78fc6b5589149",
  "kit": null,
  "llamacpp": "b1375",
  "llamacpp_vulkan": "b12211"
