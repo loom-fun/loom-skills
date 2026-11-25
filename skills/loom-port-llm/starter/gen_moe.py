@@ -1274,7 +1274,7 @@ def grouped_gemm(fmt, mode, N, K, E, KU, gemm_fn, fused=False, bias=False, act=N
         # choice moe.prefill.cw_q4k: column-wave grouped GEMMs (weights straight into B fragments, live 16-row fragments only)
         import gen_gemm_rdna4
         cw = lambda arch: gen_moe_cw_q4k.grouped_gemm_cw_q4k(mode, N, K, E, KU, store16=mode == "store" and store16(), arch=arch,
-                                                             xch=gen_moe_cw_q4k.xch())
+                                                             xch=gen_moe_cw_q4k.xch(), fmt=fmt)
         return cw("rdna3") + ("\n" + cw("rdna4") if gen_gemm_rdna4.enabled() else "")
     text = gemm_fn(fmt, mode, fmt2) if fmt2 else gemm_fn(fmt, mode)
     if "q4_0" in (fmt, fmt2):

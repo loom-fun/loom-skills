@@ -1,6 +1,9 @@
-"""MOE_CW_Q4K (choice moe.prefill.cw_q4k): column-wave grouped MoE GEMMs for Q4_K experts, drop-in for gen_moe.grouped_gemm's
-g_moe_ggu_q4_k_k* (gate/up, swiglu) and g_moe_gdn_q4_k_k* (down, store): same names, launch arguments and bucketed 64-row
-expert tiles, with the gfx12 twin `<name>_rdna4` (target(@rdna4)) built by the same generator.
+"""MOE_CW_Q4K (choice moe.prefill.cw_q4k): column-wave grouped MoE GEMMs for Q4_K and Q5_K experts, drop-in for
+gen_moe.grouped_gemm's g_moe_ggu_{q4_k,q5_k}_k* (gate/up, swiglu) and g_moe_gdn_{q4_k,q5_k}_k* (down, store): same names, launch
+arguments and bucketed 64-row expert tiles, with the gfx12 twin `<name>_rdna4` (target(@rdna4)) built by the same generator.
+Q5_K: the same header and code layout (codes at byte 48 of 176) plus qh[32] at byte 16; each lane also loads the qh bytes of
+its K16 pieces (gfx11 16, gfx12 8), shifts them right 4 once per chunk for the upper half, and per K16 piece of group g ORs
+(qh << (4 - g)) & 0x10101010 into the masked nibbles (3 VALU per code word): the codes equal gen_gemm.dequant16's Q5_K codes.
 
 Why: at a 1k-2k prompt with 256 experts top-8 an expert holds ~32-64 rows, and the 64x64-tile grouped GEMM is bound by its
 per-64-K step (half the threads dequantize a 64x64 weight tile into LDS, 2 barriers, 4 row waves read it back). Here each wave
@@ -61,12 +64,21 @@ def _meta(o, hdr):
       %{o}_meta = vector.mulf %{o}_smf, %{o}_dd : vector<8xf16>"""
 
 
-def _values(o, meta, words, g, VW, VF):
-    """%{o}_v vector<VF x f16>: the code words `words` (vector<VW x i32>) of group g (0-3 in the chunk) dequantized."""
+def _values(o, meta, words, g, VW, VF, qh=None):
+    """%{o}_v vector<VF x f16>: the code words `words` (vector<VW x i32>) of group g (0-3 in the chunk) dequantized.
+    qh (Q5_K): the matching qh words, already shifted right by 4 for the chunk's upper half, so bit g of each byte is the
+    value's fifth bit: (qh << (4 - g)) & 0x10 per byte moves it to bit 4 of the code byte (gen_gemm.dequant16's Q5_K code)."""
     sh = (f"      %{o}_sh = vector.shrui {words}, %cq_f4 : vector<{VW}xi32>\n" if g % 2 else "")
     src = f"%{o}_sh" if g % 2 else words
+    code = f"%{o}_mk"
+    if qh is not None:
+        code = f"%{o}_mq"
+        sh5 = f"""      %{o}_hs = vector.shli {qh}, %cq_{"f4" if g == 0 else "s" + str(4 - g)} : vector<{VW}xi32>
+      %{o}_hb = vector.andi %{o}_hs, %cq_m16 : vector<{VW}xi32>
+      %{o}_mq = vector.ori %{o}_mk, %{o}_hb : vector<{VW}xi32>
+"""
     return f"""{sh}      %{o}_mk = vector.andi {src}, %cq_m15 : vector<{VW}xi32>
-      %{o}_b = vector.bitcast %{o}_mk : vector<{VW}xi32> to vector<{VF}xi8>
+{sh5 if qh is not None else ""}      %{o}_b = vector.bitcast {code} : vector<{VW}xi32> to vector<{VF}xi8>
       %{o}_c = vector.uitofp %{o}_b : vector<{VF}xi8> to vector<{VF}xf16>
       %{o}_s = vector.extract {meta}[{g}] : vector<8xf16> -> f16
       %{o}_n = vector.extract {meta}[{4 + g}] : vector<8xf16> -> f16
@@ -104,9 +116,13 @@ def _xch_values(o, meta, words, p, VW, VF):
     return t
 
 
-def grouped_gemm_cw_q4k(mode, N, K, E, KU, store16=False, arch="rdna3", tile=64, xch=False):
-    """One kernel: `g_moe_g{gu,dn}_q4_k_k{K}` (arch rdna3, gfx11 fragments) or its gfx12 twin `..._rdna4` (arch rdna4)."""
-    assert mode in ("swiglu", "store") and arch in ("rdna3", "rdna4"), (mode, arch)
+def grouped_gemm_cw_q4k(mode, N, K, E, KU, store16=False, arch="rdna3", tile=64, xch=False, fmt="q4_k"):
+    """One kernel: `g_moe_g{gu,dn}_{fmt}_k{K}` (arch rdna3, gfx11 fragments) or its gfx12 twin `..._rdna4` (arch rdna4).
+    fmt q5_k: the Q4_K header and code layout (codes at byte 48 of a 176-byte superblock) plus qh[32] at byte 16 (bit g of
+    qh[l] = fifth bit of value l of group g); the chunk's qh words ride along with its code words (xch: Q4_K only)."""
+    assert mode in ("swiglu", "store") and arch in ("rdna3", "rdna4") and fmt in ("q4_k", "q5_k"), (mode, arch, fmt)
+    q5 = fmt == "q5_k"
+    xch = xch and not q5
     assert K % 256 == 0 and tile == 64
     sw = mode == "swiglu"
     g12 = arch == "rdna4"
@@ -116,9 +132,10 @@ def grouped_gemm_cw_q4k(mode, N, K, E, KU, store16=False, arch="rdna3", tile=64,
     assert N % TN == 0, (N, TN)
     WF = [("w", 0), ("w2", 0)] if sw else [("w", 0), ("w", 16)]   # (weight buffer, column offset within the wave's columns)
     WCOLS = 16 if sw else 32
-    rb = K // 256 * 144
+    BB = 176 if q5 else 144      # superblock bytes
+    rb = K // 256 * BB
     eb = rb * N
-    base = f"g_moe_g{'gu' if sw else 'dn'}_q4_k_k{K}"
+    base = f"g_moe_g{'gu' if sw else 'dn'}_{fmt}_k{K}"
     name = base + ("_rdna4" if g12 else "")
     nch = K // KC
     max_rows = 8192 * KU + tile * E
@@ -190,10 +207,16 @@ def grouped_gemm_cw_q4k(mode, N, K, E, KU, store16=False, arch="rdna3", tile=64,
   %wcols = index.constant {WCOLS} : index
   %wave_col_v = index.mul %wave, %wcols : index
   %wave_col = index.assume %wave_col_v [range(%wave_col_v, 0, {TN - WCOLS})] : index
-  %block_bytes = index.constant 144 : offset
+  %block_bytes = index.constant {BB} : offset
   %row_bytes = index.constant {rb} : offset
-  %code_bytes = index.constant 16 : offset
+  %code_bytes = index.constant {48 if q5 else 16} : offset
   %half_bytes = index.constant 64 : offset''']
+    if q5:
+        L.append(f'''  %qh_bytes = index.constant 16 : offset
+  %cq_m16 = vector.splati 269488144 : vector<{VW}xi32>
+  %cq_s3 = vector.splati 3 : vector<{VW}xi32>
+  %cq_s2 = vector.splati 2 : vector<{VW}xi32>
+  %cq_s1 = vector.splati 1 : vector<{VW}xi32>''')
     xch = xch and not g12
     if xch:
         L.append(f'''  %cq_hi = index.cmp uge, %lane, %c16 : index
@@ -265,6 +288,14 @@ def grouped_gemm_cw_q4k(mode, N, K, E, KU, store16=False, arch="rdna3", tile=64,
                 for kk in range(2):
                     s.append(f"    %q{i}{p}{kk}{sfx} = vector.load %qv{i}{sfx}[{p * 8 + kk * 4}] : view<{NWV}xi32> -> vector<{VW}xi32>")
                     outs.append((f"%q{i}{p}{kk}{sfx}", f"vector<{VW}xi32>"))
+            if q5:   # qh[32]: K16 half kk = bytes 16kk .. +16 (gfx12: the lane's 8 of them)
+                NHV = 6 if g12 else 8
+                s.append(f"""    %hb{i}{sfx}_1 = index.add %bo{i}{sfx}, %qh_bytes : offset
+    %hb{i}{sfx} = index.add %hb{i}{sfx}_1, {"%lane_code" if g12 else "%origin"} : offset
+    %hqv{i}{sfx} = buffer.view %{wb}[%hb{i}{sfx}] : buffer -> view<{NHV}xi32>""")
+                for kk in range(2):
+                    s.append(f"    %qh{i}{kk}{sfx} = vector.load %hqv{i}{sfx}[{kk * 4}] : view<{NHV}xi32> -> vector<{VW}xi32>")
+                    outs.append((f"%qh{i}{kk}{sfx}", f"vector<{VW}xi32>"))
         return "\n".join(s), outs
 
     def xload(ch, sfx):
@@ -345,6 +376,10 @@ def grouped_gemm_cw_q4k(mode, N, K, E, KU, store16=False, arch="rdna3", tile=64,
         s.append("    %half_c = index.rem %ch, %c2 : index\n    %sb_hi = index.cmp ne, %half_c, %c0 : index")
         for i in range(len(WF)):
             s.append(_meta(f"m{i}", cr[f"%h{i}p"]))
+            if q5:   # upper chunk half (groups 4-7): their fifth bits are bits 4-7 of the qh bytes
+                for kk in range(2):
+                    s.append(f"""    %qr{i}{kk} = vector.shrui {cr[f"%qh{i}{kk}p"]}, %cq_f4 : vector<{VW}xi32>
+    %qs{i}{kk} = scf.select %sb_hi, %qr{i}{kk}, {cr[f"%qh{i}{kk}p"]} : vector<{VW}xi32>""")
         cur = {a: a for a in accs}
         for g in range(4):
             for kk in range(2):
@@ -355,7 +390,8 @@ def grouped_gemm_cw_q4k(mode, N, K, E, KU, store16=False, arch="rdna3", tile=64,
                             s.append(_xch_values(f"d{i}{g // 2}{kk}", f"%m{i}_meta", cr[f"%q{i}{g // 2}{kk}p"], g // 2, VW, VF))
                         val = f"%d{i}{g // 2}{kk}_{'y' if g % 2 else 'x'}"
                     else:
-                        s.append(_values(f"d{i}{g}{kk}", f"%m{i}_meta", cr[f"%q{i}{g // 2}{kk}p"], g, VW, VF))
+                        s.append(_values(f"d{i}{g}{kk}", f"%m{i}_meta", cr[f"%q{i}{g // 2}{kk}p"], g, VW, VF,
+                                         qh=f"%qs{i}{kk}" if q5 else None))
                         val = f"%d{i}{g}{kk}_v"
                     s.append(f"    %rhs{i}{g}{kk} = vector.fragment<rhs> {val} shape [%c16, %c16] : vector<{VF}xf16>")
                 for f in range(nf):
@@ -412,6 +448,6 @@ def xch():
 
 
 def applies(fmt, mode, N, K, fused=False, bias=False, act=None):
-    """Whether grouped_gemm(fmt, mode, ...) takes the column-wave Q4_K kernel."""
-    return (mode in modes() and fmt == "q4_k" and not (fused or bias or act not in (None, "silu"))
+    """Whether grouped_gemm(fmt, mode, ...) takes the column-wave kernel (Q4_K or Q5_K experts, one format for gate and up)."""
+    return (mode in modes() and fmt in ("q4_k", "q5_k") and not (fused or bias or act not in (None, "silu"))
             and K % 256 == 0 and N % (128 if mode == "swiglu" else 256) == 0)

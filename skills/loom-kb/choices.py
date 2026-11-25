@@ -531,8 +531,8 @@ CHOICE("moe.prefill.prefetch", "bool", True, "MOE_PREFETCH", doc="Stage prefetch
 CHOICE("moe.prefill.store16", "bool", False, "MOE_STORE16", kernels=["g_moe_gdn_*", "g_moe_combine_sorted*"], rows=ROWS_PREFILL, from_pr="qwen35 lane",
        doc="Numerics-moving: the grouped down GEMM stores its expert rows (ys_sorted) as f16 and g_moe_combine_sorted reads them as f16, in place "
            "(gen_moe.store16): half the DRAM traffic of prefill's largest intermediate (prompt rows x used experts x hidden).")
-CHOICE("moe.prefill.cw_q4k", "str", "0", "MOE_CW_Q4K", kernels=["g_moe_ggu_q4_k_*", "g_moe_gdn_q4_k_*"], rows=ROWS_PREFILL, from_pr="qwen35 lane (#1418)",
-       doc="Column-wave grouped MoE GEMMs for Q4_K experts in the starter (gen_moe_cw_q4k.py, gfx11 + gfx12 twin; '1' both, or a list of "
+CHOICE("moe.prefill.cw_q4k", "str", "0", "MOE_CW_Q4K", kernels=["g_moe_ggu_q4_k_*", "g_moe_gdn_q4_k_*", "g_moe_ggu_q5_k_*", "g_moe_gdn_q5_k_*"], rows=ROWS_PREFILL, from_pr="qwen35 lane (#1418)",
+       doc="Column-wave grouped MoE GEMMs for Q4_K and Q5_K experts (Q5_K: the qh fifth bit ORed in word-wide, 3 VALU per code word) in the starter (gen_moe_cw_q4k.py, gfx11 + gfx12 twin; '1' both, or a list of "
            "swiglu,store): each wave owns output columns and dequantizes them straight into WMMA B fragments (no weight LDS stage), the "
            "activation rows are staged once per 128 K, the chunk's 6-bit scales/mins are decoded word-wide once, and only the tile's live "
            "16-row fragments get MMAs. Bit-identical to the 64-row tile kernels on live rows (same values, same K order). Loop VALU per 128 K "
