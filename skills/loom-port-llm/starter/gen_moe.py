@@ -529,6 +529,10 @@ def route_prefill_live(H, E, KU, gating, norm, bias, wty="f32", scale=1.0):
     live.append(f"  scf.if %gl_any{TR - 1} {{\n")
     rep("  %token0 = index.mul %group_id, %cTR : index\n", "  %token0 = index.mul %group_id, %cTR : index\n" + "".join(live))
     rep("  kernel.return\n}\n", "  }\n  kernel.return\n}\n")
+    if "%kept0" in text:   # register-held logits (TR past the LDS of 4): one workgroup spans live and padding tokens; padding rows stay unwritten
+        rep("    %store_lane = scalar.andi %first, %tok_live : i1\n",
+            "    %gl_wt = view.load %gl_view[%token, 2] : view<[%tokens]x4xi32> -> i32\n    %gl_lt = scalar.cmpi ne, %gl_wt, %gl_dead : i32\n"
+            "    %store_lt = scalar.andi %first, %tok_live : i1\n    %store_lane = scalar.andi %store_lt, %gl_lt : i1\n")
     return "\n" + text
 
 
