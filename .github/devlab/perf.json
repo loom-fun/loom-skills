@@ -96,9 +96,10 @@
     "perf:p8k:1:long",
     "perf:base:1",
     "perf:base:1:long",
-    "profile:ab8k:pf2k,pf8k",
+    "profile:ab8k:pf1k,pf2k,pf8k",
     "perf:p12k:1:long",
-    "perf:p12k:1"
+    "perf:p12k:1",
+    "profile:base:pf1k"
    ]
   }
  ]

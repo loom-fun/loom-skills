@@ -794,7 +794,7 @@ while [ "$qi" -lt "${#queue[@]}" ]; do
 import json,statistics as st; r=[json.loads(l) for l in open('$out/perf_$p1.jsonl')]
 k='decode_tps_124k' if '${p3:-}' == 'ctx' else 'decode_tps_32k' if '${p3:-}' else 'decode_tps'
 print('$p1', k, [x.get(k) for x in r if x.get(k)], 'median', round(st.median(v), 2) if (v := [x[k] for x in r if x.get(k)]) else 'n/a (no row served: beyond the served context)')");;
-    profile|trace|observe)   # profile:V[:SCENARIOS] (comma list of probe,pf2k,pf8k,dec; default all but probe): V served alone per scenario with --print_device_statistics (the HAL's
+    profile|trace|observe)   # profile:V[:SCENARIOS] (comma list of probe,pf1k,pf2k,pf8k,dec; default pf2k,pf8k,dec): V served alone per scenario with --print_device_statistics (the HAL's
                # per-function dispatch statistics, printed at shutdown); one session per scenario, so each table holds only that scenario's requests
       capture_kind=$kind   # trace uses the same requests without device profiling (observer-effect control)
       capture_failed=0
