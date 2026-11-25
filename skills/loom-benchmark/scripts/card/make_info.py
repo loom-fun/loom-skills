@@ -106,7 +106,7 @@ the last session that measured it is the card's value (card_lib card_metrics); t
 For XSJ, the descriptor must match across retained ROCm measurements, which take precedence over unmeasured descriptors.
 Limitations from retained XSJ sessions stay with the configuration that recorded them.
 gates: per gate the latest evidence wins (gate_supersedes: a published date-only gate is older than new evidence of that day; equal
-times: the later file), except that on the same programs_sha256 a later pass at a lower level (dev < fast < quick <
+times: the later file), except that on the same SDK and programs_sha256 a later pass at a lower level (dev < fast < quick <
 full) does not replace a pass at a higher level; a later failure always does. roofline: the later file wins. A "devlab"
 block (an older Loom-only sweep) is ignored. Unknown metric and gate names are kept.
 """
@@ -128,7 +128,7 @@ from card_lib import (DEFAULT_GPU, DRAFTED_ROWS, EVIDENCE_ID, GPUS, METRIC_KEYS,
                       gpu_view, load_info, load_json, load_package, metric_applies, native_context, over_context, package_facts,
                       programs_sha256, require_valid, fixed_pool_capacity, gpu_preset_execution, gpu_preset_name, with_gpu_preset, served_context, fit_served_context, upstream_facts, with_gate_features, write_json,
                       SERVE_HEADROOM, registry, fit_rows, non_targets, load_device_results, validate_device_results, with_device_preset, DEVICE_RESULTS_ID, card_serve_args, quick_start, serves,
-                      emulated_gate_errors, historical_xsj_gate, sdk_serve_args, xsj_enabled, xsj_evidence_errors, xsj_measurement_errors, xsj_vulkan_comparison_errors,
+                      emulated_gate_errors, historical_xsj_gate, sdk_version, sdk_serve_args, xsj_enabled, xsj_evidence_errors, xsj_measurement_errors, xsj_vulkan_comparison_errors,
                       CAVEAT_MAX, DEVICE_RESULTS_DIR, QUICK_START_QUALIFICATION, qualified_bare_quick_start, text_errors, stamped, SESSION_ACCEPTANCE_ROWS)
 
 
@@ -201,24 +201,31 @@ class Sources:
 GATE_LEVELS = ("dev", "fast", "quick", "full")   # gates.sh LEVEL, weakest first
 
 
-def gate_supersedes(new, cur):
+def gate_supersedes(new, cur, published_sources):
     """Whether gate evidence `new` replaces `cur` on the card. Each is ((when, order), evidence, published row):
     `when` is an evidence time (YYYY-MM-DDTHH:MM:SS) or a published row's date (YYYY-MM-DD); order is the evidence
     file's position (-1: the published card). A later run wins, so a later failure always shows (a regression) and
-    a pass on other programs replaces evidence on older ones; but on the same programs_sha256 a later pass at a
+    a pass on other programs replaces evidence on older ones; but on the same SDK and programs_sha256 a later pass at a
     lower level does not replace a pass at a higher level (a quick sweep after a full one keeps the full pass; a
     higher-level pass replaces a lower one whatever the order the evidence arrives in).
     Dates and times compare at the coarser precision (a published date-only gate vs a timestamped job of that day
     is a tie, broken by file order: the new evidence), so publishing a card never reorders its evidence."""
     def row(e):
         return e[2] if e[2] is not None else e[1]
+    def measured_sdk(r):
+        source = r["source"]
+        if isinstance(source, str):
+            source = published_sources[source]
+        return sdk_version(source.get("hrx_loom"))
+
     def when(e):
         t = (e[0][0] or "").replace(" ", "T")
         return t[:10], t[11:]
     (nd, nt), (cd, ct) = when(new), when(cur)
     later = (nd, nt if nt and ct else "", new[0][1]) >= (cd, ct if nt and ct else "", cur[0][1])
     n, c = row(new), row(cur)
-    if n["status"] == c["status"] == "pass" and n.get("programs_sha256") and n.get("programs_sha256") == c.get("programs_sha256"):
+    if (n["status"] == c["status"] == "pass" and n.get("programs_sha256")
+            and n["programs_sha256"] == c.get("programs_sha256") and measured_sdk(n) == measured_sdk(c)):
         rank = lambda r: GATE_LEVELS.index(r["level"]) if r.get("level") in GATE_LEVELS else -1
         return rank(n) > rank(c) if rank(n) != rank(c) else later
     return later
@@ -594,7 +601,7 @@ def cmd_build(a):
             gst = gpu_state(g.get("gpu") or evidence_gpu(ev, g.get("source")))
             gst["data"] = True
             new = ((g.get("time") or "", i), g, None)
-            if g["name"] not in gst["gates"] or gate_supersedes(new, gst["gates"][g["name"]]):
+            if g["name"] not in gst["gates"] or gate_supersedes(new, gst["gates"][g["name"]], sources.by_id):
                 gst["gates"][g["name"]] = new
         if ev.get("admission"):   # the native-context admission check of a gates run: the latest per GPU
             x = ev["admission"]

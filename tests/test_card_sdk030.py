@@ -31,6 +31,18 @@ import lint_card  # noqa: E402
 import make_info  # noqa: E402
 
 
+class GateSDK(unittest.TestCase):
+    def test_new_sdk_pass_replaces_an_older_full_pass_on_identical_programs(self):
+        source = lambda version: {"hrx_loom": {"hrx_loom": version}}
+        base = {"programs_sha256": "c" * 64, "status": "pass"}
+        old = (("2026-11-18", -1), None, dict(base, level="full", source="published-job"))
+        new = (("2026-11-24T11:12:13", 0), dict(base, level="dev", source=source("0.3.0")), None)
+        sources = {"published-job": source("0.2.0")}
+        self.assertTrue(make_info.gate_supersedes(new, old, sources))
+        self.assertFalse(make_info.gate_supersedes(old, new, sources))
+        self.assertFalse(make_info.gate_supersedes(new, old, {"published-job": source("0.3.0")}))
+
+
 class DraftTelemetry(unittest.TestCase):
     def test_030_abi1_reports_accepted_without_proposals(self):
         v = bench_common.draft_counters((TEL / "metrics_030_abi1.txt").read_text(encoding="utf-8"))
