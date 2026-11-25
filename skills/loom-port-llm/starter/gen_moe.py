@@ -490,6 +490,29 @@ kernel.def export("g_moe_route_tr") @g_moe_route_tr(%tokens: index) {{
 """, f"""  %lg_view = buffer.view %xs[%zero] : buffer -> view<{TR}x{E}xf32>
 """)
     rep("  scf.for %j = [%c0 to %cEPW step %c1] {\n", f"  {keep_out} = scf.for %j = [%c0 to %cEPW step %c1]({keep_in}) -> ({acc_ty}) {{\n")
+    if HB % 4 == 0:   # the 128-value blocks 4 at a time: 4 weight loads in flight per expert, the sums in the same order
+        loop = f"""    {acc_out} = scf.for %bq = [%c0 to %cHB step %c1]({acc_in}) -> ({acc_ty}) {{
+      %bb = index.assume %bq [range(%bq, 0, {HB - 1})] : index
+{wl}
+{dots}      scf.yield {nxt} : {acc_ty}
+    }}
+"""
+        U = ["    %cu4 = index.constant 4 : index\n",
+             f"    {acc_out} = scf.for %bq = [%c0 to %cHB step %cu4]({acc_in}) -> ({acc_ty}) {{\n"]
+        for u in range(4):
+            U.append(f"      %cu{u}_o = index.constant {u} : index\n      %bq{u} = index.add %bq, %cu{u}_o : index\n"
+                     f"      %bb{u} = index.assume %bq{u} [range(%bq{u}, 0, {HB - 1})] : index\n")
+        for u in range(4):
+            U.append(wl.replace("%bb", f"%bb{u}").replace("%wraw", f"%wraw{u}").replace("%wv", f"%wv{u}") + "\n")
+        for u in range(4):
+            for r in range(TR):
+                prev = f"%a{r}" if u == 0 else f"%n{u - 1}_{r}"
+                U.append(f"""      %xv{u}_{r} = vector.load %xs4_view[{r}, %bb{u}, %lane, %c0] : view<{TR}x{HB}x32x4xf32> -> vector<4xf32>
+      %d{u}_{r} = vector.dotf<reassoc|contract> %wv{u}, %xv{u}_{r}, %zero_f : vector<4xf32>, vector<4xf32>, f32
+      %n{u}_{r} = scalar.addf {prev}, %d{u}_{r} : f32
+""")
+        U.append("      scf.yield " + ", ".join(f"%n3_{r}" for r in range(TR)) + f" : {acc_ty}\n    }}\n")
+        rep(loop, "".join(U))
     rep("""  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
 """ + topk, f"""  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
   %lane_e = index.cmp ult, %lane, %cEPW : index
