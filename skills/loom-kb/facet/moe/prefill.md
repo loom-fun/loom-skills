@@ -35,3 +35,6 @@
     count (2k adds only 0.52 s). Skipping the WMMA of all-padding 16-row waves in the expert tiles: tie (1k +2 %,
     2k -2 %), so the MMA is not the limit; the per-k-step dequant/stage/barrier is. Faster 1k needs a cheaper
     expert weight path (e.g. int8/int4 WMMA on the codes), not less padding.
+  - Q4_K experts (starter): choice moe.prefill.cw_q4k (MOE_CW_Q4K=1) ports the deepseek2 kit's column-wave grouped
+    GEMMs (gen_moe_cw_q4k.py, gfx11 + gfx12 twin): weights decoded per lane straight into WMMA B fragments, activations
+    staged once per 128 K, MMAs only for live 16-row fragments, bit-identical live rows. Speed on DevLab pending.
