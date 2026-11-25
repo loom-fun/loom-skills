@@ -1,0 +1,17 @@
+{
+ "scope": "model/bartowski-Ornith-1.5-122B-loom",
+ "match": {
+  "slug": [
+   "bartowski-Ornith-1.5-122B-loom"
+  ]
+ },
+ "owner": "kb",
+ "choices": [
+  {
+   "set": {
+    "prefill.gemm.kq_deq_f32": true
+   },
+   "evidence": "moe_gemm_12 kernel test (unchanged f64 ggml oracle) fails on the f16 Q4_K dequant on 0.2.0 (run 44088653570) and 0.3.0 (job 138973316618): layer 12 expert block scales are f16-subnormal (d <= 5.6e-5, 98.5 % of d*sc below 2^-14); CPU emulation of the fixture on the real layer-12 experts: f16 dequant 1.41x the tolerance, f32 dequant 0.36x (= ideal f16 weights). DevLab A/B: see the PR."
+  }
+ ]
+}

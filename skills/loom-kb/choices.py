@@ -338,6 +338,12 @@ CHOICE("prefill.gemm.m256_mixed_nl", "bool", False, "GEMM_M256_MIXED_NL", kernel
        doc="IQ4_NL (32-value blocks, inline under prefill.gemm.iq4_native) joins the mixed-format swiglu m256 "
            "(prefill.gemm.m256_mixed) on either side: unsloth UD layers pairing iq4_nl with q5_k / iq4_xs run one f16-output kernel "
            "instead of two GEMMs + silu_mul; the iq4_nl weight's row bytes come from its own block count.")
+CHOICE("prefill.gemm.kq_deq_f32", "bool", False, "GEMM_KQ_DEQ_F32", kernels=["g_gemm_q4_k_*", "g_gemm_q5_k_*", "g_gemm_*_q4_k_*",
+       "g_gemm_*_q5_k_*", "g_moe_ggu_*", "g_moe_gdn_*"], rows=ROWS_PREFILL, from_pr="sdk030-pf-ornith",
+       doc="Numerics-moving: the Q4_K / Q5_K dequant into the WMMA's f16 operand (gen_gemm.kq_deq_f32) computes code * scale - min "
+           "in f32 and rounds each weight once to f16, instead of rounding the group's scale and minimum to f16 and fusing in f16. "
+           "Needed where block scales are f16-subnormal (Ornith-1.5-122B layer 12 experts: the f16 minimum's rounding is shared by "
+           "the group's 32 weights and fails the moe_gemm kernel test).")
 CHOICE("prefill.gemm.q3_k_native", "bool", False, "GEMM_Q3_K_NATIVE", kernels=["g_gemm_q3_k_*", "g_gemm_*_*_swiglu_m256_f16o"],
        rows=ROWS_PREFILL, from_pr="q38xl-fmt",
        doc="Dense Q3_K GEMMs stage their 16-value half-group inline (gen_gemm.q3_k_dequant16: the values of @g_q3_k_values + "

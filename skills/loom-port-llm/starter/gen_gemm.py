@@ -57,6 +57,38 @@ if Q3_K_NATIVE:
     HELPER = HELPER - {"q3_k"}
 
 
+# GEMM_KQ_DEQ_F32 (choice prefill.gemm.kq_deq_f32; numerics-moving): the Q4_K / Q5_K dequant to the WMMA's f16 operand computes
+# code * scale - min in f32 and rounds the weight once (the value ggml's f32 dequant gives, rounded to f16), instead of rounding
+# the group's scale and minimum to f16 first and fusing in f16. With f16-subnormal block scales (d < 2^-14: every block of
+# Ornith-1.5-122B layer 12's experts) the f16 minimum's rounding error is shared by the 32 weights of a group and does not cancel:
+# 3x the dequant error of the single rounding (layer 12's moe_gemm kernel test fails its unchanged oracle).
+KQ_DEQ_F32 = os.environ.get("GEMM_KQ_DEQ_F32", "0").strip().lower() not in ("", "0", "false", "no", "off")
+_KQ_F16 = _re.compile(
+    r"(?P<i>[ \t]*)(?P<o>%\w+)_codes = vector\.uitofp (?P<b>%\w+) : vector<(?P<n>\d+)xi8> to vector<(?P=n)xf16>\n"
+    r"[ \t]*(?P=o)_scale_h = scalar\.fptrunc (?P=o)_scale : f32 to f16\n"
+    r"[ \t]*(?P=o)_neg_min = scalar\.negf (?P=o)_minimum : f32\n"
+    r"[ \t]*(?P=o)_neg_min_h = scalar\.fptrunc (?P=o)_neg_min : f32 to f16\n"
+    r"[ \t]*(?P=o)_scales = vector\.splat (?P=o)_scale_h : vector<(?P=n)xf16>\n"
+    r"[ \t]*(?P=o)_minima = vector\.splat (?P=o)_neg_min_h : vector<(?P=n)xf16>\n"
+    r"[ \t]*(?P=o) = vector\.fmaf (?P=o)_codes, (?P=o)_scales, (?P=o)_minima : vector<(?P=n)xf16>")
+
+
+def kq_deq_f32(text):
+    """GEMM_KQ_DEQ_F32: every Q4_K / Q5_K code * scale - min block of a dequant snippet in f32, one rounding to f16 (same result
+    names and types; the f16 scale / minimum lines go away)."""
+    def f32(m):
+        i, o, b, n = m["i"], m["o"], m["b"], m["n"]
+        return (f"{i}{o}_codes = vector.uitofp {b} : vector<{n}xi8> to vector<{n}xf32>\n"
+                f"{i}{o}_neg_min = scalar.negf {o}_minimum : f32\n"
+                f"{i}{o}_scales = vector.splat {o}_scale : vector<{n}xf32>\n"
+                f"{i}{o}_minima = vector.splat {o}_neg_min : vector<{n}xf32>\n"
+                f"{i}{o}_w32 = vector.fmaf {o}_codes, {o}_scales, {o}_minima : vector<{n}xf32>\n"
+                f"{i}{o} = vector.fptrunc {o}_w32 : vector<{n}xf32> to vector<{n}xf16>")
+    out, k = _KQ_F16.subn(f32, text)
+    assert k, "GEMM_KQ_DEQ_F32: no Q4_K / Q5_K f16 dequant block in the snippet"
+    return out
+
+
 def q3_k_dequant16(w, out):
     """Q3_K (110-byte superblocks of 256: hmask[32], qs[64], scales[12], F16 d): 16 consecutive weights of row %w_row_origin at
     column %w_col -> F16 vector %{out}, all loads first. Half h of group g (scale 2g + h): l = 16h..16h+15,
@@ -280,6 +312,11 @@ def iq4_dequant16(fmt, w, out):
 
 def dequant16(fmt, w, view_name, out):
     """Loom snippet: dequantize 16 consecutive weights of row %w_row at column %w_col into F16 vector %{out}."""
+    text = _dequant16(fmt, w, view_name, out)
+    return kq_deq_f32(text) if KQ_DEQ_F32 and fmt in ("q4_k", "q5_k") else text
+
+
+def _dequant16(fmt, w, view_name, out):
     if fmt == "q4_0" and Q4_0_NATIVE:
         import moe_q4_0
         return moe_q4_0.dequant16(w, out)
@@ -1024,6 +1061,8 @@ def _g32_dequant(fmt, w, out, col):
         text = _g32_iq4(fmt, w, o, col)
     else:
         raise ValueError(fmt)
+    if KQ_DEQ_F32 and fmt == "q4_k":
+        text = kq_deq_f32(text)
     lines = [l for l in text.strip("\n").split("\n") if l.strip()]
     last = max(i for i, l in enumerate(lines) if ".load " in l)
     addr = lines[: last + 1]
