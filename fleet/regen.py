@@ -2676,7 +2676,10 @@ def final_kit_qualifications(doc, sweep, states):
     return shipped
 
 
-def check_staged_qualification(row, *, kit, sdk=None):
+FULL_SUITE_GATES = {"agent", "agent_think_off", "compare", "consistency", "golden", "sampling", "spec", "vision"}
+
+
+def check_staged_qualification(row, *, kit, sdk=None, full_suites=None):
     """Check the pinned text card for failing gates and, for shipped kits, the exact measured sessions."""
     try:
         info = card_lib.load_info(hf_file(row["staging"], "info.json", row["staging_revision"]))
@@ -2690,6 +2693,13 @@ def check_staged_qualification(row, *, kit, sdk=None):
                                  if card_lib.carried_sdk(info, gate.get("source"), sdk))
                 if carried:
                     return f"{gpu}: runner gates still measured on an earlier or unknown SDK: {', '.join(carried)}"
+            if full_suites is not None and gpu not in (row.get("gates_not_rerun") or {}):
+                gates = view.get("gates") or {}
+                expected = {"consistency"} | (FULL_SUITE_GATES & (set(gates) | set(full_suites.get(gpu) or {})))
+                missing = sorted(name for name in expected if gates.get(name, {}).get("level") != "full"
+                                 or gates[name].get("programs_sha256") != row["programs_sha256"])
+                if missing:
+                    return f"{gpu}: missing full gates on final programs: {', '.join(missing)}"
             if not kit:
                 continue
             sessions = (view.get("performance") or {}).get("sessions", [])
@@ -2715,7 +2725,9 @@ def cmd_eligible(a):
     for slug, row in list(eligible.items()):
         if row["kind"] != "text":
             continue
-        problem = check_staged_qualification(row, kit=slug in shipped, sdk=doc["sdk"]["new"])
+        expected = ({gpu: d.get("gates") for gpu, d in doc["models"][slug]["devices"].items()}
+                    if getattr(a, "require_full_gates", False) else None)
+        problem = check_staged_qualification(row, kit=slug in shipped, sdk=doc["sdk"]["new"], full_suites=expected)
         if problem:
             pending[slug] = {"production": eligible[slug]["production"], "reasons": {"staging": problem}}
             del eligible[slug]
@@ -3117,6 +3129,7 @@ def main(argv=None):
             q.add_argument("-o", "--out", required=True)
         else:
             q.add_argument("--out-dir", required=True)
+            q.add_argument("--require-full-gates", action="store_true", help="require full-level runner suites on the final program digest")
             q.add_argument("--kit-state", action="append", help="phase-2 state (repeat for every device): qualify the final published programs")
         q.set_defaults(fn=fn)
     q = sub.add_parser("rerender")

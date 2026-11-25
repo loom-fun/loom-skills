@@ -799,6 +799,24 @@ class KitVerdict(unittest.TestCase):
                                                     "top": [[12, -0.05], [11, -4.5]]})
             self.assertIsNone(regen.kit_near_tie(e, cmp))
 
+    def test_release_full_suite_checks_measured_names_level_and_programs(self):
+        row = {"staging": "staging/test", "staging_revision": "r", "programs_sha256": H,
+               "qualification": {"strix-halo": {}}}
+        expected = {"strix-halo": {"consistency": "PASS", "agent": "PASS"}}
+        gate = {"status": "pass", "level": "full", "source": "job", "programs_sha256": H}
+        gates = {"consistency": dict(gate), "agent": dict(gate), "logits": dict(gate, level="quick")}
+        info = {"devices": {"strix-halo": {"gates": gates}}, "sources": {"job": {"hrx_loom": {"hrx_loom": "0.3.0"}}}}
+        with mock.patch.object(regen, "hf_file", return_value="card"), mock.patch.object(regen.card_lib, "load_info", return_value=info):
+            def check():
+                return regen.check_staged_qualification(row, kit=False, sdk="0.3.0", full_suites=expected)
+            self.assertIsNone(check())
+            gates["agent"]["level"] = "dev"
+            self.assertIn("agent", check())
+            gates["agent"] = dict(gate, programs_sha256="older")
+            self.assertIn("agent", check())
+            del gates["agent"]
+            self.assertIn("agent", check())
+
     def test_final_session_checks_device_job_and_digest(self):
         row = {"staging": "staging/test", "staging_revision": "a" * 40, "programs_sha256": H,
                "qualification": {"strix-halo": {"url": "run/1"}, "radeon-r9700": {"url": "run/2"}}}
