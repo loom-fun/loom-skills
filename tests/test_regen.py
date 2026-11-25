@@ -55,7 +55,7 @@ class Base(unittest.TestCase):
 
     def plan(self, *args, slugs=(SLUG,), device="radeon-r9700"):
         with mock.patch.object(regen, "sh", self.gen), mock.patch.object(regen, "hf_head", lambda repo: "f" * 40), \
-                mock.patch.object(regen, "old_sdk_revision", lambda repo: "e" * 40), contextlib.redirect_stdout(io.StringIO()):
+                mock.patch.object(regen, "old_sdk_revision", lambda repo, target=None: "e" * 40), contextlib.redirect_stdout(io.StringIO()):
             regen.main(["plan", "--base", "r9700", "--device", device, "--state", self.state, *args, *slugs])
         return regen.State(self.state)
 
@@ -263,7 +263,7 @@ class IngestPublishTest(Base):
             f.write("b" * 64)
         with open(os.path.join(self.tmp, "ktest_staging.log"), "w"):
             pass
-        pin = regen.SDK_030_PIN
+        pin = regen.release_pin("0.3.0")
 
         def snapshot(repo, revision, out):
             os.makedirs(out, exist_ok=True)
@@ -381,7 +381,7 @@ class SdkAbTest(Base):
     """--mode sdk-ab: the SDK migration's A/B (old = the manifest's staging card on 0.1.0, new = built on 0.2.0): plan, ratchet, deltas, status."""
 
     def plan_sdk(self, **kw):
-        return self.plan("--mode", "sdk-ab", **kw)
+        return self.plan("--mode", "sdk-ab", "--new-sdk", "0.2.0", **kw)
 
     def cmp_file(self, name, ratios, gates=None, text="MATCH", degraded=None):
         """a strix_ab_compare.py result with the given new/old ratio per row"""
@@ -443,16 +443,16 @@ class SdkAbTest(Base):
 
     def test_sdk_030_requires_both_verified_serving_wheels(self):
         job = {"dir": self.tmp}
-        self.assertFalse(regen.measured_sdk_030(job))
+        self.assertFalse(regen.measured_sdk(job, "0.3.0"))
         first = os.path.join(self.tmp, "sdk_staging.json")
         second = os.path.join(self.tmp, "sdk_stagingnd.json")
-        for path, pin in ((first, regen.SDK_030_PIN), (second, {"hrx_loom": "0.3.0"})):
+        for path, pin in ((first, regen.release_pin("0.3.0")), (second, {"hrx_loom": "0.3.0"})):
             with open(path, "w") as f:
                 json.dump(pin, f)
-        self.assertFalse(regen.measured_sdk_030(job))
+        self.assertFalse(regen.measured_sdk(job, "0.3.0"))
         with open(second, "w") as f:
-            json.dump(regen.SDK_030_PIN, f)
-        self.assertTrue(regen.measured_sdk_030(job))
+            json.dump(regen.release_pin("0.3.0"), f)
+        self.assertTrue(regen.measured_sdk(job, "0.3.0"))
 
     def test_sdk_ab_takes_no_old_org(self):
         with self.assertRaises(SystemExit), mock.patch.object(regen, "sh", self.gen):
@@ -660,7 +660,7 @@ class SdkLoomTest(Base):
     package_recorded = SdkAbTest.package_recorded
 
     def plan_loom(self):
-        return self.plan("--mode", "sdk-loom")
+        return self.plan("--mode", "sdk-loom", "--new-sdk", "0.2.0")
 
     def cmp_file(self, name, vs_card, gates=None):
         """a strix_ab_compare.py result of a Loom-only job: new values and new / old-card ratios (no old side)"""
@@ -671,7 +671,7 @@ class SdkLoomTest(Base):
         return p
 
     def test_accept_regression_publishes_only_a_confirmed_slowdown(self):
-        st = self.plan_loom() if hasattr(self, "plan_loom") else self.plan("--mode", "sdk-loom")
+        st = self.plan_loom() if hasattr(self, "plan_loom") else self.plan("--mode", "sdk-loom", "--new-sdk", "0.2.0")
         e = st.jobs[JOB]
         e.update(stage="needs_decision", reason="confirmed regression / failed gate / text difference: ABBA confirmation (job 1): slower than -3%: prefill -7.4 %",
                  confirm_rows=["prefill"], perf={"decode": 1.0, "prefill": -6.0, "longctx": 0.0, "4stream": 0.0})
@@ -690,7 +690,7 @@ class SdkLoomTest(Base):
         self.assertEqual(regen.State(self.state).jobs[JOB]["stage"], "needs_decision")   # a gate failure is never accepted
 
     def test_accept_regression_sdk_ab_needs_both_runs_confirmed(self):
-        st = self.plan("--mode", "sdk-ab")
+        st = self.plan("--mode", "sdk-ab", "--new-sdk", "0.2.0")
         e = st.jobs[JOB]
         e.update(stage="needs_decision", round=2, reason="confirmed regression / failed gate / text difference: still undecided after the confirming run: slower than -3%: decode -4.0 %")
         st.save()
@@ -721,7 +721,7 @@ class SdkLoomTest(Base):
         return regen.State(self.state)
 
     def test_accept_gate_failure_only_kernel_tests_that_ran(self):
-        st = self.plan("--mode", "sdk-loom")
+        st = self.plan("--mode", "sdk-loom", "--new-sdk", "0.2.0")
         metrics = {r: {"new": 100.0, "card": 100.0, "new_vs_card": 1.0} for r in regen.SDK_METRICS.values()}
         held = dict(stage="needs_decision", decision="hold", reason="confirmed regression / failed gate / text difference: gate failed: ktest:staging")
         cmp = self._gate_job(st.jobs[JOB], ["ktest:staging"], metrics)
@@ -746,7 +746,7 @@ class SdkLoomTest(Base):
         self.assertEqual((e["stage"], e["decision"]), ("collected", "confirm"))
 
     def test_accept_gate_failure_settles_a_held_abba_confirmation(self):
-        st = self.plan("--mode", "sdk-loom")
+        st = self.plan("--mode", "sdk-loom", "--new-sdk", "0.2.0")
         e = st.jobs[JOB]
         e.update(stage="needs_decision", decision="confirm", confirm_rows=["prefill"], perf_cross={"decode": 0.0, "prefill": -5.0, "longctx": 0.0, "4stream": 0.0},
                  reason="ABBA confirmation (job 7): gate failed: ktest:staging (ABBA prefill -1.0 %)")
@@ -762,7 +762,7 @@ class SdkLoomTest(Base):
         self.assertIn("published as failed", e["accepted_gate_failure"])
 
     def test_accept_gate_failure_sdk_ab_round2(self):
-        st = self.plan("--mode", "sdk-ab")
+        st = self.plan("--mode", "sdk-ab", "--new-sdk", "0.2.0")
         e = st.jobs[JOB]
         ab = {r: {"old": 100.0, "new": 100.0, "ratio": 1.0} for r in regen.SDK_METRICS.values()}
         self._gate_job(e, ["ktest:staging"], ab, tag="ab2")
@@ -1010,7 +1010,7 @@ class PackageTest(Base):
         self.write_tree(os.path.join(self.canon, SLUG), {"control.loom": "v02"}, v02_model(), {"flash2.loom": "new gen"})
         open(os.path.join(self.canon, SLUG, ".ref"), "w").write("c" * 40)
         self.want = regen.card_lib.programs_sha256(os.path.join(self.canon, SLUG))
-        self.st = self.plan("--mode", "sdk-ab")
+        self.st = self.plan("--mode", "sdk-ab", "--new-sdk", "0.2.0")
 
     def run_package(self, *args, head="a" * 40, new_head="d" * 40, snap_programs=None, upload_stdout=None):
         uploads = []
