@@ -427,6 +427,16 @@ class PackageFrozen(unittest.TestCase):
         res, commits = self.run_package(["README.md"], dry=True)
         self.assertEqual((res["revision"], commits), (None, []))
 
+    def test_a_model_with_only_its_abba_confirmation_promoted_is_skipped(self):
+        """the sweep job waits for a decision while its ABBA job is promoted: nothing to package for that model (no crash), the next model is"""
+        abba = dict(self.job, stage="collected", prev="first")
+        other = dict(self.job, slug="other", stage="collected", package={"revision": "p" * 40})
+        st = SimpleNamespace(d={"opts": {}}, save=lambda: None, log=lambda m: None)
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            regen.cmd_package_frozen(st, SimpleNamespace(dry_run=False), [("abba", abba), ("o", other)])
+        self.assertIn("other: package already published", out.getvalue())
+        self.assertNotIn(TEXT, out.getvalue())
+
 
 class ImageRequest(unittest.TestCase):
     def test_text_to_image_and_upscale_requests(self):
