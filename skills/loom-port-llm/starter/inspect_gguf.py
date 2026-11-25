@@ -282,6 +282,30 @@ elif _attn and _qkv[_attn[0]]:
     print(f"attention biases: {cfg['attn_bias']} (added by g_qk_rope_store)")
 # Attention sinks (one learned logit per query head, added to the softmax denominator).
 cfg["attn_sinks"] = "blk.0.attn_sinks.weight" in tensors
+# PrismML rotated-basis checkpoints (Ternary Bonsai, prism.hadamard.*; llama.cpp load_hparams_hadamard): each listed weight was
+# stored as W D H, so its matmul input becomes H (D x): signs D (one +/-1 vector per input width), then the normalized Sylvester
+# Walsh-Hadamard transform over consecutive `block` values. The token embedding stores rotated rows: h = D (H z) after the lookup.
+# gdn_v_grouped: the gated delta-net output projection (ssm_out) was folded with its input in grouped head order
+# [head_dim, v_per_k, k_heads], while the layer produces tiled order [head_dim, k_heads, v_per_k].
+if field("prism.hadamard.version") is not None:
+    _hv = field("prism.hadamard.version")
+    assert _hv == 1 and field("prism.hadamard.transform") == "normalized-sylvester-walsh-hadamard" \
+        and field("prism.hadamard.axis") == "input-last-dimension", f"prism.hadamard v{_hv}: only v1 (untied head) is supported"
+    _sw, _sv = list(field("prism.hadamard.sign_widths") or []), list(field("prism.hadamard.sign_values") or [])
+    _signs, _o = {}, 0
+    for _w in _sw:   # +/-1 per input column as a hex bit string (bit set = -1), little-endian within each byte
+        _bits = bytearray((_w + 7) // 8)
+        for _i, _s in enumerate(_sv[_o:_o + _w]):
+            if _s < 0:
+                _bits[_i // 8] |= 1 << (_i % 8)
+        _signs[str(_w)], _o = _bits.hex(), _o + _w
+    assert field("prism.hadamard.sign_mode") == "identity" or _o == len(_sv), "prism.hadamard sign values do not match the widths"
+    cfg["hadamard"] = {"block": int(field("prism.hadamard.block_size")), "signs": _signs,
+                       "weights": sorted(field("prism.hadamard.weight_names")),
+                       "inverse": sorted(field("prism.hadamard.inverse_weight_names") or []),
+                       "gdn_v_grouped": bool(field("prism.hadamard.gdn_v_grouped", False))}
+    print(f"prism.hadamard: {len(cfg['hadamard']['weights'])} weights take H(Dx) inputs (block {cfg['hadamard']['block']}, "
+          f"sign widths {_sw}), inverse after lookup: {cfg['hadamard']['inverse']}, gdn_v_grouped={cfg['hadamard']['gdn_v_grouped']}")
 # MoE FFN (gen_moe.py) after the leading dense layers: router (f32/bf16), top-k, optional selection bias, shared
 # experts (Qwen: with a sigmoid gate, ffn_gate_inp_shexp). llama.cpp hard-codes some routing choices per architecture
 # instead of writing them to the GGUF; MOE_DEFAULTS mirrors src/models/<arch>.cpp (build_moe_ffn's norm_w and gating).
@@ -360,30 +384,6 @@ if template:
             print("WARNING: the derived chat block does not reproduce the template (FAIL above); fix it by hand")
     except (chat_probe.ProbeError, ValueError, KeyError) as e:
         print("WARNING: chat template not derivable automatically:", e)
-# PrismML rotated-basis checkpoints (Ternary Bonsai, prism.hadamard.*; llama.cpp load_hparams_hadamard): each listed weight was
-# stored as W D H, so its matmul input becomes H (D x): signs D (one +/-1 vector per input width), then the normalized Sylvester
-# Walsh-Hadamard transform over consecutive `block` values. The token embedding stores rotated rows: h = D (H z) after the lookup.
-# gdn_v_grouped: the gated delta-net output projection (ssm_out) was folded with its input in grouped head order
-# [head_dim, v_per_k, k_heads], while the layer produces tiled order [head_dim, k_heads, v_per_k].
-if field("prism.hadamard.version") is not None:
-    _hv = field("prism.hadamard.version")
-    assert _hv == 1 and field("prism.hadamard.transform") == "normalized-sylvester-walsh-hadamard" \
-        and field("prism.hadamard.axis") == "input-last-dimension", f"prism.hadamard v{_hv}: only v1 (untied head) is supported"
-    _sw, _sv = list(field("prism.hadamard.sign_widths") or []), list(field("prism.hadamard.sign_values") or [])
-    _signs, _o = {}, 0
-    for _w in _sw:   # +/-1 per input column as a hex bit string (bit set = -1), little-endian within each byte
-        _bits = bytearray((_w + 7) // 8)
-        for _i, _s in enumerate(_sv[_o:_o + _w]):
-            if _s < 0:
-                _bits[_i // 8] |= 1 << (_i % 8)
-        _signs[str(_w)], _o = _bits.hex(), _o + _w
-    assert field("prism.hadamard.sign_mode") == "identity" or _o == len(_sv), "prism.hadamard sign values do not match the widths"
-    cfg["hadamard"] = {"block": int(field("prism.hadamard.block_size")), "signs": _signs,
-                       "weights": sorted(field("prism.hadamard.weight_names")),
-                       "inverse": sorted(field("prism.hadamard.inverse_weight_names") or []),
-                       "gdn_v_grouped": bool(field("prism.hadamard.gdn_v_grouped", False))}
-    print(f"prism.hadamard: {len(cfg['hadamard']['weights'])} weights take H(Dx) inputs (block {cfg['hadamard']['block']}, "
-          f"sign widths {_sw}), inverse after lookup: {cfg['hadamard']['inverse']}, gdn_v_grouped={cfg['hadamard']['gdn_v_grouped']}")
 fmts = sorted({v["type"] for k, v in tensors.items() if k.endswith(".weight") and len(v["shape"]) == 2})
 print(f"{cfg['name']}: arch={arch} L={L} H={H} heads={heads}/{cfg['kv_heads']} d={head_dim} ffn={cfg['ffn']} vocab={vocab} formats={fmts}")
 unsupported = [f for f in fmts if f not in formats.DECODES]   # what gen_llm.py decodes (formats.py)
