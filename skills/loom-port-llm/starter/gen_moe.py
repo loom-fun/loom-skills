@@ -113,7 +113,7 @@ def scaled(v, ind, scale):
     return "" if scale == 1.0 else f"\n{ind}%{v}_k = scalar.constant {float(scale)!r} : f32\n{ind}%{v}s = scalar.mulf %{v}, %{v}_k : f32"
 
 
-def route_decode(H, E, KU, gating, norm, bias, wty="f32", scale=1.0):
+def route_decode(H, E, KU, gating, norm, bias, wty="f32", scale=1.0, split=True):
     """Decode-shaped epochs (t < 64): one workgroup per token. Router logits (f32 or bf16 weights) into LDS, then a
     parallel top-k: one thread per expert, KU rounds of workgroup max/min-index reductions (flint_router_topk pattern).
     Each lane reads 32-value chunks: few, wide loads in flight, which suits one latency-bound workgroup."""
@@ -129,7 +129,7 @@ def route_decode(H, E, KU, gating, norm, bias, wty="f32", scale=1.0):
     bias_load = f"""    %b_view = buffer.view %b[%zero] : buffer -> view<{E}xf32>
     %bias_v = view.load %b_view[%be] : view<{E}xf32> -> f32""" if bias else ""
     if gating == 3:   # the biased logit is both the selection score and the weight's logit
-        return _softmax_weight_decode(route_decode(H, E, KU, 2, False, bias, wty))
+        return _softmax_weight_decode(route_decode(H, E, KU, 2, False, bias, wty, split=False))
     norm_text = f"""  %min_sum = scalar.constant 6.103515625e-05 : f32
   %wsum = scalar.maxnumf %total, %min_sum : f32""" if norm else "  %wsum = scalar.constant 1.0 : f32"
     # softmax: thread e holds logit e (out of range: -3e38); probabilities over all E experts (workgroup max and
@@ -164,7 +164,7 @@ def route_decode(H, E, KU, gating, norm, bias, wty="f32", scale=1.0):
 """ for u in range(U)) + """    }
   }
 """
-    return f"""
+    text = f"""
 // Router: wave w scores experts w*{EPW}..; then thread e holds expert e and {KU} rounds of
 // workgroup reductions pick the top {KU} (ties: lowest index) of {GATE_NAME[gating]}{' + bias' if bias else ''}.
 kernel.def export("g_moe_route") @g_moe_route(%tokens: index) {{
@@ -250,6 +250,82 @@ kernel.def export("g_moe_route") @g_moe_route(%tokens: index) {{
   kernel.return
 }}
 """
+    if split and route_split():
+        text += _route_split(text, rloop, H, E, U, wty)
+    return text
+
+
+def route_split():
+    """moe.route.decode_split (MOE_ROUTE_DSPLIT): decode-shaped epochs score the router in g_moe_route_lg (one wave per U experts over every
+    token of the epoch: each router weight is read once per epoch, by E / U waves instead of one workgroup per token) into a logits scratch,
+    and g_moe_route_tk (g_moe_route's softmax and top-k, one workgroup per token) reads them. Each expert's logit is the same wave's same
+    sums as g_moe_route's, so ids and weights are bit-identical. Qwen3.6-35B Strix: g_moe_route 34 us x 40 layers per verify step (1.4 ms of
+    a 28.5 ms step; 4 streams 1.37 of 23.8 ms), one workgroup per token streaming the 2 MB f32 router."""
+    return os.environ.get("MOE_ROUTE_DSPLIT", "0") not in ("", "0")
+
+
+def _route_split(text, rloop, H, E, U, wty):
+    """g_moe_route_lg + g_moe_route_tk from g_moe_route's text and its scoring loop."""
+    HG, WPG = H // 32, 4
+    assert E % (U * WPG) == 0
+    lg_loop = (rloop.replace("view.store %logit", "view.store %logit").replace("%lg_view[%ex", "%lgt_view[%token, %ex").replace(f" : f32, view<{E}xf32>", f" : f32, view<[%tokens]x{E}xf32>")
+               .replace("  scf.for %j = [%c0 to %cEPW step %cU] {", "  scf.for %j = [%c0 to %cU step %cU] {"))
+    lg = f"""
+// Router logits of a decode-shaped epoch: wave w of workgroup g scores experts (g*{WPG} + w)*{U} .. +{U} of every token (g_moe_route's sums).
+kernel.def export("g_moe_route_lg") @g_moe_route_lg(%tokens: index) {{
+  %c1 = index.constant 1 : index
+  %cwg = index.constant {E // (U * WPG)} : index
+  %clanes = index.constant {32 * WPG} : index
+  kernel.launch.config workgroups(%cwg, %c1, %c1) workgroup_size(%clanes, %c1, %c1) : index
+}} launch(%tokens_arg: index, %x: buffer, %w: buffer, %lgb: buffer) {{
+  %tokens = index.assume %tokens_arg [range(%tokens_arg, 1, 8192)] : index
+  %group_id = kernel.workgroup.id<x> : index
+  %group = index.assume %group_id [range(%group_id, 0, {E // (U * WPG) - 1})] : index
+  %wave_id = kernel.subgroup.id : index
+  %wave = index.assume %wave_id [range(%wave_id, 0, {WPG - 1})] : index
+  %lane_id = kernel.subgroup.lane.id : index
+  %lane = index.assume %lane_id [range(%lane_id, 0, 31)] : index
+  %zero = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c32 = index.constant 32 : index
+{"".join(f"  %c{u} = index.constant {u} : index" + chr(10) for u in range(2, U))}  %cHG = index.constant {HG} : index
+  %zero_f = scalar.constant 0.0 : f32
+  %x_view = buffer.view %x[%zero] : buffer -> view<[%tokens]x{HG}x32xf32>
+  %w_view = buffer.view %w[%zero] : buffer -> view<{E}x{HG}x32x{wty}>
+  %lgt_view = buffer.view %lgb[%zero] : buffer -> view<[%tokens]x{E}xf32>
+  %first = index.cmp eq, %lane, %c0 : index
+  %cwpg = index.constant {WPG} : index
+  %slot = index.madd %group, %cwpg, %wave : index
+  %cU0 = index.constant {U} : index
+  %e0 = index.mul %slot, %cU0 : index
+  scf.for %tok = [%c0 to %tokens step %c1] {{
+  %token = index.assume %tok [lt(%tok, %tokens)] : index
+{lg_loop}  }}
+  kernel.return
+}}
+"""
+    tk = text[text.index('kernel.def export("g_moe_route")'):]
+    tk = tk.replace('kernel.def export("g_moe_route") @g_moe_route(', 'kernel.def export("g_moe_route_tk") @g_moe_route_tk(')
+    tk = tk.replace("launch(%tokens_arg: index, %x: buffer, %w: buffer, %b: buffer, %ids: buffer, %wts: buffer) {",
+                    "launch(%tokens_arg: index, %lgb: buffer, %b: buffer, %ids: buffer, %wts: buffer) {")
+    a, b = tk.index(rloop), len(rloop)
+    copy = f"""  %ct0 = kernel.workitem.id<x> : index
+  %ctb = index.assume %ct0 [range(%ct0, 0, 255)] : index
+  %c_in = index.cmp ult, %ctb, %cE : index
+  scf.if %c_in {{
+    %cbe = index.assume %ctb [range(%ctb, 0, {E - 1})] : index
+    %lgt_view = buffer.view %lgb[%zero] : buffer -> view<[%tokens]x{E}xf32>
+    %cl = view.load %lgt_view[%token, %cbe] : view<[%tokens]x{E}xf32> -> f32
+    view.store %cl, %lg_view[%cbe] : f32, view<{E}xf32>
+  }}
+"""
+    tk = tk[:a] + copy + tk[a + b:]
+    for dead in (f"  %x_view = buffer.view %x[%zero] : buffer -> view<[%tokens]x{HG}x32xf32>\n",
+                 f"  %w_view = buffer.view %w[%zero] : buffer -> view<{E}x{HG}x32x{wty}>\n"):
+        assert dead in tk, dead
+        tk = tk.replace(dead, "")
+    return "\n" + lg + "\n// Softmax and top-k of the router logits g_moe_route_lg wrote (g_moe_route's second half, bit-identical).\n" + tk
 
 
 def route_tokens_per_wg(H, E):
