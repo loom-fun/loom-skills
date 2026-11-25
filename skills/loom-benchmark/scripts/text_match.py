@@ -26,9 +26,7 @@ ap.add_argument("--thinking", default="off", choices=["off", "on", "template"])
 ap.add_argument("--n", type=int, default=50)
 a = ap.parse_args()
 tok = Tokenizer.from_file(a.tokenizer)
-PROMPTS = ["Write a detailed 300-word essay about the history of the printing press.",
-           "Write a long, detailed essay discussing this documentation.\n\n" + doc(2000),
-           "Explain how a refrigerator works, step by step."]
+from ratchet_prompts import PROMPTS
 TH = thinking_extra(a.thinking)
 
 

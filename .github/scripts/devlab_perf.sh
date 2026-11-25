@@ -924,6 +924,28 @@ print('gufo', k, [x.get(k) for x in r if x.get(k)], 'median', round(st.median(v)
       for i in 1 2 3; do (cd "$out" && "$T" "$B/c4_steady.py" "$lurl" 4 --thinking "$TH" | tail -1 | tee -a "c4_llamacpp${bkt}_n$nm.txt"); done
       echo "{\"session_end\": \"llamacpp$bkt-n$nm\"}" >> "$out/c4_llamacpp${bkt}_n$nm.txt"
       res[$s]=$("$T" -c "import json,statistics as st; print('llamacpp$bkt n-max $nm c4 median', st.median(r['agg_tps'] for l in open('$out/c4_llamacpp${bkt}_n$nm.txt') if 'agg_tps' in (r := json.loads(l))))");;
+    tie_native)
+      serve_alone "$p1" || exit 1
+      "$T" "$B/text_match.py" save "$url" "$out/text_$p1.json" --model "$cardid" --tokenizer "$card/tokenizer.json" --thinking "$TH" || exit 1
+      res[$s]="captured";;
+    tie_probe)
+      free_gpu
+      export LOOM_KIT=${KIT[staging]}
+      "$T" "$B/tie_probe.py" prepare "$out" "$D/staging/pkg" || exit 1
+      if [ "$(jq length "$out/tie_cases.json")" != 0 ]; then
+        gufo_bundle || exit 1
+        curl -fsSL https://raw.githubusercontent.com/loom-fun/loom-gufo-extension/ecd89ba7a64a92cb8f792fddeeabec96143b2e62/loom-embed/loom_text_embed.h -o "$D/loom_text_embed.h" || exit 1
+        echo "f4237a7e40e29c87dbbcbfd7f8efe7e1f674299b88bbd5158079bd33d9728191  $D/loom_text_embed.h" | sha256sum -c - || exit 1
+        cc -O2 -I"$D" "$here/.github/scripts/tie_probe.c" -L"$GUFO_BUNDLE/lib" -Wl,--allow-shlib-undefined -lloom_text_embed -lm -o "$D/tie_probe" || exit 1
+        for v in fun staging; do
+          while read -r i a b; do
+            "$GUFO_BUNDLE/lib/ld-linux-x86-64.so.2" --library-path "$GUFO_BUNDLE/lib" "$D/tie_probe" "$D/$v/pkg" "$(pkg_preset "$D/$v/pkg/model.json")" "$out/tie_body_$i.json" "$out/tie_prefix_$i.txt" "$a" "$b" > "$out/tie_${v}_$i.json" || exit 1
+          done < <(jq -r '.[] | [.prompt,.candidates[]] | @tsv' "$out/tie_cases.json")
+        done
+        llama_up || exit 1
+        "$T" "$B/tie_probe.py" reference "$out" "$D/staging/pkg" "$lurl" || exit 1
+      fi
+      res[$s]="captured";;
     textmatch)   # textmatch:V: first 50 generated tokens of perf.py's prompts, Loom V then llama.cpp (one at a time)
       serve_alone "$p1" || { res[$s]=ERROR; continue; }
       "$T" "$B/text_match.py" save "$url" "$out/text_$p1.json" --model "$cardid" --tokenizer "$card/tokenizer.json" --thinking "$TH" | tail -1
