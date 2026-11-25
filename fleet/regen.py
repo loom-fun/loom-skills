@@ -84,6 +84,7 @@ import make_info  # noqa: E402
 from draft_telemetry import DEPTH_COUNTED_PROPOSAL_SDKS  # noqa: E402
 import promote_check  # noqa: E402
 import sample_lib  # noqa: E402
+import functional_probes
 import sdk_package  # noqa: E402
 import sdk_pin  # noqa: E402
 from sdk_pin import VERIFIED_RELEASES  # noqa: E402
@@ -1363,7 +1364,7 @@ def standalone_logits(spec, slug, gpu, package, work):
     return standalone_gates(spec, slug, gpu, package, work, full=False)
 
 
-def standalone_gates(spec, slug, gpu, package, work, *, full):
+def standalone_gates(spec, slug, gpu, package, work, *, full, probes=False):
     """Build card evidence for the requested suite from a verified final-program device job."""
     if not isinstance(spec, dict) or not all(isinstance(spec.get(k), str) and spec[k] for k in ("artifact", "job", "variant")):
         raise RuntimeError("standalone functional ingest requires artifact, job and variant")
@@ -1372,7 +1373,7 @@ def standalone_gates(spec, slug, gpu, package, work, *, full):
     summary = sdk_package.load(artifact / "summary.json")
     step = f"gates:{variant}:full" if full else f"logits:{variant}"
     if (job.get("conclusion") != "success" or gpu not in job.get("labels", []) or job["name"] != summary["job"]
-            or job["runner_name"] != summary["runner"] or step not in summary["results"]):
+            or job["runner_name"] != summary["runner"] or (not probes and step not in summary["results"])):
         raise RuntimeError("standalone functional artifact does not match the completed device job")
     url = f"https://github.com/{REPO}/actions/runs/{job['run_id']}/job/{job['id']}"
     if job["html_url"] != url:
@@ -1387,24 +1388,34 @@ def standalone_gates(spec, slug, gpu, package, work, *, full):
     expected = sdk_package.load(Path(package) / "llm_config.json").get("sdk") or {}
     if not expected.get("wheel_sha256") or any(sdk.get(k) != expected.get(k) for k in ("hrx_loom", "wheel_sha256")):
         raise RuntimeError("standalone functional job did not use the staging package's verified SDK wheel")
-    kind = "full" if full else "logits"
-    result = artifact / f"gates_{variant}" / "gates.json" if full else artifact / f"logits_{variant}.json"
-    doc = sdk_package.load(result)
-    gates = doc.get("gates") or {}
-    if not gates or any(not isinstance(gate.get("pass"), bool) for gate in gates.values()):
-        raise RuntimeError("standalone functional job lacks measured gate verdicts")
-    if full:
-        if doc.get("level") != "full" or "consistency" not in gates:
-            raise RuntimeError("standalone functional job did not run the full suite")
-    elif set(gates) != {"logits"}:
-        raise RuntimeError("standalone functional job has no isolated logits verdict")
+    if probes:
+        kind = "probes"
+        groups = functional_probes.read_probes(artifact, package, variant, spec["gates"], summary["results"])
+        results = []
+        for level, measured in groups.items():
+            path = Path(work).resolve() / f"specialized_{level}.json"
+            path.write_text(json.dumps({"level": level, "gates": measured}))
+            results.append(str(path))
+    else:
+        kind = "full" if full else "logits"
+        result = artifact / f"gates_{variant}" / "gates.json" if full else artifact / f"logits_{variant}.json"
+        doc = sdk_package.load(result)
+        gates = doc.get("gates") or {}
+        if not gates or any(not isinstance(gate.get("pass"), bool) for gate in gates.values()):
+            raise RuntimeError("standalone functional job lacks measured gate verdicts")
+        if full:
+            if doc.get("level") != "full" or "consistency" not in gates:
+                raise RuntimeError("standalone functional job did not run the full suite")
+        elif set(gates) != {"logits"}:
+            raise RuntimeError("standalone functional job has no isolated logits verdict")
+        results = [str(result)]
     run_tool([f"{CARD}/pull_devlab.py", "--identity", str(artifact), "--gpu", gpu,
               "--device-out", f"{kind}_device.json", "--hrx-out", f"{kind}_install.json"], work)
     out = f"ev_{kind}.json"
     run_tool([f"{CARD}/make_info.py", "gates", "--gpu", gpu, "--package", package, "--fetched-programs", digest,
               "--device", f"{kind}_device.json", "--hrx-loom", str(artifact / f"sdk_{variant}.json"),
               "--time", job["completed_at"][:19], "--url", url, "--run", str(job["run_id"]), "--source-kind", "devlab",
-              str(result), "-o", out], work)
+              *results, "-o", out], work)
     return out
 
 
@@ -1523,10 +1534,11 @@ def ingest_full(st, name, e, W):
         run_tool([f"{S}/make_info.py", "gates", "--gpu", dev, "--time", end, *gfiles, "--package", out, *src, "--device", "dev.json", "--hrx-loom", hrx,
                   "-o", "ev_gates.json"], W)
         ev.append("ev_gates.json")
-    for field in ("standalone_logits", "standalone_full"):
+    for field in ("standalone_logits", "standalone_full", "standalone_probes"):
         if e.get(field):
             try:
-                ev.append(standalone_gates(e[field], slug, dev, out, W, full=field == "standalone_full"))
+                ev.append(standalone_gates(e[field], slug, dev, out, W, full=field == "standalone_full",
+                                           probes=field == "standalone_probes"))
             except (OSError, ValueError, TypeError, KeyError) as err:
                 raise RuntimeError(f"invalid {field} evidence: {err}") from err
     stub = roofline_stub(slug, out, W)
