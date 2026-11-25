@@ -22,7 +22,7 @@ import image_sdk_compare  # noqa: E402
 
 TEXT = "unsloth-Qwen3.5-4B-loom"
 IMAGE = "Tongyi-MAI-Z-Image-Turbo-loom"
-STRIX_ONLY = "unsloth-Inkling-2-Mini-loom"
+STRIX_ONLY = "example-HandWritten-Strix-loom"   # a package .github/nightly-models.json does not list
 HELD = "SenseNova-U1.6-MoT-R9700-loom"
 H = "6a47" + "0" * 60
 REV = {TEXT: "64bf40259117d99f3e6a9f43b7e80fb030300697"}
@@ -447,3 +447,20 @@ class FrozenAssembleAndLint(unittest.TestCase):
             self.assertEqual(len(lint_card.run_problems("c", {}, runs)), 1)
         with mock.patch.object(lint_card, "cited_runs", lambda card, info: cite(None)):   # a run-only citation needs a successful run
             self.assertEqual(len(lint_card.run_problems("c", {}, runs)), 1)
+
+
+class KernelTestsNotApplicable(unittest.TestCase):
+    def test_a_generator_error_without_a_claimed_kernel_gate(self):
+        with tempfile.TemporaryDirectory() as d:
+            json.dump({"results": {"ktest:staging": "ERROR", "gates:staging:dev": "GATES PASS"}}, open(os.path.join(d, "summary.json"), "w"))
+            cmp = os.path.join(d, "cmp.json")
+            st = SimpleNamespace(d={"opts": {"refs_all": {STRIX_ONLY: {"gates": {"strix-halo": ["agent", "golden"], "radeon-r9700": ["kernel_tests"]}}}}})
+            for dev, want in (("strix-halo", []), ("radeon-r9700", ["ktest:staging"])):
+                json.dump({"gate_failures": ["ktest:staging"]}, open(cmp, "w"))
+                e = {"slug": STRIX_ONLY, "device": dev, "cmp": cmp}
+                regen.kernel_tests_not_applicable(st, e, d)
+                self.assertEqual(json.load(open(cmp))["gate_failures"], want, dev)
+            json.dump({"results": {"ktest:staging": "FAIL (3/5 passed)"}}, open(os.path.join(d, "summary.json"), "w"))   # ran and failed: still a failure
+            json.dump({"gate_failures": ["ktest:staging"]}, open(cmp, "w"))
+            regen.kernel_tests_not_applicable(st, {"slug": STRIX_ONLY, "device": "strix-halo", "cmp": cmp}, d)
+            self.assertEqual(json.load(open(cmp))["gate_failures"], ["ktest:staging"])
