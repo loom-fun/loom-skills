@@ -1204,7 +1204,8 @@ def cmd_share(a):
     for b in cancel:
         print(f"run {b['run']}: every job shared or finished" + ("" if a.cancel and not a.dry_run else " (cancel with --cancel)"))
         if a.cancel and not a.dry_run:
-            sh(["gh", "run", "cancel", str(b["run"]), "-R", REPO], check=False)
+            # force-cancel: a plain `gh run cancel` of a run whose jobs wait for a self-hosted runner stays queued (seen on DevLab)
+            sh(["gh", "api", "-X", "POST", f"repos/{REPO}/actions/runs/{b['run']}/force-cancel"], check=False)
             b["cancelled"] = now()
     if cancel and a.cancel and not a.dry_run:
         sw.save()
