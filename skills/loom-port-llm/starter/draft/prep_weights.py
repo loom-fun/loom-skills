@@ -18,8 +18,8 @@ one: one lane per 32-value block, llama.cpp's quantize_row_q8_0 / quantize_row_q
 #   restricted to rows [0, N) plus every row of the added tokens (ids >= the tokenizer's base vocabulary): a reduced draft
 #   vocabulary (FR-Spec / EAGLE-3 style). The converter dequantizes Q6_K (llama.cpp's dequantize_row_q6_K) and re-encodes
 #   Q4_0; the output block g reads input block g (g < split) or g + skip (the tail), so one pass copies both segments.
-SRC = {"bf16": 64, "f16": 64, "q8_0": 34, "bf16e": 2}     # bytes per 32 values of a source the converter reads (bf16e: per element)
-DST = {"q8_0": 34, "q4_0": 18, "q6_k": 210, "f32_copy": 4, "f32_add1": 4, "f32_negexp": 4}   # ... of a prepared format (f32_*: per element)
+SRC = {"bf16": 64, "f16": 64, "q8_0": 34, "bf16e": 2, "q2_0x": 36}   # q2_0x: two Q2_0 blocks per 128 values (ternary.prep_kernel)     # bytes per 32 values of a source the converter reads (bf16e: per element)
+DST = {"q8_0": 34, "q4_0": 18, "q6_k": 210, "f32_copy": 4, "f32_add1": 4, "f32_negexp": 4, "ptq1_0": 28}   # ptq1_0: per 128 values   # ... of a prepared format (f32_*: per element)
 SRC_SUPER = {"q6_k": 210, "bf16r": 512}       # bytes per 256 values of a source with a row subset (see subset_entry); bf16r: a BF16 head (32-value units)
 
 # Elementwise bf16 -> f32 conversions of a safetensors checkpoint's small tensors (one lane per element; safetensors.py's name map
@@ -315,6 +315,9 @@ def kernel(src, dst):
     """g_prep_<src>_<dst> (one lane per 32-value block; per element for bf16e) and its stage program llm_prep_<src>_<dst>."""
     if src == "bf16r":
         return _kernel_bf16r(dst)
+    if (src, dst) == ("q2_0x", "ptq1_0"):   # Ternary Bonsai: Q2_0 file -> dense trits on the device
+        import ternary
+        return ternary.prep_kernel()
     if src in SRC_SUPER:
         return _kernel_super(src, dst)
     n = f"{src}_{dst}"

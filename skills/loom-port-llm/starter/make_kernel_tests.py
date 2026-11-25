@@ -54,6 +54,13 @@ if (cfg.get("source") or {}).get("kind") == "safetensors":   # an HF checkpoint 
         return v.reshape(int(t.shape[1]), int(t.shape[0])) if len(t.shape) == 2 else np.asarray(v, dtype=np.float32)
 else:
     T = {t.name: t for p in split_parts(cfg["gguf"]) for t in GGUFReader(p).tensors}
+    if os.environ.get("TERNARY_REPACK", "0") == "1":   # decode.ternary.repack: the kernels read the load-time PTQ1_0 copy of the Q2_0 matrices
+        class _Repacked:
+            def __init__(self, t):
+                self.name, self.shape, self.tensor_type = t.name, t.shape, gguf_ext.PTQ1_0
+                self.src = np.asarray(t.data).view(np.uint8)
+                self.data = gguf_ext.q2_0_to_ptq1_0(self.src.reshape(-1, 36)).reshape(-1)
+        T = {n: (_Repacked(t) if t.tensor_type.name == "Q2_0" and len(t.shape) == 2 and int(t.shape[0]) % 128 == 0 else t) for n, t in T.items()}
     def raw(name): return np.asarray(T[name].data).view(np.int8).reshape(-1)
     def deq(name):
         t = T[name]; return dequantize(np.asarray(t.data), t.tensor_type).reshape(int(t.shape[1]), int(t.shape[0])) if len(t.shape) == 2 else np.asarray(t.data, dtype=np.float32)
@@ -160,6 +167,20 @@ cases.append(f"""check.case public @embed {{
   kernel.launch @g_embed[%t](%t, %ids{VARGS}, %tab, %w, %x, %h) : [index](index, {ty(ids)}{VTYPES}, {ty(tab)}, tensor<{H}xf32>, tensor<{t}x{H}xf32>, tensor<{t}x{H}xf32>)
   check.expect.close actual(%x) expected(%ex) atol(1.0e-4) rtol(1.0e-3) nan(different) : tensor<{t}x{H}xf32>
   check.expect.close actual(%h) expected(%eh) atol(1.0e-3) rtol(1.0e-3) nan(different) : tensor<{t}x{H}xf32>
+  check.return
+}}
+""")
+if os.environ.get("TERNARY_REPACK", "0") == "1":   # the load-time repack kernel vs gguf_ext.q2_0_to_ptq1_0 (byte-exact)
+    _rn = "blk.0.ffn_down.weight"; _src = T[_rn].src[: 36 * 4096]; _dst = gguf_ext.q2_0_to_ptq1_0(_src.reshape(-1, 36)).reshape(-1)
+    save("rp_in", _src.view(np.int8)); save("rp_out", _dst.view(np.int8))
+    cases.append(f"""check.case public @ternary_repack {{
+  %b = check.literal value(4096) : index
+  %in0 = check.literal value(0) : i64
+  %src = check.file.read.npy path("rp_in.npy") : tensor<{_src.size}xi8>
+  %e = check.file.read.npy path("rp_out.npy") : tensor<{_dst.size}xi8>
+  %o = check.generate.fill value(0) : tensor<{_dst.size}xi8>
+  kernel.launch @g_prep_q2_0x_ptq1_0[%b](%b, %in0, %o, %src) : [index](index, i64, tensor<{_dst.size}xi8>, tensor<{_src.size}xi8>)
+  check.expect.equal actual(%o) expected(%e) : tensor<{_dst.size}xi8>
   check.return
 }}
 """)

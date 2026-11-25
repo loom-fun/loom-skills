@@ -366,6 +366,14 @@ CHOICE("decode.q4_0.act_q8", "bool", False, "Q4_0_Q8", kernels=["g_mv_q4_0_*", "
        doc="Q4_0 dense matvecs, head and expert matvecs take int8 activations (ACT_Q8's dot4 path with @g_q4_0_icodes, as llama.cpp's "
            "vec_dot_q4_0_q8_1) instead of f32 values and a per-row subgroup reduction per token, which is ALU-bound at 4 tokens "
            "(quant/q4_0 node).")
+CHOICE("decode.ternary.repack", "bool", False, "TERNARY_REPACK", kernels=["g_mv_ptq1_0_*", "g_gemm_ptq1_0_*", "g_head_mv*", "g_embed", "g_prep_q2_0x_ptq1_0"],
+       rows=ROWS_DECODE + ROWS_STREAMS, from_pr="bonsai-1416",
+       doc="A Q2_0 ternary checkpoint (Ternary Bonsai; hrx-loom 0.3.0 cannot read its PTQ1_0 file) is repacked at load into PTQ1_0 blocks by the "
+           "weight policy (starter ternary.prep_kernel; 28 instead of 36 bytes per 128 weights) and every matrix kernel reads the copy "
+           "(quant/ptq1_0, quant/q2_0 nodes).")
+CHOICE("decode.ptq1_0.mv", "str", None, "PTQ1_0_MV", kernels=["g_mv_ptq1_0_*"], rows=ROWS_DECODE + ROWS_STREAMS, from_pr="bonsai-1416",
+       doc="PTQ1_0 int8 matvecs: generic (None: one lane per 32-value group, the shared kernel), block (one lane per 128-value block, "
+           "16-bit-lane trit decode) or lut (block, workgroup byte tables) (starter ternary.mv_block / use_lut_mv).")
 CHOICE("decode.iq4.act_q8", "bool", False, "IQ4_Q8", kernels=["g_mv_iq4_*", "g_quant_q8"],
        rows=ROWS_DECODE + ROWS_STREAMS, from_pr="q38xl-dec",
        doc="IQ4_XS / IQ4_NL dense matvecs take int8 activations (ACT_Q8's dot4 path with @g_iq4_<fmt>_icodes: kvalues codes x one "

@@ -151,6 +151,16 @@ SWA_ROPE = bool(CFG.get("sliding_layers")) and (CFG.get("head_dim_swa") or D) ==
 assert not SWA_ROPE or (RD_SWA % 64 == 0 and RD_SWA <= D), "rope_dims_swa must be a multiple of 64"
 FREQ_FACTORS = CFG.get("rope_freq_factors")  # per rotary pair: frequency / factor (llama3 rope_freqs; global layers only)
 TENS = CFG["tensors"]                     # tensor name -> {"type": fmt, "shape": [...]}
+# TERNARY_REPACK=1 (choice decode.ternary.repack): a Q2_0 ternary checkpoint's matrices (Ternary Bonsai: the file hrx-loom can read) are
+# repacked at load into PTQ1_0 blocks (28 B per 128 values instead of 36) by the weight policy (ternary.prep_kernel): the programs read
+# the PTQ1_0 copy. Entries {tensor: ("q2_0x", "ptq1_0", 128-value blocks)}.
+REPACK = {}
+if os.environ.get("TERNARY_REPACK", "0") == "1":
+    assert CFG.get("hadamard"), "TERNARY_REPACK: a ternary (prism.hadamard) checkpoint"
+    for _n, _t in TENS.items():
+        if _t["type"] == "q2_0" and len(_t["shape"]) == 2 and _t["shape"][0] % 128 == 0:
+            REPACK[_n] = ("q2_0x", "ptq1_0", _t["shape"][0] * _t["shape"][1] // 128)
+            _t["type"] = "ptq1_0"
 # Gate activation (cfg attn_gate_act): sigmoid (default), or softplus (laguna) on a per-head gate, which g_gate_heads
 # applies to the head's logit so the attention kernels multiply by the stored value.
 GATE_ACT = CFG.get("attn_gate_act", "sigmoid")
@@ -6655,11 +6665,12 @@ if __name__ == "__main__":
         text = seg_attention(text)
     SRC_PREP = {n: t for n, t in TENS.items() if t.get("prep") and f'"{n}"' in text}   # safetensors: the small tensors the programs read, converted at load (hf_names/*.json "prep")
     MB_USED = {n: e for n, e in MBLK_PREP.items() if f'"{n}"' in text}   # MTP_BLOCK_PREP: the NextN block's matrices the programs read
+    MB_USED.update({n: e for n, e in REPACK.items() if f'"{n}"' in text})   # TERNARY_REPACK: the repacked matrices
     if SRC_PREP or MB_USED or VHEAD_PREP or PHEAD_MAIN:
         import prep_weights
         entries = {t["hf"]: ("bf16e", "f32_" + t["prep"]["op"], int(math.prod(t["shape"]))) for t in SRC_PREP.values()}
         assert all(t["prep"]["src"] == "bf16" for t in SRC_PREP.values()), "prepared tensors are bf16 in the checkpoint"
-        entries.update({TENS[n]["hf"]: e for n, e in MB_USED.items()})
+        entries.update({TENS[n].get("hf", n): e for n, e in MB_USED.items()})
         entries.update(PHEAD_MAIN)
         if VHEAD_PREP:   # the verified head: a Q8_0 copy of every row, HEAD_PIECE_ROWS rows per prepared tensor
             _hk = TENS["output.weight"]["hf"]

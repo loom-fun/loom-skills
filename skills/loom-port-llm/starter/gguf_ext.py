@@ -71,3 +71,28 @@ def _register():
 
 _register()
 PTQ1_0 = _c.GGMLQuantizationType._value2member_map_[143]
+
+
+def q2_0_to_ptq1_0(blocks):
+    """Repack Q2_0 ternary rows (uint8, n x 36: two 64-value blocks per 128 values) to PTQ1_0 blocks (n x 28): the load-time
+    weight policy's numpy oracle (quantize_row_ptq1_0_ref's packing; d = the scale of a half with a nonzero trit)."""
+    n = blocks.shape[0]
+    b = blocks.reshape(n, 2, 18)
+    qs = b[:, :, 2:].reshape(n, 2, 16, 1) >> np.array([0, 2, 4, 6], dtype=np.uint8).reshape(1, 1, 1, 4)
+    t = (qs & 3).reshape(n, 128).astype(np.uint16)            # trit + 1 in 0..2
+    assert t.max() <= 2, "a Q2_0 code 3 (+2) is not ternary"
+    d0, d1 = b[:, 0, :2].copy(), b[:, 1, :2].copy()
+    nz0 = (t[:, :64] != 1).any(1)
+    d = np.where(nz0[:, None], d0, d1)
+    out = np.zeros((n, 28), np.uint8)
+    def pack(vals, ntr, extra):
+        q = np.zeros(vals.shape[:-1], np.uint16)
+        for k in range(ntr):
+            q = q * 3 + vals[..., k]
+        q = q * (3 ** extra)
+        return ((q * 256 + 242) // 243).astype(np.uint8)
+    out[:, 0:16] = pack(np.stack([t[:, m + 16 * np.arange(5)] for m in range(16)], 1), 5, 0)
+    out[:, 16:24] = pack(np.stack([t[:, 80 + m + 8 * np.arange(5)] for m in range(8)], 1), 5, 0)
+    out[:, 24:26] = pack(np.stack([t[:, 120 + h + 2 * np.arange(4)] for h in range(2)], 1), 4, 1)
+    out[:, 26:28] = d
+    return out

@@ -1034,3 +1034,93 @@ def use_lut_mv(text):
                       f"  %lstep = index.mul %cW, %c32 : index\n{LUT_INIT}", 1)
         return k
     return pat.sub(sub, text), n
+
+
+# ---- load-time repack Q2_0 -> PTQ1_0 (weight policy pair ("q2_0x", "ptq1_0"), choice decode.ternary.repack) ----
+def prep_kernel():
+    """g_prep_q2_0x_ptq1_0 + its stage program: one lane per 128 values (two Q2_0 blocks, 36 bytes) -> one PTQ1_0 block (28 bytes),
+    quantize_row_ptq1_0_ref's packing (gguf_ext.q2_0_to_ptq1_0 is the oracle); the scale is the first half's unless that half is all 0."""
+    def trit(v):   # IR: %t{v} (i32, trit + 1) of value v (static) of the block
+        h, j = divmod(v, 64)
+        return (f"    %tb{v} = view.load %iv[{2 + 18 * h + j // 4}] : view<36xi8> -> i8\n"
+                f"    %tu{v} = scalar.extui %tb{v} : i8 to i32\n"
+                f"    %ts{v} = scalar.constant {2 * (j % 4)} : i32\n"
+                f"    %tr{v} = scalar.shrui %tu{v}, %ts{v} : i32\n"
+                f"    %t{v} = scalar.andi %tr{v}, %c3i : i32\n")
+    lines = [trit(v) for v in range(128)]
+    def byte(o, vals, extra):
+        acc = "%z"
+        out = []
+        for k, v in enumerate(vals):
+            out.append(f"    %p{o}_{k}a = scalar.muli {acc}, %c3i : i32\n    %p{o}_{k} = scalar.addi %p{o}_{k}a, %t{v} : i32\n")
+            acc = f"%p{o}_{k}"
+        if extra:
+            out.append(f"    %p{o}_x = scalar.muli {acc}, %c3i : i32\n"); acc = f"%p{o}_x"
+        out.append(f"    %q{o}a = scalar.muli {acc}, %c256 : i32\n    %q{o}b = scalar.addi %q{o}a, %c242 : i32\n"
+                   f"    %q{o}c = scalar.divui %q{o}b, %c243 : i32\n    %q{o} = scalar.trunci %q{o}c : i32 to i8\n"
+                   f"    view.store %q{o}, %ov[{o}] : i8, view<28xi8>\n")
+        return "".join(out)
+    for m in range(16):
+        lines.append(byte(m, [m + 16 * n for n in range(5)], False))
+    for m in range(8):
+        lines.append(byte(16 + m, [80 + m + 8 * n for n in range(5)], False))
+    for h in range(2):
+        lines.append(byte(24 + h, [120 + h + 2 * n for n in range(4)], True))
+    nz = ["%nz_init"]
+    for v in range(64):
+        lines.append(f"    %ne{v} = scalar.cmpi ne, %t{v}, %c1i : i32\n    %nz{v} = scalar.ori {nz[-1]}, %ne{v} : i1\n")
+        nz.append(f"%nz{v}")
+    return f"""
+// Load-time repack (ternary.prep_kernel): staged Q2_0 ternary tensor -> PTQ1_0 blocks, one lane per 128 values.
+kernel.def export("g_prep_q2_0x_ptq1_0") @g_prep_q2_0x_ptq1_0(%blocks: index) {{
+  %c1 = index.constant 1 : index
+  %c63 = index.constant 63 : index
+  %c64 = index.constant 64 : index
+  %rounded = index.add %blocks, %c63 : index
+  %groups = index.div %rounded, %c64 : index
+  kernel.launch.config workgroups(%groups, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+}} launch(%blocks_arg: index, %in64: i64, %output: buffer, %input: buffer) {{
+  %blocks = index.assume %blocks_arg [range(%blocks_arg, 1, 1073741824)] : index
+  %in_bound = scalar.assume %in64 [range(%in64, 0, 9223372036854775807)] : i64
+  %in_origin = index.cast %in_bound : i64 to offset
+  %c64 = index.constant 64 : index
+  %wg = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %base = index.mul %wg, %c64 : index
+  %g = index.add %base, %lane : index
+  %live = index.cmp ult, %g, %blocks : index
+  scf.if %live {{
+    %ib = index.constant 36 : offset
+    %io = index.scale %g, %ib : index, offset -> offset
+    %ia = index.add %in_origin, %io : offset
+    %iv = buffer.view %input[%ia] : buffer -> view<36xi8>
+    %ob = index.constant 28 : offset
+    %oo = index.scale %g, %ob : index, offset -> offset
+    %ov = buffer.view %output[%oo] : buffer -> view<28xi8>
+    %z = scalar.constant 0 : i32
+    %c1i = scalar.constant 1 : i32
+    %c3i = scalar.constant 3 : i32
+    %c256 = scalar.constant 256 : i32
+    %c242 = scalar.constant 242 : i32
+    %c243 = scalar.constant 243 : i32
+    %nz_init = scalar.constant false : i1
+{"".join(lines)}    %d0a = view.load %iv[0] : view<36xi8> -> i8
+    %d0b = view.load %iv[1] : view<36xi8> -> i8
+    %d1a = view.load %iv[18] : view<36xi8> -> i8
+    %d1b = view.load %iv[19] : view<36xi8> -> i8
+    %da = scf.select {nz[-1]}, %d0a, %d1a : i8
+    %db = scf.select {nz[-1]}, %d0b, %d1b : i8
+    view.store %da, %ov[26] : i8, view<28xi8>
+    view.store %db, %ov[27] : i8, view<28xi8>
+  }}
+  kernel.return
+}}
+
+command.def public @llm_prep_q2_0x_ptq1_0() launch(%output: buffer, %input: buffer) {{
+  %b64 = config.get @llm.prep_blocks : i64
+  %blocks = index.cast %b64 : i64 to index
+  %in64 = config.get @llm.prep_input : i64
+  kernel.launch @g_prep_q2_0x_ptq1_0[%blocks](%blocks, %in64, %output, %input) : [index](index, i64, buffer, buffer)
+  command.return
+}}
+"""
