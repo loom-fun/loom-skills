@@ -2700,7 +2700,7 @@ def kit_near_tie(e, text):
     replay = e.get("near_tie_replay") or {}
     if text.get("status") != "DIFF" or not replay.get("dir") or replay.get("measured_job") != e.get("job_url"):
         return None
-    from bench_common import near_tie
+    from token_ties import near_tie
     try:
         source, probe = Path(e["dir"]), Path(replay["dir"])
         url = replay["url"]

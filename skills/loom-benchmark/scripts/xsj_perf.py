@@ -597,7 +597,7 @@ def main(argv=None):
         "python": sys.version,
         "runner_sha256": sha256(Path(__file__)),
         "workload_sha256": {name: sha256(HERE / name) for name in
-                            ("perf.py", "c4_steady.py", "bench_common.py", "draft_telemetry.py", "wait_model.py",
+                            ("perf.py", "c4_steady.py", "bench_common.py", "token_ties.py", "draft_telemetry.py", "wait_model.py",
                              "../data/doc_2000.txt", "../data/doc_32000.txt")},
         "argv": [*sys.argv] if argv is None else [str(Path(__file__)), *argv],
         "environment": {k: v for k, v in evidence.env.items() if k in
