@@ -67,6 +67,16 @@
     "exec.prefill_capacity": 8192
    },
    "evidence": "qwen35 lane (#1418): prefill chunk 8192 on Strix Halo (MoE expert tiles fill at larger epochs). DevLab Strix same-job ABBA vs 4096 with the same programs (run 45527429236): prefill 8k/16k/32k +5.9/+4.3/+2.9 % (Qwen3.6), +6.6/+4.2/+2.9 % (Qwen3.5), 1k/2k tie, decode tie."
+  },
+  {
+   "when": {},
+   "set": {
+    "decode.attn.segment.d256": true,
+    "decode.attn.segment.wmma": true,
+    "moe.route.decode_split": true,
+    "moe.prefill.cw_q4k": "1"
+   },
+   "evidence": "qwen35b lane (#1418 round 2): read-once verify attention at head_dim 256 (decode.attn.segment.d256) on WMMA (decode.attn.segment.wmma), decode router split (moe.route.decode_split), column-wave Q4_K/Q5_K expert GEMMs (moe.prefill.cw_q4k). DevLab same-job ABBA vs the shipped set (run 45619373718): Strix Qwen3.6 decode_32k 56.2 -> 72.4, prefill 1k-32k +4.8..+7.0 %, decode +2.5 %, c4 +2.0 %; R9700 Qwen3.6 decode_32k 134.8 -> 163.5, prefill +9.7..+11.9 %, c4 +4.4 %; Qwen3.5 R9700 decode_32k 114.2 -> 149.3, prefill +8.4..+10.4 %; gates dev PASS on both GPUs, ktest PASS, Strix admission 262066/262144. Per-lever runs: 45583608766, 45584125475, 45587436031, 45587772150, 45591666122."
   }
  ]
 }

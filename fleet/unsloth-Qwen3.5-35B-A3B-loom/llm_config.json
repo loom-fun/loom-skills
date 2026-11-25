@@ -143,7 +143,7 @@
   "file": "Qwen3.5-35B-A3B-DFlash-Q4_K_M.gguf",
   "kind": "dflash",
   "depth": 3,
-  "ctx_max": 3500,
+  "ctx_max": 0,
   "occ_min": 2,
   "tuned": [
    {
