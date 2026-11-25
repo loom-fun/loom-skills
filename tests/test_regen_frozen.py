@@ -415,3 +415,35 @@ class ProductionFacts(unittest.TestCase):
             self.assertEqual((f["kind"], f["claimed"], f["memory_bytes"]), ("text", ["gfx1150", "strix-halo"], 5))
             self.assertEqual(f["generator"], "38b84928d947d45615439ffe54dc3d66899f7b0b")   # an "unknown" stamp falls back to the card's generator
             self.assertTrue(f["programs_sha256"])
+
+
+class FrozenAssembleAndLint(unittest.TestCase):
+    def test_only_the_pin_and_the_staging_main_wording_change(self):
+        cfg = {"sdk": {"hrx_loom": "0.2.0"}, "resolved": {"x": {"evidence": "verified on staging main (run 1)"}}, "gguf": "m.gguf"}
+        self.assertEqual(regen.staging_to_main(cfg)["resolved"]["x"]["evidence"], "verified on main (run 1)")
+        with tempfile.TemporaryDirectory() as d:
+            def snap(repo, rev, out):
+                self.assertEqual((repo, rev), (f"loom-fun/{TEXT}", REV[TEXT]))
+                os.makedirs(os.path.join(out, "program"))
+                open(os.path.join(out, "program", "llm.loom"), "w").write("frozen")
+                json.dump(cfg, open(os.path.join(out, "llm_config.json"), "w"))
+            out = os.path.join(d, "pkg")
+            with mock.patch.object(regen, "hf_snapshot_small", snap):
+                h = regen.frozen_assemble(f"loom-fun/{TEXT}@{REV[TEXT]}", "0.3.0", out)
+            got = json.load(open(os.path.join(out, "llm_config.json")))
+            self.assertEqual(got, {**regen.staging_to_main(cfg), "sdk": regen.release_pin("0.3.0")})
+            self.assertEqual(h, regen.card_lib.programs_sha256(out))
+
+    def test_lint_accepts_a_successful_job_in_a_failed_batch_run(self):
+        sys.path.insert(0, os.path.join(ROOT, "skills", "loom-benchmark", "scripts", "card"))
+        import lint_card
+        runs = lint_card.Runs()
+        runs.run = lambda repo, rid: "failure"   # another model's job failed in the same batch run
+        runs.job = lambda repo, jid: "success" if jid == "2" else "failure"
+        cite = lambda jid: [("info.json source s1", "loom-fun/loom-skills", "1", jid, None)]
+        with mock.patch.object(lint_card, "cited_runs", lambda card, info: cite("2")):
+            self.assertEqual(lint_card.run_problems("c", {}, runs), [])
+        with mock.patch.object(lint_card, "cited_runs", lambda card, info: cite("3")):
+            self.assertEqual(len(lint_card.run_problems("c", {}, runs)), 1)
+        with mock.patch.object(lint_card, "cited_runs", lambda card, info: cite(None)):   # a run-only citation needs a successful run
+            self.assertEqual(len(lint_card.run_problems("c", {}, runs)), 1)
