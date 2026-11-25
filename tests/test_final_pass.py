@@ -106,10 +106,18 @@ class LogitsMode(unittest.TestCase):
                         regen.cmd_plan(ns)
                     self.assertEqual(json.load(open(ns.state))["opts"]["bundle"], want)
 
-    def verdict(self, results):
+    def verdict(self, results, **job):
         with tempfile.TemporaryDirectory() as d:
             json.dump({"results": results}, open(os.path.join(d, "summary.json"), "w"))
-            return regen.logits_verdict(d, {})[0]
+            return regen.logits_verdict(d, job)[0]
+
+    def test_full_only_requires_a_completed_full_verdict(self):
+        key = "gates:staging:full"
+        expected = {"functional_steps": [key]}
+        self.assertEqual(self.verdict({key: "GATES PASS level=full 353s"}, **expected), "promote")
+        self.assertEqual(self.verdict({key: "rc=124"}, **expected), "hold")
+        self.assertEqual(self.verdict({key: "GATES PASS level=dev 36s"}, **expected), "hold")
+        self.assertEqual(self.verdict({}, **expected), "rerun")
 
     def test_verdict_needs_all_three_steps_and_no_failure(self):
         ok = {"func:staging": "PASS", "ktest:staging": "PASS (62/62)", "logits:staging": "LOGITS PASS"}

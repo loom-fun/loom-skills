@@ -411,6 +411,9 @@ def logits_verdict(d, e):
     required = e.get("functional_steps") or ("func:staging", "ktest:staging", "logits:staging")
     need = [k for k in required if k not in s]
     bad = {k: v for k, v in s.items() if str(v).lower().startswith(("fail", "error", "not supported")) or "FAIL" in str(v)[:40]}
+    for step in required:
+        if step.startswith("gates:") and step in s and not str(s[step]).startswith("GATES PASS level=full "):
+            bad[step] = s[step]
     if bad:
         return "hold", [f"{k}: {str(v)[:120]}" for k, v in bad.items()]
     if need:
