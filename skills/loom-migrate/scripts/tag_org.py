@@ -57,7 +57,20 @@ def bundle_plan(bundle, manifest_sha):
     document = json.loads(data)
     if document.get("schema") != 2 or not isinstance(document.get("tags"), dict):
         raise SystemExit("not a release bundle manifest with a tag plan (prepare it again)")
-    return [document["tags"][slug] for slug in sorted(document["tags"])]
+    release = document.get("release") or {}
+    if release.get("inventory") is None or release.get("card_check") != "passed":
+        raise SystemExit("not an executable release bundle (partial --only or unchecked); prepare the full release again")
+    plan = []
+    for slug in sorted(document["tags"]):
+        entry, release = document["tags"][slug], document.get("release") or {}
+        ok = (isinstance(entry, dict) and isinstance(entry.get("repo"), str) and entry["repo"] == f"loom-fun/{slug}"
+              and isinstance(entry.get("parent"), str) and re.fullmatch(r"[0-9a-f]{40}", entry["parent"])
+              and entry.get("tag") == release.get("outgoing_tag")
+              and entry.get("action") in ("create", "already-at-parent", "already-on-target-sdk"))
+        if not ok:
+            raise SystemExit(f"{slug}: invalid tag plan entry (prepare the release again)")
+        plan.append(entry)
+    return plan
 
 
 def tag_planned(api, entry, message, dry):

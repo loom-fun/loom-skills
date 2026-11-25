@@ -31,7 +31,7 @@ tag_org = load("tag_org_bundle", SCRIPTS / "tag_org.py")
 SLUG, IMAGE, HELD, OTHER = "example-text-loom", "example-image-loom", "example-held-loom-r9700", "example-other-loom"
 META = promotion.release_meta("0.3.0", "v0.2.0")
 HUB_MODULE = SimpleNamespace(
-    CommitOperationAdd=lambda name, path: SimpleNamespace(path_in_repo=name, path=path),
+    CommitOperationAdd=lambda name, data: SimpleNamespace(path_in_repo=name, data=data),
     CommitOperationDelete=lambda name, is_folder: SimpleNamespace(path_in_repo=name, delete=True),
 )
 
@@ -75,7 +75,7 @@ class FakeHub:
 
     def __init__(self, tmp):
         self.tmp, self.repos, self.dirs, self.writes, self.tags_created = tmp, {}, {}, [], []
-        self.crash_after_commit = False
+        self.crash_after_commit, self.before_commit = False, None
 
     def add(self, repo, files, label):
         commit = sha_of(f"{repo}:{label}:{len(self.dirs)}")
@@ -120,6 +120,9 @@ class FakeHub:
 
     def create_commit(self, repo, revision, parent_commit, operations, commit_message, commit_description, **_):
         assert revision == "main"
+        if self.before_commit:
+            hook, self.before_commit = self.before_commit, None
+            hook()
         if self.head(repo) != parent_commit:
             raise RuntimeError("412 parent commit mismatch")
         root, hashes = self.dirs[parent_commit]
@@ -128,7 +131,7 @@ class FakeHub:
             if getattr(op, "delete", False):
                 files.pop(op.path_in_repo)
             else:
-                files[op.path_in_repo] = Path(op.path).read_bytes()
+                files[op.path_in_repo] = op.data
         commit = self.add(repo, files, commit_message)
         self.repos[repo]["commits"][0].message = commit_description
         self.writes.append(repo)
@@ -411,3 +414,89 @@ class ReleaseWriterTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+    def test_held_repo_outgoing_tag_is_verified_before_any_write(self):
+        sha = self.release.prepare()
+        hub = self.release.hub
+        for slug in (SLUG, OTHER):  # tag only the eligible repos; the held repo stays untagged
+            hub.repos[f"loom-fun/{slug}"]["tags"]["v0.2.0"] = self.release.rows[slug]["target_revision"]
+        with self.assertRaisesRegex(ValueError, rf"tags must resolve .*{HELD}"):
+            self.release.replay(sha)
+        self.assertEqual(hub.writes, [])
+
+    def test_execute_requires_confirmation(self):
+        sha = self.release.prepare()
+        self.release.tag(sha)
+        for env in ({}, {"PROMOTE_CONFIRM": "loom-fun-staging"}):
+            with self.release.patched(), patch.dict("os.environ", env, clear=True), \
+                    self.assertRaisesRegex(ValueError, "PROMOTE_CONFIRM=loom-fun"):
+                promotion.replay(self.release.hub, self.release.bundle, sha, True, self.tmp / "receipt.jsonl")
+        self.assertEqual(self.release.hub.writes, [])
+
+    def test_dry_run_command_never_writes(self):
+        hub = self.release.hub
+
+        def forbidden(*args, **kwargs):
+            raise AssertionError("dry-run wrote to the Hub")
+
+        hub.create_commit = hub.create_tag = forbidden
+        with self.release.patched():
+            code = promotion.main(["dry-run", "--eligible", str(self.release.eligible), "--held", str(self.release.held),
+                                   "--sdk", "0.3.0", "--outgoing-tag", "v0.2.0", "--bundle", str(self.release.bundle)], api=hub)
+        self.assertEqual((code, hub.writes, hub.tags_created), (0, [], []))
+
+    def test_foreign_commit_between_preflight_and_commit_refuses(self):
+        sha = self.release.prepare()
+        self.release.tag(sha)
+        hub, repo = self.release.hub, f"loom-fun/{SLUG}"
+        hub.before_commit = lambda: hub.add(repo, production_text(SLUG), "racing foreign commit")
+        with self.assertRaisesRegex(RuntimeError, "412 parent commit mismatch"):
+            self.release.replay(sha)
+        self.assertEqual(hub.writes, [])
+        self.assertEqual(hub.repos[repo]["commits"][0].title, "racing foreign commit")
+
+    def test_half_written_final_receipt_line_is_skipped(self):
+        sha = self.release.prepare()
+        self.release.tag(sha)
+        self.release.hub.crash_after_commit = True
+        with self.assertRaises(ConnectionError):
+            self.release.replay(sha)
+        receipt = self.tmp / "receipt.jsonl"
+        receipt.write_text('{"repo": "loom-fun/' + SLUG + '", "comm')
+        self.release.replay(sha)
+        self.assertEqual(len(self.release.hub.writes), 2)
+
+    def test_bundle_bytes_changed_after_review_refuse_at_write(self):
+        sha = self.release.prepare()
+        self.release.tag(sha)
+        real = promotion.digest
+        flipped = self.release.bundle / "packages" / SLUG / "REPORT.md"
+        original = flipped.read_bytes()
+        calls = []
+
+        def swap_after_inspect(path):
+            result = real(path)
+            if path == flipped and not calls:
+                calls.append(1)
+                flipped.write_bytes(b"tampered after verification")
+            return result
+
+        with patch.object(promotion, "digest", swap_after_inspect), \
+                self.assertRaisesRegex(ValueError, "changed since review"):
+            self.release.replay(sha)
+        self.assertEqual(self.release.hub.writes, [])
+        flipped.write_bytes(original)
+
+    def test_tag_plan_entries_are_validated_and_null_rollback_tag_is_clear(self):
+        sha = self.release.prepare()
+        manifest = self.release.bundle / "manifest.json"
+        document = json.loads(manifest.read_text())
+        document["tags"][SLUG]["tag"] = "v9.9.9"
+        manifest.write_bytes(promotion.canonical(document))
+        with self.assertRaisesRegex(SystemExit, "invalid tag plan entry"):
+            tag_org.bundle_plan(self.release.bundle, promotion.digest(manifest))
+        row = {"staging_revision": "a" * 40, "target_revision": "b" * 40,
+               "delete_target_files": {"program/a.loom": "f" * 64}, "rollback_tag": None}
+        with self.assertRaisesRegex(ValueError, "rollback tag"):
+            list(promotion.records({"x-loom": row}))

@@ -108,8 +108,8 @@ def records(pins, allow_empty=False):
             require(isinstance(paths, dict) and all(n != HUB_ATTRIBUTES and safe_path(n) and re.fullmatch(SHA256, sha)
                     for n, sha in paths.items()), f"{slug}: invalid {field} file map")
         if row.get("delete_target_files"):
-            require(re.fullmatch(r"v\d+\.\d+\.\d+", row.get("rollback_tag", "")),
-                    f"{slug}: deleted files require a pinned outgoing rollback tag")
+            require(re.fullmatch(r"v\d+\.\d+\.\d+", row.get("rollback_tag") or ""),
+                    f"{slug}: deleted files require a pinned outgoing rollback tag (rollback_tag is {row.get('rollback_tag')!r})")
         require("programs_sha256" not in row or re.fullmatch(SHA256, row["programs_sha256"] or ""),
                 f"{slug}: programs_sha256 must be a sha256")
         if "image_readme_refresh" in row:
@@ -301,7 +301,7 @@ def rewrite_readme(data, slug, model):
 
 def inspect_refs(name, data, slug):
     """The production form names no staging repo anywhere (owner decision on #1415: no staging provenance on cards)."""
-    require(STAGING.encode() not in data, f"{slug}/{name}: staging reference in the production form")
+    require(STAGING.encode() not in data.lower(), f"{slug}/{name}: staging reference in the production form")
 
 
 def card_file_check(slug, directory):
@@ -514,6 +514,7 @@ def prepare(api, eligible_path, held_path, bundle, meta, only=None, fetch=None, 
         inventory = None  # an incomplete bundle can never be executed
         held = {slug: row for slug, row in held.items() if slug in tags}
     (bundle / "packages").mkdir(exist_ok=True)
+    # tool_sha256 is informational (which prepare tool built the bundle); replay trusts the manifest digest, not the tool.
     document = {"schema": SCHEMA, "release": {**meta, "inventory": inventory,
                                               "tool_sha256": digest(Path(__file__).resolve())},
                 "packages": release, "held": held, "tags": tags}
@@ -597,8 +598,14 @@ def read_progress(path, manifest_sha, rows):
     require(not path.is_symlink(), "receipt must be a regular file")
     repo_to_row = {f"{PRODUCTION}/{slug}": row for slug, row in rows}
     entries = {}
-    for line in path.read_text(encoding="utf-8").splitlines():
-        event = json.loads(line)
+    lines = path.read_text(encoding="utf-8").splitlines()
+    for number, line in enumerate(lines):
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            # a crash can leave the last line half written: skip it, recover() handles that repo from the live head
+            require(number == len(lines) - 1, f"receipt line {number + 1} is corrupt")
+            continue
         repo, commit = event["repo"], event["commit"]
         require(event["manifest_sha256"] == manifest_sha and pinned_sha(commit) and repo in repo_to_row,
                 "receipt does not belong to the reviewed release")
@@ -628,6 +635,12 @@ def replay(api, bundle, manifest_sha, execute, receipt_path):
         require(live == meta["inventory"], "production inventory changed since review: "
                 f"new {sorted(set(live) - set(meta['inventory']))}, gone {sorted(set(meta['inventory']) - set(live))}")
     recovered, untagged, plan = {}, [], []
+    # Held repos (tag plan entries without a package) get no package write, but their outgoing tag is part of the same
+    # all-or-nothing precondition: verify it before any package is written.
+    for slug, tag in sorted(tags.items()):
+        if slug not in by_slug and tag["action"] != "already-on-target-sdk" \
+                and tag_commit(api, tag["repo"], tag["tag"]) != tag["parent"]:
+            untagged.append(tag["repo"])
     # Preflight every row before any upload. Each actual commit also uses the parent as compare-and-swap.
     for slug, row in rows:
         repo = f"{PRODUCTION}/{slug}"
@@ -674,10 +687,17 @@ def replay(api, bundle, manifest_sha, execute, receipt_path):
             if repo in prior or repo in recovered or not (row["operations"] or deleted):
                 print(f"{repo}: verified, no pending upload", flush=True)
                 continue
+            payloads = {}
+            for name in row["operations"]:
+                data = (bundle / "packages" / slug / name).read_bytes()
+                require(hashlib.sha256(data).hexdigest() == row["output"][name], f"{repo}: bundle file {name} changed since review")
+                payloads[name] = data
+            # huggingface_hub skips a commit whose operations change nothing and returns the parent's commit info (no new
+            # commit); rows with no pending operation never get here, and the readback below would catch it anyway.
             commit = api.create_commit(
                 repo, repo_type="model", revision="main", parent_commit=row["target_revision"], token=True,
                 commit_message=commit_title(row), commit_description=f"{MARKER}{manifest_sha}",
-                operations=[CommitOperationAdd(name, bundle / "packages" / slug / name) for name in row["operations"]]
+                operations=[CommitOperationAdd(name, payloads[name]) for name in row["operations"]]
                 + [CommitOperationDelete(name, is_folder=False) for name in deleted],
             )
             require(pinned_sha(getattr(commit, "oid", None)),
