@@ -64,7 +64,10 @@ LLAMACPP_DIR=<dir> "$S/llamacpp_server.sh" MODEL.gguf 8130 1 34000   # goldens /
 LLAMACPP_DIR=<dir> "$S/llamacpp_server.sh" MODEL.gguf 8130 4 8192    # perf incl. 4 streams
 "$S/llamacpp_server.sh" --stop 8130
 ```
-Always use the **same GGUF file** as the Loom package. Never run llama.cpp and a
+Always use the **same GGUF file** as the Loom package (one exception: a package whose GGUF holds a type stock llama.cpp cannot read,
+e.g. Ternary Bonsai's PTQ1_0, runs the reference on the repo's stock packing of the identical weights, `LLAMA_REF_GGUF=FILE`
+(`llamacpp_server.sh`; DevLab port jobs `REF_GGUF=ORG/REPO:FILE`), after a check that both files dequantize to the same values;
+the card records it as a baseline difference). Never run llama.cpp and a
 big Loom model at the same time if together they exceed GPU memory.
 
 ## 1. Correctness gates (before any performance claim)
