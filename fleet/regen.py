@@ -418,7 +418,10 @@ def production_facts(repo, rev, cache):
     kinds = {(sv or {}).get("kind") for sv in (model.get("services") or {}).values()}
     out = {"programs_sha256": card_lib.programs_sha256(d), "kind": "image" if cfg is None and kinds == {"image"} else "text",
            "claimed": sorted((info.get("devices") or {}).keys()), "memory_bytes": (info.get("card") or {}).get("memory_bytes"),
-           "features": (info.get("card") or {}).get("features") or [], "sdk": (cfg or {}).get("sdk")}
+           "features": (info.get("card") or {}).get("features") or [], "sdk": (cfg or {}).get("sdk"),
+           # the commit that generated the package (its llm_config stamp), else the commit that generated its card
+           "generator": next((c for c in (((cfg or {}).get("generator") or {}).get("skills_commit"), (info.get("versions") or {}).get("card_generator"))
+                              if c and re.fullmatch(r"[0-9a-f]{7,40}", str(c))), None)}
     if not out["programs_sha256"]:
         raise RuntimeError(f"{repo}@{rev[:10]}: no program/ files")
     json.dump(out, open(facts, "w"), indent=1)
@@ -523,7 +526,7 @@ def cmd_plan(a):
                         f = production_facts(published, revision, os.path.join(work, "production"))
                     except Exception as x:
                         die(f"{published}@{revision[:10]}: cannot read the production package ({x}); rerun plan")
-                    refs[s].update(programs_sha256=f["programs_sha256"], kind=f["kind"], claimed=f["claimed"])
+                    refs[s].update(programs_sha256=f["programs_sha256"], kind=f["kind"], claimed=f["claimed"], generator=f.get("generator"))
                     if s not in nightly and f["kind"] == "text":   # a hand-written package the nightly list does not hold: its card's facts
                         refs[s]["model"] = {"repo": published, "slug": s.lower(), "memory_bytes": f["memory_bytes"], "kit": None, "features": f["features"]}
                 continue
@@ -1152,11 +1155,14 @@ def ingest_full(st, name, e, W):
     llm, vk = g("perf_llamacpp-rocm.np1_n*.jsonl"), g("perf_llamacpp-vulkan.np1_n*.jsonl")
     c4l, c4v = g("c4_llamacpp-rocm.nodraft_n*.txt"), g("c4_llamacpp-vulkan.perslot.nodraft_n*.txt")
     vl, c4vl = g("perf_vllm_n*.jsonl"), g("c4_vllm_n*.txt")   # a safetensors card: vLLM ROCm is the baseline engine (devlab_perf.sh vllm: steps)
-    st_card = (json.load(open(os.path.join(ROOT, "fleet", slug, "llm_config.json"))).get("source") or {}).get("kind") == "safetensors"
+    fleet_cfg = os.path.join(ROOT, "fleet", slug, "llm_config.json")   # a package outside the manifest (a hand-written one): its own config
+    st_card = (json.load(open(fleet_cfg if os.path.isfile(fleet_cfg) else os.path.join(out, "llm_config.json"))).get("source") or {}).get("kind") == "safetensors"
+    production = st.d["opts"].get("programs") == "production"
+    drafts = g(f"metrics_{V}_*.txt") if production and make_info_supports("perf", "--draft-metrics") else []
     if loom_only:   # the job measured Loom alone: the baseline rows (llama.cpp ROCm and Vulkan, or vLLM) are the previous card's, with their own run and date
         run_tool([f"{S}/make_info.py", "perf", "--gpu", dev, "--loom-jsonl", f"{d}/perf_{V}.jsonl", "--c4-loom", f"{d}/c4_{ND}.txt",
                   "--baseline-from-info", baseline_info, "--package", out, *src, "--device", "dev.json", "--hrx-loom", hrx,
-                  "--fetched-programs", rd("programs_sha256_staging.txt"), "-o", "ev_perf.json"], W)
+                  "--fetched-programs", rd("programs_sha256_staging.txt"), *(["--draft-metrics", *drafts] if drafts else []), "-o", "ev_perf.json"], W)
     else:
         if not st_card and not (llm and c4l):
             raise RuntimeError("the job has no llama.cpp ROCm files (a job without --baselines cannot make this device's table)")
@@ -1197,6 +1203,12 @@ def ingest_full(st, name, e, W):
     run_tool([f"{S}/make_info.py", "roofline", "--gpu", dev, "--device", card_lib.registry.device(dev)["roofline"]["default"], "--package", out,
               "--evidence", "ev_perf.json", "-o", "ev_roof.json"], W)
     ev.append("ev_roof.json")
+    if production:   # the frozen package carries no generator stamp of this branch: the production card's, named as such
+        gen = ((st.d["opts"].get("refs_all") or {}).get(slug) or {}).get("generator")
+        if gen:
+            json.dump({"evidence": "loom-card-evidence/2", "gpu": dev, "versions": {"package": {"skills_commit": {"commit": gen, "basis": "production card"}}}},
+                      open(os.path.join(W, "ev_versions.json"), "w"), indent=1)
+            ev.append("ev_versions.json")
     gpus = [x for x in card_lib.registry.devices() if x in (prev.get("devices") or {}) or x == dev]
     fit = card_lib.registry.device(dev).get("fit_table")
     build = [f"{S}/make_info.py", "build", out, "--org", st.d["opts"]["new_org"], "--gpus", ",".join(gpus)]
@@ -1209,12 +1221,28 @@ def ingest_full(st, name, e, W):
         build += ["--perf-from", spec]
     # sdk-loom: the previous card's Loom sessions are the v0.1 rows this table replaces (its llama.cpp rows were copied into the new session above;
     # the Vulkan baselines stay as published)
+    if production and e.get("source_card") and make_info_supports("build", "--previous-card"):   # the delta line against the production card
+        build += ["--previous-card", f"card:{e['source_card']}={baseline_info}"]
+    if production and make_info_supports("build", "--sdk-evidence"):   # regression explanations and every cited job's conclusion
+        json.dump(build_evidence(st), open(os.path.join(W, "evidence.json"), "w"), indent=1)
+        build += ["--sdk-evidence", os.path.join(W, "evidence.json")]
     run_tool(build + ["--memory-bytes", str(mem), "--from-info", "info_prev.json", *(["--reset-performance"] if loom_only else []), "--evidence", *ev,
                       "-o", "info_new.json"], W)
     shutil.copy(os.path.join(W, "info_new.json"), os.path.join(out, "info.json"))
     msg = card_message(e, dev, run, loom_only, sdk, target_sdk(st.d))
     parent = rev if verified else hf_head(f"{st.d['opts']['new_org']}/{slug}")
     return out, parent, msg
+
+
+_MAKE_INFO_HELP = {}
+
+
+def make_info_supports(sub, flag):
+    """whether this checkout's make_info.py SUB takes FLAG (the card generator gains options independently of regen)"""
+    if sub not in _MAKE_INFO_HELP:
+        r = subprocess.run([PY, os.path.join(CARD, "make_info.py"), sub, "--help"], capture_output=True, text=True)
+        _MAKE_INFO_HELP[sub] = r.stdout + r.stderr
+    return flag in _MAKE_INFO_HELP[sub]
 
 
 def ingest_strix(st, name, e, W):
@@ -1924,7 +1952,9 @@ def build_evidence(st):
         r = refs.get(e["slug"]) or {}
         src = (r.get("old") or e.get("source_card") or "@").split("@")
         mod = doc["models"].setdefault(e["slug"], {"production": src[0], "production_revision": src[1], "programs_sha256": r.get("programs_sha256"),
-                                                   "kind": r.get("kind", e.get("kind", "text")), "claimed_devices": r.get("claimed", []), "devices": {}})
+                                                   "kind": r.get("kind", e.get("kind", "text")), "claimed_devices": r.get("claimed", []), "devices": {},
+                                                   **({"versions": {"package": {"skills_commit": {"commit": r["generator"], "basis": "production card"}}}}
+                                                      if r.get("generator") else {})})
         status = device_status(e)
         dv = {"status": status, "reason": e.get("reason")}
         if status not in ("no_runner", "not_claimed", "does_not_fit", "pending"):
