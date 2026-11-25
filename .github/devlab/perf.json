@@ -1,11 +1,11 @@
 {
- "_comment": "Original round-three candidates on elastic backing plus the chunk-4096 control. Select and gate one measured configuration.",
+ "_comment": "Flash Next final card job: the shipped catalog build (programs cf814884, chunk 4096) on hrx-loom 0.3.0 vs the production card, full gates once.",
  "runner": "strix",
  "memory_bytes": 100000000000,
  "llama_spec": "matched",
  "jobs": [
   {
-   "name": "flash-final",
+   "name": "flash-card",
    "runner": "strix",
    "card": "loom-fun/unsloth-Qwen3.8-Flash-Next-loom@d847c21bc93c0c6bc45752a9edaf91d80ac74490",
    "memory_bytes": 100000000000,
@@ -14,179 +14,63 @@
    "llamacpp_vulkan": "b12211",
    "variants": [
     {
-     "name": "base",
+     "name": "fun",
+     "card": "loom-fun/unsloth-Qwen3.8-Flash-Next-loom@d847c21bc93c0c6bc45752a9edaf91d80ac74490",
+     "sdk": "0.3.0"
+    },
+    {
+     "name": "staging",
      "build": {},
-     "sdk": "0.3.0",
      "ref": "29c71e1b6d407e4194253476fad3a96ea1214dae",
-     "build_args": [
-      "--memory-gib",
-      "4096",
-      "--prefill",
-      "4096"
-     ],
+     "sdk": "0.3.0",
+     "programs_sha256": "cf81488403eaa6e082dffa92387842b456b251c6456141595ea6b4f0a34fa486",
      "execution": {
       "prefill_capacity": 4096
-     },
-     "programs_sha256": "cf81488403eaa6e082dffa92387842b456b251c6456141595ea6b4f0a34fa486"
+     }
     },
     {
-     "name": "basend",
+     "name": "funnd",
+     "card": "loom-fun/unsloth-Qwen3.8-Flash-Next-loom@d847c21bc93c0c6bc45752a9edaf91d80ac74490",
+     "execution": {
+      "draft_depth": 0
+     },
+     "sdk": "0.3.0"
+    },
+    {
+     "name": "stagingnd",
      "build": {},
-     "sdk": "0.3.0",
      "ref": "29c71e1b6d407e4194253476fad3a96ea1214dae",
-     "build_args": [
-      "--memory-gib",
-      "4096",
-      "--prefill",
-      "4096"
-     ],
+     "sdk": "0.3.0",
+     "programs_sha256": "cf81488403eaa6e082dffa92387842b456b251c6456141595ea6b4f0a34fa486",
      "execution": {
       "prefill_capacity": 4096,
-      "draft_depth": 0
-     },
-     "programs_sha256": "cf81488403eaa6e082dffa92387842b456b251c6456141595ea6b4f0a34fa486"
-    },
-    {
-     "name": "p8k",
-     "build": {},
-     "sdk": "0.3.0",
-     "ref": "d836f73f81ea57f00effd148dd8fcb8809e18170",
-     "build_args": [
-      "--memory-gib",
-      "4096",
-      "--prefill",
-      "8192"
-     ]
-    },
-    {
-     "name": "p8knd",
-     "build": {},
-     "sdk": "0.3.0",
-     "ref": "d836f73f81ea57f00effd148dd8fcb8809e18170",
-     "build_args": [
-      "--memory-gib",
-      "4096",
-      "--prefill",
-      "8192"
-     ],
-     "execution": {
-      "draft_depth": 0
-     }
-    },
-    {
-     "name": "a8k",
-     "build": {},
-     "sdk": "0.3.0",
-     "ref": "0edc5023e2781da58e0a07b6d12dd33d9f9f0d33",
-     "build_args": [
-      "--memory-gib",
-      "4096",
-      "--prefill",
-      "8192"
-     ]
-    },
-    {
-     "name": "a8knd",
-     "build": {},
-     "sdk": "0.3.0",
-     "ref": "0edc5023e2781da58e0a07b6d12dd33d9f9f0d33",
-     "build_args": [
-      "--memory-gib",
-      "4096",
-      "--prefill",
-      "8192"
-     ],
-     "execution": {
-      "draft_depth": 0
-     }
-    },
-    {
-     "name": "b8k",
-     "build": {},
-     "sdk": "0.3.0",
-     "ref": "c80c4b62c16c4bb425093505451c3a666c8146aa",
-     "build_args": [
-      "--memory-gib",
-      "4096",
-      "--prefill",
-      "8192"
-     ]
-    },
-    {
-     "name": "b8knd",
-     "build": {},
-     "sdk": "0.3.0",
-     "ref": "c80c4b62c16c4bb425093505451c3a666c8146aa",
-     "build_args": [
-      "--memory-gib",
-      "4096",
-      "--prefill",
-      "8192"
-     ],
-     "execution": {
-      "draft_depth": 0
-     }
-    },
-    {
-     "name": "ab8k",
-     "build": {},
-     "sdk": "0.3.0",
-     "ref": "2db5ef4f10f33b47314114191a96f4cc1446ca8e",
-     "build_args": [
-      "--memory-gib",
-      "4096",
-      "--prefill",
-      "8192"
-     ]
-    },
-    {
-     "name": "ab8knd",
-     "build": {},
-     "sdk": "0.3.0",
-     "ref": "2db5ef4f10f33b47314114191a96f4cc1446ca8e",
-     "build_args": [
-      "--memory-gib",
-      "4096",
-      "--prefill",
-      "8192"
-     ],
-     "execution": {
       "draft_depth": 0
      }
     }
    ],
    "steps": [
-    "perf:base:1",
-    "perf:base:1:long",
-    "c4:basend",
-    "perf:p8k:1",
-    "perf:p8k:1:long",
-    "c4:p8knd",
-    "perf:a8k:1",
-    "perf:a8k:1:long",
-    "c4:a8knd",
-    "perf:b8k:1",
-    "perf:b8k:1:long",
-    "c4:b8knd",
-    "perf:ab8k:1",
-    "perf:ab8k:1:long",
-    "c4:ab8knd",
-    "perf:ab8k:1",
-    "perf:ab8k:1:long",
-    "c4:ab8knd",
-    "perf:b8k:1",
-    "perf:b8k:1:long",
-    "c4:b8knd",
-    "perf:a8k:1",
-    "perf:a8k:1:long",
-    "c4:a8knd",
-    "perf:p8k:1",
-    "perf:p8k:1:long",
-    "c4:p8knd",
-    "perf:base:1",
-    "perf:base:1:long",
-    "c4:basend",
-    "flash-final"
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:fun:1",
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:staging:1:long",
+    "perf:fun:1:long",
+    "perf:fun:1:long",
+    "perf:staging:1:long",
+    "perf:staging:1:long",
+    "perf:fun:1:long",
+    "c4:funnd",
+    "c4:stagingnd",
+    "c4:stagingnd",
+    "c4:funnd",
+    "textmatch:fun",
+    "textmatch:staging",
+    "func:staging",
+    "ktest:staging",
+    "gates:staging:full",
+    "admit:staging"
    ],
    "sdk": "0.3.0"
   }
