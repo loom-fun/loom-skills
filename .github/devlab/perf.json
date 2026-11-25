@@ -1,11 +1,11 @@
 {
- "_comment": "pf-ornith x2: Ornith-1.5-122B Strix, prefill.gemm.kq_zero_point: fun = kit build at d632f23125c8ab1ba8732e17d2638b5970570ee3 (sdk030 base), staging = kit build at f4ba93cbb776e413e09694e23397f971e7b11831; card context (LOOM_MEMORY_CAP_GIB 100), ktest + perf ABBA 3+3 short and long + gates once on staging",
+ "_comment": "pf-ornith x3: Ornith-1.5-122B Strix logits gate, fun = kit build at 4898f832f6ac43da771ce102889937b1b02f7485 (sdk030), staging = kit build at f9b120af1ca4ab1424a3418dbc67b87cfc6bfd6b (prefill.gemm.kq_zero_point); both built with the version-1 publish_epoch / input contract (telemetry.proposal_counts, chat.input_measure off: host-side only, no device program change) so the pinned Gufo bundle loads them until the 0.3.0 bundle pin lands",
  "runner": "strix",
  "memory_bytes": 106000000000,
  "llama_spec": "matched",
  "jobs": [
   {
-   "name": "pfo2-122b-strix",
+   "name": "pfo3-122b-strix",
    "runner": "strix",
    "card": "loom-fun-staging/bartowski-Ornith-1.5-122B-loom",
    "memory_bytes": 106000000000,
@@ -15,34 +15,31 @@
    "variants": [
     {
      "name": "fun",
-     "build": {},
-     "ref": "d632f23125c8ab1ba8732e17d2638b5970570ee3"
+     "build": {
+      "LLM_PROPOSAL_COUNTS": "0",
+      "LLM_INPUT_MEASURE": "0"
+     },
+     "ref": "4898f832f6ac43da771ce102889937b1b02f7485"
     },
     {
      "name": "staging",
-     "build": {},
-     "ref": "f4ba93cbb776e413e09694e23397f971e7b11831"
+     "build": {
+      "LLM_PROPOSAL_COUNTS": "0",
+      "LLM_INPUT_MEASURE": "0"
+     },
+     "ref": "f9b120af1ca4ab1424a3418dbc67b87cfc6bfd6b"
     }
    ],
    "steps": [
-    "ktest:staging",
-    "perf:fun:1",
-    "perf:staging:1",
-    "perf:staging:1",
-    "perf:fun:1",
-    "perf:fun:1",
-    "perf:staging:1",
-    "perf:staging:1:long",
-    "perf:fun:1:long",
-    "perf:fun:1:long",
-    "perf:staging:1:long",
-    "perf:staging:1:long",
-    "perf:fun:1:long",
-    "textmatch:fun",
-    "textmatch:staging",
-    "func:staging",
-    "gates:staging:dev"
+    "logits:fun",
+    "logits:staging"
    ],
+   "bundle": {
+    "build": {
+     "extension": "loom-fun/loom-gufo-extension@45b2bc0062e73d9fcce8d3d71be9a85a2bfe448f",
+     "gufo": "loom-fun/gufo@2255d6f3754f530af1d178097abe48c436104908"
+    }
+   },
    "env": {
     "LOOM_MEMORY_CAP_GIB": "100"
    }
