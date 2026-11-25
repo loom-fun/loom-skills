@@ -740,6 +740,44 @@ class KitVerdict(unittest.TestCase):
             st.d["opts"]["ship"] = []
             self.assertIn("decision pending", qualify()["reason"])
 
+    def test_near_tie_needs_both_measured_programs_all_prompts_and_compare(self):
+        with tempfile.TemporaryDirectory() as t:
+            def write(directory, name, doc):
+                with open(os.path.join(directory, name), "w") as f:
+                    json.dump(doc, f)
+
+            diag = os.path.join(t, "probe")
+            os.mkdir(diag)
+            url = "https://github.com/loom-fun/loom-skills/actions/runs/1/job/2"
+            replay = {"dir": diag, "url": url, "device": "strix-halo", "measured_job": "original"}
+            e = {"near_tie_replay": replay, "dir": t, "source_card": "test@abc", "job_url": "original", "device": "strix-halo"}
+            cmp = {"status": "DIFF", "prompts": 2, "identical": 1}
+            with open(os.path.join(diag, "card_revision.txt"), "w") as f:
+                f.write(e["source_card"])
+            for side, token, other in (("fun", 11, 12), ("staging", 12, 11)):
+                for d in (t, diag):
+                    write(d, f"text_{side}.json", {"texts": ["same", str(token)]})
+                    write(d, f"sdk_{side}.json", regen.release_pin("0.3.0"))
+                    with open(os.path.join(d, f"programs_sha256_{side}.txt"), "w") as f:
+                        f.write(H)
+                write(diag, f"tie_{side}_1.json", {"prompt_ids": [1], "prefix_device_choices": [4], "device": token,
+                                                       "top": [[token, -0.4], [other, -0.6]]})
+            write(diag, "tie_cases.json", [{"prompt": 1, "candidates": [11, 12], "common": [4], "position": 1}])
+            os.mkdir(os.path.join(t, "gates_staging"))
+            gate = {"verdict": "PASS", "gates": {"compare": {"pass": True}}, "context_admit": {"admitted": True}}
+            write(t, "gates_staging/gates.json", gate)
+            self.assertEqual(regen.kit_near_tie(e, cmp), url)
+            for gates in ({}, {"compare": {"pass": False}}):
+                write(t, "gates_staging/gates.json", dict(gate, gates=gates))
+                self.assertIsNone(regen.kit_near_tie(e, cmp))
+            write(t, "gates_staging/gates.json", gate)
+            self.assertIsNone(regen.kit_near_tie(e, dict(cmp, identical=0)))
+            self.assertIsNone(regen.kit_near_tie(dict(e, device="radeon-r9700"), cmp))
+            self.assertIsNone(regen.kit_near_tie(dict(e, job_url="another job"), cmp))
+            write(diag, "tie_staging_1.json", {"prompt_ids": [1], "prefix_device_choices": [4], "device": 12,
+                                                    "top": [[12, -0.05], [11, -4.5]]})
+            self.assertIsNone(regen.kit_near_tie(e, cmp))
+
     def test_final_session_checks_device_job_and_digest(self):
         row = {"staging": "staging/test", "staging_revision": "a" * 40, "programs_sha256": H,
                "qualification": {"strix-halo": {"url": "run/1"}, "radeon-r9700": {"url": "run/2"}}}
