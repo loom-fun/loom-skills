@@ -82,6 +82,7 @@ import card_lib  # noqa: E402
 import promote_check  # noqa: E402
 import sample_lib  # noqa: E402
 import sdk_package  # noqa: E402
+import sdk_pin  # noqa: E402
 from sdk_pin import VERIFIED_RELEASES  # noqa: E402
 from publish_package import parse_upload_receipt  # noqa: E402
 
@@ -118,23 +119,23 @@ def version_key(version):
     return tuple(int(x) for x in m.groups())
 
 
-def newest_release():
-    """the newest verified SDK release (loom-setup/scripts/sdk_pin.py VERIFIED_RELEASES): what a migration moves TO by default"""
-    return max(VERIFIED_RELEASES, key=version_key)
-
-
-SDK_NEW = newest_release()
+SDK_NEW = sdk_pin.newest_verified()   # what a migration moves TO by default (loom-setup/scripts/sdk_pin.py VERIFIED_RELEASES)
 LEGACY_NEW_SDK = "0.2.0"   # a state planned before plan recorded opts.new_sdk (the v0.1 -> v0.2 migration) targets this
-LINUX_WHEEL = "manylinux_2_39_x86_64"   # the runners' platform wheel (devlab_perf.sh ensure_sdk.sh)
 VERSIONS = os.path.join(ROOT, "skills", "loom-migrate", "versions")
 
 
 def release_pin(version):
-    """the llm_config.json "sdk" pin of a VERIFIED release (sdk_pin.VERIFIED_RELEASES), or None for an unverified version"""
-    rel = VERIFIED_RELEASES.get(version)
-    if not rel:
-        return None
-    return {"hrx_loom": version, "source": "pypi", "hrx_system_sha": rel["hrx_system_sha"], "wheel_sha256": rel["wheels"][LINUX_WHEEL]}
+    """the llm_config.json "sdk" pin of a VERIFIED release (sdk_pin.release_pin), or None for an unverified version (a legacy target)"""
+    return sdk_pin.release_pin(version) if version in VERIFIED_RELEASES else None
+
+
+def repo_rel(path):
+    """PATH relative to the repository when it is inside it, else absolute (another drive on Windows)"""
+    try:
+        rel = os.path.relpath(path, ROOT)
+    except ValueError:
+        return os.path.abspath(path)
+    return os.path.abspath(path) if rel.startswith("..") else rel
 
 
 def inventory_path(version):
@@ -513,7 +514,7 @@ def cmd_plan(a):
             if accepted:
                 published = f"{PRODUCTION_ORG}/{s}"
                 if published not in accepted:
-                    die(f"{published}: absent from the accepted SDK {new_sdk} production inventory ({os.path.relpath(inventory, ROOT)})")
+                    die(f"{published}: absent from the accepted SDK {new_sdk} production inventory ({repo_rel(inventory)})")
                 revision = accepted[published]
                 reference = f"{published}@{revision}"
                 refs[s] = {"old": reference, "new": reference}
@@ -546,7 +547,7 @@ def cmd_plan(a):
     st = {"schema": "regen/1", "created": now(), "mode": a.mode, "work": work, "state": state_path,
           "opts": {"gates": a.gates, "new_org": a.new_org, "base": a.base, "old_org": old_org, "batch": a.batch, "refs": None,
                    "new_sdk": new_sdk, **({"old_sdk_target": True} if a.old_sdk == "target" else {}),
-                   **({"programs": "production", "inventory": os.path.relpath(inventory, ROOT),
+                   **({"programs": "production", "inventory": repo_rel(inventory),
                                            "old_sdk": inventory_old_version(inventory), "held": held} if production else {}),
                    **({"replicas": a.replicas} if a.replicas > 1 else {}), **({"sequential": True} if a.sequential else {}),
                    **({"no_baselines": True} if a.no_baselines else {}), **({"bundle": a.bundle} if a.bundle else {}),
