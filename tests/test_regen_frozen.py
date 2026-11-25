@@ -597,6 +597,11 @@ class Share(unittest.TestCase):
             self.assertEqual({n: e["stage"] for n, e in sw.jobs.items()}, {"sab-a": "shared", "sab-b": "shared", "sab-c": "shared"})
             self.assertEqual([b["jobs"] for b in sw.d["batches"]], [[], []])
             self.assertEqual(sw.d["batches"][1]["stage"], "dropped")
+            with mock.patch.object(regen, "gh_json", lambda args: {"jobs": []}), contextlib.redirect_stdout(io.StringIO()):
+                try:
+                    regen.main(["poll", sweep])   # a dropped batch (no branch, no run) is not looked up
+                except SystemExit:
+                    pass
             self.assertEqual(calls, [["gh", "run", "cancel", "11", "-R", regen.REPO]])
             self.assertEqual(q.jobs["sab-a"]["phase1"], {"state": sw.path, "job": "sab-a"})
             # the phase-2 job of a is collected: its frozen side is the migration job's result; b's job failed: it stops for a decision
