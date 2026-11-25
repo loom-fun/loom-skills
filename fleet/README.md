@@ -19,6 +19,7 @@ published model, without a GPU and without any weights.
 | `ownership.json` | protected core files, files each PR kind may change, kernel family -> files and rows_map rule ids (data; protected) |
 | `route_load.py` | instruction load: lines a port / optimize run reads per fleet model (routed files + workflow and kb SKILL.md) vs the pre-refactor set at `--base`; `--md`, `--json` |
 | `replays/` | measure 2: past PRs replayed through the guards (`replay.py NAME`, `mkpatches.py`, `summarize.py`); evidence per PR and `REPLAYS.md` |
+| `sdk_inventory.py` | `snapshot` the production org's public package repos (org/repo -> head) / `drift` between two inventories: the accepted inventory of an SDK migration |
 | `regen.py` | regenerate many cards, one command per step (`plan submit poll collect rerun ingest publish status accept adopt`), state in one JSON file; `--mode card` for a new device: no A/B |
 | `devices/` | per-device results of GPUs with no DevLab runner (gfx1201 16 GB class, gfx1150): per model fits / max context / serve flags / preset overrides / evidence with provenance; schema `devices/device_results.schema.json`, `devices/README.md`; `make_info.py build` turns an entry into the card's GPU block, preset and section |
 | `rows_map.json` | kernel family -> card rows / gates (data; first matching rule wins) |
@@ -64,6 +65,22 @@ ones on the confirmed rows), `perf_cross`, `confirmed` = {row: ABBA %}; `status 
 card's llama.cpp rows (ROCm: copied per row with its original run and date as `baseline_from`; Vulkan: the published session stays), never re-measured, and the card's
 methodology says "llama.cpp measured on D (run), Loom on D2 (run): same runner type, different jobs" instead of "same job" (`render_card.py`; a same-job card keeps its wording).
 Order: `plan -> submit -> poll -> collect -> (rerun -> submit -> poll -> collect) -> package -> ingest -> publish`.
+
+**Frozen SDK migration (`--programs production`)**: the release ships the production programs unchanged on the new SDK, so the sweep measures exactly those.
+
+    python fleet/sdk_inventory.py snapshot -o /tmp/inv.json && python fleet/sdk_inventory.py drift skills/loom-migrate/versions/vOLD-to-vNEW-production.json /tmp/inv.json
+    regen.py plan --base BRANCH --device strix-halo --device radeon-r9700 --mode sdk-loom --programs production --all --state S.json
+    regen.py submit S.json --max-inflight auto; (loop >= 120 s) regen.py poll S.json; regen.py collect S.json; regen.py rerun S.json && regen.py submit S.json
+    regen.py evidence S.json -o evidence.json; regen.py package S.json; regen.py ingest S.json; regen.py publish S.json; regen.py eligible S.json --out-dir release/
+
+`--new-sdk` defaults to the newest verified release (`sdk_pin.VERIFIED_RELEASES`); its inventory `skills/loom-migrate/versions/vOLD-to-vNEW-production.json`
+pins every production package (`_drift` records what moved since it was first accepted), the sibling `-held.json` lists packages out of the release. Each
+job serves the production package at its pinned revision on the new SDK (nothing built; the programs hash is checked before anything is measured), the
+devices come from the card itself (runner-less ones are recorded as carried), image packages get an image-service job (identical pixels on both SDKs),
+and every perf session leaves the server's raw `/metrics` (`metrics_V_NNN.txt`: the speculative counters). `evidence` writes the per model / device /
+metric record (`sdk-evidence/1`: old card row and session, new row, run, job, conclusion, programs hash, wheel, gates, admission probe, acceptance);
+`eligible` derives eligible.json / held.json / pending.json from it, fail closed. Phase 2 (the kit's programs against the frozen ones, both on the new
+SDK, ABBA in one job): `regen.py plan --mode sdk-ab --old-sdk target --no-baselines ...`.
 
 `regen.py package S.json [--dry-run] [--slugs S...] [--ref REF]` is the step between `collect` and `ingest` (`make_info.py` refuses programs other than the
 ones the job built, so the v0.2 package must be on staging before the card is made). It builds the base once, CPU only (`build_fleet.py --ref origin/<base>
