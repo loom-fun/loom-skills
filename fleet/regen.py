@@ -1772,6 +1772,8 @@ def cmd_package_frozen(st, a, picked):
     slugs = sorted({e["slug"] for _, e in picked if e.get("kind") != "image"})   # an image card is migrated by the image tooling (its job is the evidence)
     for slug in slugs:
         jobs = [e for _, e in picked if e["slug"] == slug and not e.get("prev")]   # the sweep jobs (an ABBA confirmation is not a card job)
+        if not jobs:   # only a model's ABBA confirmation is promoted (its sweep job waits for a decision): nothing to package yet
+            continue
         if not a.dry_run and all(e.get("package") for e in jobs):
             print(f"{slug}: package already published ({jobs[0]['package']['revision'][:10]})")
             continue
