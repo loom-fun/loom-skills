@@ -881,6 +881,9 @@ for name in ("prepare", "control", "storage", "service"):
     if name in ("control", "service") and os.environ.get("LLM_PROPOSAL_COUNTS", "0") == "1":   # choice telemetry.proposal_counts (SDK 0.3.0)
         import proposal_counts
         text = (proposal_counts.patch_control if name == "control" else proposal_counts.patch_service)(text)
+    if name == "control" and os.environ.get("LLM_INPUT_MEASURE", "0") == "1":   # choice chat.input_measure: the SDK 0.3.0 count contract
+        import input_measure
+        text = input_measure.patch_control(text)
     if name in ("storage", "control", "prepare") and os.environ.get("LLM_LOGITS", "1") == "0":   # choice feature.logits_export off: no logits readback in the package
         text = re.sub(r"(?s)\n?[ ]*// logits:begin\n.*?// logits:end\n", "\n", text)
     for k, v in subs.items():

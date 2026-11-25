@@ -775,6 +775,11 @@ CHOICE("telemetry.proposal_counts", "bool", False, "LLM_PROPOSAL_COUNTS", kernel
        doc="publish_epoch takes the SDK 0.3.0 proposal_counts buffer (starter/proposal_counts.py): each verified drafted span reports "
            "the candidates it presented (planned length minus the anchor; 0 for ordinary work), so /metrics keeps draft_proposed_tokens and "
            "the acceptance rate is measurable (#1401). Version-1 ABI kept; host-side only, no device program changes. Needs hrx-loom >= 0.3.0.")
+CHOICE("chat.input_measure", "bool", False, "LLM_INPUT_MEASURE", kernels=["program"], rows=[], from_pr="sdk030 sdkcap",
+       doc="prepare_input follows the SDK 0.3.0 complete-conversation count contract (starter/input_measure.py): above the capacity it "
+           "returns no tokens and the count (the server rejects a generation request itself, HTTP 400) and capacity -1 measures, so "
+           "POST /v1/chat/completions/input_tokens counts a conversation beyond the window instead of answering 400. Host-side only: "
+           "no device program changes. Needs hrx-loom >= 0.3.0 at serve time for the measuring probe (0.2.0 never sends -1).")
 
 # ======================================================================================================================
 # Not choices: everything else the generators and their tools read from the environment
