@@ -6497,6 +6497,8 @@ if __name__ == "__main__":
     if HADAMARD:   # prism.hadamard: the quantizers feeding folded weights rotate (after quant/head wiring, before the row-scale fusions)
         program, _had_used = ternary.wiring(program, CFG)
         COMMON += ternary.kernels(CFG, _had_used)
+        if os.environ.get("HAD_FAST", "0") == "1":   # choice decode.hadamard.fast: register / subgroup FWHT in the rotating int8 quantizers
+            COMMON = ternary.use_fast_q8(COMMON, CFG, _had_used)
     if os.environ.get("ROW_SCALE_LIVE", "1") != "0":   # after quant_wiring (it matches g_row_scale_f16); =0 A/B it off
         program = live_row_scale(program)
         COMMON += ROW_SCALE_LIVE

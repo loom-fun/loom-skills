@@ -1124,3 +1124,90 @@ command.def public @llm_prep_q2_0x_ptq1_0() launch(%output: buffer, %input: buff
   command.return
 }}
 """
+
+
+# ---- register / subgroup FWHT (choice decode.hadamard.fast, env HAD_FAST=1) ----
+def fwht_fast(pfx="ff"):
+    """IR: normalized-free 1024-point FWHT of the block held as 4 consecutive values per lane (%{pfx}x0..3 = elements 4l..4l+3,
+    256 lanes = 8 waves of 32): stages h = 1, 2 in registers, h = 4..64 by xor shuffles inside the wave, h = 128..512 through the
+    workgroup buffer %buf (3 store / barrier / load rounds). Leaves %{pfx}f0..3."""
+    t = []
+    x = [f"%{pfx}x{k}" for k in range(4)]
+    def bf(a, b, n1, n2):
+        t.append(f"  {n1} = scalar.addf {a}, {b} : f32\n  {n2} = scalar.subf {a}, {b} : f32\n")
+    bf(x[0], x[1], f"%{pfx}a0", f"%{pfx}a1"); bf(x[2], x[3], f"%{pfx}a2", f"%{pfx}a3")
+    bf(f"%{pfx}a0", f"%{pfx}a2", f"%{pfx}b0", f"%{pfx}b2"); bf(f"%{pfx}a1", f"%{pfx}a3", f"%{pfx}b1", f"%{pfx}b3")
+    cur = [f"%{pfx}b{k}" for k in range(4)]
+    t.append(f"  %{pfx}w32 = scalar.constant 32 : i32\n  %{pfx}lane32 = index.rem %lane, %{pfx}c32 : index\n  %{pfx}li = index.cast %{pfx}lane32 : index to i32\n")
+    for s, m in enumerate((1, 2, 4, 8, 16)):
+        t.append(f"  %{pfx}m{s} = scalar.constant {m} : i32\n  %{pfx}hb{s}0 = scalar.andi %{pfx}li, %{pfx}m{s} : i32\n"
+                 f"  %{pfx}hb{s} = scalar.cmpi ne, %{pfx}hb{s}0, %zero_i : i32\n")
+        nxt = []
+        for k in range(4):
+            c = cur[k]
+            t.append(f"  %{pfx}i{s}_{k} = scalar.bitcast {c} : f32 to i32\n"
+                     f"  %{pfx}o{s}_{k}, %{pfx}u{s}_{k} = kernel.subgroup.shuffle<xor> %{pfx}i{s}_{k}, %{pfx}m{s}, %{pfx}w32 : i32, i32, i32\n"
+                     f"  %{pfx}p{s}_{k} = scalar.bitcast %{pfx}o{s}_{k} : i32 to f32\n"
+                     f"  %{pfx}s{s}_{k} = scalar.addf {c}, %{pfx}p{s}_{k} : f32\n"
+                     f"  %{pfx}d{s}_{k} = scalar.subf %{pfx}p{s}_{k}, {c} : f32\n"
+                     f"  %{pfx}n{s}_{k} = scf.select %{pfx}hb{s}, %{pfx}d{s}_{k}, %{pfx}s{s}_{k} : f32\n")
+            nxt.append(f"%{pfx}n{s}_{k}")
+        cur = nxt
+    t.append(f"  %{pfx}bv = buffer.view %buf[%zero] : buffer -> view<256x4xf32>\n  %{pfx}wv = index.div %lane, %{pfx}c32 : index\n")
+    for s, m in enumerate((1, 2, 4)):   # partner wave = wave ^ m (elements i ^ 128 m)
+        st = "\n".join(f"  view.store {cur[k]}, %{pfx}bv[%lane, %c{k}x] : f32, view<256x4xf32>" for k in range(4))
+        t.append(f"""  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+{st}
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  %{pfx}W{s} = index.constant {m} : index
+  %{pfx}wq{s} = index.div %{pfx}wv, %{pfx}W{s} : index
+  %{pfx}wr{s} = index.rem %{pfx}wq{s}, %{pfx}c2 : index
+  %{pfx}up{s} = index.cmp ne, %{pfx}wr{s}, %c0 : index
+  %{pfx}dl{s} = index.mul %{pfx}W{s}, %{pfx}c32 : index
+  %{pfx}pl0{s} = scf.select %{pfx}up{s}, %{pfx}dl{s}, %c0 : index
+  %{pfx}pl1{s} = index.add %lane, %{pfx}dl{s} : index
+  %{pfx}pl2{s} = index.sub %lane, %{pfx}pl0{s} : index
+  %{pfx}plr{s} = scf.select %{pfx}up{s}, %{pfx}pl2{s}, %{pfx}pl1{s} : index
+  %{pfx}pl{s} = index.assume %{pfx}plr{s} [range(%{pfx}plr{s}, 0, 255)] : index
+""")
+        nxt = []
+        for k in range(4):
+            t.append(f"  %{pfx}q{s}_{k} = view.load %{pfx}bv[%{pfx}pl{s}, %c{k}x] : view<256x4xf32> -> f32\n"
+                     f"  %{pfx}S{s}_{k} = scalar.addf {cur[k]}, %{pfx}q{s}_{k} : f32\n"
+                     f"  %{pfx}D{s}_{k} = scalar.subf %{pfx}q{s}_{k}, {cur[k]} : f32\n"
+                     f"  %{pfx}N{s}_{k} = scf.select %{pfx}up{s}, %{pfx}D{s}_{k}, %{pfx}S{s}_{k} : f32\n")
+            nxt.append(f"%{pfx}N{s}_{k}")
+        cur = nxt
+    st = "\n".join(f"  view.store {cur[k]}, %{pfx}bv[%lane, %c{k}x] : f32, view<256x4xf32>" for k in range(4))
+    pre = f"  %{pfx}c32 = index.constant 32 : index\n  %{pfx}c2 = index.constant 2 : index\n" + "".join(f"  %c{k}x = index.constant {k} : index\n" for k in range(4))
+    return pre + "".join(t) + f"  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)\n{st}\n  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)\n"
+
+
+def _gather_regs(width, perm, gdn, pfx="ff"):
+    """As _gather, into registers %{pfx}x0..3 (this lane's 4 consecutive inputs of block %blk) instead of the buffer."""
+    g = _gather(width, perm, gdn)
+    g = g.replace(f"  %buf_v = buffer.view %buf[%zero] : buffer -> view<{BLK}xf32>\n", "")
+    body = g[g.index("  scf.for %e"):]
+    head = g[:g.index("  scf.for %e")]
+    inner = body[body.index("{\n") + 2: body.rindex("  }\n")]
+    inner = inner.replace(f"      view.store %xs, %buf_v[%ei] : f32, view<{BLK}xf32>\n", "")
+    out = [head]
+    for k in range(4):
+        out.append(_uniq(inner.replace("%e4 = index.mul %lane, %c4 : index\n      %ei0 = index.add %e4, %e : index",
+                                       f"%e4 = index.mul %lane, %c4 : index\n      %ek = index.constant {k} : index\n      %ei0 = index.add %e4, %ek : index"), f"g{k}")
+                   + f"      %{pfx}x{k} = scalar.addf %g{k}xs, %zero_f : f32\n")
+    return "".join(out)
+
+
+def use_fast_q8(text, cfg, used):
+    """Replace the g_had_q8_w* kernels by the register / shuffle FWHT form (same names and outputs)."""
+    gdn = cfg.get("gdn")
+    for k, w, perm in sorted(used):
+        if k != "q8":
+            continue
+        name = f"g_had_q8_w{w}{'p' if perm else ''}"
+        old = q8_kernel(w, perm, gdn)
+        new = old.replace(_gather(w, perm, gdn) + fwht("buf", 1, 256, "fw"), _gather_regs(w, perm, gdn) + fwht_fast())
+        assert new != old and old in text, name
+        text = text.replace(old, new)
+    return text

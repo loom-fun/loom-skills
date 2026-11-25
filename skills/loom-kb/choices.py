@@ -374,6 +374,9 @@ CHOICE("decode.ternary.repack", "bool", False, "TERNARY_REPACK", kernels=["g_mv_
 CHOICE("decode.ptq1_0.mv", "str", None, "PTQ1_0_MV", kernels=["g_mv_ptq1_0_*"], rows=ROWS_DECODE + ROWS_STREAMS, from_pr="bonsai-1416",
        doc="PTQ1_0 int8 matvecs: generic (None: one lane per 32-value group, the shared kernel), block (one lane per 128-value block, "
            "16-bit-lane trit decode) or lut (block, workgroup byte tables) (starter ternary.mv_block / use_lut_mv).")
+CHOICE("decode.hadamard.fast", "bool", False, "HAD_FAST", kernels=["g_had_q8_*"], rows=ROWS_DECODE + ROWS_STREAMS, from_pr="bonsai-1416",
+       doc="prism.hadamard rotating int8 quantizers: the 1024-point transform in registers and subgroup shuffles (3 workgroup rounds) "
+           "instead of 10 barrier-separated workgroup-memory stages (starter ternary.fwht_fast).")
 CHOICE("decode.iq4.act_q8", "bool", False, "IQ4_Q8", kernels=["g_mv_iq4_*", "g_quant_q8"],
        rows=ROWS_DECODE + ROWS_STREAMS, from_pr="q38xl-dec",
        doc="IQ4_XS / IQ4_NL dense matvecs take int8 activations (ACT_Q8's dot4 path with @g_iq4_<fmt>_icodes: kvalues codes x one "
