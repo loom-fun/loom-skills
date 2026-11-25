@@ -42,8 +42,9 @@ def facts(repo, rev, cache):
 class VersionGeneric(unittest.TestCase):
     def test_newest_verified_release_is_the_default_target(self):
         self.assertEqual(regen.SDK_NEW, max(regen.VERIFIED_RELEASES, key=regen.version_key))
-        with mock.patch.dict(regen.VERIFIED_RELEASES, {"0.10.0": {"hrx_system_sha": "x", "wheels": {regen.LINUX_WHEEL: "y"}}}):
-            self.assertEqual(regen.newest_release(), "0.10.0")   # numeric ordering, not string ordering
+        with mock.patch.dict(regen.VERIFIED_RELEASES, {"0.10.0": {"hrx_system_sha": "x", "wheels": {"manylinux_2_39_x86_64": "y"}}}):
+            self.assertEqual(regen.sdk_pin.newest_verified(), "0.10.0")   # numeric ordering, not string ordering
+            self.assertEqual(regen.release_pin("0.10.0")["wheel_sha256"], "y")
         self.assertGreater(regen.version_key("0.10.0"), regen.version_key("0.9.1"))
         with self.assertRaises(ValueError):
             regen.version_key("card")
@@ -52,7 +53,7 @@ class VersionGeneric(unittest.TestCase):
         pin = regen.release_pin("0.3.0")
         rel = regen.VERIFIED_RELEASES["0.3.0"]
         self.assertEqual(pin, {"hrx_loom": "0.3.0", "source": "pypi", "hrx_system_sha": rel["hrx_system_sha"],
-                               "wheel_sha256": rel["wheels"][regen.LINUX_WHEEL]})
+                               "wheel_sha256": rel["wheels"]["manylinux_2_39_x86_64"]})
         self.assertIsNone(regen.release_pin("0.2.0"))   # not verified here: the legacy staging-history path
 
     def test_no_hard_coded_target_version_in_regen(self):
