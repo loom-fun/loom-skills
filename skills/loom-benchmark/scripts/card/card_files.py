@@ -58,16 +58,33 @@ def package_files(directory):
 
 PROSE_STAGING = re.compile(r"(?<!loom-fun-)\bstaging\b", re.I)   # the card's own prose never says staging at all
 
+RELEASE_HISTORY = re.compile(r"\b(?:previous card|prior SDK|migration-only|new port in SDK|regressions?|"
+                             r"SDK[- ]delta|ABBA|kit build (?:was|kept)|change from the (?:last|previous))\b", re.I)
+INFO_PROSE = {"note", "notes", "explanation", "explanations", "footnote", "footnotes", "next_steps",
+              "differs", "reason", "detail", "summary", "description", "title", "text"}
+
+
+def info_history_problems(value, path="info.json", prose=False):
+    """Check narrative fields at any depth, including lists and keyed collections of notes."""
+    if isinstance(value, dict):
+        for key, item in value.items():
+            yield from info_history_problems(item, f"{path}.{key}", prose or key in INFO_PROSE)
+    elif isinstance(value, list):
+        for index, item in enumerate(value):
+            yield from info_history_problems(item, f"{path}[{index}]", prose)
+    elif prose and isinstance(value, str):
+        match = RELEASE_HISTORY.search(value)
+        if match:
+            yield f"{path}: release history ({match.group()})"
+
 
 def text_problems(rel, text):
     """The text rules of one card text file (README.md and REPORT.md, the card's prose, never say "staging"; the
     configs' recorded evidence strings may say "staged" for a kernel's pipeline, so only staging-flow phrases count)."""
     out = []
     pats = FORBIDDEN + ([(PROSE_STAGING, "staging wording")] if rel in ("README.md", "REPORT.md") else [])
-    if rel in ("README.md", "REPORT.md", "info.json"):
-        pats = pats + [(re.compile(r"\b(?:previous card|prior SDK|migration-only|new port in SDK|regressions?|"
-                                   r"SDK[- ]delta|ABBA|kit build (?:was|kept)|change from the (?:last|previous))\b", re.I),
-                        "release history")]
+    if rel in ("README.md", "REPORT.md"):
+        pats = pats + [(RELEASE_HISTORY, "release history")]
     for pat, what in pats:
         hits = sorted({m.group(0) for m in pat.finditer(text)})
         if hits:
@@ -78,6 +95,7 @@ def text_problems(rel, text):
             info = json.loads(text)
         except ValueError as e:
             return out + [f"info.json: not JSON ({e})"]
+        out.extend(info_history_problems(info))
         for field in ("promotion_hold", "sdk_delta"):
             if field in info:
                 out.append(f"info.json: {field} belongs in the release report")

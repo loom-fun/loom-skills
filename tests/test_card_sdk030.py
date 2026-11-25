@@ -107,6 +107,15 @@ class CardFiles(unittest.TestCase):
                 with self.subTest(name=name, phrase=phrase):
                     self.assertTrue(any("release history" in p for p in card_files.text_problems(name, text)))
 
+    def test_recorded_session_command_and_card_note(self):
+        performance = {"sessions": [{"commands": ["perf:ws64:1 ABBA"]}]}
+        info = {"devices": {"gfx1201-16gb": {"performance": performance}}}
+        self.assertEqual(card_files.text_problems("info.json", json.dumps(info)), [])
+        performance["baseline"] = {"differs": ["Change from the previous card"]}
+        problems = card_files.text_problems("info.json", json.dumps(info))
+        self.assertEqual(problems, ["info.json.devices.gfx1201-16gb.performance.baseline.differs[0]: "
+                                    "release history (Change from the previous)"])
+
     def test_program_identifiers_are_code(self):
         with tempfile.TemporaryDirectory() as t:
             self.package(t)
