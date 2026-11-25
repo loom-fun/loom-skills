@@ -110,7 +110,15 @@ class KernelTests(unittest.TestCase):
 
     @unittest.skipUnless(loom_compile(), "loom-compile not available")
     def test_kernel_designs_compile_for_gfx1201_without_spills(self):
-        """every design of choice prefill.gemm.mxfp4s_f8_kernel (gen_mxfp4s.F8_KERNELS), both modes and both nibble orders, compiles without scratch"""
+        """Check the exact scratch allocation of every design, mode and nibble order."""
+        compiler = Path(loom_compile()).resolve()
+        # The compiler can come from a different SDK environment than the test runner.
+        sdk_python = compiler.with_name("python.exe" if os.name == "nt" else "python")
+        sdk_version = subprocess.check_output(
+            [sdk_python, "-c", "from importlib.metadata import version; print(version('hrx-loom'))"],
+            text=True,
+        ).strip()
+        lvs_store_bytes = 4 if sdk_version.startswith("0.2.") else 0
         for name, kws in R.F8_KERNELS.items():
             for mode, kw in zip(("store", "swiglu"), kws):
                 for order in ("pairs", "split16"):
@@ -118,12 +126,12 @@ class KernelTests(unittest.TestCase):
                         f = Path(d) / "t.loom"
                         f.write_text(HEADER + R.gemm_mxfp4s_f8_m256(mode, order=order, **kw))
                         out = Path(d) / "o.hsaco"
-                        r = subprocess.run([loom_compile(), str(f), "--format=amdgpu-hsaco", "--target=amdgpu:gfx1201", f"--output={out}"], capture_output=True, text=True)
+                        r = subprocess.run([compiler, str(f), "--format=amdgpu-hsaco", "--target=amdgpu:gfx1201", f"--output={out}"], capture_output=True, text=True)
                         self.assertEqual(r.returncode, 0, (name, mode, r.stderr[:1500]))
                         blob = out.read_bytes()
                         i = blob.find(b".private_segment_fixed_size")
-                        # hrx-loom 0.2.0's compiler spills 4 bytes of scratch in the opt-in `lvs` store design (v0.1.0's did not); every other design is spill-free
-                        want = 4 if (name, mode) == ("lvs", "store") else 0
+                        self.assertGreaterEqual(i, 0, f"{name} {mode} missing scratch metadata")
+                        want = lvs_store_bytes if (name, mode) == ("lvs", "store") else 0
                         self.assertEqual(blob[i + len(b".private_segment_fixed_size")], want, f"{name} {mode} scratch bytes")
 
     def test_kernel_design_choice(self):
