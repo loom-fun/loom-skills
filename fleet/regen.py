@@ -447,6 +447,9 @@ def image_jobs(st, device, slugs, refs, old_sdk):
 
 
 def cmd_plan(a):
+    for k, v in (("new_sdk", None), ("programs", "build"), ("old_sdk", "card"), ("held", None), ("image_device", "strix-halo")):
+        if not hasattr(a, k):   # a caller that builds its own namespace (fleet/final_pass.py) without the SDK-mode options
+            setattr(a, k, v)
     new_sdk = a.new_sdk or SDK_NEW
     try:
         version_key(new_sdk)
