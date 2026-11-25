@@ -776,6 +776,10 @@ CHOICE("chat.input_measure", "bool", True, "LLM_INPUT_MEASURE", kernels=["progra
            "returns no tokens and the count (the server rejects a generation request itself, HTTP 400) and capacity -1 measures, so "
            "POST /v1/chat/completions/input_tokens counts a conversation beyond the window instead of answering 400. Host-side only: "
            "no device program changes. Needs hrx-loom >= 0.3.0 at serve time for the measuring probe (0.2.0 never sends -1). Default on for every text model (DevLab run 45527529704, PR #1429: over-window count HTTP 400 -> the count on every job, perf within noise); False: the pre-0.3.0 prepare_input that fails with @require above the capacity.")
+CHOICE("telemetry.proposal_counts", "bool", True, "LLM_PROPOSAL_COUNTS", kernels=["program"], rows=[], from_pr="sdk030 sdkcap",
+       doc="publish_epoch takes the SDK 0.3.0 proposal_counts buffer (starter/proposal_counts.py): each verified drafted span reports "
+           "the candidates it presented (planned length minus the anchor; 0 for ordinary work), so /metrics keeps draft_proposed_tokens and "
+           "the acceptance rate is measurable (#1401). Version-1 ABI kept; host-side only, no device program changes. Needs hrx-loom >= 0.3.0. Default on for every package (DevLab run 45532798266, PR #1441); False: the 13-argument publish_epoch (SDK 0.3.0 then reports proposals as unknown and /metrics omits draft_proposed_tokens).")
 
 # ======================================================================================================================
 # Not choices: everything else the generators and their tools read from the environment
