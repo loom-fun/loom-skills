@@ -15,6 +15,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import types
 import unittest
 from pathlib import Path
 
@@ -24,6 +25,10 @@ CARD = SCRIPTS / "card"
 TEL = CARD / "test/sdk03/telemetry"
 sys.path.insert(0, str(SCRIPTS))
 sys.path.insert(0, str(CARD))
+try:
+    import requests  # noqa: F401  (bench_common's HTTP client; the counters parsed here need none)
+except ImportError:
+    sys.modules["requests"] = types.ModuleType("requests")
 import bench_common  # noqa: E402
 import card_files  # noqa: E402
 import card_lib  # noqa: E402
