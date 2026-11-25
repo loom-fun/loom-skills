@@ -408,10 +408,18 @@ def old_frozen(doc, refs, gates):
     return doc
 
 
-def sdk_ab(doc, old_sdk, new_sdk, key):
+# exec.* scope keys that are build flags of the built package on a device without its own memory pool (Strix Halo serves the package's
+# own preset, so a scope rule there must reach the build: a confirming rerun without it measured the 4096 chunk of a card that ships 8192)
+BUILD_EXEC_FLAGS = {"prefill_capacity": "--prefill"}
+
+
+def sdk_ab(doc, old_sdk, new_sdk, key, device=None):
     """The SDK A/B of a job document (see --sdk-ab): old variants on old_sdk serving the published card, new variants built from the checkout on new_sdk."""
+    pooled = device is None or card_lib.GPUS[device]["memory_bytes"] is not None
     for j in doc["jobs"]:
         j["sdk"] = new_sdk
+        if any(x.startswith("gates:staging") for x in j["steps"]) and "admit:staging" not in j["steps"]:
+            j["steps"].append("admit:staging")   # the built package's native-context admission probe, as frozen() gives the production one (the card lints it)
         by = {v["name"]: v for v in j["variants"]}
         for old, new in (("fun", "staging"), ("funnd", "stagingnd")):
             o, n = by[old], by[new]
@@ -427,6 +435,11 @@ def sdk_ab(doc, old_sdk, new_sdk, key):
             # changed prepare()'s context bound (and the programs hash), and refit the context on Strix when the weights are large (122B: 4096).
             n.pop("context", None)
             n["build_args"] = list(n.get("build_args") or []) + ["--memory-gib", "4096"]
+            if not pooled:   # the checkout's scope rules (exec.*) for this device: build flags of the package it will publish
+                ex = card_lib.scope_execution(j["card"].split("/", 1)[1].split("@", 1)[0], device)
+                for k, flag in BUILD_EXEC_FLAGS.items():
+                    if ex.get(k) is not None and flag not in n["build_args"]:
+                        n["build_args"] += [flag, str(ex[k])]
             n["sdk"] = new_sdk
             o["sdk"] = old_sdk
             if j.get(f"require_preset_{key}"):
@@ -471,7 +484,7 @@ def build_replicas(a):
             for j in doc["jobs"]:
                 j["steps"] = [x for x in j["steps"] if x.split(":")[0] not in ("func", "ktest", "gates", "admit", "smoke")]
     elif a.sdk_ab:
-        sdk_ab(doc, a.old_sdk, a.new_sdk, card_lib.registry.device(a.device)["runner"]["key"])
+        sdk_ab(doc, a.old_sdk, a.new_sdk, card_lib.registry.device(a.device)["runner"]["key"], a.device)
         if a.loom_only:
             loom_only(doc)
         if a.old_frozen:

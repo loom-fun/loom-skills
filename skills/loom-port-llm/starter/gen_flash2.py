@@ -748,9 +748,13 @@ if R4 and not ROLE:
     text = twin_names(text)
 elif not R4 and not ROLE and os.environ.get("LOOM_RDNA4", "1") != "0":   # the gfx12 twins K_rdna4 (flash2_rdna4.py) follow the kernels
     from flash2_rdna4 import twin_env   # a per-target choice's twin value (<ENV>__RDNA4)
-    # FLASH2_SWA_TWIN=s: the gfx12 twin is gen_flash2s.py's split-dims kernel (same launch signature) instead of this generic one
+    # FLASH2_SWA_TWIN=s: the gfx12 twin is gen_flash2s.py's split-dims kernel (same launch signature) instead of this generic one.
+    # gen_flash2s.py stages a 32-key tile with >= 8 waves (head_dim x G >= 1024); with 16-key tiles at head_dim 256 (the twin's
+    # FLASH2_KT256 = 16, choice prefill.attn.flash2_kt256) four waves suffice, so G = 2 (gemma4 12B/26B/31B sliding layers) qualifies too.
+    _kt16 = CFG["dim"] == 256 and twin_env(os.environ).get("FLASH2_KT256") == "16"
     _twin_gen = os.path.join(os.path.dirname(os.path.abspath(__file__)), "gen_flash2s.py") if (
-        os.environ.get("FLASH2_SWA_TWIN") == "s" and T == "llm" and CFG["dim"] in (256, 512) and not CFG["sinks"] and CFG["dim"] * CFG["group"] >= 1024) else os.path.abspath(__file__)
+        os.environ.get("FLASH2_SWA_TWIN") == "s" and T == "llm" and CFG["dim"] in (256, 512) and not CFG["sinks"]
+        and CFG["dim"] * CFG["group"] * (2 if _kt16 else 1) >= 1024) else os.path.abspath(__file__)
     subprocess.run([sys.executable, _twin_gen], check=True, env=dict(twin_env(os.environ), FLASH2_ARCH="rdna4", FLASH2_OUT=out_path + ".rdna4"))
     text += open(out_path + ".rdna4").read()
     os.remove(out_path + ".rdna4")

@@ -24,6 +24,22 @@ class AcceptancePerPass(unittest.TestCase):
         dumps = sorted(str(p) for p in DATA.glob('metrics_staging_*.txt'))
         self.assertLess(make_info.draft_metrics_acceptance(dumps)['accepted_per_pass'], 0.8)
 
+    def test_repeat_rows_average_all_successful_per_pass_samples(self):
+        from draft_telemetry import repeat_decode
+        key = "decode_tps_2k"
+        for field in ("acceptance", "accepted_per_pass"):
+            out = {field: {}}
+
+            def request(i):
+                if i == 2:
+                    return None
+                out[field][key] = (0.25, 0.50, None, 0.75)[i]
+                return (100, 120, None, 110)[i]
+
+            self.assertEqual(repeat_decode(out, key, "decode_2k", 4, request), 110)
+            self.assertEqual(out[field][key], 0.50)
+            self.assertEqual(out["samples"]["decode_2k"], [100, 120, 110])
+
     def test_no_rows_no_value(self):
         self.assertIsNone(make_info.session_per_pass([{"label": "x", "decode_tps": 10.0}]))
 

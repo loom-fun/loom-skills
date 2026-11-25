@@ -12,6 +12,10 @@ step() { echo "== $* ($(date +%T))"; }
 # example kit it applied (gemma4, glimmer: chat formats the starter can't model) at WORKDIR/kit next to PKG;
 # without LOOM_KIT the starter's renders those prompts differently (agent gate: render_ok false on every turn).
 [ -n "${LOOM_KIT:-}" ] || [ ! -f "$(dirname "$pkg")/kit/chat_probe.py" ] || export LOOM_KIT=$(dirname "$pkg")/kit
+# A hand-written package whose chat program renders a format no kit models (llm_config.json chat.call_format with a
+# renderer in renderers/<call_format>/, e.g. inkling2's channel format) is rendered with that renderer.
+renderer=$S/renderers/$("$T" -c "import json; print((json.load(open('$pkg/llm_config.json')).get('chat') or {}).get('call_format') or '-')" 2>/dev/null)
+[ -f "$renderer/chat_probe.py" ] && export LOOM_KIT=$renderer
 
 # One model at a time: GPU memory is system RAM on Strix Halo, so Loom and llama.cpp never run
 # together. loom_down stops the loom-serve listening on $url's port and remembers its exact command

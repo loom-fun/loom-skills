@@ -40,6 +40,26 @@ def facts(repo, rev, cache):
             "features": ["draft"], "sdk": {"hrx_loom": "0.2.0"}}
 
 
+class AcceptanceEvidence(unittest.TestCase):
+    def test_perf_session_per_pass_uses_old_decode_row_and_device_depth(self):
+        view = {"performance": {"sessions": [{"source": "old", "metrics": {
+            "decode": {"acceptance": 0.5}, "spec_acceptance": {"loom": 0.8}}}]},
+                "sources": {"old": {"hrx_loom": {"hrx_loom": "0.2.0"}}}}
+        with tempfile.TemporaryDirectory() as d:
+            def write(name, doc):
+                with open(os.path.join(d, name), "w") as f:
+                    json.dump(doc, f)
+            write("model_staging.json", {"presets": {"chat": {"execution": {}}, "chat-r9700": {"execution": {"draft_depth": 2}}}})
+            write("llm_config.json", {"draft": {"depth": 3}})
+            write("perf_staging.jsonl", {"label": "fun", "accepted_per_pass": {"decode_tps": 0.9}})
+            result = regen.acceptance_evidence(d, "radeon-r9700", view)
+            self.assertEqual((result["old"], result["new"], result["unit"]), (1, 0.9, "accepted_per_pass"))
+            del view["performance"]["sessions"][0]["metrics"]["decode"]
+            result = regen.acceptance_evidence(d, "radeon-r9700", view)
+            self.assertIsNone(result["old"])
+            self.assertTrue(result["incomparable"])
+
+
 class VersionGeneric(unittest.TestCase):
     def test_newest_verified_release_is_the_default_target(self):
         self.assertEqual(regen.SDK_NEW, max(regen.VERIFIED_RELEASES, key=regen.version_key))
@@ -638,6 +658,37 @@ class AcceptShownNotEligible(unittest.TestCase):
             accept("--shown-not-eligible")
 
 
+class LaneOwned(unittest.TestCase):
+    """slugs a lane owns end to end: the sweep never packages, ingests, publishes, verifies, confirms or submits them"""
+    def test_sidecar_and_opts_skip_every_publishing_step(self):
+        with tempfile.TemporaryDirectory() as t:
+            state = os.path.join(t, "s.json")
+            jobs = {"l": {"slug": "lane-loom", "device": "strix-halo", "stage": "ingested", "round": 1, "batch": 0},
+                    "c": {"slug": "lane-loom", "device": "radeon-r9700", "stage": "collected", "decision": "confirm", "round": 1, "batch": 0},
+                    "o": {"slug": "other-loom", "device": "strix-halo", "stage": "planned", "round": 1, "batch": 1}}
+            json.dump({"work": t, "mode": "sdk-loom", "opts": {"programs": "production", "new_org": regen.STAGING_ORG, "lane_owned": ["x-loom"]},
+                       "jobs": jobs, "batches": [{"id": 0, "device": "strix-halo", "jobs": ["l"], "stage": "planned"},
+                                                 {"id": 1, "device": "strix-halo", "jobs": ["o"], "stage": "planned"}]}, open(state, "w"))
+            open(state + ".lane_owned", "w").write("# lanes\nlane-loom  # qwen35 lane\n")
+            st = regen.State(state)
+            self.assertEqual(regen.lane_owned(st), {"x-loom", "lane-loom"})
+            submitted, ran = [], []
+            with mock.patch.object(regen, "submit_batch", lambda st, b, dry: submitted.append(b["id"])), \
+                    mock.patch.object(regen, "sh", lambda *a, **k: ran.append(a) or SimpleNamespace(returncode=0, stdout="", stderr="")), \
+                    contextlib.redirect_stdout(io.StringIO()) as out:
+                regen.main(["submit", state])
+                regen.main(["rerun", state])
+                regen.main(["publish", state])
+                regen.main(["package", state])
+            self.assertEqual(submitted, [1])
+            self.assertEqual(ran, [])
+            self.assertIn("no confirming runs needed", out.getvalue())
+            self.assertEqual(regen.State(state).jobs["l"]["stage"], "ingested")
+            with self.assertRaises(SystemExit) as ex:
+                regen.main(["package", state, "--slugs", "lane-loom"])
+            self.assertIn("lane-owned", str(ex.exception.code))
+
+
 class KitVerdict(unittest.TestCase):
     """Phase 2: ship the kit programs of a model only when every device's A/B passes; else keep the frozen ones and re-queue its cards."""
     def write(self, t, name, doc):
@@ -884,3 +935,22 @@ class OldFrozenGates(unittest.TestCase):
     def test_devlab_ktest_reads_its_own_variants_package(self):
         text = open(os.path.join(ROOT, ".github", "scripts", "devlab_perf.sh")).read()
         self.assertIn('[ -f "$D/$p1/cfg.json" ] || cp "$D/cfg.json" "$D/$p1/cfg.json"', text)
+
+
+class ConstrainedEvidence(unittest.TestCase):
+    def test_replay_is_scoped_and_uses_candidate(self):
+        opts = {"constrained_gates": {TEXT: {"artifact": "artifact", "job": "job.json", "variant": "sample"}}}
+        with mock.patch.object(regen, "run_tool") as run:
+            for slug, gpu in [(IMAGE, "radeon-r9700"), (TEXT, "strix-halo")]:
+                self.assertEqual(regen.constrained_evidence(opts, slug, gpu, "candidate", "work", None), [])
+            with self.assertRaisesRegex(RuntimeError, "pinned production"):
+                regen.constrained_evidence(opts, TEXT, "radeon-r9700", "candidate", "work", None)
+            run.assert_not_called()
+            args = (opts, TEXT, "radeon-r9700", "candidate", "work", "production/info.json")
+            self.assertEqual(regen.constrained_evidence(*args), ["ev_constrained.json"])
+            run.assert_called_once_with([f"{regen.CARD}/make_info.py", "emulated-gates", os.path.abspath("artifact"),
+                                         "--job", os.path.abspath("job.json"), "--variant", "sample", "--package",
+                                         "candidate", "-o", "ev_constrained.json"], "work")
+            run.side_effect = RuntimeError("package programs differ")
+            with self.assertRaisesRegex(RuntimeError, "programs differ"):
+                regen.constrained_evidence(*args)

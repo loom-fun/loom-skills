@@ -185,6 +185,19 @@ class SubmitPollTest(Base):
         self.assertEqual((e["stage"], e["run"], e["completed"]), ("done", "5", "t1"))
 
 
+    def test_poll_follows_an_adopted_batch_without_a_branch(self):
+        """regen.py adopt --run (a batch submitted by hand, e.g. while the contents API failed) records the run but no branch: poll still follows it"""
+        self.plan()
+        st = regen.State(self.state)
+        st.d["batches"][0].update(stage="submitted", run="9")
+        st.save()
+        jobs = {"jobs": [{"name": JOB, "status": "completed", "conclusion": "success", "url": "u", "startedAt": "t0", "completedAt": "t1"}]}
+        with mock.patch.object(regen, "gh_json", lambda args: jobs), contextlib.redirect_stdout(io.StringIO()):
+            with self.assertRaises(SystemExit) as c:
+                regen.main(["poll", self.state])
+            self.assertEqual(c.exception.code, 0)
+        self.assertEqual(regen.State(self.state).jobs[JOB]["stage"], "done")
+
 class CollectTest(Base):
     def test_aa_job_in_band_is_promoted(self):
         self.collected()
@@ -1012,7 +1025,7 @@ class PackageTest(Base):
         self.want = regen.card_lib.programs_sha256(os.path.join(self.canon, SLUG))
         self.st = self.plan("--mode", "sdk-ab", "--new-sdk", "0.2.0")
 
-    def run_package(self, *args, head="a" * 40, new_head="d" * 40, snap_programs=None, upload_stdout=None):
+    def run_package(self, *args, head="a" * 40, new_head="d" * 40, snap_programs=None, upload_stdout=None, source_of=None):
         uploads = []
         heads = iter([head, new_head])
 
@@ -1030,7 +1043,7 @@ class PackageTest(Base):
         def snapshot(repo, rev, out):
             uploads.append(["snapshot", repo, rev])
             shutil.rmtree(out, ignore_errors=True)   # as hf_snapshot_small does
-            shutil.copytree(self.snap, out)
+            shutil.copytree(source_of(repo, rev) if source_of else self.snap, out)
         out = io.StringIO()
         with mock.patch.object(regen, "sh", sh), mock.patch.object(regen, "hf_head", lambda r: next(heads)), \
                 mock.patch.object(regen, "hf_snapshot_small", snapshot), \
@@ -1063,6 +1076,28 @@ class PackageTest(Base):
         self.assertEqual(m["variants"]["gguf"]["services"]["chat"]["parameters"]["model"]["files"][0]["origin"], "@checkpoint/m.gguf")
         self.assertNotIn("pool_capacity", json.dumps(m))
         self.assertFalse(m["variants"]["gguf"]["services"]["chat"]["config"]["llm.logits"])   # the v0.2 field the canonical build adds
+
+    def test_a_production_source_card_keeps_the_staging_card_files(self):
+        """the package assembled from the pinned production revision (frozen-source phase) ships the staging repo's card files until the
+        card step: the production README / info.json name loom-fun, and a card file the staging head lacks is not carried over"""
+        st = regen.State(self.state)
+        st.jobs[JOB]["source_card"] = f"loom-fun/{SLUG}@{'e' * 40}"
+        st.save()
+        staging = os.path.join(self.tmp, "staging_head")
+        self.write_tree(staging, {"control.loom": "v01"}, v01_model(), None, ("tokenizer.json",))
+        for f in ("README.md", "info.json"):
+            open(os.path.join(staging, f), "w").write("staging " + f)
+        production = self.snap
+
+        def pick(repo, rev):
+            return production if repo.startswith("loom-fun/") else staging
+        self.run_package("--dry-run", "--slugs", SLUG, source_of=pick)
+        pkg = os.path.join(regen.State(self.state).work, "package", SLUG, "pkg")
+        for f in ("README.md", "info.json"):
+            self.assertEqual(open(os.path.join(pkg, f)).read(), "staging " + f)
+        self.assertFalse(os.path.exists(os.path.join(pkg, "REPORT.md")))   # production-only: never shipped on staging
+        self.assertEqual(open(os.path.join(pkg, "program", "control.loom")).read(), "v02")
+        self.assertEqual(regen.card_lib.programs_sha256(pkg), self.want)
 
     def test_real_run_records_the_new_revision_and_hash_and_is_idempotent(self):
         st, calls, _ = self.run_package("--slugs", SLUG)
