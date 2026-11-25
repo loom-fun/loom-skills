@@ -563,7 +563,7 @@ class Share(unittest.TestCase):
                                                    "gates:fun:dev": "GATES PASS", "admit:fun": "ADMITTED"}}, open(os.path.join(src, "summary.json"), "w"))
             open(os.path.join(src, "results.tsv"), "w").write("perf:fun:1\tfun decode\nperf:staging:1\tstaging decode\n")
             regen.phase1_view(src, dst)
-            got = sorted(os.path.relpath(os.path.join(r, f), dst) for r, _, fs in os.walk(dst) for f in fs)
+            got = sorted(os.path.relpath(os.path.join(r, f), dst).replace(os.sep, "/") for r, _, fs in os.walk(dst) for f in fs)
             self.assertEqual(got, sorted(["admit_staging.json", "c4_stagingnd.txt", "gates_staging/gates.json", "metrics_staging_000.txt", "perf-staging.log",
                                           "perf_staging.jsonl", "programs_sha256_staging.txt", "results.tsv", "runner.txt", "sdk_staging.json",
                                           "sdk_stagingnd.json", "summary.json", "text_staging.json"]))

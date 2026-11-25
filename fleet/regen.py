@@ -1105,8 +1105,8 @@ def cmd_collect(a):
 
 # ---------------------------------------------------------------- share (one job: the kit build's A/B and the frozen package's migration evidence)
 
-OLD_VARIANT = re.compile(r"(?<=[_:-])fun(nd)?(?=[./_:-]|$)")   # the old side's variant token in a job file name or step name
-NEW_VARIANT = re.compile(r"(?<=[_:-])staging(nd)?(?=[./_:-]|$)")
+OLD_VARIANT = re.compile(r"(?<=[_:-])fun(nd)?(?=[./\\_:-]|$)")   # the old side's variant token in a job file name or step name
+NEW_VARIANT = re.compile(r"(?<=[_:-])staging(nd)?(?=[./\\_:-]|$)")
 
 
 def phase1_view(src, dst):
