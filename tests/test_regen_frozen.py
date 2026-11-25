@@ -381,7 +381,7 @@ class ImageRequest(unittest.TestCase):
         self.assertEqual((body["prompt"], body["seed"], body["model"], size), ("p", 42, "z", (1024, 768)))
         m["services"]["image"]["interface"]["input"] = "base64 of the raw RGB input image in the prompt"
         body, size = image_sdk_compare.request_body(m, "image")
-        self.assertEqual((body["size"], size), ("256x64", (256, 64)))
+        self.assertEqual((body["size"], size), ("1024x768", (1024, 768)))   # the preset's own geometry from a quarter-size input
         self.assertEqual(image_sdk_compare.abba(2), ["old", "new", "new", "old"])
 
 
