@@ -71,6 +71,15 @@ def apply(cfg, draft_kind, environ=None, kit=None, devices=None, kit_dir=HERE, s
     except rs.ResolveError as e:
         sys.exit(f"choices: {e}")
     dirty = []
+    # Unsuffixed command-line overrides of an rdna4-only graph choice belong
+    # to that family too. Route them before filling the environment from scopes.
+    for c in ch.CHOICES.values():
+        if getattr(c, "family_program", False) and c.devices == ["rdna4"] and c.env in environ and "rdna3" in res["devices"]:
+            value = environ.pop(c.env)
+            if "rdna4" in res["devices"]:
+                environ.setdefault(c.env + "__RDNA4", value)
+            elif value != c.to_env(c.legacy):
+                dirty.append(c.key)
     for env, c in ch.BY_ENV.items():
         if env not in environ or (c.kits is not None and kit not in c.kits):
             continue

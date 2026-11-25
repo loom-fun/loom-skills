@@ -744,7 +744,7 @@ CHOICE("prefill.gdn.ab_f8", "bool", False, "GDN_AB_F8", devices=["rdna4"], rows=
        doc="MXFP4 split-plane hybrids with prefill.gdn.ab_q8 and the fp8 GEMMs (gen_mxfp4s.ab_f8): in GEMM-shape epochs whose rows are a multiple of 32 "
            "the 48-row GDN alpha / beta projections run as ONE paired skinny fp8 WMMA GEMM (32 x 48 tiles, both weights, K step 256) on the fp8 rows the "
            "producer twin already wrote for the qkv GEMM (%h8), not g_quant_q8 + two int8 16-token matvecs; gfx11 keeps the int8 launches.")
-CHOICE("prefill.gdn.ab_q8", "bool", False, "GDN_AB_Q8", devices=["rdna4"], rows=ROWS_PREFILL, kernels=["g_quant_q8", "g_mv_mxfp4s_k5120_t16_q8"],
+CHOICE("prefill.gdn.ab_q8", "bool", False, "GDN_AB_Q8", family_program=True, devices=["rdna4"], rows=ROWS_PREFILL, kernels=["g_quant_q8", "g_mv_mxfp4s_k5120_t16_q8"],
        from_pr="mxfp4st olayer",
        doc="MXFP4 split-plane hybrids, GEMM-shape epochs: the 48-row GDN alpha / beta projections run as the 16-token int8 matvec on h quantized "
            "once to int8, not as the f32 4-token matvec over h (gen_llm.ab_q8).")

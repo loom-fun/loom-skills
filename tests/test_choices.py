@@ -266,6 +266,19 @@ class Resolution(unittest.TestCase):
         self.assertEqual(kb_choices.family_program_env(env), dict(env, QG_SPLIT="0"))
         self.assertIsNone(kb_choices.family_program_env(dict(env, LOOM_RDNA4="0")))
 
+    def test_rdna4_only_graph_and_raw_override(self):
+        key = "prefill.gdn.ab_q8"
+        env = {}
+        kb_choices.apply(cfg(choices={key: True}), None, environ=env)
+        self.assertNotIn("GDN_AB_Q8", env)
+        self.assertEqual(env["GDN_AB_Q8__RDNA4"], "1")
+        self.assertEqual(kb_choices.family_program_env(env)["GDN_AB_Q8"], "1")
+        raw = {"GDN_AB_Q8": "1"}
+        result = kb_choices.apply(cfg(), None, environ=raw)
+        self.assertNotIn("GDN_AB_Q8", raw)
+        self.assertEqual(raw["GDN_AB_Q8__RDNA4"], "1")
+        self.assertIn(key, result["dirty"])
+
     def test_graph_test_signatures_follow_package_target(self):
         for arch, value in (("gfx1151", "1"), ("gfx1201", "0")):
             env = {"QG_SPLIT": "1", "QG_SPLIT__RDNA4": "0", "DEVICE_ARCH": arch}
