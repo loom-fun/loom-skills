@@ -1,5 +1,5 @@
 {
  "_comment": "The Gufo bundle (gufo with its HIP backend + the loom extension: the serve stack exists only with HIP) the logits:V / gufo:V steps run (built inside the devlab-perf run by its `bundle` job, never hosted). logits_jobs.py puts these pins on every job that has the steps; bump them here (full 40-character commit ids: actions/checkout does not take short ones) when loom-gufo-extension or gufo moves.",
- "extension": "loom-fun/loom-gufo-extension@45b2bc0062e73d9fcce8d3d71be9a85a2bfe448f",
- "gufo": "loom-fun/gufo@2255d6f3754f530af1d178097abe48c436104908"
+ "extension": "loom-fun/loom-gufo-extension@cd2a18327bdafd36d091d0a779c4d1efa770ae04",
+ "gufo": "loom-fun/gufo@01778da1e6443329fc0ef7fd45950e6bb0dee1fd"
 }

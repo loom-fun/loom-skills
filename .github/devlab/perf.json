@@ -1,47 +1,80 @@
 {
- "_comment": "R9700 per-model measurement (r9700_jobs.py): one job per model on one R9700 runner; loom-fun-staging card, llama.cpp ROCm b1375 + Vulkan b12211 with the matched drafting, reduced-context models served at served_context. Does not fit: none",
+ "_comment": "gufopin: Gufo bundle at the proposed pins loads a frozen (staging card) and a kit-built package; logits + gufo conformance, one job per GPU",
  "runner": "r9700",
- "memory_bytes": 34000000000,
+ "memory_bytes": 36000000000,
  "llama_spec": "matched",
+ "card": "loom-fun-staging/ggml-org-Qwen3-1.7B-loom@cc514947bd56d72d42a2aed33b19ecb5188dc00f",
+ "kit": null,
+ "llamacpp": "b1374",
  "jobs": [
   {
-   "name": "unsloth-qwen3-0-6b-loom",
-   "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
+   "name": "gp-r9700-qwen3-1-7b",
+   "runner": "r9700",
+   "repeat_rows": 3,
+   "card": "loom-fun-staging/ggml-org-Qwen3-1.7B-loom@cc514947bd56d72d42a2aed33b19ecb5188dc00f",
+   "require_preset_r9700": true,
+   "memory_bytes_r9700": 17000000000,
    "kit": null,
    "llamacpp": "b1375",
    "llamacpp_vulkan": "b12211",
-   "memory_bytes_r9700": 17000000000,
    "variants": [
     {
-     "name": "card",
-     "build": {}
+     "name": "card"
     },
     {
-     "name": "nodraft",
+     "name": "kit",
      "build": {},
-     "execution": {
-      "draft_depth": 0
-     }
+     "ref": "origin/sdk030",
+     "build_args": [
+      "--prefill-device",
+      "radeon-r9700=4096"
+     ]
     }
    ],
    "steps": [
-    "func:card",
-    "ktest:card",
-    "gates:card:dev",
-    "perf:card:3",
-    "perf:card:3:long",
-    "c4:nodraft",
-    "llama@rocm.np1:3",
-    "llama@rocm.np1:3:long",
-    "llamac4@rocm.nodraft",
-    "llama@vulkan.np1:3",
-    "llama@vulkan.np1:3:long",
-    "llamac4@vulkan.perslot.nodraft"
-   ]
+    "logits:card",
+    "gufo:card",
+    "logits:kit",
+    "gufo:kit"
+   ],
+   "bundle": {
+    "build": {
+     "extension": "loom-fun/loom-gufo-extension@cd2a18327bdafd36d091d0a779c4d1efa770ae04",
+     "gufo": "loom-fun/gufo@01778da1e6443329fc0ef7fd45950e6bb0dee1fd"
+    }
+   }
+  },
+  {
+   "name": "gp-strix-qwen3-1-7b",
+   "runner": "strix",
+   "repeat_rows": 3,
+   "card": "loom-fun-staging/ggml-org-Qwen3-1.7B-loom@cc514947bd56d72d42a2aed33b19ecb5188dc00f",
+   "kit": null,
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "card"
+    },
+    {
+     "name": "kit",
+     "build": {},
+     "ref": "origin/sdk030"
+    }
+   ],
+   "steps": [
+    "logits:card",
+    "gufo:card",
+    "logits:kit",
+    "gufo:kit"
+   ],
+   "bundle": {
+    "build": {
+     "extension": "loom-fun/loom-gufo-extension@cd2a18327bdafd36d091d0a779c4d1efa770ae04",
+     "gufo": "loom-fun/gufo@01778da1e6443329fc0ef7fd45950e6bb0dee1fd"
+    }
+   },
+   "memory_bytes": 17000000000
   }
- ],
- "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
- "kit": null,
- "llamacpp": "b1375",
- "llamacpp_vulkan": "b12211"
+ ]
 }
