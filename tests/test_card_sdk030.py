@@ -163,6 +163,28 @@ class Lint(unittest.TestCase):
             self.assertEqual(res["admission"], [])
             self.assertEqual(res["delta"], ["card: strix-halo prefill_2k -4.0 % unexplained (beyond -3 %)"])
 
+    def test_foreign_tree_caught_in_both_forms(self):
+        # retro review: --form staging composed symlinks and os.walk did not follow them, so dev/ (and program/, gen/) went unchecked
+        with tempfile.TemporaryDirectory() as t:
+            d = self.card(t)
+            (d / "dev").mkdir()
+            (d / "dev" / "notes.txt").write_text("porting notes\n", encoding="utf-8")
+            for form in ("production", "staging"):
+                res = lint_card.lint(str(d), form=form, runs=lint_card.Runs(offline=True))
+                self.assertIn("dev/ (1 files): not part of the card format", res["files"], form)
+            (d / "dev" / "notes.txt").unlink()
+            (d / "program" / "stray.txt").write_text("x\n", encoding="utf-8")   # inside a card tree: allowed in both forms alike
+            self.assertEqual(lint_card.lint(str(d), form="staging", runs=lint_card.Runs(offline=True))["files"],
+                             lint_card.lint(str(d), form="production", runs=lint_card.Runs(offline=True))["files"])
+
+    def test_docstring_says_what_publish_runs(self):
+        # retro review: the docstring said publish_package.py runs the lint; it runs only the files check (card_files.check_package)
+        pub = (CARD / "publish_package.py").read_text(encoding="utf-8")
+        self.assertIn("from card_files import check_package", pub)
+        self.assertNotRegex(pub, r"import lint_card|from lint_card|lint_card\.lint\(|lint_card\.py\"")   # it never runs the lint
+        self.assertNotIn("publish_package.py runs it before", lint_card.__doc__)
+        self.assertIn("publish_package.py runs only the\nfiles check", lint_card.__doc__)
+
     def test_hand_edit_failed_run_and_staging_text(self):
         with tempfile.TemporaryDirectory() as t:
             d = self.card(t)
@@ -209,6 +231,41 @@ class AcceptanceDelta(unittest.TestCase):
         self.assertEqual(r["per_pass"], {"old": 0.975, "new": 1.249})   # not the spec gate's 68 % x 3 = 2.04
         self.assertFalse(r["different_workloads"])
         self.assertEqual(r["change"], round(1.249 / 0.975 - 1, 4))
+
+    def session_acceptance(self, info, **kw):
+        for sess in info["devices"]["strix-halo"]["performance"]["sessions"]:
+            if "spec_acceptance" in sess["metrics"]:
+                sess["metrics"]["spec_acceptance"].update(kw)
+        return info
+
+    def test_acceptance_drop_is_a_regression(self):
+        # retro review: a spec_acceptance drop beyond 3 % was never marked, so it needed no explanation
+        info = self.session_acceptance(self.info(), accepted_per_pass=0.9)   # 0.975 -> 0.9 per pass: -7.7 %
+        r = self.row(info)
+        self.assertEqual(r["relative"], round(0.9 / 0.975 - 1, 4))
+        self.assertTrue(r["regression"])
+        import render_card
+        text = "\n".join(render_card.delta_lines(info, {"hrx_loom": "0.3.0"}, True, 3))
+        self.assertIn("drafted tokens accepted -7.7 % (0.97 → 0.90 per verification pass): unexplained.", text)
+        self.assertIn("counted them) ³", text)
+        d = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, d, True)
+        d = Lint.card(self, d)   # the lint sees it too (it now compares with the package's draft depth, as the render does)
+        (d / "info.json").write_text(json.dumps(info, indent=1), encoding="utf-8")
+        res = lint_card.lint(str(d), runs=lint_card.Runs(offline=True))
+        self.assertIn("card: strix-halo spec_acceptance -7.7 % unexplained (beyond -3 %)", res["delta"])
+        r = self.row(self.session_acceptance(self.info(), accepted_per_pass=0.96))   # -1.5 %: within the band
+        self.assertFalse(r["regression"])
+
+    def test_acceptance_drop_in_points_is_relative(self):
+        info = self.info()
+        info["sdk_delta"]["comparisons"][0]["devices"]["strix-halo"]["metrics"]["spec_acceptance"] = 0.68
+        info = self.session_acceptance(info, loom=0.64)   # 68 % -> 64 %: -4 points, -5.9 % relative
+        r = self.row(info)
+        self.assertEqual((r["change"], r["relative"]), (round(0.64 - 0.68, 4), round(0.64 / 0.68 - 1, 4)))
+        self.assertTrue(r["regression"])
+        info["sdk_delta"]["comparisons"][0]["explanations"] = {"strix-halo": {"spec_acceptance": {"text": "the drafter changed"}}}
+        self.assertEqual(self.row(info)["explanation"], {"text": "the drafter changed"})
 
     def test_spec_gate_only_old_card_has_no_delta(self):
         info = self.info()

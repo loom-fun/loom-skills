@@ -513,11 +513,15 @@ CHOICE("moe.decode.rows_per_wg", "int", None, "MOE_R", dynamic=True, kit_legacy=
            "10 % faster at R=2 than R=8).", **_MO)
 CHOICE("moe.decode.act_q8", "bool", True, "MOE_Q8", doc="Decode expert matvecs read int8 activations (with decode.mv.act_q8).", **_MO)
 CHOICE("moe.route.unroll", "int", 4, "MOE_ROUTE_U", doc="Experts per wave scored together in the router.", **_MO)
-CHOICE("moe.route.tokens_per_wg", "int", 0, "ROUTE_TR", doc="Router tokens per workgroup (0: the largest of 1/2/4/8 whose LDS fits 48 KiB).",
+CHOICE("moe.route.tokens_per_wg", "int", 0, "ROUTE_TR", doc="Router tokens per workgroup (0: the largest of 1/2/4/8 whose LDS fits 48 KiB). "
+       "A count whose x rows fit 64 KiB but not with the logits (8 at hidden 2048, 256 experts) keeps the logits in registers: same sums, half the weight reads of 4.",
        **_MO)
 CHOICE("moe.fold", "bool", True, "MOE_FOLD", doc="Fold the routing weights into the expert matvec.", **_MO)
 CHOICE("moe.prefill.skip_empty", "bool", True, "MOE_SKIP_EMPTY", doc="Waves of empty expert tiles exit early.", **_MO)
 CHOICE("moe.prefill.prefetch", "bool", True, "MOE_PREFETCH", doc="Stage prefetch in the grouped expert GEMMs.", **_MO)
+CHOICE("moe.prefill.store16", "bool", False, "MOE_STORE16", kernels=["g_moe_gdn_*", "g_moe_combine_sorted*"], rows=ROWS_PREFILL, from_pr="qwen35 lane",
+       doc="Numerics-moving: the grouped down GEMM stores its expert rows (ys_sorted) as f16 and g_moe_combine_sorted reads them as f16, in place "
+           "(gen_moe.store16): half the DRAM traffic of prefill's largest intermediate (prompt rows x used experts x hidden).")
 _DS2 = dict(kits=["deepseek2"], rows=ROWS_PREFILL, from_pr="joyai-pfgemm")   # deepseek2 example kit (JoyAI-LLM-Flash campaign, PR #1361)
 CHOICE("prefill.gemm.t64_g32", "bool", False, "GEMM_T64_G32", kernels=["g_gemm_iq4_*", "g_moe_g*_iq4_*"], **_DS2,
        doc="The 64-row WMMA tile stages IQ4_XS / IQ4_NL a whole 32-group per thread (_g32_iq4, the iq4_f16lut values): grouped MoE "
@@ -756,6 +760,9 @@ CHOICE("decode.head.piece_rows", "int", 16384, "HEAD_PIECE_ROWS", kernels=["g_he
        doc="Rows per prepared piece of a pieced head (draft.propose.head_pieces, decode.head.verify); a multiple of 128.", **{})
 CHOICE("draft.dflash.splits", "int", 32, "DFL_SPLITS", kernels=["g_dfl_attention", "g_dfl_ctx_split"], rows=ROWS_DECODE,
        doc="DFlash context-attention splits.")
+CHOICE("draft.dflash.split_window", "bool", False, "DFL_SPLIT_WIN", kernels=["g_dfl_attention", "g_dfl_ctx_split"], rows=ROWS_DECODE, from_pr="qwen35 lane",
+       doc="A sliding-window DFlash drafter takes the split-K context attention too (g_dfl_ctx_split: keys loaded once per 8 block tokens "
+           "instead of once per (block token, query head)); every split covers the window of the block's first token. Proposals only.")
 CHOICE("draft.dflash.prep_weights", "bool", True, "DRAFTER_PREP", kernels=["g_dfl_*"], rows=ROWS_DECODE + ROWS_STREAMS,
        doc="A BF16/F16 drafter is used as Q8_0 at load (draft_weights.loom); False: as is.")
 CHOICE("draft.ngram.max", "int", 4, "NGRAM_MAX", kernels=["g_ng_propose"], rows=ROWS_DECODE + ROWS_STREAMS,

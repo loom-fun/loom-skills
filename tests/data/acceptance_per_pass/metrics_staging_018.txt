@@ -1,0 +1,3 @@
+loom_serve_model_observation_total{model="Qwen/Qwen3.5-35B-A3B",kind="text",incarnation="1",topic="text",schema="1",field="decode_tokens",unit="tokens"} 0
+loom_serve_model_observation_total{model="Qwen/Qwen3.5-35B-A3B",kind="text",incarnation="1",topic="text",schema="1",field="draft_proposed_tokens",unit="tokens"} 0
+loom_serve_model_observation_total{model="Qwen/Qwen3.5-35B-A3B",kind="text",incarnation="1",topic="text",schema="1",field="draft_accepted_inputs",unit="tokens"} 0
