@@ -702,6 +702,60 @@ class KitVerdict(unittest.TestCase):
             e.update(cmp=cmp, job_url=f"https://github.com/loom-fun/loom-skills/actions/runs/1/job/{n}")
         return self.write(t, name, {"mode": "sdk-ab", "opts": {"old_sdk_target": True, "base": "sdk030"}, "batches": [], "jobs": jobs})
 
+    def test_eligible_uses_the_verified_published_confirmation(self):
+        with tempfile.TemporaryDirectory() as t:
+            gpu = "strix-halo"
+            old = {"slug": TEXT, "device": gpu, "stage": "collected", "decision": "rerun",
+                   "rows_pct": {"decode": 1}, "rerun_of_me": "22"}
+            final = {"slug": TEXT, "device": gpu, "stage": "published", "decision": "promote",
+                     "source_card": f"loom-fun/{TEXT}@{REV[TEXT]}", "dir": t, "run": "1", "conclusion": "success",
+                     "rows_pct": {"decode": 1}, "package": {"programs_sha256": H}, "prev": "11",
+                     "verified": {"ok": True}, "published_revision": "a" * 40, "published": "2026-01-02"}
+            st = regen.State(self.p2(t, "kit.json", {"11": old, "22": final}))
+            st.d["opts"].update(new_org=regen.STAGING_ORG, new_sdk="0.3.0", ship=[TEXT])
+            sw = regen.State(self.write(t, "sweep.json", {"opts": {}, "jobs": {}, "batches": []}))
+            model = {"production": f"loom-fun/{TEXT}", "production_revision": REV[TEXT]}
+            def qualify():
+                model.update(devices={gpu: {"status": "qualified"}}, programs_sha256="old")
+                doc = {"sdk": {"new": "0.3.0"}, "models": {TEXT: model}}
+                regen.final_kit_qualifications(doc, sw, [st])
+                return model["devices"][gpu]
+            for variant in ("staging", "stagingnd"):
+                self.write(t, f"sdk_{variant}.json", regen.release_pin("0.3.0"))
+            with open(os.path.join(t, "programs_sha256_staging.txt"), "w") as f:
+                f.write(H)
+            os.mkdir(os.path.join(t, "gates_staging"))
+            gate = {"verdict": "PASS", "gates": {"compare": {"pass": True}}, "context_admit": {"admitted": True}}
+            self.write(t, "gates_staging/gates.json", gate)
+            row = qualify()
+            self.assertEqual((row["status"], row["job"], row["published_revision"]), ("qualified", "22", "a" * 40))
+            self.assertEqual(model["programs_sha256"], H)
+            gate["gates"]["compare"]["pass"] = False
+            self.write(t, "gates_staging/gates.json", gate)
+            self.assertEqual(qualify()["status"], "pending")
+            st.jobs["22"]["package"]["programs_sha256"] = "other"
+            self.assertIn("programs", qualify()["reason"])
+            st.jobs["22"]["verified"]["ok"] = False
+            self.assertIn("verified", qualify()["reason"])
+            st.d["opts"]["ship"] = []
+            self.assertIn("decision pending", qualify()["reason"])
+
+    def test_final_session_checks_device_job_and_digest(self):
+        row = {"staging": "staging/test", "staging_revision": "a" * 40, "programs_sha256": H,
+               "qualification": {"strix-halo": {"url": "run/1"}, "radeon-r9700": {"url": "run/2"}}}
+        info = {"sources": {"a": {"url": "run/1"}, "b": {"url": "run/2"}},
+                "devices": {gpu: {"performance": {"sessions": [{"source": src, "programs_sha256": H}]}}
+                            for gpu,src in (("strix-halo", "a"), ("radeon-r9700", "b"))}}
+        with mock.patch.object(regen, "hf_file", return_value="pinned") as fetch, \
+                mock.patch.object(regen.card_lib, "load_info", return_value=info):
+            self.assertIsNone(regen.check_kit_sessions(row))
+            fetch.assert_called_once_with("staging/test", "info.json", "a" * 40)
+            session = info["devices"]["radeon-r9700"]["performance"]["sessions"][0]
+            session["source"] = "a"
+            self.assertIn("radeon-r9700", regen.check_kit_sessions(row))
+            session.update(source="b", programs_sha256="old")
+            self.assertIn("radeon-r9700", regen.check_kit_sessions(row))
+
     def test_ship_keep_and_wait(self):
         with tempfile.TemporaryDirectory() as t:
             pub = {"stage": "published", "decision": "promote", "verified": {"ok": True}}

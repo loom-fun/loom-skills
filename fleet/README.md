@@ -82,7 +82,9 @@ devices come from the card itself (runner-less ones are recorded as carried), im
 and every perf session leaves the server's raw `/metrics` (`metrics_V_NNN.txt`: the speculative counters). `evidence` writes the per model / device /
 metric record (`sdk-evidence/1`: old card row and session, new row, run, job, conclusion, programs hash, wheel, gates, admission probe, acceptance);
 `eligible` derives eligible.json / held.json / pending.json from it, fail closed. Phase 2 (the kit's programs against the frozen ones, both on the new
-SDK, ABBA in one job): `regen.py plan --mode sdk-ab --old-sdk target --no-baselines ...`.
+SDK, ABBA in one job): `regen.py plan --mode sdk-ab --old-sdk target --no-baselines ...`. For the final staging inventory, pass
+`--kit-state PATH` to `eligible` for each phase-2 state. It checks each shipped device against the measured session on the pinned staging card.
+The separate `evidence` command continues to report the SDK comparison on frozen programs.
 
 `regen.py package S.json [--dry-run] [--slugs S...] [--ref REF]` is the step between `collect` and `ingest` (`make_info.py` refuses programs other than the
 ones the job built, so the v0.2 package must be on staging before the card is made). It builds the base once, CPU only (`build_fleet.py --ref origin/<base>
