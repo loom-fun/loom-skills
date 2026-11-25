@@ -12,7 +12,8 @@ with their own loader; nothing from the host but the GPU driver and Python) and 
       runner): top-1 exact (a divergence is judged by the golden gate's rule, bench_common.near_tie and, where it rejects, again with
       llama.cpp's own other numerics at that position (llama_views: the same prefix in one batch and in micro-batches of 8, as
       bench_common.near_tie_at; the llama.cpp server is restarted with --llama-start for it once Gufo is stopped), and ends that prompt's
-      comparison), the other tokens both list within a tolerance by probability (LOGPROB_TIERS, measured engine differences:
+      comparison), the other tokens both list within a tolerance by probability (LOGPROB_TIERS, measured engine differences; a token
+      outside it passes only when it is within the same tolerance of one of llama.cpp's own views there, within_a_view:
       tight where the mass is, loose in the tail, none below p=1e-4). llama.cpp's references are recorded FIRST and its server is
       stopped (--llama-stop) before any Gufo loads: a 24B+ package and the reference GGUF do not fit one GPU together;
   (c) default spans unchanged: the greedy text of the same server with and without logprobs (device path vs host path), and of a
@@ -156,10 +157,27 @@ def check_vs_llama(loom_tops, llama_keys, llama_tops, near_tie, eog=(), keep_spa
         for key, lp in merge_keys(top, eog, keep_space).items():
             if key in ltop:
                 allowed = tail_tol(lp, ltop[key])
-                if allowed is not None and abs(lp - ltop[key]) > allowed:
+                if allowed is not None and abs(lp - ltop[key]) > allowed and not within_a_view(key, lp, k, views_at, eog, keep_space):
                     problems.append(f"step {k}: token {key!r} logprob {lp:.3f} vs llama.cpp {ltop[key]:.3f} (tolerance {allowed})")
         compared += 1
     return compared, problems
+
+
+def within_a_view(key, lp, k, views_at, eog=(), keep_space=False):
+    """Is Loom's log-prob of `key` at step k within the tolerance (tail_tol, the same tiers) of llama.cpp's own log-prob in one of its other
+    numerics there (views_at(k): llama_views)? The tail rule's counterpart of near_tie's views: at an ill-conditioned position llama.cpp's
+    prefill and decode kernels disagree with each other by more than the tolerance (Qwen3-Coder-30B R9700 'where': a float64 forward of the
+    same GGUF -4.10, llama.cpp -5.75, Loom -2.15), and Loom must then agree with one of llama.cpp's own answers. A view that does not list
+    the token never passes it."""
+    if views_at is None:
+        return False
+    for v in views_at(k):
+        v = merge_keys(v.items(), eog, keep_space)
+        if key in v:
+            allowed = tail_tol(lp, v[key])
+            if allowed is None or abs(lp - v[key]) <= allowed:
+                return True
+    return False
 
 
 def check_default_unchanged(off, on_device, on_host):
@@ -446,7 +464,8 @@ def run(a):
             asked = {}
 
             def views_at(k, ids=ids, gen=gen, asked=asked):
-                asked[k] = llama_views(pkg, a.llama, ids + gen[:k]) if a.llama_start or a.llama_stop == "" else []
+                if k not in asked:
+                    asked[k] = llama_views(pkg, a.llama, ids + gen[:k]) if a.llama_start or a.llama_stop == "" else []
                 return asked[k]
             n, problems = check_vs_llama(tops, lkeys, ltops, near_tie, eog, keep, views_at)
             compared_max = max(compared_max, n)
