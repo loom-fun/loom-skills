@@ -69,7 +69,7 @@ class ReferenceModelTest(unittest.TestCase):
             self.assertTrue(got.endswith("m.gguf"))
             self.assertEqual(Path(got).read_bytes(), data)
             self.assertEqual(rm.fetch(entry, os.path.join(tmp, "cache"), base), got)   # cached, re-verified
-            Path(got).write_bytes(data[:-1] + b"x")   # corrupted cache: refused and removed
+            Path(got).write_bytes(data[:-1] + bytes([data[-1] ^ 0xFF]))   # corrupted cache (last byte flipped): refused and removed
             with self.assertRaises(ValueError):
                 rm.fetch(entry, os.path.join(tmp, "cache"), base)
             self.assertFalse(os.path.exists(got))
