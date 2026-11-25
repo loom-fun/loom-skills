@@ -1,5 +1,5 @@
 {
- "_comment": "Flash-Next prefill lane (#1417) round 1b (elastic backing: fixed backing + chunk 8192 does not fit): prefill chunk 8192/12288; A = 64-row expert records for short packets; B = int8 hyperconnection projections up to 8192-token packets",
+ "_comment": "Flash-Next prefill lane (#1417) round 3 (= round 1b re-run with config.serve null so 8192 chunks serve on elastic backing): A = 64-row expert records for packets <= 2304; B = int8 hyperconnection projections up to 8192-token packets",
  "card": "loom-fun/unsloth-Qwen3.8-Flash-Next-loom@d847c21bc93c0c6bc45752a9edaf91d80ac74490",
  "sdk": "0.3.0",
  "kit": "qwen4exp",
@@ -11,19 +11,15 @@
  },
  "jobs": [
   {
-   "name": "flash-r1b",
+   "name": "flash-r3",
    "variants": [
-    {
-     "name": "base",
-     "build": {},
-     "sdk": "0.3.0",
-     "elastic": true,
-     "memory_bytes": "none"
-    },
     {
      "name": "p8k",
      "build": {},
      "sdk": "0.3.0",
+     "config": {
+      "serve": null
+     },
      "execution": {
       "prefill_capacity": 8192
      },
@@ -33,51 +29,48 @@
     {
      "name": "a8k",
      "build": {},
-     "ref": "3b9a2c9e1af3def3cee7d2d8090b7b742c450886",
      "sdk": "0.3.0",
+     "config": {
+      "serve": null
+     },
      "execution": {
       "prefill_capacity": 8192
      },
      "elastic": true,
-     "memory_bytes": "none"
+     "memory_bytes": "none",
+     "ref": "3b9a2c9e1af3def3cee7d2d8090b7b742c450886"
     },
     {
      "name": "b8k",
      "build": {},
-     "ref": "8235dd4ef83b1eb1e4069560876a2d6d611309a0",
      "sdk": "0.3.0",
+     "config": {
+      "serve": null
+     },
      "execution": {
       "prefill_capacity": 8192
      },
      "elastic": true,
-     "memory_bytes": "none"
+     "memory_bytes": "none",
+     "ref": "8235dd4ef83b1eb1e4069560876a2d6d611309a0"
     },
     {
      "name": "ab8k",
      "build": {},
-     "ref": "ac9c028b115670d0b63f38fe16bf377486f5baf4",
      "sdk": "0.3.0",
+     "config": {
+      "serve": null
+     },
      "execution": {
       "prefill_capacity": 8192
      },
      "elastic": true,
-     "memory_bytes": "none"
-    },
-    {
-     "name": "p12k",
-     "build": {},
-     "sdk": "0.3.0",
-     "execution": {
-      "prefill_capacity": 12288
-     },
-     "elastic": true,
-     "memory_bytes": "none"
+     "memory_bytes": "none",
+     "ref": "ac9c028b115670d0b63f38fe16bf377486f5baf4"
     }
    ],
    "steps": [
     "smoke:ab8k",
-    "perf:base:1",
-    "perf:base:1:long",
     "perf:p8k:1",
     "perf:p8k:1:long",
     "perf:a8k:1",
@@ -94,12 +87,7 @@
     "perf:a8k:1:long",
     "perf:p8k:1",
     "perf:p8k:1:long",
-    "perf:base:1",
-    "perf:base:1:long",
-    "profile:ab8k:pf1k,pf2k,pf8k",
-    "perf:p12k:1:long",
-    "perf:p12k:1",
-    "profile:base:pf1k"
+    "profile:b8k:pf2k,pf8k"
    ]
   }
  ]
