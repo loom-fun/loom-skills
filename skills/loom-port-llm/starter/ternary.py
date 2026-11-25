@@ -558,3 +558,194 @@ def np_unrotate_embed(z, cfg):
     z = np.asarray(z, np.float64)
     w = z.shape[-1]
     return (z.reshape(z.shape[0], -1, BLK) @ np_hadamard()).reshape(z.shape) * np_signs(cfg, w)
+
+
+# ---- whole-block decode matvec (choice decode.ptq1_0.mv = "block") ----
+def _block_codes(pfx):
+    """IR: the 4 groups' int8 codes %{pfx}c0..3 of the block in vector<7xi32> %{pfx}blk (as _icodes, no selects)."""
+    return f"""      %{pfx}by = vector.bitcast %{pfx}blk : vector<7xi32> to vector<28xi8>
+      %{pfx}a = vector.slice %{pfx}by[0] : vector<28xi8> -> vector<16xi8>
+      %{pfx}b8 = vector.slice %{pfx}by[16] : vector<28xi8> -> vector<8xi8>
+      %{pfx}h2 = vector.slice %{pfx}by[24] : vector<28xi8> -> vector<2xi8>
+      %{pfx}dw = vector.extract %{pfx}blk[6] : vector<7xi32> -> i32
+      %{pfx}c16 = scalar.constant 16 : i32
+      %{pfx}dsh = scalar.shrui %{pfx}dw, %{pfx}c16 : i32
+      %{pfx}d16 = scalar.trunci %{pfx}dsh : i32 to i16
+      %{pfx}dh = scalar.bitcast %{pfx}d16 : i16 to f16
+      %{pfx}d = scalar.extf %{pfx}dh : f16 to f32
+      %{pfx}bb = vector.concat<0> %{pfx}b8, %{pfx}b8 : vector<8xi8>, vector<8xi8> -> vector<16xi8>
+      %{pfx}h4 = vector.concat<0> %{pfx}h2, %{pfx}h2 : vector<2xi8>, vector<2xi8> -> vector<4xi8>
+      %{pfx}h8 = vector.concat<0> %{pfx}h4, %{pfx}h4 : vector<4xi8>, vector<4xi8> -> vector<8xi8>
+      %{pfx}bq = vector.concat<0> %{pfx}b8, %{pfx}h8 : vector<8xi8>, vector<8xi8> -> vector<16xi8>
+      %{pfx}x0 = func.call @g_ptq1_0_tc16(%{pfx}a, %tp1) : (vector<16xi8>, vector<16xi8>) -> (vector<16xi8>)
+      %{pfx}x1 = func.call @g_ptq1_0_tc16(%{pfx}a, %tp3) : (vector<16xi8>, vector<16xi8>) -> (vector<16xi8>)
+      %{pfx}x2 = func.call @g_ptq1_0_tc16(%{pfx}a, %tp9) : (vector<16xi8>, vector<16xi8>) -> (vector<16xi8>)
+      %{pfx}x3 = func.call @g_ptq1_0_tc16(%{pfx}a, %tp27) : (vector<16xi8>, vector<16xi8>) -> (vector<16xi8>)
+      %{pfx}x4 = func.call @g_ptq1_0_tc16(%{pfx}a, %tp81) : (vector<16xi8>, vector<16xi8>) -> (vector<16xi8>)
+      %{pfx}x5 = func.call @g_ptq1_0_tc16(%{pfx}bb, %tp2hi) : (vector<16xi8>, vector<16xi8>) -> (vector<16xi8>)
+      %{pfx}x6 = func.call @g_ptq1_0_tc16(%{pfx}bb, %tp3lo) : (vector<16xi8>, vector<16xi8>) -> (vector<16xi8>)
+      %{pfx}x7 = func.call @g_ptq1_0_tc16(%{pfx}bq, %tp3hi) : (vector<16xi8>, vector<16xi8>) -> (vector<16xi8>)
+      %{pfx}c0 = vector.concat<0> %{pfx}x0, %{pfx}x1 : vector<16xi8>, vector<16xi8> -> vector<32xi8>
+      %{pfx}c1 = vector.concat<0> %{pfx}x2, %{pfx}x3 : vector<16xi8>, vector<16xi8> -> vector<32xi8>
+      %{pfx}c2 = vector.concat<0> %{pfx}x4, %{pfx}x5 : vector<16xi8>, vector<16xi8> -> vector<32xi8>
+      %{pfx}c3 = vector.concat<0> %{pfx}x6, %{pfx}x7 : vector<16xi8>, vector<16xi8> -> vector<32xi8>
+"""
+
+
+_TP = """  %ti1 = scalar.constant 1 : i8
+  %ti3 = scalar.constant 3 : i8
+  %ti9 = scalar.constant 9 : i8
+  %ti27 = scalar.constant 27 : i8
+  %ti81 = scalar.constant 81 : i8
+  %tp1 = vector.splat %ti1 : vector<16xi8>
+  %tp3 = vector.splat %ti3 : vector<16xi8>
+  %tp9 = vector.splat %ti9 : vector<16xi8>
+  %tp27 = vector.splat %ti27 : vector<16xi8>
+  %tp81 = vector.splat %ti81 : vector<16xi8>
+  %tp3lo = vector.from_elements %ti9, %ti9, %ti9, %ti9, %ti9, %ti9, %ti9, %ti9, %ti27, %ti27, %ti27, %ti27, %ti27, %ti27, %ti27, %ti27 : vector<16xi8>
+  %tp2hi = vector.from_elements %ti1, %ti1, %ti1, %ti1, %ti1, %ti1, %ti1, %ti1, %ti3, %ti3, %ti3, %ti3, %ti3, %ti3, %ti3, %ti3 : vector<16xi8>
+  %tp3hi = vector.from_elements %ti81, %ti81, %ti81, %ti81, %ti81, %ti81, %ti81, %ti81, %ti1, %ti1, %ti3, %ti3, %ti9, %ti9, %ti27, %ti27 : vector<16xi8>
+"""
+
+
+def mv_block(name, K, R, TG, mode="store"):
+    """A PTQ1_0 int8-activation matvec with the generic kernel's name, grid and arguments (gen_llm._mv, iq): each lane decodes
+    whole 128-value blocks (one 28-byte load, no divergence, no re-read of the block by four lanes), W waves take the R rows in
+    turn, the lanes of a wave stride over the row's blocks, one subgroup reduction per row and token. mode: store | swiglu
+    (silu(x W^T) * (x W2^T)) | pair (y = x W^T, y2 = x W2^T). Every token's sum runs in the same order for any TG (verify ==
+    decode)."""
+    nb = K // 128
+    groups = K // 32
+    W = min(R, 4)
+    nw = 1 if mode == "store" else 2
+    wargs = "%w: buffer" if nw == 1 else "%w: buffer, %w2: buffer"
+    yargs = "%y: buffer, %y2: buffer" if mode == "pair" else "%y: buffer"
+    accs = [f"%a{wi}_{j}" for wi in range(nw) for j in range(TG)]
+    init = ", ".join(f"{a} = %zero_f" for a in accs)
+    types = ", ".join("f32" for _ in accs)
+    body = []
+    for wi, wn in enumerate(["w", "w2"][:nw]):
+        body.append(f"""      %wv{wi} = buffer.view %{wn}[%zero] : buffer -> view<[%n]x{nb}x7xi32>
+      %b{wi}blk = vector.load %wv{wi}[%row, %bk, %c0] : view<[%n]x{nb}x7xi32> -> vector<7xi32>
+""" + _block_codes(f"b{wi}"))
+    for j in range(TG):
+        body.append(f"""      %tr{j} = index.add %token0, %cj{j} : index
+      %tl{j} = index.cmp ult, %tr{j}, %tokens : index
+      %q{j}, %m{j} = scf.if %tl{j} -> (vector<32xi32>, vector<8xf32>) {{
+        %tk{j} = index.assume %tr{j} [lt(%tr{j}, %tokens)] : index
+        %qv = vector.load %xq_view[%tk{j}, %bk, %c0] : view<[%tokens]x{nb}x32xi32> -> vector<32xi32>
+        %mv = vector.load %xm_view[%tk{j}, %bk, %c0] : view<[%tokens]x{nb}x8xf32> -> vector<8xf32>
+        scf.yield %qv, %mv : vector<32xi32>, vector<8xf32>
+      }} else {{
+        scf.yield %zero32i, %zero8f : vector<32xi32>, vector<8xf32>
+      }}
+      %qb{j} = vector.bitcast %q{j} : vector<32xi32> to vector<128xi8>""")
+        for g in range(4):
+            body.append(f"""      %qg{j}_{g} = vector.slice %qb{j}[{32 * g}] : vector<128xi8> -> vector<32xi8>
+      %da{j}_{g} = vector.extract %m{j}[{2 * g}] : vector<8xf32> -> f32""")
+        for wi in range(nw):
+            terms = []
+            for g in range(4):
+                body.append(f"""      %dp{wi}_{j}_{g} = vector.dot4i<s8s8> %b{wi}c{g}, %qg{j}_{g}, %zero8i : vector<32xi8>, vector<32xi8>, vector<8xi32>
+      %di{wi}_{j}_{g} = vector.reduce<addi> %dp{wi}_{j}_{g}, %zero_i : vector<8xi32>, i32
+      %df{wi}_{j}_{g} = scalar.sitofp %di{wi}_{j}_{g} : i32 to f32
+      %ds{wi}_{j}_{g} = scalar.mulf %df{wi}_{j}_{g}, %da{j}_{g} : f32""")
+                terms.append(f"%ds{wi}_{j}_{g}")
+            body.append(f"""      %s01_{wi}_{j} = scalar.addf {terms[0]}, {terms[1]} : f32
+      %s23_{wi}_{j} = scalar.addf {terms[2]}, {terms[3]} : f32
+      %sb_{wi}_{j} = scalar.addf %s01_{wi}_{j}, %s23_{wi}_{j} : f32
+      %na{wi}_{j} = scalar.fmaf %sb_{wi}_{j}, %b{wi}d, %a{wi}_{j} : f32""")
+    yields = ", ".join(f"%na{wi}_{j}" for wi in range(nw) for j in range(TG))
+    outs = []
+    for j in range(TG):
+        red = [f"""    %r{wi}_{j} = kernel.subgroup.reduce<addf> %res{wi}_{j} : f32""" for wi in range(nw)]
+        if mode == "swiglu":
+            val = f"""      %silu{j} = scalar.siluf<afn> %r0_{j} : f32
+      %v{j} = scalar.mulf %silu{j}, %r1_{j} : f32
+      func.call @g_store_row(%y, %tokens, %n, %tr{j}o, %row, %v{j}, %accumulate) : (buffer, index, index, index, index, f32, i32)"""
+        elif mode == "pair":
+            val = f"""      func.call @g_store_row(%y, %tokens, %n, %tr{j}o, %row, %r0_{j}, %accumulate) : (buffer, index, index, index, index, f32, i32)
+      func.call @g_store_row(%y2, %tokens, %n, %tr{j}o, %row, %r1_{j}, %accumulate) : (buffer, index, index, index, index, f32, i32)"""
+        else:
+            val = f"""      func.call @g_store_row(%y, %tokens, %n, %tr{j}o, %row, %r0_{j}, %accumulate) : (buffer, index, index, index, index, f32, i32)"""
+        outs.append("\n".join(red) + f"""
+    %tr{j}o = index.add %token0, %cj{j} : index
+    %tl{j}o = index.cmp ult, %tr{j}o, %tokens : index
+    %st{j} = scalar.andi %tl{j}o, %first : i1
+    scf.if %st{j} {{
+{val}
+    }}""")
+    res = ", ".join(f"%res{wi}_{j}" for wi in range(nw) for j in range(TG))
+    cj = "\n".join(f"  %cj{j} = index.constant {j} : index" for j in range(TG))
+    return f"""
+kernel.def export("{name}") @{name}(%n: index, %tokens: index) {{
+  %c1 = index.constant 1 : index
+  %lanes = index.constant {32 * W} : index
+  %rows_per = index.constant {R} : index
+  %tg = index.constant {TG} : index
+  %tg_less = index.constant {TG - 1} : index
+  %row_groups = index.div %n, %rows_per : index
+  %tg_pad = index.add %tokens, %tg_less : index
+  %token_groups = index.div %tg_pad, %tg : index
+  kernel.launch.config workgroups(%token_groups, %row_groups, %c1) workgroup_size(%lanes, %c1, %c1) : index
+}} launch(%n_arg: index, %tokens_arg: index, %accumulate: i32, %x: buffer, {wargs}, {yargs}) {{
+  %n = index.assume %n_arg [range(%n_arg, {R}, 262144), multiple_of(%n_arg, {R})] : index
+  %tokens = index.assume %tokens_arg [range(%tokens_arg, 1, 8192)] : index
+  %group_id = kernel.workgroup.id<y> : index
+  %tgroup_id = kernel.workgroup.id<x> : index
+  %wave_id = kernel.subgroup.id : index
+  %wave = index.assume %wave_id [range(%wave_id, 0, {W - 1})] : index
+  %lane_id = kernel.subgroup.lane.id : index
+  %lane = index.assume %lane_id [range(%lane_id, 0, 31)] : index
+  %zero = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c32 = index.constant 32 : index
+  %cW = index.constant {W} : index
+  %rows_per = index.constant {R} : index
+  %tg = index.constant {TG} : index
+  %nbk = index.constant {nb} : index
+  %zero_f = scalar.constant 0.0 : f32
+  %zero_i = scalar.constant 0 : i32
+  %zero8i = vector.splati 0 : vector<8xi32>
+  %zero32i = vector.splati 0 : vector<32xi32>
+  %zero8f = vector.splatf 0.0 : vector<8xf32>
+{_TP}{cj}
+  %xq_view = buffer.view %x[%zero] : buffer -> view<[%tokens]x{nb}x32xi32>
+  %xm_k = index.constant {K} : offset
+  %xm_off = index.scale %tokens, %xm_k : index, offset -> offset
+  %xm_view = buffer.view %x[%xm_off] : buffer -> view<[%tokens]x{nb}x8xf32>
+  %row_base = index.mul %group_id, %rows_per : index
+  %token0 = index.mul %tgroup_id, %tg : index
+  %first = index.cmp eq, %lane, %c0 : index
+  scf.for %rr = [%wave to %rows_per step %cW] {{
+    %row_v = index.add %row_base, %rr : index
+    %row = index.assume %row_v [lt(%row_v, %n)] : index
+    {res} = scf.for %bk0 = [%lane to %nbk step %c32]({init} : {types}) -> ({types}) {{
+      %bk = index.assume %bk0 [range(%bk0, 0, {nb - 1})] : index
+{chr(10).join(body)}
+      scf.yield {yields} : {types}
+    }}
+{chr(10).join(outs)}
+  }}
+  kernel.return
+}}
+"""
+
+
+def use_block_mv(text):
+    """Replace every generic PTQ1_0 int8 matvec definition (g_mv_ptq1_0_k<K>[_swiglu|_pair][_t<TG>]_q8[_r<R>], rdna3 and rdna4
+    copies) by mv_block() of the same name. Returns (text, count)."""
+    pat = re.compile(r'kernel\.def (target\(@\w+\) )?export\("(g_mv_ptq1_0_k(\d+)(_swiglu|_pair)?(?:_t(\d+))?_q8(?:_r(\d+))?(_rdna4)?)"\).*?\n  kernel\.return\n\}\n', re.S)
+    n = [0]
+
+    def sub(m):
+        tgt, name, K, md, TG, R, _ = m.groups()
+        K, TG = int(K), int(TG or 1)
+        R = int(R or 16)
+        mode = {"_swiglu": "swiglu", "_pair": "pair"}.get(md, "store")
+        k = mv_block(name, K, R, TG, mode)
+        if tgt:
+            k = k.replace("\nkernel.def export(", f"\nkernel.def {tgt}export(", 1)
+        n[0] += 1
+        return k.lstrip("\n")
+    return pat.sub(sub, text), n[0]
