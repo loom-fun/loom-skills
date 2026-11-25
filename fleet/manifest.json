@@ -1101,7 +1101,7 @@
   "prism-ml-Ternary-Bonsai-2.5-27B-loom": {
    "staging": {
     "repo": "loom-fun-staging/prism-ml-Ternary-Bonsai-2.5-27B-loom",
-    "revision": "8452a253f979742aafa7f44a133c1c042daeb275"
+    "revision": "1115da0f6b5edf3a77fde0c1652ea21ac15c4914"
    },
    "model_id": "prism-ml/Ternary-Bonsai-2.5-27B",
    "kit": null,
