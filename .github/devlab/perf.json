@@ -1,47 +1,33 @@
 {
- "_comment": "R9700 per-model measurement (r9700_jobs.py): one job per model on one R9700 runner; loom-fun-staging card, llama.cpp ROCm b1375 + Vulkan b12211 with the matched drafting, reduced-context models served at served_context. Does not fit: none",
- "runner": "r9700",
- "memory_bytes": 34000000000,
+ "_comment": "sdk030 pre-existing gate failures (pf-inkling): Inkling-2-Mini Strix frozen package on hrx-loom 0.3.0 with the pinned mainline reference GGUF + inkling2 renderer (branch sdk030-pf-inkling-ref). Gates dev (the sweep's level) then full.",
+ "runner": "strix",
+ "memory_bytes": 33000000000,
  "llama_spec": "matched",
+ "card": "loom-fun/unsloth-Inkling-2-Mini-loom@4e018e88a3aa9826286c71dfe2f6c905a491659b",
+ "kit": null,
+ "llamacpp": "b1384",
  "jobs": [
   {
-   "name": "unsloth-qwen3-0-6b-loom",
-   "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
+   "name": "pf-inkling-strix",
+   "runner": "strix",
+   "card": "loom-fun/unsloth-Inkling-2-Mini-loom@4e018e88a3aa9826286c71dfe2f6c905a491659b",
+   "memory_bytes": 33000000000,
    "kit": null,
-   "llamacpp": "b1375",
+   "llamacpp": "b1384",
    "llamacpp_vulkan": "b12211",
-   "memory_bytes_r9700": 17000000000,
+   "sdk": "0.3.0",
    "variants": [
     {
-     "name": "card",
-     "build": {}
-    },
-    {
-     "name": "nodraft",
-     "build": {},
-     "execution": {
-      "draft_depth": 0
-     }
+     "name": "staging",
+     "sdk": "0.3.0",
+     "programs_sha256": "fdb1aaa4771f05a9cc9315aa774bddf121123c8143d3b81762563e6fedc0f6aa"
     }
    ],
    "steps": [
-    "func:card",
-    "ktest:card",
-    "gates:card:dev",
-    "perf:card:3",
-    "perf:card:3:long",
-    "c4:nodraft",
-    "llama@rocm.np1:3",
-    "llama@rocm.np1:3:long",
-    "llamac4@rocm.nodraft",
-    "llama@vulkan.np1:3",
-    "llama@vulkan.np1:3:long",
-    "llamac4@vulkan.perslot.nodraft"
+    "func:staging",
+    "gates:staging:dev",
+    "gates:staging:full"
    ]
   }
- ],
- "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
- "kit": null,
- "llamacpp": "b1375",
- "llamacpp_vulkan": "b12211"
+ ]
 }
