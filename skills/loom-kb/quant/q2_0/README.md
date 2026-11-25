@@ -9,3 +9,7 @@ at load: loom-kb topic `sdk`).
 Helpers (`starter/ternary.py`): `@g_q2_0_icodes` (codes 0..3, scale d, minimum d: int8 matvecs and the head subtract the activation
 code sum) and `@g_q2_0_values`. A 32-value group is 8 bytes: four shift-and-mask steps give the codes of values 4i + k in byte i, one
 byte shuffle restores value order (about 1 VALU op per weight).
+Prefill GEMM: by default the 64-row tile through `@g_q2_0_values` (a 32-value decode per 16 weights); `prefill.gemm.q2_0_native`
+(`GEMM_Q2_0_NATIVE`, `ternary.q2_0_dequant16`) decodes the 16-value quarter-block inline (one 4-byte load, word-wide shift-and-mask, F16
+`(q - 1) * d`, exact) and takes the 128/256-row kernels. Reduced-vocabulary MTP proposals copy a Q2_0 head's rows as they are
+(`draft.propose.head_rows`, topic `speculative`).

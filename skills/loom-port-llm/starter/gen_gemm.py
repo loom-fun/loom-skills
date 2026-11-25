@@ -55,6 +55,12 @@ HELPER = {"q4_0", "q5_0", "iq4_nl", "iq4_xs", "q3_k", "iq3_s", "f16", "mxfp4", "
 Q4_0_NATIVE = os.environ.get("GEMM_Q4_0_NATIVE", "0").strip().lower() not in ("", "0", "false", "no", "off")
 if Q4_0_NATIVE:
     HELPER = HELPER - {"q4_0"}
+# GEMM_Q2_0_NATIVE (choice prefill.gemm.q2_0_native): Q2_0 (Ternary Bonsai) decodes its 16-value quarter-block straight to F16
+# (ternary.q2_0_dequant16: one 4-byte code load, word-wide shift-and-mask, the values of @g_q2_0_values + fptrunc) and so gets the
+# 128/256-row kernels instead of the 64-row tile that decodes a whole 32-value group per 16 weights.
+Q2_0_NATIVE = os.environ.get("GEMM_Q2_0_NATIVE", "0").strip().lower() not in ("", "0", "false", "no", "off")
+if Q2_0_NATIVE:
+    HELPER = HELPER - {"q2_0"}
 # GEMM_IQ4_NATIVE (choice prefill.gemm.iq4_native): IQ4_XS / IQ4_NL decode their 16-value half-group inline (iq4_dequant16: the
 # loads exposed, so the 128/256-row kernels prefetch them and the mixed-format m256 swiglu takes iq4_xs) instead of through the
 # @g_<fmt>_values helper, which limits them to the 64-row tile. Same values as the helper + fptrunc.
@@ -299,6 +305,9 @@ def dequant16(fmt, w, view_name, out):
         return iq4_dequant16(fmt, w, out)
     if fmt == "q3_k" and Q3_K_NATIVE:
         return q3_k_dequant16(w, out)
+    if fmt == "q2_0" and Q2_0_NATIVE:
+        import ternary
+        return ternary.q2_0_dequant16(w, out)
     if fmt == "ptq1_0":   # 16 consecutive trits = one (byte vector, power of 3) pair of the block (ternary.py @g_ptq1_0_half16)
         return f'''
       %{out}_bv = index.constant 128 : index

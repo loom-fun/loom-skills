@@ -2416,16 +2416,16 @@ def _phead_params():
     t = _pkg_llm_text()
     i = t.find("@g_head_select_p(") if t else -1
     m = re.search(r"%split = scalar\.constant (\d+) : i32\n\s*%shift = scalar\.constant (\d+) : i32", t[i:]) if i >= 0 else None
-    return (int(m.group(1)), int(m.group(2)), "@g_prep_q6_k_q6_k(" in t) if m else None
+    return (int(m.group(1)), int(m.group(2)), "@g_prep_q6_k_q6_k(" in t or "@g_prep_q2_0_q2_0(" in t) if m else None
 
 
-# a Q6_K head (GGUF) or a BF16 head (safetensors, prep_weights "bf16r"); the package's llm.loom says whether the copy exists
-_PH = _phead_params() if ((HEAD_Q8 and HEAD_FMT == "q6_k" and H % 256 == 0 or ACT_Q8 and HEAD_FMT == "bf16" and H % 32 == 0)
+# a Q6_K or Q2_0 head (GGUF) or a BF16 head (safetensors, prep_weights "bf16r"); the package's llm.loom says whether the copy exists
+_PH = _phead_params() if ((HEAD_Q8 and HEAD_FMT in ("q6_k", "q2_0") and H % 256 == 0 or ACT_Q8 and HEAD_FMT == "bf16" and H % 32 == 0)
                           and (cfg.get("mtp") or cfg.get("drafter"))) else None
-PSRC = "bf16r" if HEAD_FMT == "bf16" else "q6_k"
+PSRC = "bf16r" if HEAD_FMT == "bf16" else HEAD_FMT
 if _PH:
-    split_rows, shift, SAME = _PH                        # SAME: the copy keeps the Q6_K rows (PROPOSE_HEAD=q6_k), else Q4_0
-    PSUF = "_pq6" if SAME else "_p40"
+    split_rows, shift, SAME = _PH                        # SAME: the copy keeps the head's rows (Q6_K with PROPOSE_HEAD=q6_k; Q2_0 always), else Q4_0
+    PSUF = {"q6_k": "_pq6", "q2_0": "_pq2"}[PSRC] if SAME else "_p40"
     base_tok = split_rows + shift                     # first added-token id; the copy holds rows [0, split_rows) + [base_tok, V)
     V_ = cfg["vocab"]; rows_p = split_rows + V_ - base_tok; CHp = (rows_p + 127) // 128
     sel = np.concatenate([np.arange(split_rows), np.arange(base_tok, V_)])
@@ -2452,7 +2452,7 @@ if _PH:
     lpad = np.full((S, CHP), -3.0e38, np.float32); lpad[:, :rows_p] = lp
     save("pr_meta", hm); save("pr_h", hp); save("pr_l", lpad.reshape(-1))
     unit = 256 if SAME else 32
-    mt, ht, w4t = f"tensor<{hm.size}xi32>", f"tensor<{S}x{H}xf32>", f"tensor<{nb * (210 if SAME else 18)}xi8>"
+    mt, ht, w4t = f"tensor<{hm.size}xi32>", f"tensor<{S}x{H}xf32>", f"tensor<{nb * ({'q6_k': 210, 'q2_0': 72}[PSRC] if SAME else 18)}xi8>"
     tol = (2.0e-3 if SAME else 3.0e-2) * float(np.abs(lp).max())
     skip_blocks = base_tok * H * 2 if PSRC == "bf16r" else (base_tok - split_rows) * H // unit   # bf16r: the tail range's byte origin in the one buffer
     def prl(k, tag):
@@ -2471,7 +2471,7 @@ if _PH:
   %w = check.file.read.npy path("hd_w.npy") : {hwt}
   %le = check.file.read.npy path("pr_l.npy") : tensor<{S * CHP}xf32>
   %w4 = check.generate.fill value(0) : {w4t}
-  kernel.launch @g_prep_{PSRC}_{"q6_k" if SAME else "q4_0"}[%b](%b, %o, %sp, %sk, %w4, %w) : [index](index, i64, i64, i64, {w4t}, {hwt})
+  kernel.launch @g_prep_{PSRC}_{PSRC if SAME else "q4_0"}[%b](%b, %o, %sp, %sk, %w4, %w) : [index](index, i64, i64, i64, {w4t}, {hwt})
   %hk = check.literal value({H}) : index
   %hq = check.generate.fill value(0) : tensor<{S}x{2 * H}xi8>
   kernel.launch @g_quant_q8[%t, %hk](%t, %hk, %h, %hq) : [index, index](index, index, {ht}, tensor<{S}x{2 * H}xi8>)

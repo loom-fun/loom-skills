@@ -19,8 +19,8 @@ one: one lane per 32-value block, llama.cpp's quantize_row_q8_0 / quantize_row_q
 #   vocabulary (FR-Spec / EAGLE-3 style). The converter dequantizes Q6_K (llama.cpp's dequantize_row_q6_K) and re-encodes
 #   Q4_0; the output block g reads input block g (g < split) or g + skip (the tail), so one pass copies both segments.
 SRC = {"bf16": 64, "f16": 64, "q8_0": 34, "bf16e": 2, "q2_0x": 36}   # q2_0x: two Q2_0 blocks per 128 values (ternary.prep_kernel)     # bytes per 32 values of a source the converter reads (bf16e: per element)
-DST = {"q8_0": 34, "q4_0": 18, "q6_k": 210, "f32_copy": 4, "f32_add1": 4, "f32_negexp": 4, "ptq1_0": 28}   # ptq1_0: per 128 values   # ... of a prepared format (f32_*: per element)
-SRC_SUPER = {"q6_k": 210, "bf16r": 512}       # bytes per 256 values of a source with a row subset (see subset_entry); bf16r: a BF16 head (32-value units)
+DST = {"q8_0": 34, "q4_0": 18, "q6_k": 210, "f32_copy": 4, "f32_add1": 4, "f32_negexp": 4, "ptq1_0": 28, "q2_0": 72}   # ptq1_0: per 128 values; q2_0: a same-format row-subset copy, per 256 values   # ... of a prepared format (f32_*: per element)
+SRC_SUPER = {"q6_k": 210, "bf16r": 512, "q2_0": 72}       # bytes per 256 values of a source with a row subset (see subset_entry); bf16r: a BF16 head (32-value units); q2_0: four 64-value blocks (same-format copy only)
 
 # Elementwise bf16 -> f32 conversions of a safetensors checkpoint's small tensors (one lane per element; safetensors.py's name map
 # says which tensor takes which op): copy (conv1d, dt_bias, the gated norm), add1 (the zero-centred RMSNorm weights: w + 1 is
@@ -192,18 +192,20 @@ def _kernel_super(src, dst):
     dequantizer in llm.loom, then quantize_row_q4_0); dst == src: a 256-value superblock, copied byte for byte."""
     n = f"{src}_{dst}"
     same = dst == src
+    assert same or src == "q6_k", f"{src} -> {dst}: only Q6_K converts; another superblock source is copied as it is"
     unit = "256-value superblock" if same else "32-value block"
+    nbytes = SRC_SUPER[src]   # bytes per 256-value unit (Q6_K: one superblock; Q2_0: four 64-value blocks)
     if same:
-        body = """    %src_view = buffer.view %input[%origin] : buffer -> view<210xi8>
+        body = f"""    %src_view = buffer.view %input[%origin] : buffer -> view<{nbytes}xi8>
     %oo = index.scale %g, %sb_bytes : index, offset -> offset
-    %dst_view = buffer.view %output[%oo] : buffer -> view<210xi8>
+    %dst_view = buffer.view %output[%oo] : buffer -> view<{nbytes}xi8>
     %c0 = index.constant 0 : index
-    %c210 = index.constant 210 : index
-    scf.for %k = [%c0 to %c210 step %c1] {
-      %kb = index.assume %k [range(%k, 0, 209)] : index
-      %byte = view.load %src_view[%kb] : view<210xi8> -> i8
-      view.store %byte, %dst_view[%kb] : i8, view<210xi8>
-    }
+    %c{nbytes} = index.constant {nbytes} : index
+    scf.for %k = [%c0 to %c{nbytes} step %c1] {{
+      %kb = index.assume %k [range(%k, 0, {nbytes - 1})] : index
+      %byte = view.load %src_view[%kb] : view<{nbytes}xi8> -> i8
+      view.store %byte, %dst_view[%kb] : i8, view<{nbytes}xi8>
+    }}
 """
         locate = """    %sb = %sg
 """
@@ -233,7 +235,7 @@ kernel.def export("g_prep_{n}") @g_prep_{n}(%blocks: index) {{
   %c1 = index.constant 1 : index
   %c8 = index.constant 8 : index
   %c64 = index.constant 64 : index
-  %sb_bytes = index.constant 210 : offset
+  %sb_bytes = index.constant {nbytes} : offset
   %wg = kernel.workgroup.id<x> : index
   %lane = kernel.workitem.id<x> : index
   %base = index.mul %wg, %c64 : index

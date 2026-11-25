@@ -1,14 +1,13 @@
 {
- "_comment": "Ternary Bonsai 27B (#1416): R9700 card measurement on the MTP card; iterate round 2 (register/shuffle FWHT quantizers HAD_FAST; repack + table decode) on R9700 and Strix Halo",
+ "_comment": "Ternary Bonsai 27B (#1416): R9700 card measurement (llama.cpp rows on the matched MTP spec) + iterate round 3: reduced-vocabulary MTP proposal head (Q2_0 row copy, 32k/80k rows), native Q2_0 GEMM staging (128/256-row kernels), the same-architecture prefill stack of Qwen3.8-27B (gfx11 / gfx12 sets)",
  "card": "loom-fun-staging/prism-ml-Ternary-Bonsai-2.5-27B-loom",
  "kit": null,
  "memory_bytes": 39000000000,
- "llama_spec": "matched",
  "llamacpp": "b1387",
  "llamacpp_vulkan": "b12211",
  "jobs": [
   {
-   "name": "bonsai-r9700-card",
+   "name": "bonsai-r9700-card2",
    "card": "loom-fun-staging/prism-ml-Ternary-Bonsai-2.5-27B-loom",
    "kit": null,
    "llamacpp": "b1387",
@@ -42,10 +41,12 @@
     "llamac4@vulkan.perslot.nodraft",
     "profile:card"
    ],
-   "runner": "r9700"
+   "runner": "r9700",
+   "llama_spec": "--spec-type draft-mtp --spec-draft-n-max 3",
+   "_comment": "llama_spec: the arguments of the Strix Halo card's llama.cpp rows (run 45545014427; the package's MTP depth 3); the model is not in data/drafting_classification.json (not a nightly card yet)"
   },
   {
-   "name": "bonsai-r2-r9700",
+   "name": "bonsai-r3-r9700",
    "runner": "r9700",
    "card": "loom-fun-staging/prism-ml-Ternary-Bonsai-2.5-27B-loom",
    "kit": null,
@@ -56,36 +57,61 @@
      "context": 65536
     },
     {
-     "name": "hadfast",
-     "context": 65536,
+     "name": "ph32",
      "build": {
-      "HAD_FAST": "1"
-     }
+      "PROPOSE_HEAD_ROWS": "32768"
+     },
+     "context": 65536
     },
     {
-     "name": "rplut",
-     "context": 65536,
+     "name": "ph80",
      "build": {
-      "TERNARY_REPACK": "1",
-      "PTQ1_0_MV": "lut",
-      "HAD_FAST": "1"
-     }
+      "PROPOSE_HEAD_ROWS": "81920"
+     },
+     "context": 65536
+    },
+    {
+     "name": "nat",
+     "build": {
+      "GEMM_Q2_0_NATIVE": "1"
+     },
+     "context": 65536
+    },
+    {
+     "name": "nst",
+     "build": {
+      "GEMM_Q2_0_NATIVE": "1",
+      "GDN_CHUNK": "1",
+      "GDN_COPY_SPLIT": "8",
+      "FLASH2_TRIM": "1"
+     },
+     "context": 65536
     }
    ],
    "steps": [
     "smoke:card",
-    "ktest:hadfast",
-    "ktest:rplut",
-    "perf:card:2",
-    "perf:hadfast:2",
-    "perf:rplut:2",
+    "ktest:ph32",
+    "ktest:nst",
+    "perf:card:1",
+    "perf:ph32:1",
+    "perf:ph80:1",
+    "perf:nat:1",
+    "perf:nst:1",
+    "perf:nst:1",
+    "perf:nat:1",
+    "perf:ph80:1",
+    "perf:ph32:1",
+    "perf:card:1",
     "perf:card:1:long",
-    "perf:hadfast:1:long",
-    "profile:hadfast"
+    "perf:ph32:1:long",
+    "perf:ph80:1:long",
+    "perf:nat:1:long",
+    "perf:nst:1:long",
+    "profile:nst"
    ]
   },
   {
-   "name": "bonsai-r2-strix",
+   "name": "bonsai-r3-strix",
    "card": "loom-fun-staging/prism-ml-Ternary-Bonsai-2.5-27B-loom",
    "kit": null,
    "memory_bytes": 39000000000,
@@ -94,43 +120,61 @@
      "name": "card"
     },
     {
-     "name": "hadfast",
+     "name": "ph32",
      "build": {
-      "HAD_FAST": "1"
+      "PROPOSE_HEAD_ROWS": "32768"
      }
     },
     {
-     "name": "rp",
+     "name": "ph80",
      "build": {
-      "TERNARY_REPACK": "1",
-      "HAD_FAST": "1"
+      "PROPOSE_HEAD_ROWS": "81920"
      }
     },
     {
-     "name": "rplut",
+     "name": "nat",
      "build": {
-      "TERNARY_REPACK": "1",
-      "PTQ1_0_MV": "lut",
-      "HAD_FAST": "1"
+      "GEMM_Q2_0_NATIVE": "1"
+     }
+    },
+    {
+     "name": "nst",
+     "build": {
+      "GEMM_Q2_0_NATIVE": "1",
+      "FLASH2_KT256": "16",
+      "GDN_CHUNK11": "1",
+      "GDN_CHUNK11_FUSE": "1",
+      "GDN_CHUNK11_GATE": "1",
+      "GDN_CHUNK11_CN": "16",
+      "GDN_CHUNK11_OPT": "kbo",
+      "GDN_SKIP_LONG": "1",
+      "GDN_AB_WMMA": "1",
+      "RESID_EPI": "1",
+      "FLASH2_TRIM": "1",
+      "QG_SPLIT": "1"
      }
     }
    ],
    "steps": [
     "smoke:card",
-    "ktest:hadfast",
-    "ktest:rp",
-    "ktest:rplut",
-    "perf:card:2",
+    "ktest:ph32",
+    "ktest:nst",
+    "perf:card:1",
+    "perf:ph32:1",
+    "perf:ph80:1",
+    "perf:nat:1",
+    "perf:nst:1",
+    "perf:nst:1",
+    "perf:nat:1",
+    "perf:ph80:1",
+    "perf:ph32:1",
+    "perf:card:1",
     "perf:card:1:long",
-    "perf:hadfast:2",
-    "perf:hadfast:1:long",
-    "perf:rp:2",
-    "perf:rp:1:long",
-    "perf:rplut:2",
-    "perf:rplut:1:long",
-    "c4:card",
-    "profile:card",
-    "profile:rplut"
+    "perf:ph32:1:long",
+    "perf:ph80:1:long",
+    "perf:nat:1:long",
+    "perf:nst:1:long",
+    "profile:nst"
    ]
   }
  ]

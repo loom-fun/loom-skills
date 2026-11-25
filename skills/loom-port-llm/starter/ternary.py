@@ -243,6 +243,52 @@ func.def inline @g_q2_0_values(%w: buffer, %origin: offset, %group: index) -> (v
 }
 """
 
+def q2_0_dequant16(w, out):
+    """gen_gemm dequant16 for Q2_0 (GEMM_Q2_0_NATIVE): the 16 weights of row %w_row_origin at column %w_col (a multiple of 16) as F16
+    %{out}. Quarter q of the 64-value block is 4 code bytes at 2 + 4q; (word >> 2k) & 0x03030303 holds values 4i + k in byte i, a
+    shuffle restores value order. (code - 1) is exact in F16 and so is its product with the F16 scale (a factor of -1, 0, 1 or 2): the
+    values of @g_q2_0_values + fptrunc. Loads first (gen_gemm._split_dequant prefetches them)."""
+    o = out
+    sh = "\n".join(f"""      %{o}_t{k} = vector.shrui %{o}_cw, %{o}_s{k} : vector<1xi32>
+      %{o}_r{k} = vector.andi %{o}_t{k}, %{o}_m : vector<1xi32>""" if k else f"      %{o}_r0 = vector.andi %{o}_cw, %{o}_m : vector<1xi32>" for k in range(4))
+    return f"""
+      %{o}_bv = index.constant 64 : index
+      %{o}_block = index.div %w_col, %{o}_bv : index
+      %{o}_within = index.rem %w_col, %{o}_bv : index
+      %{o}_q0 = index.div %{o}_within, %c16 : index
+      %{o}_q = index.assume %{o}_q0 [range(%{o}_q0, 0, 3)] : index
+      %{o}_block_add = index.scale %{o}_block, %block_bytes : index, offset -> offset
+      %{o}_block_origin = index.add %w_row_origin, %{o}_block_add : offset
+      %{o}_two = index.constant 2 : offset
+      %{o}_four = index.constant 4 : offset
+      %{o}_qo = index.scale %{o}_q, %{o}_four : index, offset -> offset
+      %{o}_co0 = index.add %{o}_block_origin, %{o}_two : offset
+      %{o}_co = index.add %{o}_co0, %{o}_qo : offset
+      %{o}_d_view = buffer.view %{w}[%{o}_block_origin] : buffer -> view<1xf16>
+      %{o}_c_view = buffer.view %{w}[%{o}_co] : buffer -> view<4xi8>
+      %{o}_d = view.load %{o}_d_view[0] : view<1xf16> -> f16
+      %{o}_c4 = vector.load %{o}_c_view[0] : view<4xi8> -> vector<4xi8>
+      %{o}_cw = vector.bitcast %{o}_c4 : vector<4xi8> to vector<1xi32>
+      %{o}_m = vector.splati 50529027 : vector<1xi32>
+      %{o}_s1 = vector.splati 2 : vector<1xi32>
+      %{o}_s2 = vector.splati 4 : vector<1xi32>
+      %{o}_s3 = vector.splati 6 : vector<1xi32>
+{sh}
+      %{o}_b0 = vector.bitcast %{o}_r0 : vector<1xi32> to vector<4xi8>
+      %{o}_b1 = vector.bitcast %{o}_r1 : vector<1xi32> to vector<4xi8>
+      %{o}_b2 = vector.bitcast %{o}_r2 : vector<1xi32> to vector<4xi8>
+      %{o}_b3 = vector.bitcast %{o}_r3 : vector<1xi32> to vector<4xi8>
+      %{o}_b01 = vector.concat<0> %{o}_b0, %{o}_b1 : vector<4xi8>, vector<4xi8> -> vector<8xi8>
+      %{o}_b23 = vector.concat<0> %{o}_b2, %{o}_b3 : vector<4xi8>, vector<4xi8> -> vector<8xi8>
+      %{o}_all = vector.concat<0> %{o}_b01, %{o}_b23 : vector<8xi8>, vector<8xi8> -> vector<16xi8>
+      %{o}_codes = vector.shuffle<[0, 4, 8, 12, 1, 5, 9, 13, 2, 6, 10, 14, 3, 7, 11, 15]> %{o}_all : vector<16xi8>
+      %{o}_f = vector.sitofp %{o}_codes : vector<16xi8> to vector<16xf16>
+      %{o}_one = vector.splatf 1.0 : vector<16xf16>
+      %{o}_c = vector.subf %{o}_f, %{o}_one : vector<16xf16>
+      %{o}_ds = vector.splat %{o}_d : vector<16xf16>
+      %{o} = vector.mulf %{o}_c, %{o}_ds : vector<16xf16>"""
+
+
 def signs_rodata(cfg):
     """One read-only table per sign width: the +/-1 signs as bits (set = -1), little-endian 32-bit words."""
     had = cfg["hadamard"]

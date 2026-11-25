@@ -6357,9 +6357,11 @@ if __name__ == "__main__":
             import prep_weights
             PSRC = "bf16r" if src_fmt(head_name) == "bf16" else src_fmt(head_name)   # bf16r: BF16 rows re-encoded (safetensors head)
             assert PSRC in prep_weights.SRC_SUPER and ACT_Q8 and H % 32 == 0, \
-                f"PROPOSE_HEAD_ROWS needs a Q6_K or BF16 head with int8 activations (head {src_fmt(head_name)}, ACT_Q8={ACT_Q8})"
+                f"PROPOSE_HEAD_ROWS needs a Q6_K, Q2_0 or BF16 head with int8 activations (head {src_fmt(head_name)}, ACT_Q8={ACT_Q8})"
             PBASE = base_vocab() or V
             PDST = "q6_k" if os.environ.get("PROPOSE_HEAD", "q4_0") == "q6_k" and PSRC == "q6_k" else "q4_0"   # q6_k: the rows kept as they are (no re-rounding)
+            if PSRC == "q2_0":   # a Q2_0 head (Ternary Bonsai, 2.25 bits per weight): the subset's rows are copied as they are (Q4_0 would be larger)
+                PDST = "q2_0"
             HPREP = {TENS[head_name].get("hf", head_name): prep_weights.subset_entry(PSRC, PDST, PROWS, PBASE, V, H)}
             HKEY = TENS[head_name].get("hf", head_name)
             PHEAD_ROWS = prep_weights.subset_rows(PROWS, PBASE, V)
@@ -6485,7 +6487,7 @@ if __name__ == "__main__":
             _rows = PHEAD_ROWS[2] if PHEAD_ROWS else V   # a reduced draft vocabulary has fewer rows
             _V, _CH = V, CHUNKS
             V, CHUNKS = _rows, (_rows + 127) // 128
-            _pf, _ps = ("q6_k", "_pq6") if PHEAD_ROWS and HPREP[HKEY][1] == "q6_k" else ("q4_0", "_p40")
+            _pf, _ps = {"q6_k": ("q6_k", "_pq6"), "q2_0": ("q2_0", "_pq2")}.get(HPREP[HKEY][1] if PHEAD_ROWS else "", ("q4_0", "_p40"))
             COMMON += "".join(head_mv(tg, _pf, iq=True, suffix=_ps) for tg in (1, 4, 8, 16))
             V, CHUNKS = _V, _CH
             _pm = _re.search(r"command\.def public @llm_" + gen_draft.DRAFT["kind"] + r"_propose\(\).*?\n\}\n", program, _re.S)
