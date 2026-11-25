@@ -75,10 +75,14 @@ Order matters: each step's proof is the next step's precondition. Big outputs go
    Loom and llama.cpp come from different jobs on the same runner type.
 6. **Publish to the staging org** (`loom-fleet` `reference/publish.md`): each card shows its own new-SDK measurement and the delta line
    against the old card; publish partial progress; verify the live card (session and programs hash). Never production.
-   **Before promotion**, prepare and dry-run the exact production bytes on DevLab using the
-   [reviewed bundle procedure](reference/prepared-promotion.md). Freeze the outgoing SDK tag plan against the same production
-   parents so the old cards stay addressable at `.../resolve/v<old>/model.json`. After approval, verify the outgoing tags and
-   replay the reviewed bundle. See `loom-fleet` reference/publish.md for the card-tag and release-tag rules.
+   **Before promotion** (owner's go-ahead), freeze `eligible.json` and `held.json` (every model repo of the production org in exactly one) and
+   prepare the reviewed bundle: `scripts/replay_promotion.py prepare` composes the exact production bytes, checks them with the
+   card file-set check, and plans the OUTGOING SDK tag at each production parent so the old card stays addressable at
+   `.../resolve/v<old>/model.json` ([reviewed bundle procedure](reference/prepared-promotion.md)). After approval, in this order
+   (reference/release-checklist.md section 5): `scripts/tag_org.py --bundle` creates the outgoing tags; merge the integration
+   branch and tag the merge commit `sdkX.Y.Z-uN` (`loom-fleet` reference/publish.md "Release tags"); `scripts/replay_promotion.py
+   replay --execute` writes the cards. The card-tag rule: `loom-fleet` reference/publish.md "Card tags"; the promoted (new-SDK)
+   cards get no tag now. A single card outside a release goes through `loom-benchmark/scripts/card/promote_staging.py`.
 7. **Report the perf delta** per model and device: equal or better on a supermajority of metrics, and every regression over 3 % explained
    (an upstream issue, or here). A result without its explanation is not reported as "fine".
 8. **Simplification ledger** (`notes/simplifications.md`): what the new SDK lets us delete (a flag, a computation, a workaround). Land what
@@ -109,9 +113,11 @@ A change can sit in two classes (a pool-size change is card schema *and* program
 |---|---|
 | `"${LOOM_SKILL_DIR}/scripts/sweep.py" --sdk VENV FLEET_DIR [--json OUT] [--no-link]` | version-agnostic: `loom-opt` parse of every program file and `loom-link` link of every variant/service of every package (a fleet dir or one package), the first-error-class histogram, JSON out. Run it with the old venv as control and the new venv as the test |
 | `"${LOOM_SKILL_DIR}/scripts/rewrite_v010_v020.py" [--check] [--json OUT] [--no-widen-pool] [--py] PATH...` | the v0.1.0 to v0.2.0 source migration on a file, package or tree: `vector.constant` to `splati`/`splatf` by element type, `command.program.*` to `command.*`, the `publish_epoch` control-state argument, the weights-policy import key range, `pool_capacity` out of cards, the KV pool bounds, the one-token conv guard, the vision finite-batch ABI; idempotent; prints `manual: FILE:LINE: ... section N` for what needs a hand edit |
-| `"${LOOM_SKILL_DIR}/scripts/tag_org.py" --org ORG --tag vX.Y.Z [--message M] [--only REPO...] [--force] [--dry-run]` | tags the head of every `*-loom` repo of the org with the OUTGOING SDK version; skips a repo that has the tag; refuses a repo whose head is not on that SDK (its `llm_config.json` pin) unless `--force`; exit 1 if any repo failed, was refused, or has the tag on another commit; used before promotion |
-| `"${LOOM_SKILL_DIR}/scripts/replay_promotion.py" prepare --pins PINS.json --bundle DIR` | prepares exact production package bytes and fingerprints the source, target and prepared files |
-| `"${LOOM_SKILL_DIR}/scripts/replay_promotion.py" replay --bundle DIR --manifest-sha256 SHA256` | verifies the reviewed bundle and production parents with anonymous Hub reads |
+| `"${LOOM_SKILL_DIR}/scripts/tag_org.py" --bundle DIR --manifest-sha256 SHA [--dry-run]` | release step 1: tags every repo of the bundle's reviewed tag plan (text, image, held) with the OUTGOING SDK version at its reviewed parent, never a newer head; reads created tags back; exit 1 unless every row is `exists`, `created`, `would-create` or `skip` |
+| `"${LOOM_SKILL_DIR}/scripts/tag_org.py" --org ORG --tag vX.Y.Z [--message M] [--only REPO...] [--force] [--dry-run]` | outside a release: tags the head of every `*-loom` repo of the org; refuses a head whose `llm_config.json` pin is another SDK unless `--force`; exit 1 if any repo failed, was refused, or has the tag on another commit |
+| `"${LOOM_SKILL_DIR}/scripts/replay_promotion.py" prepare --eligible E.json --held H.json --sdk X.Y.Z --outgoing-tag vA.B.C --bundle DIR [--loom-fetch PATH]` | the release bundle from data only: checks the scope against the production inventory, composes the exact production bytes (org rewrite in fetch lines and `info.json`, card file-set check, no staging reference, optional programs hash), plans the outgoing tags, writes `manifest.json` and the `RELEASE.md` runbook |
+| `"${LOOM_SKILL_DIR}/scripts/replay_promotion.py" dry-run` (prepare's arguments, plus `--only SLUG...`, `--skip-card-check`) | prepare + tag plan + read-only replay with anonymous reads; reports every failing package; its bundle is never executable |
+| `"${LOOM_SKILL_DIR}/scripts/replay_promotion.py" replay --bundle DIR --manifest-sha256 SHA [--execute --receipt FILE]` | verifies the bundle, inventory, parents, staging heads and outgoing tags (read-only); with `--execute` (and `PROMOTE_CONFIRM=loom-fun`) writes one parent-guarded commit per repo, receipts and reads back; resumes from the receipt and recovers a commit whose receipt line was lost |
 
 A new pair gets its own `rewrite_<from>_<to>.py` beside these and a row here; keep scripts standard-library only.
 

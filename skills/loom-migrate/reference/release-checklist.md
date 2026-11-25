@@ -48,8 +48,11 @@ tracking issue loom-fun/loom-skills#1172). SKILL.md has the per-step detail for 
       KB device node, skill pointer, card section.
 
 ## 4. Dependent repos and pages (one PR each, unmerged until promotion)
-- [ ] loom-dev website (loom-fun/loom-dev): install/fetch/serve text, new GPUs browsable.
-- [ ] HF org pages: staging org page (`spaces/<staging-org>/README`) updated now; the production page prepared for promotion.
+Every change outside loom-skills is a reviewed pull request, never a direct commit to a default branch.
+- [ ] loom-dev website (loom-fun/loom-dev): install/fetch/serve text, new GPUs browsable. A PR from a branch
+      (`gh pr create --repo loom-fun/loom-dev --draft`), merged at section 5 step 5.
+- [ ] HF org pages: staging org page (`spaces/<staging-org>/README`) updated now; the production page as a Hub pull request on
+      `spaces/<production-org>/README` (`huggingface_hub` `upload_file(..., create_pr=True)`), merged at section 5 step 4.
 - [ ] Gufo upstream PR (gufo-org/gufo, the Loom extension support PR): rebased, works with the new SDK; stays draft.
 - [ ] loom-fun/loom-gufo-extension: SDK pin (Nix), API, docs, conformance against the staging cards.
 - [ ] loom-fun/weaver: pins, runtime, doctor, templates, packaging, release notes.
@@ -57,12 +60,23 @@ tracking issue loom-fun/loom-skills#1172). SKILL.md has the per-step detail for 
 - [ ] Upstream SDK bugs: write them up with source refs; file only with the owner's OK.
 
 ## 5. Promotion, in order (owner's go)
-Before approval, freeze the eligible staging commits, production parents, outgoing tags and held repos. Prepare and verify the exact production package bytes on DevLab using [the reviewed bundle procedure](prepared-promotion.md).
+Before approval, freeze the release inputs (`eligible.json` from the qualification evidence, `held.json` with the owner's reason
+for every production repo not promoted) and prepare the bundle with `scripts/replay_promotion.py prepare` (the reviewed bundle
+procedure, [prepared-promotion.md](prepared-promotion.md)). Every model repo of the production org is in exactly one of the two files.
+The owner approves one manifest SHA256; it covers the package bytes, the parents and the outgoing tag plan. The bundle's
+generated `RELEASE.md` repeats these steps with that SHA256.
 
-1. [ ] Verify or create the outgoing SDK tags at the exact production parents in the reviewed release tag plan. The `tag_org.py --only REPO...` dry run can check explicitly named text repos, including suffixed names. Use the release's exact tag plan for image packages, whose SDK evidence has no `llm_config.json`. The promoted cards get tags when they in turn move to a newer SDK.
-2. [ ] Merge `sdk<NNN>` -> `main`; tag the merge commit `sdk<new>-uN` (publish.md "Release tags").
-3. [ ] Replay the reviewed bundle against the pinned production parents. Archive the returned commit IDs and exact readback receipts.
-4. [ ] Publish the production HF org page.
+1. [ ] Outgoing SDK tags first, before anything else: `"${LOOM_SKILL_DIR}/scripts/tag_org.py" --bundle DIR --manifest-sha256 SHA`
+      (`--dry-run` first). Every repo of the plan (text, image and held repos with a `tag_revision`) gets `v<old>` at its
+      reviewed parent; rerun until every row reads `exists`, `created` or `skip`. If this step stops partway, main and
+      production are still entirely on the old release. The promoted cards get tags when they in turn move to a newer SDK
+      (`loom-fleet` reference/publish.md "Card tags").
+2. [ ] Merge `sdk<NNN>` -> `main` at the reviewed head; tag the merge commit `sdk<new>-uN` (publish.md "Release tags").
+3. [ ] Replay: `PROMOTE_CONFIRM=loom-fun "${LOOM_SKILL_DIR}/scripts/replay_promotion.py" replay --bundle DIR --manifest-sha256 SHA
+      --execute --receipt production-commits.jsonl`. It refuses to write until step 1 is complete; after an interruption rerun
+      the same command with the same receipt. Archive the receipt (returned commit IDs and readbacks); verify every live card
+      (programs hash, pin, Quick start).
+4. [ ] Merge the production HF org page pull request.
 5. [ ] Merge the website PR; check the device pages.
 6. [ ] Merge the extension and weaver PRs; take the Lemonade PR out of draft; mark the Gufo PR ready if its maintainers agree.
 7. [ ] Clean up: close experiment PRs, delete merged branches, archive campaign dirs, final report.

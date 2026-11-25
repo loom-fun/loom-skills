@@ -17,7 +17,8 @@ Per repo (the same name in both orgs):
   1. fetch the requested staging commit (current head by default; every file but .gitattributes: the package is small, its weights are
      fetched from their origins by loom-fetch);
   2. the publish-time org rewrite: info.json "repo" -> loom-fun/NAME, then render_card.py regenerates README.md and REPORT.md
-     (Quick start URLs, links) from it, and render_card.py --check verifies them; no file may still name loom-fun-staging;
+     (Quick start URLs, links) from it, and render_card.py --check verifies them; no file may still name loom-fun-staging, and the
+     card's file-set check (card_files.py) must pass;
   3. compare with the loom-fun repo at its current commit: files added / changed / removed / unchanged (git blob ids, LFS sha256),
      and a README diff summary;
   4. publish_package.py upload --org loom-fun --dry-run (the card checks the real upload runs).
@@ -91,6 +92,20 @@ def remote_files(api, repo, revision=None):
     return info.sha, out
 
 
+def card_file_problems(directory):
+    """The card's own file-set and text check (card_files.py beside this script: only what the card format defines, no
+    staging reference). A missing check is a problem: promotion fails closed."""
+    import importlib.util
+    from pathlib import Path
+    path = os.path.join(HERE, "card_files.py")
+    if not os.path.isfile(path):
+        return [f"card file-set check {path} is missing"]
+    spec = importlib.util.spec_from_file_location("card_files", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return list(module.check_package(Path(directory)))
+
+
 def package_work_dir(work, slug):
     """Keep a package's disposable work directory under the selected scratch root."""
     if not re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9_-])?", slug):
@@ -153,6 +168,7 @@ def promote(api, slug, work, execute, staging_revision=None, target_revision=Non
             except UnicodeDecodeError:
                 pass
     r["staging_refs_left"] = left
+    r["card_files"] = card_file_problems(out)
     readme_new = open(os.path.join(out, "README.md"), encoding="utf-8").read()
     r["readme_vs_staging"] = sum(1 for d in difflib.ndiff(readme_old.splitlines(), readme_new.splitlines()) if d[:1] in "+-")
     # compare with the loom-fun repo
@@ -183,7 +199,8 @@ def promote(api, slug, work, execute, staging_revision=None, target_revision=Non
     dry = subprocess.run([py, os.path.join(HERE, "publish_package.py"), "upload", out, "--repo", slug, "--org", DST, "--dry-run"],
                          capture_output=True, text=True)
     r["dry_run"] = "pass" if dry.returncode == 0 else f"FAIL: {(dry.stdout + dry.stderr).strip()[-300:]}"
-    r["ok"] = r["render_check"] == "pass" and not left and r["dry_run"] == "pass" and not ch["removed"]
+    r["ok"] = (r["render_check"] == "pass" and not left and not r["card_files"] and r["dry_run"] == "pass"
+               and not ch["removed"])
     if execute:
         if not r["ok"]:
             r["executed"] = "skipped: checks failed"
@@ -246,7 +263,7 @@ def main():
     if a.report:
         L = ["# Promotion dry run: loom-fun-staging -> loom-fun", "",
              f"{sum(1 for x in res if x.get('ok'))}/{len(res)} repos pass every check (org rewrite, render --check, no "
-             "loom-fun-staging reference left, publish_package.py upload --org loom-fun --dry-run). Nothing was uploaded.", "",
+             "loom-fun-staging reference left, card file set, publish_package.py upload --org loom-fun --dry-run). Nothing was uploaded.", "",
              "| repo | staging commit | loom-fun commit | added | changed | removed | unchanged | README +/- | schema | checks |",
              "|---|---|---|---|---|---|---|---|---|---|"]
         for x in res:
@@ -265,7 +282,8 @@ def main():
             L += [f"### {x['slug']}", f"- changed: {', '.join(f['changed']) or 'none'}", f"- added: {', '.join(f['added']) or 'none'}",
                   f"- removed: {', '.join(f['removed']) or 'none'}",
                   f"- README new headings: {'; '.join(rd.get('new_headings') or []) or 'none'}; dropped: {'; '.join(rd.get('dropped_headings') or []) or 'none'}",
-                  f"- checks: render {x['render_check']}; staging refs left {x['staging_refs_left'] or 'none'}; dry run {x['dry_run']}", ""]
+                  f"- checks: render {x['render_check']}; staging refs left {x['staging_refs_left'] or 'none'}; "
+                  f"card file set {'; '.join(x['card_files']) or 'pass'}; dry run {x['dry_run']}", ""]
         open(a.report, "w").write("\n".join(L) + "\n")
     sys.exit(0 if all(x.get("ok") for x in res) else 1)
 

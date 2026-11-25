@@ -1,27 +1,94 @@
-# Prepare a reviewed promotion bundle
+# Prepare and replay a reviewed promotion bundle
 
-Use `scripts/replay_promotion.py` for an explicitly scoped release. Prepare the production form on DevLab before requesting promotion approval. The preparation preserves the staged README and report prose, serving arguments and qualification files. It changes the staging namespace in the card's fetch selectors and generated `info.json` repository field. Image packages keep their own card layout and are checked against the published image qualification.
+An SDK release moves every eligible staging card to production in one reviewed step. The writer is
+`scripts/replay_promotion.py` (package bytes) plus `scripts/tag_org.py --bundle` (outgoing tags); both are general tools
+driven only by the release's data files. Release-specific facts (which slugs, which exceptions) never go into code.
+Targeted single-card promotions outside an SDK release use `loom-benchmark/scripts/card/promote_staging.py` instead
+(`loom-fleet` reference/publish.md).
 
-From the release tool checkout with Python 3.11 or later and `huggingface_hub==0.36.0`, run:
+Requirements: Python 3.11 or later and `huggingface_hub==0.36.0`. Preparation and every check use anonymous Hub reads;
+only the owner-approved steps 1 and 3 of the runbook write.
+
+## Inputs (data, frozen before approval)
+
+- `eligible.json`: `{SLUG: {"staging_revision": SHA, "target_revision": SHA, ...}}`, generated from the qualification evidence
+  (`fleet/regen.py eligible`). Optional per-package exceptions, each reviewed with the row:
+  - `programs_sha256`: the programs hash the qualifying job served (`card_lib.programs_sha256`); checked against the prepared
+    package when present, required for image packages (they have no `llm_config.json` or generated `info.json`).
+  - `retain_target_files` / `delete_target_files` (`{path: sha256}`): a production-only file kept, or retired. A deletion also
+    needs `rollback_tag`, which must be the release's outgoing tag; preparation refuses any remaining reference to a retired file.
+  - `image_readme_refresh`: an image card whose production README changed after the reference revision (the four identities).
+  Other fields of the evidence row (devices, runs) are informational and do not enter the manifest.
+- `held.json`: `{SLUG: {"reason": TEXT, "tag_revision": SHA?}}`: every production repo that is not promoted, with the owner's
+  reason. `tag_revision` (the repo's exact current head) still gives it the outgoing tag.
+
+Every model repo of the production org (whatever its name: `...-loom-r9700` and hand-written packages without the `-loom` suffix included) must be in exactly one of the two files.
+A repo published after the snapshot therefore stops the release instead of being left behind; so does a repo that is in the
+inputs but no longer in production.
+
+## Prepare (DevLab or any host)
 
 ```bash
 python skills/loom-migrate/scripts/replay_promotion.py prepare \
-  --pins pins.json --bundle release
+  --eligible eligible.json --held held.json --sdk 0.3.0 --outgoing-tag v0.2.0 --bundle release \
+  [--loom-fetch "$(command -v loom-fetch)"]
 ```
 
-The pin file maps each approved slug to its exact `staging_revision` and `target_revision`. Use `retain_target_files` to preserve a reviewed file that exists only in production. If the release explicitly retires a production-only file, list its path and current SHA256 in `delete_target_files` and supply the outgoing `rollback_tag`. Preparation checks for references to retired files. Verify every advertised preset's released SDK fetch plan against those deletions as part of the release receipt. The tool verifies both pinned inventories and refuses unaccounted production-only files. Include the prepared directory, manifest SHA256, tool commit and exact outgoing tag plan in the release handoff. The model repos remain unchanged during preparation.
+Per package it reads the exact staging and production commits (verifying every blob), composes the production form, and
+plans the outgoing tag:
 
-Hugging Face's `.gitattributes` is included in the source, target and output checksums wherever present. The prepared output preserves the production bytes, with no upload operation for that path.
+- The production form is the staged bytes with exactly two rewrites: the staging repo in the README's `loom-fetch` selectors
+  and in the generated `info.json` `repo`. The README must carry the release's exact install pin.
+- No file of the production form may name the staging org, and the card's own file-set check
+  (`loom-benchmark/scripts/card/card_files.py`, `check_package`) must pass: cards ship only what the card format defines
+  (no qualification or provenance JSONs, rehearsal leftovers or process text). There is no per-file stripping: a card that
+  fails is fixed on staging and qualified again. A missing check fails closed.
+- Hugging Face's `.gitattributes` keeps the production bytes (no upload operation for it).
+- The tag plan reads the production parent's SDK pin (`llm_config.json`, else the README install pin for image packages):
+  `create` or `already-at-parent` for the outgoing SDK, `already-on-target-sdk` for a parent that already pins the release
+  SDK; any other pin, or the outgoing tag on another commit, is refused.
+- `--loom-fetch` also runs the SDK's own fetch dry run of every preset of the prepared form (no download).
 
-An operator in a fresh session uses the downloaded bundle and the **reviewed** manifest SHA256 supplied by the release handoff:
+The bundle holds `manifest.json` (schema 2: release SDK and outgoing tag, inventory, packages with source / target / output
+SHA256 maps and operations, held rows, tag plan), the prepared `packages/`, and a generated `RELEASE.md` runbook with the
+section 5 order and the manifest SHA256. Hand over the bundle, the manifest SHA256 and the tool commit for review. The
+manifest SHA256 is the single identity the owner approves; it covers the tag plan.
+
+## Dry run (read-only, any time)
 
 ```bash
-python skills/loom-migrate/scripts/replay_promotion.py replay \
-  --bundle release --manifest-sha256 "$REVIEWED_MANIFEST_SHA256"
+python skills/loom-migrate/scripts/replay_promotion.py dry-run --eligible eligible.json --held held.json \
+  --sdk 0.3.0 --outgoing-tag v0.2.0 --bundle /disk/scratch/dry [--only SLUG ...] [--skip-card-check]
 ```
 
-Replay checks every prepared file and production parent before any upload. After explicit approval and verification that the outgoing tags resolve to the reviewed parents, the same command accepts `--execute --receipt production-commits.jsonl` with `PROMOTE_CONFIRM=loom-fun` and an authenticated Hub session. It submits the reviewed operations with the pinned parent as a compare-and-swap condition. A removal also requires the rollback tag to resolve to that exact parent. Each returned commit is recorded before full readback. Successful readback requires the exact prepared inventory and SHA256 at that commit and the same commit on main.
+Prepares, prints the tag plan and the read-only replay plan, and lists every failing package instead of stopping at the first.
+`--only` (a sample) and `--skip-card-check` (before the card check exists on the branch) produce a bundle that replay refuses
+to execute.
 
-Keep the receipt in the operator's durable release artifacts. The same command and same receipt can resume an interrupted replay after verifying previously recorded commits. An unexpected head with no matching receipt stops the release.
+## Release (owner's go, in this order: release-checklist.md section 5)
 
-If the Hub accepted a commit before its response was recorded, the release owner can recover the receipt through read-only checks. Fetch the candidate commit in a scratch Git repository and confirm that its sole parent equals the manifest's `target_revision` and its commit description contains the exact reviewed manifest SHA256. After the release owner confirms that identity, append one JSON line to the receipt with the exact `repo`, candidate `commit`, `manifest_sha256` and `"verified": false`. Run the read-only replay with that receipt. It checks that the candidate is still on main and that its entire file map matches the approved bundle before any remaining upload is allowed. If any check differs, leave the release paused for a new explicit decision.
+1. Outgoing tags: `tag_org.py --bundle release --manifest-sha256 SHA --dry-run`, then without `--dry-run`. Each repo is tagged
+   at its reviewed parent, never at a newer head (`moved` means the parent changed: prepare again); text, image and held repos
+   alike; created tags are read back. Rerun until every row is `exists`, `created` or `skip`.
+2. Merge the integration branch into loom-skills `main` and tag the merge commit `sdk<new>-uN`.
+3. `PROMOTE_CONFIRM=loom-fun python skills/loom-migrate/scripts/replay_promotion.py replay --bundle release --manifest-sha256 SHA --execute --receipt production-commits.jsonl`
+
+Replay verifies before any write: every bundle file against the manifest, the production inventory, each production parent
+and its bytes, each staging head (a moved staging head means the reviewed staging card is no longer the newest: review again),
+and that every planned outgoing tag resolves to its parent (step 1 first). It then writes one commit per pending repo with the
+parent as compare-and-swap, title `Promote reviewed package from staging <staging sha>` and description
+`Reviewed promotion manifest SHA256: <sha>`, records the returned commit in the receipt, reads the full inventory back and
+records it as verified. Without `--execute` the same command is the read-only check.
+
+## Interruptions and recovery
+
+Keep the receipt with the release artifacts and rerun the same command with the same receipt after any interruption:
+
+- A commit in the receipt is verified again (exact inventory and still the head) and skipped.
+- A crash after the Hub accepted a commit but before its receipt line: the live head differs from the reviewed parent, and replay
+  recovers it automatically only when that head is this release's commit for this repo: the exact title, the exact manifest
+  marker in its description, the reviewed parent as its parent, and the exact prepared byte inventory. It appends a
+  `"recovered": true` receipt line and does not commit again.
+- Anything else on `main` (a foreign commit, a look-alike with another parent or other bytes) stops the release with
+  `reconcile before retry`. Reconcile by hand with the release owner; a changed production parent needs a newly prepared and
+  reviewed bundle.

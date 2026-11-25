@@ -3,8 +3,10 @@
 How a package and its generated card reach the Hub, how the card's evidence is filled on DevLab, and when a regenerated
 package may replace a published one. The sampled promotion check for targeted work (`fleet/promote_check.py`, the baseline
 store) is [targeted-fix.md](targeted-fix.md) section 5; the ratchet's design is in [architecture.md](architecture.md);
-`loom-benchmark/scripts/card/promote_staging.py` moves approved staging packages to their final repos on the owner's go-ahead; for an SDK
-migration, first tag the production repos with the outgoing SDK version (`loom-migrate` SKILL.md step 6, `scripts/tag_org.py`).
+`loom-benchmark/scripts/card/promote_staging.py` moves approved staging packages to their final repos on the owner's go-ahead (a targeted
+fix: render check, card file-set check, parent-guarded upload). An SDK release instead promotes the whole fleet from one reviewed bundle:
+`loom-migrate` `scripts/replay_promotion.py` with the outgoing SDK tags created first by `scripts/tag_org.py --bundle`, in the order of
+`loom-migrate` reference/release-checklist.md section 5 ([prepared-promotion.md](../../loom-migrate/reference/prepared-promotion.md)).
 
 **Release tags** (owner rule, 2026-11-16). loom-skills: every promotion to `main` (with its loom-fun cards) tags the merge commit
 `sdkX.Y.Z-uN`: X.Y.Z is the hrx-loom SDK version the release targets; N counts the promotions on that SDK, starting at 0 and resetting
@@ -13,8 +15,8 @@ to 0 on a new SDK (`sdk0.1.0-u0`, `sdk0.1.0-u1`, `sdk0.2.0-u0`, ...). No `v` pre
 
 <a id="card-tags"></a>**Card tags** (loom-fun): a card tag `vX.Y.Z` means exactly one thing: the last commit of that card repo that worked
 with SDK X.Y.Z, before the card moved to a newer SDK, i.e. the repo's head at the time of the move. It is created only at that move,
-never on a new card. `scripts/tag_org.py` tags every `*-loom` repo whose head still pins the outgoing SDK, including cards the campaign did
-not migrate (their head stays the last commit on that SDK). Which loom-skills commit built a card is in its `info.json`
+never on a new card. In a release, `scripts/tag_org.py --bundle` tags every repo of the reviewed tag plan at its reviewed parent, including
+held repos (their head stays the last commit on that SDK); `tag_org.py --org` tags every `*-loom` head still pinning the outgoing SDK. Which loom-skills commit built a card is in its `info.json`
 (`versions.card_generator`), so cards carry no release tag.
 
 Which models need this work is [populate-org.md](populate-org.md).
