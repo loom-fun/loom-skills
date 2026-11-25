@@ -1450,6 +1450,10 @@ def ingest_full(st, name, e, W):
     if production and kept and make_info_supports("build", "--kit-kept"):   # phase 2 kept these frozen programs: the card says why (kit-verdict)
         json.dump(kept, open(os.path.join(W, "kit_kept.json"), "w"), indent=1)
         build += ["--kit-kept", os.path.join(W, "kit_kept.json")]
+    ext = explanations(st.d, slug)
+    if ext and make_info_supports("build", "--delta-explanations"):   # root causes written for this model's rows (regen.py explain)
+        json.dump(ext, open(os.path.join(W, "explanations.json"), "w"), indent=1)
+        build += ["--delta-explanations", os.path.join(W, "explanations.json")]
     if production and make_info_supports("build", "--sdk-evidence"):   # regression explanations and every cited job's conclusion
         json.dump(build_evidence(st), open(os.path.join(W, "evidence.json"), "w"), indent=1)
         build += ["--sdk-evidence", os.path.join(W, "evidence.json")]
@@ -2194,8 +2198,8 @@ def device_evidence(st, e, info_cache):
         if not exact.get(k) or exact[k] - 1 >= -SDK_REGRESSION:
             continue
         c = ev["confirmed"].get(k)
-        expl = None
-        if c is not None and c >= -SDK_REGRESSION * 100 and e.get("confirmed_by"):   # the ratchet's same-job ABBA settled it: a generated explanation
+        expl = explanations(st.d, e["slug"]).get("card", {}).get(e["device"], {}).get(k)   # a root cause written for it (regen.py explain)
+        if expl is None and c is not None and c >= -SDK_REGRESSION * 100 and e.get("confirmed_by"):   # the ratchet's same-job ABBA settled it: a generated explanation
             expl = {"text": f"same-job ABBA (the same programs on hrx-loom {o_sdk(st)} and {target_sdk(st.d)}): {c:+.1f} %, within the band; "
                             f"the {ev['delta_pct'][k]:+.1f} % against the previous card is the difference between two jobs", "url": e["confirmed_by"]}
         ev["regressions"].append({"row": k, "pct": ev["delta_pct"][k], "confirmed_abba_pct": c, "explanation": expl})
@@ -2542,6 +2546,41 @@ def reference_pending_problems(d, fails):
     return out
 
 
+def explanations(d, slug):
+    """{"card"|"migration": {GPU: {row: {text, url}}}} written for SLUG in the state's explanations file (regen.py explain), else {}"""
+    path = d["opts"].get("explanations")
+    try:
+        return (json.load(open(path)) if path else {}).get(slug) or {}
+    except (OSError, ValueError):
+        return {}
+
+
+def cmd_explain(a):
+    """Root causes of regression rows, written by whoever found them ({SLUG: {"card"|"migration": {GPU: {row: {text, url}}}}}, the make_info.py
+    --delta-explanations form): the state records the file (ingest passes each model's entry, the evidence carries it) and every published or
+    ingested card whose entry is new or changed is re-queued (ingest -> publish -> verify)."""
+    st = State(a.state)
+    path = os.path.abspath(a.file)
+    doc = json.load(open(path))
+    st.d["opts"]["explanations"] = path
+    seen = st.d["opts"].setdefault("explained", {})
+    n = []
+    for slug, entry in sorted(doc.items()):
+        for label, by_gpu in (entry or {}).items():
+            for dev, rows in (by_gpu or {}).items():
+                key = hashlib.sha256(json.dumps(rows, sort_keys=True).encode()).hexdigest()[:16]
+                if seen.get(f"{slug}:{label}:{dev}") == key:
+                    continue
+                for name, e in st.jobs.items():
+                    if e["slug"] == slug and e["device"] == dev and not e.get("prev") and e["stage"] == "published":
+                        e["stage"] = "collected"
+                        e.pop("verified", None)
+                        n.append(f"{slug} {dev}")
+                seen[f"{slug}:{label}:{dev}"] = key
+    st.log(f"explain: {path}; re-queued {len(n)} cards: {', '.join(n) or 'none'}")
+    st.save()
+
+
 def cmd_accept_no_reference(a):
     """--programs production: a model whose gates could not run because the reference engine cannot serve its checkpoint (gates.sh: llama-server
     would not start, "references still pending after 5 rounds"; e.g. an architecture only a hand-made reference serves) is decided on its other
@@ -2662,6 +2701,10 @@ def main(argv=None):
     q = sub.add_parser("verify", help="--programs production: check the published staging cards (programs, pin, cited job, lint_card.py)")
     q.add_argument("state")
     q.set_defaults(fn=cmd_verify)
+    q = sub.add_parser("explain", help="root causes of regression rows (FILE: {slug: {card: {gpu: {row: {text, url}}}}}): recorded, cards re-queued")
+    q.add_argument("state")
+    q.add_argument("file")
+    q.set_defaults(fn=cmd_explain)
     q = sub.add_parser("share", help="one job instead of two: migration jobs of SWEEP measured by the --old-frozen phase-2 jobs of P2STATE")
     q.add_argument("sweep")
     q.add_argument("p2")

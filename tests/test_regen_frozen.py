@@ -756,3 +756,28 @@ class AcceptRegressionRows(unittest.TestCase):
                 regen.main(["accept-regression", p, "m", "--note", "confirmed; root cause open"])
             e = regen.State(p).jobs["a"]
             self.assertEqual((e["stage"], e["confirmed"], e["confirmed_by"]), ("collected", {"prefill_1k": -2.1, "prefill_2k": -3.2}, "https://x/job/2"))
+
+
+class Explain(unittest.TestCase):
+    def test_recorded_and_changed_cards_requeued(self):
+        with tempfile.TemporaryDirectory() as t:
+            p = os.path.join(t, "s.json")
+            json.dump({"work": t, "mode": "sdk-loom", "opts": {"programs": "production"}, "batches": [], "log": [], "jobs": {
+                "a": {"slug": "m", "device": "strix-halo", "stage": "published", "verified": {"ok": False}, "round": 1},
+                "b": {"slug": "m", "device": "radeon-r9700", "stage": "published", "round": 1},
+                "c": {"slug": "n", "device": "strix-halo", "stage": "published", "round": 1}}}, open(p, "w"))
+            f = os.path.join(t, "x.json")
+            doc = {"m": {"card": {"strix-halo": {"decode_2k": {"text": "acceptance of its prompts", "url": "https://x/job/1"}}}}}
+            json.dump(doc, open(f, "w"))
+            with contextlib.redirect_stdout(io.StringIO()):
+                regen.main(["explain", p, f])
+            st = regen.State(p)
+            self.assertEqual({n: e["stage"] for n, e in st.jobs.items()}, {"a": "collected", "b": "published", "c": "published"})
+            self.assertNotIn("verified", st.jobs["a"])
+            self.assertEqual(regen.explanations(st.d, "m"), doc["m"])
+            self.assertEqual(regen.explanations(st.d, "n"), {})
+            st.jobs["a"]["stage"] = "published"
+            st.save()
+            with contextlib.redirect_stdout(io.StringIO()):
+                regen.main(["explain", p, f])   # unchanged: nothing re-queued
+            self.assertEqual(regen.State(p).jobs["a"]["stage"], "published")
