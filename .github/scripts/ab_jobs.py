@@ -444,6 +444,9 @@ def build_replicas(a):
         frozen(doc, a.old_sdk, a.new_sdk, json.load(open(a.refs)) if a.refs else {})
         if a.loom_only:
             loom_only(doc)
+        else:   # the same-job ABBA confirmation of rows: the package's gates ran in its sweep job (the same programs), so only rows are measured
+            for j in doc["jobs"]:
+                j["steps"] = [x for x in j["steps"] if x.split(":")[0] not in ("func", "ktest", "gates", "admit", "smoke")]
     elif a.sdk_ab:
         sdk_ab(doc, a.old_sdk, a.new_sdk, card_lib.registry.device(a.device)["runner"]["key"])
         if a.loom_only:
