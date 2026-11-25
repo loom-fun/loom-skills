@@ -23,6 +23,13 @@
     "prefill.attn.flash2_peel": false
    },
    "evidence": "Undrafted qwen3moe (Qwen3-30B-A3B-2507, head_dim 128, 4 KV heads) on gfx11 only: the peeled flash2 prefill kernel (#480) cost Strix prefill_16k 0.967-0.968x vs the loom-fun package (runs 43633426669, 43646278564). Peel off: Strix vs loom-fun prefill_16k 1.002, prefill_8k 1.008, all rows in band (run 43651904215, PR #752). The gfx12 twin keeps the peel: without it R9700 prefill_32k fell to 0.949 (same run)."
+  },
+  {
+   "set": {
+    "moe.route.tokens_per_wg": 8,
+    "moe.prefill.store16": true
+   },
+   "evidence": "#1400 (SDK 0.3.0 runtime: g_moe_route_tr_live +20-30 % device time with a byte-identical code object, idle gaps between dispatches; R9700 prefill_1k -3.3 % on the frozen programs). Kernel in isolation identical on 0.2.0 and 0.3.0 (kbench sdkfix_route, run 45626779552: 0.317 / 0.315 ms at 2048 tokens); 8-token router (logits in registers, half the router weight reads) -36 % there. Coder-30B R9700 same-runner A/B (run 45627555876, job 139251790061), vs the production package on 0.2.0: 0.3.0 frozen pf1k/2k/8k/16k/32k -3.3/-2.6/-2.3/-1.9/-1.3 %; 8-token router alone -2.6/-0.2/-0.9/-0.6/-0.6 %; + f16 expert rows (moe.prefill.store16) +0.3/+2.9/+1.6/+1.2/+0.8 %, decode/decode_2k/decode_32k within -0.5..+0.5 % of 0.3.0 frozen; ktest 94/94. Numerics-moving (f16 rows): gates in the final job."
   }
  ]
 }
