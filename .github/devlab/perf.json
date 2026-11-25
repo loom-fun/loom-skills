@@ -1,47 +1,38 @@
 {
- "_comment": "R9700 per-model measurement (r9700_jobs.py): one job per model on one R9700 runner; loom-fun-staging card, llama.cpp ROCm b1375 + Vulkan b12211 with the matched drafting, reduced-context models served at served_context. Does not fit: none",
- "runner": "r9700",
- "memory_bytes": 34000000000,
- "llama_spec": "matched",
+ "_comment": "Image packages (fleet/regen.py --programs production): the frozen package on hrx-loom 0.2.0 and 0.3.0, same runner, ABBA sessions, identical pixels (image_sdk_compare.py)",
+ "runner": "strix",
+ "memory_bytes": 0,
+ "card": "loom-fun/Tongyi-MAI-Z-Image-Turbo-loom@77e103e314324c35a88b62350286b07e8dc0f05d",
  "jobs": [
   {
-   "name": "unsloth-qwen3-0-6b-loom",
-   "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
-   "kit": null,
-   "llamacpp": "b1375",
-   "llamacpp_vulkan": "b12211",
-   "memory_bytes_r9700": 17000000000,
-   "variants": [
-    {
-     "name": "card",
-     "build": {}
-    },
-    {
-     "name": "nodraft",
-     "build": {},
-     "execution": {
-      "draft_depth": 0
-     }
-    }
-   ],
-   "steps": [
-    "func:card",
-    "ktest:card",
-    "gates:card:dev",
-    "perf:card:3",
-    "perf:card:3:long",
-    "c4:nodraft",
-    "llama@rocm.np1:3",
-    "llama@rocm.np1:3:long",
-    "llamac4@rocm.nodraft",
-    "llama@vulkan.np1:3",
-    "llama@vulkan.np1:3:long",
-    "llamac4@vulkan.perslot.nodraft"
-   ]
+   "name": "simg-tongyi-mai-z-image-turbo-loom",
+   "runner": "strix",
+   "kind": "image",
+   "card": "loom-fun/Tongyi-MAI-Z-Image-Turbo-loom@77e103e314324c35a88b62350286b07e8dc0f05d",
+   "memory_bytes": 0,
+   "variants": [],
+   "steps": [],
+   "image": {
+    "old_sdk": "0.2.0",
+    "new_sdk": "0.3.0",
+    "programs_sha256": "039ea46b206fb164ba3d5abb728f1b22f24abd3a22c30eb570f76574e8307ea4",
+    "preset": null
+   }
+  },
+  {
+   "name": "simg-xinntao-real-esrgan-x4plus-loom",
+   "runner": "strix",
+   "kind": "image",
+   "card": "loom-fun/xinntao-Real-ESRGAN-x4plus-loom@d7126ceb45f03476c8f6608ba77959dd48fe4515",
+   "memory_bytes": 0,
+   "variants": [],
+   "steps": [],
+   "image": {
+    "old_sdk": "0.2.0",
+    "new_sdk": "0.3.0",
+    "programs_sha256": "1bb330028632e04ac99640439a206b570768df0f551e84306d1249accba9ef74",
+    "preset": null
+   }
   }
- ],
- "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
- "kit": null,
- "llamacpp": "b1375",
- "llamacpp_vulkan": "b12211"
+ ]
 }
