@@ -678,6 +678,12 @@ class KitVerdict(unittest.TestCase):
             self.assertEqual(sw.jobs["a-s"]["stage"], "published")
             self.assertEqual(regen.State(r).d["opts"]["ship"], ["a"])
             self.assertEqual(regen.State(s).d["opts"]["ship"], ["a"])
+            with contextlib.redirect_stdout(io.StringIO()):   # ingest: a model kit-verdict has not shipped waits; a shipped one needs its package
+                regen.main(["ingest", s])
+            p2 = regen.State(s).jobs
+            self.assertEqual((p2["sc"]["stage"], p2["sc"].get("reason")), ("collected", None))
+            self.assertEqual(p2["sa"]["stage"], "needs_decision")
+            self.assertIn("package is not published yet", p2["sa"]["reason"])
 
 
 class Share(unittest.TestCase):
