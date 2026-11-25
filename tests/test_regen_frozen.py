@@ -529,3 +529,84 @@ class KitVerdict(unittest.TestCase):
             self.assertEqual(sw.jobs["a-s"]["stage"], "published")
             self.assertEqual(regen.State(r).d["opts"]["ship"], ["a"])
             self.assertEqual(regen.State(s).d["opts"]["ship"], ["a"])
+
+
+class Share(unittest.TestCase):
+    """One job per model and device: the --old-frozen phase-2 job is also the frozen package's migration job."""
+    def test_old_frozen_job(self):
+        ref = f"loom-fun/{TEXT}@{REV[TEXT]}"
+        doc = AbJobsFrozen().doc()
+        doc["jobs"][0]["steps"] = ["perf:fun:1", "perf:staging:1", "func:staging", "ktest:staging", "gates:staging:dev"]
+        ab_jobs.old_frozen(doc, {TEXT: {"old": ref, "new": ref, "programs_sha256": H}}, "dev")
+        j = doc["jobs"][0]
+        by = {v["name"]: v for v in j["variants"]}
+        self.assertEqual((by["fun"]["programs_sha256"], by["funnd"]["programs_sha256"]), (H, H))
+        self.assertNotIn("programs_sha256", by["staging"])
+        for step in ("func:fun", "ktest:fun", "gates:fun:dev", "admit:fun", "admit:staging"):
+            self.assertIn(step, j["steps"])
+        with self.assertRaises(SystemExit):
+            ab_jobs.old_frozen(AbJobsFrozen().doc(), {}, "dev")
+        with self.assertRaises(SystemExit):
+            ab_jobs.main(["--device", "strix-halo", "--sdk-ab", "--old-sdk", "0.2.0", "--new-sdk", "0.3.0", "--old-frozen", TEXT])
+
+    def test_view_is_the_frozen_side_as_a_migration_job(self):
+        with tempfile.TemporaryDirectory() as t:
+            src, dst = os.path.join(t, "job"), os.path.join(t, "view")
+            os.makedirs(os.path.join(src, "gates_fun"))
+            os.makedirs(os.path.join(src, "gates_staging"))
+            for f in ("perf_fun.jsonl", "perf_staging.jsonl", "c4_funnd.txt", "c4_stagingnd.txt", "programs_sha256_fun.txt", "programs_sha256_staging.txt",
+                      "sdk_fun.json", "sdk_funnd.json", "admit_fun.json", "admit_staging.json", "metrics_fun_000.txt", "perf-fun.log", "runner.txt",
+                      "gates_fun/gates.json", "gates_staging/gates.json", "build_staging.log", "text_fun.json"):
+                open(os.path.join(src, f), "w").write(f)
+            json.dump({"job": "sab-x", "results": {"perf:fun:1": "fun decode_tps [1] median 1", "perf:staging:1": "staging decode_tps [2] median 2",
+                                                   "c4:funnd": "funnd c4 median 3", "textmatch:fun": "x", "func:fun": "pass", "func:staging": "fail",
+                                                   "gates:fun:dev": "GATES PASS", "admit:fun": "ADMITTED"}}, open(os.path.join(src, "summary.json"), "w"))
+            open(os.path.join(src, "results.tsv"), "w").write("perf:fun:1\tfun decode\nperf:staging:1\tstaging decode\n")
+            regen.phase1_view(src, dst)
+            got = sorted(os.path.relpath(os.path.join(r, f), dst).replace(os.sep, "/") for r, _, fs in os.walk(dst) for f in fs)
+            self.assertEqual(got, sorted(["admit_staging.json", "c4_stagingnd.txt", "gates_staging/gates.json", "metrics_staging_000.txt", "perf-staging.log",
+                                          "perf_staging.jsonl", "programs_sha256_staging.txt", "results.tsv", "runner.txt", "sdk_staging.json",
+                                          "sdk_stagingnd.json", "summary.json", "text_staging.json"]))
+            self.assertEqual(open(os.path.join(dst, "perf_staging.jsonl")).read(), "perf_fun.jsonl")   # the frozen side's file
+            self.assertEqual(open(os.path.join(dst, "gates_staging/gates.json")).read(), "gates_fun/gates.json")
+            self.assertEqual(json.load(open(os.path.join(dst, "summary.json")))["results"],
+                             {"perf:staging:1": "staging decode_tps [1] median 1", "c4:stagingnd": "stagingnd c4 median 3", "func:staging": "pass",
+                              "gates:staging:dev": "GATES PASS", "admit:staging": "ADMITTED"})
+            self.assertEqual(open(os.path.join(dst, "results.tsv")).read(), "perf:staging:1\tfun decode\n")
+
+    def test_share_and_feed(self):
+        with tempfile.TemporaryDirectory() as t:
+            def write(name, doc):
+                p = os.path.join(t, name)
+                json.dump({"work": t, **doc}, open(p, "w"))
+                return p
+            sweep = write("sweep.json", {"mode": "sdk-loom", "opts": {"programs": "production"}, "log": [], "batches": [
+                {"id": 0, "device": "strix-halo", "jobs": ["sab-a", "sab-b"], "stage": "submitted", "run": "11"},
+                {"id": 1, "device": "strix-halo", "jobs": ["sab-c"], "stage": "planned"}], "jobs": {
+                "sab-a": {"slug": "a", "device": "strix-halo", "stage": "queued", "batch": 0, "round": 1},
+                "sab-b": {"slug": "b", "device": "strix-halo", "stage": "queued", "batch": 0, "round": 1},
+                "sab-c": {"slug": "c", "device": "strix-halo", "stage": "planned", "batch": 1, "round": 1}}})
+            p2 = write("p2.json", {"mode": "sdk-ab", "opts": {"old_sdk_target": True, "old_frozen": True}, "log": [], "batches": [], "jobs": {
+                "sab-a": {"slug": "a", "device": "strix-halo", "stage": "planned", "round": 1},
+                "sab-b": {"slug": "b", "device": "strix-halo", "stage": "planned", "round": 1},
+                "sab-c": {"slug": "c", "device": "strix-halo", "stage": "planned", "round": 1}}})
+            calls = []
+            with mock.patch.object(regen, "sh", lambda cmd, check=True: calls.append(cmd)), contextlib.redirect_stdout(io.StringIO()):
+                regen.main(["share", sweep, p2, "--cancel"])
+            sw, q = regen.State(sweep), regen.State(p2)
+            self.assertEqual({n: e["stage"] for n, e in sw.jobs.items()}, {"sab-a": "shared", "sab-b": "shared", "sab-c": "shared"})
+            self.assertEqual([b["jobs"] for b in sw.d["batches"]], [[], []])
+            self.assertEqual(sw.d["batches"][1]["stage"], "dropped")
+            self.assertEqual(calls, [["gh", "run", "cancel", "11", "-R", regen.REPO]])
+            self.assertEqual(q.jobs["sab-a"]["phase1"], {"state": sw.path, "job": "sab-a"})
+            # the phase-2 job of a is collected: its frozen side is the migration job's result; b's job failed: it stops for a decision
+            d = os.path.join(t, "jobdir")
+            os.makedirs(d)
+            json.dump({"job": "sab-a", "results": {}}, open(os.path.join(d, "summary.json"), "w"))
+            with contextlib.redirect_stdout(io.StringIO()):
+                regen.feed_phase1({**q.jobs["sab-a"], "dir": d, "conclusion": "success", "run": "22", "job_url": "u"})
+                regen.feed_phase1({**q.jobs["sab-b"], "dir": d, "conclusion": "failure", "job_url": "v"})
+            sw = regen.State(sweep)
+            self.assertEqual((sw.jobs["sab-a"]["stage"], sw.jobs["sab-a"]["run"], sw.jobs["sab-a"]["job_url"]), ("done", "22", "u"))
+            self.assertEqual(regen.download(sw, "sab-a", sw.jobs["sab-a"]), sw.jobs["sab-a"]["shared_dir"])
+            self.assertEqual(sw.jobs["sab-b"]["stage"], "needs_decision")
