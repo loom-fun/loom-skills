@@ -1,6 +1,7 @@
 """Every emitter and default targets the newest verified SDK release (sdk_pin.VERIFIED_RELEASES), not a literal version."""
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -33,10 +34,12 @@ class NewestRelease(unittest.TestCase):
 
 class FreshStarter(unittest.TestCase):
     def test_a_fresh_starter_kit_emits_the_newest_pin(self):
-        """apply_example.sh copies the starter out of the repository: the copy must still emit the newest verified pin and sha256."""
+        """apply_example.sh starter = copy the starter, then `kit_source.py write`: the copy must still emit the newest verified pin and sha256."""
+        skill = ROOT / "skills" / "loom-port-llm"
         with tempfile.TemporaryDirectory() as d:
             kit = os.path.join(d, "kit")
-            subprocess.run(["bash", str(ROOT / "skills" / "loom-port-llm" / "reference" / "apply_example.sh"), "starter", kit],
+            shutil.copytree(skill / "starter", kit)
+            subprocess.run([sys.executable, os.path.join(kit, "kit_source.py"), "write", kit, "--skills-dir", str(skill)],
                            check=True, capture_output=True)
             out = subprocess.run([sys.executable, "-I", "-c", "import sys; sys.path.insert(0, sys.argv[1]); import kit_source, json; "
                                   "print(json.dumps(kit_source.SDK_PIN))", kit], check=True, capture_output=True, text=True).stdout
