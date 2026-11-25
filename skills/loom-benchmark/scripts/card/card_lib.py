@@ -1351,47 +1351,12 @@ def xsj_vulkan_comparison_errors(sessions, vulkan, at):
 # ---- the SDK a card's values were measured on, against the SDK its Quick start installs (the pin)
 # Methodology rule 17: an hrx-loom version change invalidates the stored Loom rows and gates. A value or gate measured on
 # another version than the pin is "carried": shown marked (card.carried "mark", the default) or not at all ("drop").
-# The delta line (sdk_delta) compares every metric a GPU re-measured on the pin with the earlier cards' stored values.
-DELTA_BAND = 0.03   # a regression beyond 3 % needs an explanation (loom-migrate step 7)
-DELTA_NAMES = {"decode": "decode", "decode_2k": "decode at 2k", "decode_32k": "decode at 32k", "prefill_1k": "prefill 1k",
-               "prefill_2k": "prefill 2k", "prefill_8k": "prefill 8k", "prefill_16k": "prefill 16k", "prefill_32k": "prefill 32k",
-               "streams4": "4 streams", "spec_acceptance": "drafted tokens accepted"}
 GOOD_CONCLUSIONS = ("success",)
 
 
 def sdk_version(x):
     """The version of an hrx-loom identity (a source's or llm_config.json's), or None."""
     return x.get("hrx_loom") if isinstance(x, dict) else None
-
-
-VERSIONS_DIR = os.path.normpath(os.path.join(HERE, "..", "..", "..", "loom-migrate", "versions"))
-
-
-def production_inventory(sdk, versions_dir=None):
-    """The accepted production inventory of the SDK migration TO version SDK (skills/loom-migrate/versions/vOLD-to-vSDK-production.json,
-    {org/repo: revision}) as (OLD, inventory), or None when this checkout has none."""
-    d = versions_dir or VERSIONS_DIR
-    hits = sorted(f for f in (os.listdir(d) if sdk and os.path.isdir(d) else []) if re.fullmatch(rf"v(.+)-to-v{re.escape(sdk)}-production\.json", f))
-    if not hits:
-        return None
-    return re.match(r"v(.+?)-to-v", hits[-1]).group(1), load_json(os.path.join(d, hits[-1]))
-
-
-def new_port_problem(repo, sdk, versions_dir=None):
-    """Why REPO (org/NAME, any org: staging cards keep the production names) is NOT a new port in SDK SDK, or None when it is: a new
-    port is a repository absent from the production inventory of the migration to SDK (it had no card on the previous SDK)."""
-    inv = production_inventory(sdk, versions_dir)
-    if inv is None:
-        return f"no production inventory of the migration to hrx-loom {sdk} in this checkout (skills/loom-migrate/versions)"
-    name = repo.rsplit("/", 1)[-1]
-    hit = next((r for r in inv[1] if r.rsplit("/", 1)[-1] == name), None)
-    return f"{hit} is in the hrx-loom {inv[0]} production inventory (it has a previous card to compare)" if hit else None
-
-
-def new_port_line(sdk, versions_dir=None):
-    """The delta line of a new port (info.json sdk_delta.new_port), generated: the previous SDK comes from the inventory's file name."""
-    inv = production_inventory(sdk, versions_dir)
-    return f"New port in SDK {sdk}: no SDK {inv[0] if inv else 'earlier'} card to compare."
 
 
 def sdk_at_least(x, major, minor):
@@ -1468,92 +1433,6 @@ def drop_carried(info, pin):
 
 SESSION_ACCEPTANCE_KEY = "spec_acceptance_session"   # in the stored metrics, beside the spec gate's spec_acceptance
 SESSION_ACCEPTANCE_ROWS = ("decode", "decode_2k", "decode_32k")
-
-
-def previous_values(old):
-    """{gpu: {"hrx_loom": version or None, "metrics": {metric: Loom value}, "gates": {gate: {status, detail}}}} of an
-    earlier card's info.json: the values and gate results that card shows (card_metrics), what make_info.py build
-    --previous-card stores in sdk_delta (a gate this card fails that the earlier card failed too is pre-existing)."""
-    old = normalize(old)
-    out = {}
-    for gpu, dev in (old.get("devices") or {}).items():
-        if not has_results(dev):
-            continue
-        view = gpu_view(old, gpu)
-        sessions = (view.get("performance") or {}).get("sessions", [])
-        metrics, sdks = {}, set()
-        for k, (m, i) in card_metrics(view).items():
-            if k not in METRIC_KEYS or (m.get("loom") is None and k != "spec_acceptance"):
-                continue
-            metrics[k] = m.get("loom")
-            sdks.add(source_sdk(old, sessions[i]["source"]))
-        gates = {n: {"status": g["status"], "detail": g.get("detail")} for n, g in sorted((dev.get("gates") or {}).items())}
-        if metrics or gates:
-            out[gpu] = {"hrx_loom": sdks.pop() if len(sdks) == 1 else None, "metrics": metrics}
-            # the drafted-token acceptance of the perf session's decode requests: the like-for-like old side of the acceptance delta
-            # (the spec gate's value, in metrics, decodes another prompt set)
-            sess = [m["acceptance"] for k, (m, _) in card_metrics(view).items() if k in SESSION_ACCEPTANCE_ROWS and m.get("acceptance") is not None]
-            if sess:
-                out[gpu]["metrics"][SESSION_ACCEPTANCE_KEY] = round(statistics.median(sess), 3)
-            if gates:
-                out[gpu]["gates"] = gates
-    return out
-
-
-def previous_gate(info, gpu, name):
-    """The earlier (published) card's result of a gate on a GPU ({status, detail}, sdk_delta comparison "card"), or None."""
-    for c in (info.get("sdk_delta") or {}).get("comparisons") or []:
-        if c["label"] == "card":
-            return ((c["devices"].get(gpu) or {}).get("gates") or {}).get(name)
-    return None
-
-
-def delta_rows(info, pin, comparison, depth=None):
-    """The delta line of one sdk_delta comparison: {gpu: [row]} for every GPU of the comparison this card re-measured
-    on the pin's SDK; a row {metric, old, new, change, relative, unreported, regression, explanation} per metric either side has
-    (change: the relative change, spec_acceptance the change in points; relative: the relative change of every metric, spec_acceptance
-    included; None when one side has no value). regression: relative below -DELTA_BAND, the drafted-token acceptance like any other metric.
-    spec_acceptance measured as accepted tokens per verification pass (unreported proposals) is compared with the
-    earlier card's share of proposals x the draft depth (depth): SDK 0.2 counted every verification as depth proposals,
-    so that product is exactly its accepted tokens per pass (row per_pass: {old, new}). The old side is the earlier card's
-    perf-session acceptance of its decode rows (metrics.spec_acceptance_session), the same workload as the new value; an earlier card that
-    has only the spec gate's value decoded another prompt set: the row carries different_workloads and no change."""
-    out = {}
-    expl = comparison.get("explanations") or {}
-    for gpu, prev in comparison["devices"].items():
-        dev = (info.get("devices") or {}).get(gpu)
-        if not dev or not has_results(dev) or not dev.get("performance"):
-            continue
-        view = gpu_view(info, gpu)
-        sessions = view["performance"]["sessions"]
-        current = {k: (m, i) for k, (m, i) in card_metrics(view).items()
-                   if k in METRIC_KEYS and not carried_sdk(info, sessions[i]["source"], pin)}
-        if not current:
-            continue   # not re-measured on this SDK: its rows are carried (marked), no delta
-        rows = []
-        for k in METRIC_KEYS:
-            if k not in prev["metrics"] and k not in current:
-                continue
-            old = prev["metrics"].get(k)
-            m = current[k][0] if k in current else {}
-            new = m.get("loom")
-            change, per_pass, different = None, None, False
-            if old is not None and new is not None:
-                change = round(new - old, 4) if k == "spec_acceptance" else round(new / old - 1, 4) if old else None
-            elif k == "spec_acceptance" and old is not None and m.get("accepted_per_pass") is not None:
-                if prev["metrics"].get(SESSION_ACCEPTANCE_KEY) is not None:
-                    if depth:
-                        per_pass = {"old": round(prev["metrics"][SESSION_ACCEPTANCE_KEY] * depth, 3), "new": m["accepted_per_pass"]}
-                        change = round(per_pass["new"] / per_pass["old"] - 1, 4) if per_pass["old"] else None
-                else:
-                    different = True
-            relative = change if k != "spec_acceptance" or per_pass else round(new / old - 1, 4) if change is not None and old else None
-            regression = relative is not None and relative < -DELTA_BAND
-            rows.append({"metric": k, "old": old, "new": new, "change": change, "relative": relative, "unreported": m.get("unreported"), "per_pass": per_pass,
-                         "different_workloads": different, "accepted_per_pass": m.get("accepted_per_pass"), "missing": k not in current, "regression": regression,
-                         "explanation": (expl.get(gpu) or {}).get(k)})
-        out[gpu] = rows
-    return out
 
 
 def validate(info, programs=None):

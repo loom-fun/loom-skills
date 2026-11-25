@@ -1397,7 +1397,7 @@ def ingest_full(st, name, e, W):
     fleet_cfg = os.path.join(ROOT, "fleet", slug, "llm_config.json")   # a package outside the manifest (a hand-written one): its own config
     st_card = (json.load(open(fleet_cfg if os.path.isfile(fleet_cfg) else os.path.join(out, "llm_config.json"))).get("source") or {}).get("kind") == "safetensors"
     production = st.d["opts"].get("programs") == "production"
-    phase2 = phase2_state(st.d)   # the kit build vs the frozen programs on the target SDK: delta vs the production card AND the migration-only card
+    phase2 = phase2_state(st.d)
     drafts = g(f"metrics_{V}_*.txt") if (production or phase2) and make_info_supports("perf", "--draft-metrics") else []
     if loom_only:   # the job measured Loom alone: the baseline rows (llama.cpp ROCm and Vulkan, or vLLM) are the previous card's, with their own run and date
         run_tool([f"{S}/make_info.py", "perf", "--gpu", dev, "--loom-jsonl", f"{d}/perf_{V}.jsonl", "--c4-loom", f"{d}/c4_{ND}.txt",
@@ -1483,21 +1483,7 @@ def ingest_full(st, name, e, W):
         keep.append(f"gfx1201-16gb={baseline_info}")
     for spec in keep:
         build += ["--perf-from", spec]
-    # sdk-loom: the previous card's Loom sessions are the v0.1 rows this table replaces (its llama.cpp rows were copied into the new session above;
-    # the Vulkan baselines stay as published)
-    if (production or phase2) and e.get("source_card") and make_info_supports("build", "--previous-card"):   # the delta line against the production card
-        build += ["--previous-card", f"card:{e['source_card']}={baseline_info}"]
-    if phase2:   # the staging head's card before this one is the migration-only card (phase 1: the frozen programs on the target SDK)
-        build += ["--previous-card", "migration=info_prev.json"]
-    kept = (st.d["opts"].get("kit_kept") or {}).get(slug)
-    if production and kept and make_info_supports("build", "--kit-kept"):   # phase 2 kept these frozen programs: the card says why (kit-verdict)
-        json.dump(kept, open(os.path.join(W, "kit_kept.json"), "w"), indent=1)
-        build += ["--kit-kept", os.path.join(W, "kit_kept.json")]
-    ext = explanations(st.d, slug)
-    if ext and make_info_supports("build", "--delta-explanations"):   # root causes written for this model's rows (regen.py explain)
-        json.dump(ext, open(os.path.join(W, "explanations.json"), "w"), indent=1)
-        build += ["--delta-explanations", os.path.join(W, "explanations.json")]
-    if production and make_info_supports("build", "--sdk-evidence"):   # regression explanations and every cited job's conclusion
+    if production and make_info_supports("build", "--sdk-evidence"):   # record the conclusions of the cited jobs
         json.dump(build_evidence(st), open(os.path.join(W, "evidence.json"), "w"), indent=1)
         build += ["--sdk-evidence", os.path.join(W, "evidence.json")]
     run_tool(build + ["--memory-bytes", str(mem), "--from-info", "info_prev.json", *(["--reset-performance"] if loom_only else []), "--evidence", *ev,
@@ -2779,7 +2765,7 @@ def kit_job_verdict(st, name, e):
 def cmd_kit_verdict(a):
     """Phase 2 of a migration, per model: SHIP the kit programs when every device's A/B job (the phase-2 states) passes kit_job_verdict and the
     model's phase-1 cards (the sweep state) are all published; else KEEP the frozen programs: the sweep state records kit_kept[slug] =
-    {reason, url} and re-queues that model's published phase-1 cards (ingest passes --kit-kept: the card says why). Writes --out."""
+    {reason, url}. Writes --out."""
     sweep = State(a.sweep)
     states = [State(p) for p in a.states]
     for s_ in states:
@@ -2823,10 +2809,6 @@ def cmd_kit_verdict(a):
             kept = {"reason": reason if len(reason) <= 230 else reason[:227].rsplit(" ", 1)[0] + " ...", "url": next((u for u in urls if u), None)}
             out[slug] = {"ship": False, **kept}
             sweep.d["opts"].setdefault("kit_kept", {})[slug] = kept
-            for e in p1:   # the published migration-only cards are rebuilt with the line (ingest -> publish -> verify)
-                e["stage"] = "collected"
-                e.pop("verified", None)
-            sweep.log(f"{slug}: kit build kept out ({kept['reason'][:120]}); migration-only cards re-queued")
             print(f"{slug}: KEEP the frozen programs: {kept['reason']}")
         if ties:
             out[slug]["near_tie_jobs"] = ties
@@ -2882,28 +2864,12 @@ def explanations(d, slug):
 
 
 def cmd_explain(a):
-    """Root causes of regression rows, written by whoever found them ({SLUG: {"card"|"migration": {GPU: {row: {text, url}}}}}, the make_info.py
-    --delta-explanations form): the state records the file (ingest passes each model's entry, the evidence carries it) and every published or
-    ingested card whose entry is new or changed is re-queued (ingest -> publish -> verify)."""
+    """Attach per-model explanations to the sweep evidence used by the release report."""
     st = State(a.state)
     path = os.path.abspath(a.file)
-    doc = json.load(open(path))
+    sdk_package.load(path)
     st.d["opts"]["explanations"] = path
-    seen = st.d["opts"].setdefault("explained", {})
-    n = []
-    for slug, entry in sorted(doc.items()):
-        for label, by_gpu in (entry or {}).items():
-            for dev, rows in (by_gpu or {}).items():
-                key = hashlib.sha256(json.dumps(rows, sort_keys=True).encode()).hexdigest()[:16]
-                if seen.get(f"{slug}:{label}:{dev}") == key:
-                    continue
-                for name, e in st.jobs.items():
-                    if e["slug"] == slug and e["device"] == dev and not e.get("prev") and e["stage"] == "published":
-                        e["stage"] = "collected"
-                        e.pop("verified", None)
-                        n.append(f"{slug} {dev}")
-                seen[f"{slug}:{label}:{dev}"] = key
-    st.log(f"explain: {path}; re-queued {len(n)} cards: {', '.join(n) or 'none'}")
+    st.log(f"explain: {path}")
     st.save()
 
 
@@ -3030,7 +2996,7 @@ def main(argv=None):
     q = sub.add_parser("verify", help="--programs production: check the published staging cards (programs, pin, cited job, lint_card.py)")
     q.add_argument("state")
     q.set_defaults(fn=cmd_verify)
-    q = sub.add_parser("explain", help="root causes of regression rows (FILE: {slug: {card: {gpu: {row: {text, url}}}}}): recorded, cards re-queued")
+    q = sub.add_parser("explain", help="root causes of regression rows (FILE: {slug: {card: {gpu: {row: {text, url}}}}}): recorded in the release evidence")
     q.add_argument("state")
     q.add_argument("file")
     q.set_defaults(fn=cmd_explain)

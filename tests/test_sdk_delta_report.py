@@ -25,6 +25,12 @@ def doc():
 
 
 class Report(unittest.TestCase):
+    def test_image_times_are_taken_from_sweep_evidence(self):
+        evidence = doc()
+        image = evidence["models"]["Img-loom"]["devices"]["strix-halo"]["image"]
+        image.update(old={"median_s": 10}, new={"median_s": 9})
+        self.assertIn("| Img-loom | strix-halo | 10 | 9 | -10.0 % |", rep.render(evidence))
+
     def test_verdict_and_band(self):
         rows = {(r["slug"], r["device"]): r for r in rep.collect(doc())}
         s = rows[("A-loom", "strix-halo")]

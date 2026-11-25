@@ -28,7 +28,7 @@ from card_lib import (DEFAULT_GPU, FEATURES, GATE_NAMES, GATES, GPUS, HF, LOOM_U
                       TIMED, PRELOAD_FLAG, preload_mode, card_gpus, card_metrics, derived_tags, beyond_context, gate_applies, generator_commit, stamped, gpu_context, gpu_memory, recorded_quick_start, serves,
                       gpu_view, has_results, has_runner, load_info, load_json, load_package, metric_applies, native_context, over_context,
                       package_facts, programs_sha256, require_valid, stale_metrics, with_gate_features, historical_xsj_gate, sdk_uses_file_parameters, xsj_enabled,
-                      DELTA_BAND, DELTA_NAMES, GOOD_CONCLUSIONS, UNRECORDED_SDK, carried_sdk, delta_rows, drop_carried, new_port_line, previous_gate, sdk_at_least, sdk_version)
+                      GOOD_CONCLUSIONS, UNRECORDED_SDK, carried_sdk, drop_carried, sdk_at_least, sdk_version)
 from matched_spec import TIE_BAND, classification  # noqa: E402
 
 YES, NO, NA, MISSING = "✅", "❌", "—", "—"
@@ -655,9 +655,9 @@ def remeasure_lines(rm, g, sources, on):
     return L
 
 
-def carried_text(old, pin):
+def carried_text(old):
     """The marker phrase of a value or gate measured on another hrx-loom version than the pin."""
-    return (f"measured on an SDK the run did not record" if old == UNRECORDED_SDK else f"measured on SDK {old}") + f", not re-qualified on {sdk_version(pin)}"
+    return (f"measured on an SDK the run did not record" if old == UNRECORDED_SDK else f"measured on SDK {old}")
 
 
 ACCEPTANCE_UNREPORTED = ("hrx-loom {v} reports no drafter proposal count for this package's service ABI 1 controller "
@@ -832,7 +832,7 @@ def perf_section(L, info, facts, feats, d, g, here, ctx, pin=None):
         L.append(f"- {STALE} Measured on programs other than this repository's (sha256 {short(sha)}, this repository's "
                  f"{short(here)}): the value describes another build of the package until a session re-measures it.")
     for old in carried:
-        L.append(f"- {CARRIED} {carried_text(old, pin)[0].upper()}{carried_text(old, pin)[1:]} (the SDK the Quick start installs).")
+        L.append(f"- {CARRIED} {carried_text(old)[0].upper()}{carried_text(old)[1:]}.")
     if metric_applies("spec_acceptance", kind, feats):
         m, i = shown.get("spec_acceptance", ({}, None))
         if m.get("unreported") == "proposals" and m.get("loom") is None:
@@ -857,76 +857,6 @@ def perf_section(L, info, facts, feats, d, g, here, ctx, pin=None):
     L += [f"- {MISSING} not measured; n/a not applicable" + (
         f" ({oc}: the document is longer than the " + (f"{ctx:,}-token context this GPU serves" if served else
                                                        f"model's native {ctx}-token context") + ")" if oc else "") + ".", ""]
-
-
-def delta_lines(info, pin, solo, depth=None):
-    """The delta line of each earlier card (info.json sdk_delta, card_lib.delta_rows): every metric of every GPU this card
-    re-measured on its own SDK, against that card's stored value. A regression beyond DELTA_BAND is numbered and followed
-    by its explanation from evidence, or "unexplained" (lint_card.py refuses to publish that)."""
-    L = []
-    if (info.get("sdk_delta") or {}).get("new_port"):   # no earlier card of this package exists (make_info.py build --new-port checked it)
-        L += [f"**{new_port_line(sdk_version(pin))}**", ""]
-    kit = (info.get("sdk_delta") or {}).get("kit")
-    if kit:
-        L += [f"**Programs:** the previous card's programs with only the SDK migration; this release's loom-skills kit build was A/B'd "
-              f"against them on hrx-loom {sdk_version(pin)} and is not shipped: {kit['reason'].rstrip('.')}"
-              + (f" ([evidence]({kit['url']}))" if kit.get("url") else "") + ".", ""]
-    for c in (info.get("sdk_delta") or {}).get("comparisons") or []:
-        rows = delta_rows(info, pin, c, depth)
-        if not rows:
-            continue
-        olds = sorted({d["hrx_loom"] for g, d in c["devices"].items() if g in rows and d.get("hrx_loom")})
-        if c["label"] == "card":
-            L += [f"**Change from the previous card** ([revision `{c['revision'][:7]}`]({HF}/{c['repo']}/tree/{c['revision']})"
-                  + (f", hrx-loom {' / '.join(olds)}" if olds else "") + f"; this card: hrx-loom {sdk_version(pin)}):", ""]
-        else:
-            L += [f"**Change from the migration-only build** (this package's previous programs on hrx-loom {sdk_version(pin)}):", ""]
-        notes = []
-        for g, rs in rows.items():
-            parts = []
-            for r in rs:
-                name = DELTA_NAMES[r["metric"]]
-                if r["metric"] == "spec_acceptance" and r.get("per_pass"):   # SDK 0.2's share x depth = its accepted per pass
-                    pp = r["per_pass"]
-                    parts.append(f"{name} per verification pass {pp['old']:.2f} → {pp['new']:.2f} ({r['change'] * 100:+.1f} %; both in the "
-                                 f"performance session's decode requests, the previous card's share of depth-{depth} proposals as SDK "
-                                 f"{olds[0] if olds else 'its'} counted them)")
-                    if r["regression"]:
-                        notes.append((g, r))
-                        parts[-1] += f" {mark(len(notes))}"
-                elif r["metric"] == "spec_acceptance" and r.get("different_workloads"):
-                    parts.append(f"{name}: previous card {pct_of(r['old'])} of proposals in its speculative-decoding gate, this card "
-                                 f"{r['accepted_per_pass']:.2f} per verification pass in the performance session (different workloads, no delta)")
-                elif r["metric"] == "spec_acceptance":
-                    new = ("not reported" if r["unreported"] else "not re-measured" if r["missing"]
-                           else pct_of(r["new"]) if r["new"] is not None else "not measured")
-                    parts.append(f"{name} {pct_of(r['old']) if r['old'] is not None else MISSING} → {new}")
-                    if r["regression"]:
-                        notes.append((g, r))
-                        parts[-1] += f" {mark(len(notes))}"
-                elif r["change"] is None:
-                    parts.append(f"{name} " + ("not re-measured" if r["missing"] else "new" if r["old"] is None else "not measured"))
-                else:
-                    t = f"{name} {r['change'] * 100:+.1f} %"
-                    if r["regression"]:
-                        notes.append((g, r))
-                        t += f" {mark(len(notes))}"
-                    parts.append(t)
-            L.append(("- " if solo and len(rows) == 1 else f"- {GPUS[g]['short']}: ") + ", ".join(parts) + ".")
-        for i, (g, r) in enumerate(notes, 1):
-            e = r["explanation"]
-            why = (e["text"].rstrip(".") + (f" ([evidence]({e['url']}))" if e.get("url") else "")) if e else "unexplained"
-            if r["metric"] == "spec_acceptance":   # a drafted-token acceptance drop: its own quantity, not tok/s
-                pp = r.get("per_pass")
-                vals = f"{pp['old']:.2f} → {pp['new']:.2f} per verification pass" if pp else f"{pct_of(r['old'])} → {pct_of(r['new'])}"
-                L.append(f"- {mark(i)} {GPUS[g]['short']} {DELTA_NAMES[r['metric']]} {r['relative'] * 100:+.1f} % ({vals}): {why}.")
-            else:
-                L.append(f"- {mark(i)} {GPUS[g]['short']} {DELTA_NAMES[r['metric']]} {r['change'] * 100:+.1f} % "
-                         f"({num(r['metric'], r['old'])} → {num(r['metric'], r['new'])} tok/s): {why}.")
-        L.append(f"- Change: (this card / previous card - 1) × 100 % of the Loom value; beyond -{DELTA_BAND * 100:g} % a regression needs a "
-                 "confirmed explanation.")
-        L.append("")
-    return L
 
 
 def render(d):
@@ -1075,7 +1005,6 @@ def render(d):
     first = next(iter(live), None)
     bname = ((info["devices"][first].get("performance") or {}).get("baseline") or {}).get("name", "llama.cpp") if first else "llama.cpp"
     L += [f"## Performance vs {bname}", ""]
-    L += delta_lines(info, pin, solo, (facts["spec"] or (None, None))[1])
     if solo:
         perf_section(L, info, facts, feats, d, live[0], here, gpu_context(info, live[0], native), pin)
     else:
@@ -1144,12 +1073,9 @@ def render(d):
             ev.append(key)
         old = carried_sdk(info, gt["source"], pin)
         if old and gt["status"] == "pass":   # a pass on another SDK is never shown as a plain pass under this pin
-            return f"{UNKNOWN} pass" + (f" ({gt['detail']})" if gt["detail"] else "") + f", {carried_text(old, pin)} {mark(ev.index(key) + 1)}"
+            return f"{UNKNOWN} pass" + (f" ({gt['detail']})" if gt["detail"] else "") + f", {carried_text(old)} {mark(ev.index(key) + 1)}"
         res = (f"{YES} pass" if gt["status"] == "pass" else f"{NO} fail" + (f" on SDK {old}" if old else ""))
-        prev = previous_gate(info, g, name) if gt["status"] == "fail" and not old else None
-        pre = (", pre-existing: the previous card failed it too" + (f" ({prev['detail']})" if prev.get("detail") else "")
-               if prev and prev["status"] == "fail" else "")
-        return res + (f" ({gt['detail']})" if gt["detail"] else "") + pre + f" {mark(ev.index(key) + 1)}"
+        return res + (f" ({gt['detail']})" if gt["detail"] else "") + f" {mark(ev.index(key) + 1)}"
 
     def gate_cell(g, name, desc):
         result = gate_result(g, name, desc)
@@ -1173,22 +1099,6 @@ def render(d):
         lv = f", LEVEL={level}" if level else ""
         L.append(f"- {mark(i)} {src_text(s)}{lv}, {text(date)}; device {source_device_text(s)}; "
                  f"hrx-loom {sdk_text(s['hrx_loom'])}.")
-    for g in cols:   # the native-context admission check of each GPU's latest gates run (gates.sh context_admit): a check, not a gate
-        x = info["devices"][g].get("admission") if has_results(info["devices"][g]) else None
-        if not x:
-            continue
-        src = sources[x["source"]]
-        old = carried_sdk(info, x["source"], pin)
-        where = "" if solo else f" on the {GPUS[g]['short']}"
-        if x.get("emulated_on"):
-            where = f" measured on {GPUS[x['emulated_on']['device']]['short']} limited to 16 GB (SDK {sdk_version(src['hrx_loom'])})"
-        verdict = (f"admitted a {x['tokens']:,}-token request" if x["admitted"] and x.get("tokens") else "admitted" if x["admitted"]
-                   else "refused the request")
-        L.append(f"- Context admission{where}: one request filling the {x['context']:,}-token context "
-                 if x.get("context") else f"- Context admission{where}: one request filling the served context ")
-        L[-1] += (f"{verdict}" + (f" ({x['detail']})" if x.get("detail") and not x["admitted"] else "")
-                  + ("; the server did not cancel it within 60 s" if x["admitted"] and "did not cancel" in (x.get("detail") or "") else "")
-                  + (f"; {carried_text(old, pin)}" if old else "") + f"; {src_text(src)}, {text(x['date'])}.")
     L += ["- Gates are the loom-benchmark correctness gates (`gates.sh`); a gate without a recorded run shows no evidence.", ""]
 
     # ---- files
@@ -1412,7 +1322,6 @@ def render_report(d):
     L = [f"# {facts['name']} for AMD Loom: measurement report", "",
          f"How the values on this repository's model card were measured. Generated from `info.json` (schema "
          f"`{SCHEMA_ID}`) by the loom-skills card generator; the card's README.md is rendered from the same data.", "",
-         *delta_lines(info, required_sdk(facts, versions, info["sources"]), solo, (facts["spec"] or (None, None))[1]),
          "## Setup", "",
          (f"- Package: this repository. Programs generated by loom-skills {skills_text(facts['generator'], versions)} with "
           f"hrx-loom {package_sdk(facts['generator'], versions)}." if generator_commit(facts['generator'], versions)[1] != "none" else

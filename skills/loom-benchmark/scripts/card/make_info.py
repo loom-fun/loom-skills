@@ -129,8 +129,7 @@ from card_lib import (DEFAULT_GPU, DRAFTED_ROWS, EVIDENCE_ID, GPUS, METRIC_KEYS,
                       programs_sha256, require_valid, fixed_pool_capacity, gpu_preset_execution, gpu_preset_name, with_gpu_preset, served_context, fit_served_context, upstream_facts, with_gate_features, write_json,
                       SERVE_HEADROOM, registry, fit_rows, non_targets, load_device_results, validate_device_results, with_device_preset, DEVICE_RESULTS_ID, card_serve_args, quick_start, serves,
                       emulated_gate_errors, historical_xsj_gate, sdk_serve_args, xsj_enabled, xsj_evidence_errors, xsj_measurement_errors, xsj_vulkan_comparison_errors,
-                      CAVEAT_MAX, DEVICE_RESULTS_DIR, QUICK_START_QUALIFICATION, qualified_bare_quick_start, text_errors, previous_values, stamped, SESSION_ACCEPTANCE_ROWS,
-                      new_port_problem, sdk_version)
+                      CAVEAT_MAX, DEVICE_RESULTS_DIR, QUICK_START_QUALIFICATION, qualified_bare_quick_start, text_errors, stamped, SESSION_ACCEPTANCE_ROWS)
 
 
 # ---------------------------------------------------------------- sources
@@ -464,7 +463,6 @@ def cmd_build(a):
         return G.setdefault(gpu, {"baseline": None, "sessions": [], "gates": {}, "baselines": {}, "roofline": None, "meta": {}, "data": False,
                                   "remeasure": None})
     card_features = {}   # evidence-established feature statuses (import_card.py: greedy-only sampling)
-    old_delta = None
     sources = Sources()
     if a.from_info:   # a published card: its data first, then the new evidence on top
         old = load_info(a.from_info)   # loom-card/2: its one GPU is strix-halo
@@ -514,9 +512,6 @@ def cmd_build(a):
             a.status = old.get("status")
         if a.next_steps is None:
             a.next_steps = old.get("next_steps")
-        if a.promotion_hold is None:
-            a.promotion_hold = old.get("promotion_hold")
-        old_delta = old.get("sdk_delta")
     for spec in a.perf_from or []:   # GPU=INFO.json: that card's performance on GPU (sessions, baselines and their sources) as published
         gpu, _, path = spec.partition("=")
         if gpu not in GPUS or not path:
@@ -784,42 +779,17 @@ def cmd_build(a):
         info["status"] = a.status
     if a.next_steps:
         info["next_steps"] = a.next_steps
-    if a.promotion_hold:
-        info["promotion_hold"] = a.promotion_hold
     jobs = {}
     if a.sdk_evidence:   # the sweep's record of this model: explanations of its regressions and its jobs' conclusions
         if a.sdk_evidence.get("schema") != "sdk-evidence/1":
             sys.exit("--sdk-evidence: not an sdk-evidence/1 file")
         model = (a.sdk_evidence.get("models") or {}).get(a.repo.split("/")[-1]) or {}
-        ex = {}
         for gpu, dev in (model.get("devices") or {}).items():
             if dev.get("job_url") and dev.get("conclusion"):
                 jobs[dev["job_url"]] = dev["conclusion"]
-            for r in dev.get("regressions") or []:
-                e = r.get("explanation")
-                if e:
-                    ex.setdefault(gpu, {})[r["row"]] = e if isinstance(e, dict) else {"text": e, "url": dev.get("job_url")}
-        if ex:
-            explicit = a.delta_explanations or {}
-            for gpu, rows in (explicit.get("card") or {}).items():
-                ex.setdefault(gpu, {}).update(rows)
-            a.delta_explanations = {**explicit, "card": ex}
     for src in info["sources"].values():
         if src.get("url") in jobs:
             src["conclusion"] = jobs[src["url"]]
-    delta = sdk_delta(a, old_delta)
-    has_card = any(c["label"] == "card" for c in (delta or {}).get("comparisons", []))
-    if a.new_port or ((old_delta or {}).get("new_port") and not has_card):   # --from-info's new-port line stays until a previous card is given
-        if has_card:
-            sys.exit("--new-port: this card also has a previous-card comparison (--previous-card card:...)")
-        cfg = pkg["cfg"]
-        sdk = sdk_version(cfg.get("sdk")) or sdk_version((cfg.get("generator") or {}).get("hrx_loom"))
-        why = new_port_problem(info["repo"], sdk)
-        if why:
-            sys.exit(f"--new-port: {why}")
-        delta = {**(delta or {"comparisons": []}), "new_port": True}
-    if delta:
-        info["sdk_delta"] = delta
     used = {s["source"] for d in devices.values() for s in (d.get("performance") or {}).get("sessions", [])}
     used |= {m["baseline_from"]["source"] for d in devices.values() for s in (d.get("performance") or {}).get("sessions", [])
              for m in s["metrics"].values() if m.get("baseline_from")}
@@ -841,55 +811,6 @@ def cmd_build(a):
         with open(a.o, "w", encoding="utf-8", newline="\n") as f:
             f.write(out)
         print(f"wrote {a.o}", file=sys.stderr)
-
-
-def sdk_delta(a, old_delta):
-    """info.json sdk_delta: --from-info's comparisons, replaced per label by --previous-card, with --delta-explanations
-    merged in. Only the earlier cards' stored values are kept; render_card.py computes the delta line from them."""
-    comps = {c["label"]: c for c in (old_delta or {}).get("comparisons", [])}
-    for spec in a.previous_card or []:
-        head, sep, path = spec.partition("=")
-        label, _, where = head.partition(":")
-        if not sep or label not in ("card", "migration") or (label == "card") != bool(where):
-            sys.exit(f"--previous-card {spec}: expected card:REPO@REVISION=INFO.json or migration=INFO.json")
-        old = load_info(path)
-        require_valid(old, path)
-        c = {"label": label}
-        if label == "card":
-            repo, _, rev = where.partition("@")
-            if not re.fullmatch(r"[0-9a-f]{40}", rev):
-                sys.exit(f"--previous-card {spec}: REVISION must be the 40-hex commit of the earlier card")
-            c.update(repo=repo, revision=rev)
-        c["devices"] = previous_values(old)
-        if not c["devices"]:
-            sys.exit(f"--previous-card {spec}: {path} shows no Loom values")
-        if comps.get(label, {}).get("explanations"):
-            c["explanations"] = comps[label]["explanations"]
-        comps[label] = c
-    for label, by_gpu in (a.delta_explanations or {}).items():
-        if label not in comps:
-            sys.exit(f"--delta-explanations: no {label} comparison (pass --previous-card {label}...)")
-        ex = comps[label].setdefault("explanations", {})
-        for gpu, rows in by_gpu.items():
-            for k, e in rows.items():
-                if not isinstance(e, dict) or not e.get("text"):
-                    sys.exit(f"--delta-explanations {label}.{gpu}.{k}: needs a text")
-                errs = text_errors(f"--delta-explanations {label}.{gpu}.{k}", e["text"], CAVEAT_MAX)
-                if errs:   # one short factual line from the evidence, like a caveat: no narrative
-                    sys.exit("\n".join(errs))
-                ex.setdefault(gpu, {})[k] = {"text": e["text"], "url": e.get("url")}
-    order = {"card": 0, "migration": 1}
-    kit = getattr(a, "kit_kept", None) or (old_delta or {}).get("kit")
-    if kit:
-        if not kit.get("reason"):
-            sys.exit("--kit-kept: needs a reason")
-        errs = text_errors("--kit-kept reason", kit["reason"], CAVEAT_MAX)
-        if errs:
-            sys.exit("\n".join(errs))
-        kit = {"reason": kit["reason"], "url": kit.get("url")}
-    if not comps and not kit:
-        return None
-    return {**({"kit": kit} if kit else {}), "comparisons": sorted(comps.values(), key=lambda c: order[c["label"]])}
 
 
 # ---------------------------------------------------------------- perf logs -> evidence
@@ -1725,24 +1646,9 @@ def main(argv=None):
                    "from another card's info.json (the staging flow: the loom-fun card's Strix table, with a remeasure evidence)")
     b.add_argument("--status", choices=["paused", "active"], help="paused: work on this model has stopped (active: clears it)")
     b.add_argument("--next-steps", type=next_steps_file, help="a file of next steps, one per line (empty: none)")
-    b.add_argument("--promotion-hold", type=load_json, help="(retired: the delta line is generated from --previous-card) kept only so an older info.json still validates")
-    b.add_argument("--previous-card", action="append", metavar="card:REPO@REVISION=INFO.json | migration=INFO.json",
-                   help="an earlier card of this package whose stored Loom values the delta line compares with (repeat): card = the published "
-                   "card this one replaces (its repo and revision), migration = this package's migration-only card on the new SDK (frozen "
-                   "programs; no link, it is never published as the production card). Replaces --from-info's comparison of the same label")
-    b.add_argument("--new-port", action="store_true",
-                   help="this package had no card on the previous SDK (its repository is not in the production inventory of the migration to the "
-                   "package's SDK, skills/loom-migrate/versions/vOLD-to-vNEW-production.json; refused otherwise): the card's delta line says so, "
-                   "generated, instead of comparing with an earlier card. Kept by --from-info until a --previous-card card is given")
-    b.add_argument("--kit-kept", type=load_json, metavar="KIT.json",
-                   help='{"reason": ..., "url": ...}: these migration-only programs stay; the release kit build was A/B\'d against them on the new SDK '
-                        "and not shipped (fleet/regen.py, phase 2): the card says why, one generated line")
     b.add_argument("--sdk-evidence", type=load_json, metavar="EVIDENCE.json",
-                   help="an sdk-evidence/1 file (fleet/regen.py evidence): this card's regression explanations (as --delta-explanations "
-                   "card) and the conclusion of every job it cites (recorded on the sources; render_card.py refuses a failed one)")
-    b.add_argument("--delta-explanations", type=load_json, metavar="FILE.json",
-                   help='{"card"|"migration": {GPU: {METRIC: {"text": ..., "url": ...}}}}: why a metric regressed beyond the band, from '
-                   "evidence (a confirming rerun, a root cause); merged over --from-info's")
+                   help="an sdk-evidence/1 file (fleet/regen.py evidence): the conclusions of this card's jobs"
+                   " (recorded on the sources; render_card.py refuses a failed one)")
     b.add_argument("--upstream", choices=["probe", "none"], default=os.environ.get("LOOM_CARD_UPSTREAM", "probe"),
                    help="probe: ask Hugging Face what the upstream model has (vision: an mmproj or vision_config; audio: audio_* "
                    "config keys; an older package: the GGUF chat template), for the features that are n/a when it has none; "

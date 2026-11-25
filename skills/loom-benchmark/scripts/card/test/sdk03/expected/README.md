@@ -37,13 +37,6 @@ curl http://127.0.0.1:8080/v1/chat/completions \
 
 ## Performance vs llama.cpp
 
-**Change from the previous card** ([revision `89abcde`](https://huggingface.co/loom-fun/ggml-org-Flint-loom/tree/89abcdef0123456789abcdef0123456789abcdef), hrx-loom 0.1.0; this card: hrx-loom 0.3.0):
-
-- decode +0.7 %, decode at 2k +0.0 %, decode at 32k +0.0 %, prefill 1k -15.0 % ¹, prefill 2k -4.0 % ², prefill 8k +0.0 %, prefill 16k +0.0 %, prefill 32k +0.0 %, 4 streams +0.0 %, drafted tokens accepted per verification pass 0.97 → 1.25 (+28.1 %; both in the performance session's decode requests, the previous card's share of depth-3 proposals as SDK 0.1.0 counted them).
-- ¹ Strix Halo prefill 1k -15.0 % (956.9 → 813.6 tok/s): confirmed by a same-runner rerun of both SDKs (fixture) ([evidence](https://github.com/loom-fun/loom-skills/actions/runs/3103/job/3104)).
-- ² Strix Halo prefill 2k -4.0 % (1316.4 → 1263.8 tok/s): unexplained.
-- Change: (this card / previous card - 1) × 100 % of the Loom value; beyond -3 % a regression needs a confirmed explanation.
-
 | metric | llama.cpp | Loom | margin vs best llama.cpp | roofline | Loom % of roofline |
 |---|---|---|---|---|---|
 | decode tok/s, short prompt | 67.3 | 93.0 | +38 % | 177.8 | 52 % |
@@ -93,7 +86,7 @@ curl http://127.0.0.1:8080/v1/chat/completions \
 
 | gate | description | result |
 |---|---|---|
-| `kernel_tests` | Unit tests of the generated kernels against reference implementations | ❌ fail (120/121; failed: moe_gemm_12), pre-existing: the previous card failed it too (67/68; failed: moe_gemm_12) ¹ |
+| `kernel_tests` | Unit tests of the generated kernels against reference implementations | ❌ fail (120/121; failed: moe_gemm_12) ¹ |
 | `golden` | llama.cpp reference recorded on the same GGUF: greedy tokens and top-5 log-probs, short prompts and 1k-32k documents | ✅ pass ² |
 | `compare` | Greedy output vs the llama.cpp reference, token by token; every divergence is a near-tie | ✅ pass ² |
 | `vision` | Image input vs llama.cpp with the same projector: identical prompt tokens, replies equal up to near-ties | — not applicable |
@@ -107,7 +100,6 @@ curl http://127.0.0.1:8080/v1/chat/completions \
 
 - ¹ DevLab Dispatch run 3102, 2026-11-25; device AMD RYZEN AI MAX+ 395 w/ Radeon 8060S, AMD Radeon 8060S Graphics, Ubuntu 26.04; hrx-loom `0.3.0` (hrx-system `e2c41a7`).
 - ² DevLab Dispatch run 3102, LEVEL=full, 2026-11-25; device AMD RYZEN AI MAX+ 395 w/ Radeon 8060S, AMD Radeon 8060S Graphics, Ubuntu 26.04; hrx-loom `0.3.0` (hrx-system `e2c41a7`).
-- Context admission: one request filling the 65,536-token context admitted a 65,410-token request; DevLab Dispatch run 3102, 2026-11-25.
 - Gates are the loom-benchmark correctness gates (`gates.sh`); a gate without a recorded run shows no evidence.
 
 ## Files

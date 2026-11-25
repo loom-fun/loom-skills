@@ -16,7 +16,7 @@ start qualification record, a rehearsal leftover, a dev/ bench tree, a porting n
 Text rules, over the card files that are text (never program/ or library/, whose identifiers are code): no reference
 to the staging org or to staging at all (a production card is composed from the staging one with every staging
 reference removed), no rehearsal or qualification-record wording, and an info.json without the retired hand-assembled
-promotion_hold block (the delta line is generated from sdk_delta).
+release comparison blocks.
 """
 import json
 import os
@@ -64,6 +64,10 @@ def text_problems(rel, text):
     configs' recorded evidence strings may say "staged" for a kernel's pipeline, so only staging-flow phrases count)."""
     out = []
     pats = FORBIDDEN + ([(PROSE_STAGING, "staging wording")] if rel in ("README.md", "REPORT.md") else [])
+    if rel in ("README.md", "REPORT.md", "info.json"):
+        pats = pats + [(re.compile(r"\b(?:previous card|prior SDK|migration-only|new port in SDK|regressions?|"
+                                   r"SDK[- ]delta|ABBA|kit build (?:was|kept)|change from the (?:last|previous))\b", re.I),
+                        "release history")]
     for pat, what in pats:
         hits = sorted({m.group(0) for m in pat.finditer(text)})
         if hits:
@@ -74,8 +78,9 @@ def text_problems(rel, text):
             info = json.loads(text)
         except ValueError as e:
             return out + [f"info.json: not JSON ({e})"]
-        if "promotion_hold" in info:
-            out.append("info.json: promotion_hold (a hand-assembled SDK comparison; the delta line comes from sdk_delta)")
+        for field in ("promotion_hold", "sdk_delta"):
+            if field in info:
+                out.append(f"info.json: {field} belongs in the release report")
     return out
 
 

@@ -18,9 +18,6 @@ Checks (each problem names its check):
              at least one GPU is measured on it
   render     README.md (and a generated REPORT.md) is exactly what render_card.py renders from the card's files: no
              hand-written text (--generator: the card generator scripts to render with, default this checkout's)
-  delta      a card measured on a new SDK carries the delta line (info.json sdk_delta, comparison "card") for every
-             GPU it re-measured, and every regression beyond the band (a drafted-token acceptance drop too) has an explanation
-             (else "unexplained")
   acceptance a drafting card's re-measured GPUs record the drafted-token acceptance, or why it is not reported
   admission  a chat card's re-measured GPUs record the native-context admission check
   carried    (informational) GPUs and values carried from another SDK, shown marked
@@ -37,8 +34,8 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from card_files import check_package  # noqa: E402
-from card_lib import (DELTA_BAND, METRIC_KEYS, card_gpus, card_metrics, carried_sdk, delta_rows, free_text_errors, gpu_view,  # noqa: E402
-                      has_results, load_info, load_package, metric_applies, new_port_problem, package_facts, requalified, sdk_version, validate)
+from card_lib import (card_gpus, card_metrics, carried_sdk, free_text_errors, gpu_view,  # noqa: E402
+                      has_results, load_info, load_package, metric_applies, package_facts, requalified, sdk_version, validate)
 
 def read(path):
     with open(path, encoding="utf-8", errors="replace") as f:
@@ -191,28 +188,10 @@ def render_problems(card, generator):
 
 
 def info_problems(card, info, facts, feats, pin):
-    """delta, acceptance, admission and carried findings of a text card."""
-    out = {"delta": [], "acceptance": [], "admission": [], "carried": []}
+    """Acceptance, admission and carried findings of a text card."""
+    out = {"acceptance": [], "admission": [], "carried": []}
     gpus = [g for g in card_gpus(info) if has_results(info["devices"][g])]
     re_measured = [g for g in gpus if requalified(info, g, pin)]
-    comps = (info.get("sdk_delta") or {}).get("comparisons") or []
-    card_comp = next((c for c in comps if c["label"] == "card"), None)
-    new_port = bool((info.get("sdk_delta") or {}).get("new_port"))
-    if new_port:   # the generated new-port line is accepted only for a repository with no card on the previous SDK
-        why = "a card comparison too" if card_comp else new_port_problem(info.get("repo") or "", sdk_version(pin))
-        if why:
-            out["delta"].append(f"new-port delta line on a card that is not a new port: {why}")
-    elif re_measured and not card_comp:
-        out["delta"].append("no delta line against the previous card (info.json sdk_delta has no card comparison)")
-    for c in comps:
-        rows = delta_rows(info, pin, c, (facts.get("spec") or (None, None))[1])   # the draft depth, as render_card.py compares acceptance
-        for g in re_measured:
-            if g in c["devices"] and g not in rows:
-                out["delta"].append(f"{c['label']}: {g} has no metric re-measured on the pin to compare")
-        for g, rs in rows.items():
-            for r in rs:
-                if r["regression"] and not r["explanation"]:
-                    out["delta"].append(f"{c['label']}: {g} {r['metric']} {r['relative'] * 100:+.1f} % unexplained (beyond -{DELTA_BAND * 100:g} %)")
     for g in gpus:
         view = gpu_view(info, g)
         sessions = (view.get("performance") or {}).get("sessions", [])
@@ -247,7 +226,7 @@ def lint(card, form="production", runs=None, generator=HERE, files=None):
     """{check: [problem]} of one card directory (empty lists: it passes). "carried" is informational. files: the
     repository's paths when the directory holds only some of them (a download without the weights)."""
     runs = runs or Runs()
-    res = {k: [] for k in ("files", "runs", "versions", "render", "delta", "acceptance", "admission", "carried")}
+    res = {k: [] for k in ("files", "runs", "versions", "render", "acceptance", "admission", "carried")}
     prod, tmp = compose(card, form)
     try:
         res["files"] = check_package(prod, files)
