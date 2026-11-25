@@ -128,7 +128,7 @@ from card_lib import (DEFAULT_GPU, DRAFTED_ROWS, EVIDENCE_ID, GPUS, METRIC_KEYS,
                       programs_sha256, require_valid, fixed_pool_capacity, gpu_preset_execution, gpu_preset_name, with_gpu_preset, served_context, fit_served_context, upstream_facts, with_gate_features, write_json,
                       SERVE_HEADROOM, registry, fit_rows, non_targets, load_device_results, validate_device_results, with_device_preset, DEVICE_RESULTS_ID, card_serve_args, quick_start, serves,
                       historical_xsj_gate, sdk_serve_args, xsj_enabled, xsj_evidence_errors, xsj_measurement_errors, xsj_vulkan_comparison_errors,
-                      CAVEAT_MAX, DEVICE_RESULTS_DIR, QUICK_START_QUALIFICATION, qualified_bare_quick_start, text_errors, previous_values, stamped)
+                      CAVEAT_MAX, DEVICE_RESULTS_DIR, QUICK_START_QUALIFICATION, qualified_bare_quick_start, text_errors, previous_values, stamped, SESSION_ACCEPTANCE_ROWS)
 
 
 # ---------------------------------------------------------------- sources
@@ -978,6 +978,27 @@ def acceptance_samples(rows, c4_path=None):
     return out
 
 
+def per_pass_samples(rows):
+    """{metric: [accepted drafted tokens per verification pass]} of perf.py rows ("accepted_per_pass" per decode request: an SDK that
+    reports no proposal count, bench_common.per_pass_between over that request alone)."""
+    out = {}
+    for r in rows:
+        for k, m in DECODE:
+            if (r.get("accepted_per_pass") or {}).get(k) is not None:
+                out.setdefault(m, []).append(r["accepted_per_pass"][k])
+    return out
+
+
+def session_per_pass(rows):
+    """The perf session's accepted drafted tokens per verification pass, the same aggregation as the earlier card's share of proposals
+    (card_lib SESSION_ACCEPTANCE_ROWS: each decode row's median over its sessions, then the median over the rows), or None. Taken from
+    the decode requests themselves, never from the server's cumulative /metrics: those also count the prefill rows' few decode
+    tokens, the warm-ups and undrafted long-context decode, each a pass with no proposal, which lowers the value against the earlier card."""
+    pp, _ = session_values(rows, per_pass_samples)
+    per_row = [statistics.median(v) for k, v in pp.items() if k in SESSION_ACCEPTANCE_ROWS and v]
+    return round(statistics.median(per_row), 3) if per_row else None
+
+
 def with_acceptance(metrics, acc):
     """Adds each metric's session acceptance (median over the sessions of each session's median) to metrics, in place."""
     for k, vals in acc.items():
@@ -1151,6 +1172,9 @@ def cmd_perf(a):
         acc = draft_metrics_acceptance(a.draft_metrics)
         if acc:
             metrics["spec_acceptance"] = acc
+    rows_pp = None if extra else session_per_pass(loom_rows)
+    if rows_pp is not None and (metrics.get("spec_acceptance") or {}).get("loom") is None:   # unreported proposals: per pass of the decode requests
+        metrics["spec_acceptance"] = {"loom": None, "unreported": "proposals", "accepted_per_pass": rows_pp}
     if a.baseline_from_info:
         if extra or llama_rows:
             sys.exit("--baseline-from-info replaces the llama.cpp logs: give a Loom-only job's files")

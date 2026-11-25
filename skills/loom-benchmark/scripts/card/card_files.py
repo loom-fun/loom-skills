@@ -47,7 +47,9 @@ def card_file(rel):
 def package_files(directory):
     """The repository paths of a package directory (POSIX, relative), without VCS metadata."""
     out = []
-    for root, dirs, files in os.walk(directory):
+    # followlinks: lint_card.py --form staging composes the production form with each top-level entry a symlink into the card, and its trees
+    # (program/, gen/, dev/ ...) must be listed and checked like real directories
+    for root, dirs, files in os.walk(directory, followlinks=True):
         dirs[:] = sorted(d for d in dirs if d not in (".git", ".cache", "__pycache__"))
         for f in sorted(files):
             out.append(os.path.relpath(os.path.join(root, f), directory).replace(os.sep, "/"))
