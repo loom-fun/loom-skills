@@ -169,7 +169,7 @@ def compare(a_path, b_path, metrics=None, pkg=None, llama=None):
         print(f"DIFF: {len(a)} vs {len(b)} records")
     acc = ""
     if metrics:
-        from bench_common import draft_counters, per_pass_between, proposals_unreported
+        from draft_telemetry import draft_counters, per_pass_between, proposals_unreported
         text = (urllib.request.urlopen(metrics + "/metrics", timeout=30).read().decode() if metrics.startswith("http")
                 else open(metrics).read())
         vals = draft_counters(text)

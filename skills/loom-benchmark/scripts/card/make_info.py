@@ -1202,7 +1202,7 @@ def draft_metrics_acceptance(paths):
     """spec_acceptance of a perf session from loom-serve /metrics dumps (cumulative per serve session): {"loom": share
     of proposals} when the SDK counts proposals, else {"loom": None, "unreported": "proposals", "accepted_per_pass": x}
     (bench_common.per_pass_between); the median over the dumps that decoded drafted tokens, or None."""
-    from bench_common import acceptance_between, draft_counters, per_pass_between, proposals_unreported
+    from draft_telemetry import acceptance_between, draft_counters, per_pass_between, proposals_unreported
     shares, passes, unreported = [], [], False
     for p in paths:
         v = draft_counters(open(p, encoding="utf-8", errors="replace").read())
