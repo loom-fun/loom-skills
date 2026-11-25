@@ -140,8 +140,8 @@ def run_problems(card, info, runs):
             out.append(f"{where}: run {rid}" + (f" job {jid}" if jid else "") + " cannot be resolved (unknown evidence)")
         elif jid and jc != "success":
             out.append(f"{where}: cites job {jid} of run {rid}, which concluded {jc}")
-        elif rc != "success":
-            out.append(f"{where}: cites run {rid}, which concluded {rc}" + (f" (its job {jid} succeeded)" if jid else ""))
+        elif not jid and rc != "success":   # a cited successful job stands on its own (its run may hold other models' jobs: D6 a)
+            out.append(f"{where}: cites run {rid}, which concluded {rc}")
     return out
 
 
