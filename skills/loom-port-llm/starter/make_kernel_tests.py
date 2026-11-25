@@ -3313,8 +3313,12 @@ if cfg.get("moe") and os.environ.get("MOE_TESTS", "1") == "1":
         t = 6; ids, wts = chain(t, "")
         SGT = f"tensor<{t}xf32>, " if SHG else ""
         info_l = np.zeros((t, 4), np.int32); info_l[:, 2] = 1; info_l[2, 2] = 0; info_l[4:, 2] = 0
-        save(tag + "_info", info_l); save(tag + "_ids_l", np.where(np.arange(t)[:, None] >= 4, 0, ids).astype(np.int32))
-        save(tag + "_wts_l", np.where(np.arange(t)[:, None] >= 4, 0, wts).astype(np.float32))
+        # g_moe_route_tr_live skips a workgroup whose tokens are all padding and writes every row of the others
+        from gen_moe import route_tokens_per_wg
+        _tr = route_tokens_per_wg(H, E_)
+        _skip = np.array([not info_l[(r // _tr) * _tr:(r // _tr + 1) * _tr, 2].any() for r in range(t)])[:, None]
+        save(tag + "_info", info_l); save(tag + "_ids_l", np.where(_skip, 0, ids).astype(np.int32))
+        save(tag + "_wts_l", np.where(_skip, 0, wts).astype(np.float32))
         cases.append(f"""check.case public @moe_chain_{li} {{
 {common(t, "")}  %act = check.generate.fill value(0.0) : tensor<{t * KU}x{FE}xf32>
   %ys = check.generate.fill value(0.0) : tensor<{t * KU}x{H}xf32>
