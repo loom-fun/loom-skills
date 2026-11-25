@@ -1248,6 +1248,10 @@ def ingest_full(st, name, e, W):
                   *src, "--device", "none", "--hrx-loom", "none", "-o", "ev_vulkan.json"], W)
         ev.append("ev_vulkan.json")
     gfiles = [f for f in (f"{d}/gates_{V}/gates.json", f"{d}/ktest_{V}.log") if os.path.exists(f)]
+    if e.get("no_reference") and gfiles and gfiles[0].endswith("gates.json"):   # accept-no-reference: the job's gates did not run; the card keeps
+        gj = json.load(open(gfiles[0]))   # the previous ones (marked as not re-run on this SDK), only the admission probe is this job's
+        gfiles[0] = os.path.join(W, "gates_not_run.json")
+        json.dump({"gates": {}, **{k: gj[k] for k in ("ts", "level", "context_admit") if k in gj}}, open(gfiles[0], "w"), indent=1)
     adm = os.path.join(d, f"admit_{V}.json")
     if gfiles and gfiles[0].endswith("gates.json") and os.path.isfile(adm):
         # the frozen job's admission probe (admit:V, the served preset's native context; the gates ran at the dev level, which has none): the card
@@ -2072,6 +2076,10 @@ def build_evidence(st):
             dv["published_revision"] = e["published_revision"]
         if e.get("accepted_regression"):
             dv["accepted_regression"] = e["accepted_regression"]
+        if e.get("no_reference"):
+            dv["gates_not_run"] = e["no_reference"]
+        if e.get("not_applicable"):
+            dv["not_applicable"] = e["not_applicable"]
         mod["devices"][e["device"]] = dv
     return doc
 
@@ -2133,6 +2141,33 @@ def cmd_eligible(a):
     print(f"eligible {len(eligible)}, held {len(held)}, pending {len(pending)}: {a.out_dir}")
     for s, p in pending.items():
         print(f"  pending {s}: " + "; ".join(f"{k}: {v}" for k, v in p["reasons"].items())[:300])
+
+
+def cmd_accept_no_reference(a):
+    """--programs production: a model whose gates could not run because the reference engine cannot serve its checkpoint (gates.sh: llama-server
+    would not start, "references still pending after 5 rounds"; e.g. an architecture only a hand-made reference serves) is decided on its other
+    evidence; its card carries the previous gates, shown not re-run on this SDK (the job's gate results are not ingested). The note names why.
+    A gate that ran against a reference and failed is never accepted here."""
+    st = State(a.state)
+    if st.d["opts"].get("programs") != "production":
+        die("accept-no-reference is for --programs production states")
+    done = []
+    for name, e in st.jobs.items():
+        if e["slug"] not in a.slug or e["stage"] != "needs_decision" or e.get("prev") or not e.get("cmp"):
+            continue
+        fails = json.load(open(e["cmp"])).get("gate_failures") or []
+        out = read(os.path.join(e.get("dir") or "", "gates_staging.out"), "") or ""
+        if not fails or any(not f.startswith("gates:") for f in fails) or "references still pending after 5 rounds" not in out \
+                or "could not start llama-server" not in out:
+            print(f"{e['slug']} {e['device']}: not a reference that could not start ({', '.join(fails) or 'no gate failure'}), not accepted")
+            continue
+        decision, reasons, perf, rows = _decide_without(st, name, e, True)
+        e.update(perf=perf, rows_pct=rows, perf_cross=dict(perf), decision=decision, reason="; ".join(reasons), no_reference=a.note)
+        e["stage"] = "collected" if decision in ("promote", "confirm") else "needs_decision"
+        st.log(f"{e['slug']} {e['device']}: gates not run (no reference): {a.note} -> {e['stage']} ({decision})")
+        done.append(f"{e['slug']} {e['device']} ({decision})")
+    st.save()
+    print("accepted: " + (", ".join(done) or "nothing"))
 
 
 def cmd_adopt(a):
@@ -2223,6 +2258,11 @@ def main(argv=None):
             q.add_argument("--ref", help="the git ref the canonical build is made at (default: origin/<the state's base>)")
             q.add_argument("--prefill-transition", action="append", default=[], metavar="SLUG:PRESET:OLD:NEW",
                            help="explicit measured prefill change; every selected job must provide matching programs and preset execution")
+    q = sub.add_parser("accept-no-reference", help="--programs production: gates that could not run (no reference engine for the checkpoint)")
+    q.add_argument("state")
+    q.add_argument("slug", nargs="+")
+    q.add_argument("--note", required=True, help="why no reference serves it, e.g. 'stock llama.cpp b1384 cannot load the inkling2 GGUF (KB inkling2/porting.md)'")
+    q.set_defaults(fn=cmd_accept_no_reference)
     for name, fn, help_ in (("evidence", cmd_evidence, "the sdk-evidence/1 document of a --programs production state (per model / device / metric)"),
                             ("eligible", cmd_eligible, "eligible.json / held.json / pending.json of the release from a --programs production state (fail closed)")):
         q = sub.add_parser(name, help=help_)
