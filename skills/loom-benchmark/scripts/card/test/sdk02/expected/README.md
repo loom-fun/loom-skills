@@ -67,7 +67,7 @@ AMD Radeon AI PRO R9700 (gfx1201, 32 GB): this package does not fit its 32 GB (i
 - Margin vs best llama.cpp: (Loom / max(ROCm, Vulkan) - 1) × 100 %, using the available measured tokens/s for each row on this GPU. With only one valid backend, that backend is used; with neither, the margin is not measured. Raw backend values and their measurement sources are retained below and in the table.
 - Measured 2026-11-13; device AMD Strix Halo (DevLab Dispatch runner X2-LA03-S03-D03), Linux; hrx-loom `0.1.0` (hrx-system `d01d1c1`, recovered); source: [DevLab Dispatch run 43392598780](https://github.com/loom-fun/loom-skills/actions/runs/43392598780/job/131775918531).
 - llama.cpp Vulkan: measured 2026-11-13; source: [DevLab Dispatch run 43392598780](https://github.com/loom-fun/loom-skills/actions/runs/43392598780/job/131775918531). Archive sha256 `9759acd`.
-- § Measured on SDK 0.1.0, not re-qualified on 0.2.0rc1 (the SDK the Quick start installs).
+- § Measured on SDK 0.1.0.
 - Roofline: the hardware ceiling for this GGUF on AMD Ryzen AI Max+ 395 "Strix Halo" (gfx1151) at 216 GB/s and 59 TFLOP/s, from loom-roofline `roofline.py` (loom-skills `acd9ac7`).
 - — not measured; n/a not applicable.
 
@@ -91,15 +91,15 @@ AMD Radeon AI PRO R9700 (gfx1201, 32 GB): this package does not fit its 32 GB (i
 
 | gate | description | result |
 |---|---|---|
-| `kernel_tests` | Unit tests of the generated kernels against reference implementations | ? pass (59/59), measured on SDK 0.1.0, not re-qualified on 0.2.0rc1 ¹ |
-| `golden` | llama.cpp reference recorded on the same GGUF: greedy tokens and top-5 log-probs, short prompts and 1k-32k documents | ? pass, measured on SDK 0.1.0, not re-qualified on 0.2.0rc1 ² |
-| `compare` | Greedy output vs the llama.cpp reference, token by token; every divergence is a near-tie | ? pass, measured on SDK 0.1.0, not re-qualified on 0.2.0rc1 ² |
+| `kernel_tests` | Unit tests of the generated kernels against reference implementations | ? pass (59/59), measured on SDK 0.1.0 ¹ |
+| `golden` | llama.cpp reference recorded on the same GGUF: greedy tokens and top-5 log-probs, short prompts and 1k-32k documents | ? pass, measured on SDK 0.1.0 ² |
+| `compare` | Greedy output vs the llama.cpp reference, token by token; every divergence is a near-tie | ? pass, measured on SDK 0.1.0 ² |
 | `vision` | Image input vs llama.cpp with the same projector: identical prompt tokens, replies equal up to near-ties | — not applicable |
-| `consistency` | Concurrent requests give the same output as the same requests run alone | ? pass, measured on SDK 0.1.0, not re-qualified on 0.2.0rc1 ² |
+| `consistency` | Concurrent requests give the same output as the same requests run alone | ? pass, measured on SDK 0.1.0 ² |
 | `spec` | Speculative decoding on gives exactly the output of speculative decoding off | — not applicable |
-| `agent` | Multi-turn tool-calling loop: exact prompt rendering, history reuse, valid tool calls, output vs llama.cpp | ? pass, measured on SDK 0.1.0, not re-qualified on 0.2.0rc1 ² |
-| `agent_think_off` | The tool-calling loop with thinking off | ? pass, measured on SDK 0.1.0, not re-qualified on 0.2.0rc1 ² |
-| `sampling` | temperature, top_k and seed behave as specified; first-token distribution matches llama.cpp | ? pass, measured on SDK 0.1.0, not re-qualified on 0.2.0rc1 ² |
+| `agent` | Multi-turn tool-calling loop: exact prompt rendering, history reuse, valid tool calls, output vs llama.cpp | ? pass, measured on SDK 0.1.0 ² |
+| `agent_think_off` | The tool-calling loop with thinking off | ? pass, measured on SDK 0.1.0 ² |
+| `sampling` | temperature, top_k and seed behave as specified; first-token distribution matches llama.cpp | ? pass, measured on SDK 0.1.0 ² |
 | `logits` | Host logits readback (llm.logits on): at T=0 every returned row's argmax is the device's token, the top-k matches llama.cpp, greedy text is unchanged | — not applicable |
 | `decision` | Decision answers (choice, score, noul probabilities) vs llama.cpp on the same prompts | — not applicable |
 

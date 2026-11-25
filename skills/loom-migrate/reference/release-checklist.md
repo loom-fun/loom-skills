@@ -30,6 +30,7 @@ tracking issue loom-fun/loom-skills#1172). SKILL.md has the per-step detail for 
       Decide "SDK regression vs our kernels vs a changed default" with evidence. A changed default is a card setting, not an
       upstream bug.
 - [ ] Gate failures triaged; a failure that already existed on the old SDK is not a regression and is out of scope.
+- [ ] Link the sweep-generated SDK delta report and regression explanations in the tracking issue. Keep release history out of card files.
 - [ ] Final render of every card on staging (design, Quick start, device sections); live verification (programs hash, pin, sessions).
 - [ ] Smoke the staging cards right before the go: SKILL.md step 5 smoke (serve, one chat, one tool call) on a sample per GPU.
 

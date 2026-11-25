@@ -690,7 +690,7 @@ class LaneOwned(unittest.TestCase):
 
 
 class KitVerdict(unittest.TestCase):
-    """Phase 2: ship the kit programs of a model only when every device's A/B passes; else keep the frozen ones and re-queue its cards."""
+    """Phase 2: ship the kit programs of a model only when every device's A/B passes; else keep the published frozen cards."""
     def write(self, t, name, doc):
         p = os.path.join(t, name)
         json.dump({"work": t, **doc}, open(p, "w"))
@@ -817,7 +817,7 @@ class KitVerdict(unittest.TestCase):
             self.assertNotIn("c", kv)   # its migration-only card is not published yet
             sw = regen.State(sweep)
             self.assertEqual(sw.d["opts"]["kit_kept"]["b"]["url"], "https://github.com/loom-fun/loom-skills/actions/runs/1/job/sb")
-            self.assertEqual((sw.jobs["b-s"]["stage"], "verified" in sw.jobs["b-s"]), ("collected", False))
+            self.assertEqual((sw.jobs["b-s"]["stage"], "verified" in sw.jobs["b-s"]), ("published", True))
             self.assertEqual(sw.jobs["a-s"]["stage"], "published")
             self.assertEqual(regen.State(r).d["opts"]["ship"], ["a"])
             self.assertEqual(regen.State(s).d["opts"]["ship"], ["a"])
@@ -987,7 +987,7 @@ class AcceptRegressionRows(unittest.TestCase):
 
 
 class Explain(unittest.TestCase):
-    def test_recorded_and_changed_cards_requeued(self):
+    def test_explanations_feed_evidence_without_requeue(self):
         with tempfile.TemporaryDirectory() as t:
             p = os.path.join(t, "s.json")
             json.dump({"work": t, "mode": "sdk-loom", "opts": {"programs": "production"}, "batches": [], "log": [], "jobs": {
@@ -1000,8 +1000,8 @@ class Explain(unittest.TestCase):
             with contextlib.redirect_stdout(io.StringIO()):
                 regen.main(["explain", p, f])
             st = regen.State(p)
-            self.assertEqual({n: e["stage"] for n, e in st.jobs.items()}, {"a": "collected", "b": "published", "c": "published"})
-            self.assertNotIn("verified", st.jobs["a"])
+            self.assertEqual({n: e["stage"] for n, e in st.jobs.items()}, {"a": "published", "b": "published", "c": "published"})
+            self.assertEqual(st.jobs["a"]["verified"], {"ok": False})
             self.assertEqual(regen.explanations(st.d, "m"), doc["m"])
             self.assertEqual(regen.explanations(st.d, "n"), {})
             st.jobs["a"]["stage"] = "published"

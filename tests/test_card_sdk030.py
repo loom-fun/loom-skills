@@ -17,7 +17,6 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from types import SimpleNamespace
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "skills/loom-benchmark/scripts"
@@ -100,6 +99,14 @@ class CardFiles(unittest.TestCase):
                 self.assertIn(want, got)
             self.assertNotIn("info.json:1: staging wording", got)   # the org name is one finding, not two
 
+    def test_release_history_in_card_files(self):
+        for phrase in ("Change from the previous card", "Change from the migration-only build",
+                       "New port in SDK", "confirmed by ABBA", "regression", "SDK delta"):
+            for name in ("README.md", "REPORT.md", "info.json"):
+                text = json.dumps({"note": phrase}) if name == "info.json" else phrase
+                with self.subTest(name=name, phrase=phrase):
+                    self.assertTrue(any("release history" in p for p in card_files.text_problems(name, text)))
+
     def test_program_identifiers_are_code(self):
         with tempfile.TemporaryDirectory() as t:
             self.package(t)
@@ -152,28 +159,38 @@ class Lint(unittest.TestCase):
             shutil.copy(CARD / "test/sdk03/expected" / f, d / f)
         return d
 
-    def test_sdk_evidence_and_explicit_explanations_merge_per_metric(self):
+    def test_legacy_metadata_is_removed_on_rebuild(self):
         with tempfile.TemporaryDirectory() as t:
             d = self.card(t)
-            info = d / "info.json"
-            slug = json.loads(info.read_text(encoding="utf-8"))["repo"].split("/")[-1]
-            gpu = "strix-halo"
-            generated = {"text": "Same-job confirmation within the band.", "url": None}
-            explicit = {"text": "A second measurement confirmed this row.", "url": None}
-            rows = [{"row": k, "explanation": generated} for k in ("decode", "prefill_2k")]
-            evidence = Path(t, "evidence.json")
-            evidence.write_text(json.dumps({"schema": "sdk-evidence/1",
-                                            "models": {slug: {"devices": {gpu: {"regressions": rows}}}}}), encoding="utf-8")
-            explanations = Path(t, "explicit.json")
-            explanations.write_text(json.dumps({"card": {gpu: {"decode": explicit}}}), encoding="utf-8")
-            out = Path(t, "rebuilt.json")
+            path = d / "info.json"
+            info = json.loads(path.read_text())
+            info["sdk_delta"] = {"comparisons": [], "new_port": True}
+            path.write_text(json.dumps(info))
+            self.assertTrue(any("sdk_delta" in p for p in lint_card.lint(str(d), "staging", lint_card.Runs(True))["files"]))
             subprocess.run([sys.executable, str(CARD / "make_info.py"), "build", str(d), "--upstream", "none",
-                            "--device-results", "none", "--from-info", str(info), "--sdk-evidence", str(evidence),
-                            "--delta-explanations", str(explanations), "-o", str(out)], check=True)
-            comparisons = json.loads(out.read_text(encoding="utf-8"))["sdk_delta"]["comparisons"]
-            merged = next(c for c in comparisons if c["label"] == "card")["explanations"][gpu]
-            self.assertEqual(merged["decode"], explicit)
-            self.assertEqual(merged["prefill_2k"], generated)
+                            "--device-results", "none", "--from-info", str(path)], check=True)
+            self.assertNotIn("sdk_delta", json.loads(path.read_text()))
+
+    def test_staging_template_sections_and_notes(self):
+        # Slots in the released single-device card, with the SDK-specific values and
+        # measurement citations removed. Optional hardware and serve flags vary by package.
+        headings = ["## Quick start", "## Send a request", "## Performance vs llama.cpp", "**Methodology**",
+                    "## Features", "## Correctness", "## Files"]
+        notes = ["Compared", "Out of the box", "Drafting", "4 streams", "Rows", "llama.cpp ROCm",
+                 "Measured on", "Margin vs", "Measured", "Drafted tokens accepted", "Roofline", "— not measured"]
+        with tempfile.TemporaryDirectory() as t:
+            d = self.card(t)
+            info = json.loads((d / "info.json").read_text())
+            info["repo"] = info["repo"].replace("loom-fun/", "loom-fun-staging/")
+            (d / "info.json").write_text(json.dumps(info))
+            import render_card
+            readme = render_card.render(str(d))
+            self.assertEqual([line for line in readme.splitlines() if line.startswith(("## ", "**"))], headings)
+            method = readme.split("**Methodology**")[1].split("## Features")[0]
+            slots = [next((label for label in notes if line[2:].startswith(label)), line)
+                     for line in method.splitlines() if line.startswith("- ") and line[2] not in "¹²³⁴⁵⁶⁷⁸⁹"]
+            self.assertEqual(slots, notes)
+            self.assertNotIn("- Context admission", readme)
 
     def test_sdk03_golden(self):
         with tempfile.TemporaryDirectory() as t:
@@ -184,7 +201,6 @@ class Lint(unittest.TestCase):
             self.assertEqual(res["versions"], [])
             self.assertEqual(res["acceptance"], [])
             self.assertEqual(res["admission"], [])
-            self.assertEqual(res["delta"], ["card: strix-halo prefill_2k -4.0 % unexplained (beyond -3 %)"])
 
     def test_foreign_tree_caught_in_both_forms(self):
         # retro review: --form staging composed symlinks and os.walk did not follow them, so dev/ (and program/, gen/) went unchecked
@@ -222,91 +238,17 @@ class Lint(unittest.TestCase):
             self.assertTrue(any("concluded failure" in p for p in res["runs"]), res["runs"])
             self.assertTrue(res["render"], "a hand edit or a failed run must not pass the render check")
 
-    def test_dropped_acceptance_and_missing_delta(self):
+    def test_dropped_acceptance_and_admission(self):
         with tempfile.TemporaryDirectory() as t:
             d = self.card(t)
             info = json.loads((d / "info.json").read_text(encoding="utf-8"))
-            info.pop("sdk_delta")
             for s in info["devices"]["strix-halo"]["performance"]["sessions"]:
                 s["metrics"].pop("spec_acceptance", None)
             info["devices"]["strix-halo"].pop("admission")
             (d / "info.json").write_text(json.dumps(info, indent=1), encoding="utf-8")
             res = lint_card.lint(str(d), runs=lint_card.Runs(offline=True))
-            self.assertTrue(res["delta"] and "no delta line" in res["delta"][0], res["delta"])
             self.assertTrue(res["acceptance"], res)
             self.assertTrue(res["admission"], res)
-
-
-class AcceptanceDelta(unittest.TestCase):
-    """The acceptance delta compares one quantity from one workload (perf-session acceptance) on both sides."""
-    def info(self):
-        return json.loads((CARD / "test/sdk03/expected/info.json").read_text(encoding="utf-8"))
-
-    def row(self, info, depth=3):
-        pin = {"hrx_loom": "0.3.0"}
-        rows = card_lib.delta_rows(info, pin, info["sdk_delta"]["comparisons"][0], depth)["strix-halo"]
-        return next(r for r in rows if r["metric"] == "spec_acceptance")
-
-    def test_perf_session_old_side(self):
-        info = self.info()
-        self.assertEqual(info["sdk_delta"]["comparisons"][0]["devices"]["strix-halo"]["metrics"]["spec_acceptance_session"], 0.325)
-        r = self.row(info)
-        self.assertEqual(r["per_pass"], {"old": 0.975, "new": 1.249})   # not the spec gate's 68 % x 3 = 2.04
-        self.assertFalse(r["different_workloads"])
-        self.assertEqual(r["change"], round(1.249 / 0.975 - 1, 4))
-
-    def session_acceptance(self, info, **kw):
-        for sess in info["devices"]["strix-halo"]["performance"]["sessions"]:
-            if "spec_acceptance" in sess["metrics"]:
-                sess["metrics"]["spec_acceptance"].update(kw)
-        return info
-
-    def test_acceptance_drop_is_a_regression(self):
-        # retro review: a spec_acceptance drop beyond 3 % was never marked, so it needed no explanation
-        info = self.session_acceptance(self.info(), accepted_per_pass=0.9)   # 0.975 -> 0.9 per pass: -7.7 %
-        r = self.row(info)
-        self.assertEqual(r["relative"], round(0.9 / 0.975 - 1, 4))
-        self.assertTrue(r["regression"])
-        import render_card
-        text = "\n".join(render_card.delta_lines(info, {"hrx_loom": "0.3.0"}, True, 3))
-        self.assertIn("drafted tokens accepted -7.7 % (0.97 → 0.90 per verification pass): unexplained.", text)
-        self.assertIn("counted them) ³", text)
-        d = Path(tempfile.mkdtemp())
-        self.addCleanup(shutil.rmtree, d, True)
-        d = Lint.card(self, d)   # the lint sees it too (it now compares with the package's draft depth, as the render does)
-        (d / "info.json").write_text(json.dumps(info, indent=1), encoding="utf-8")
-        res = lint_card.lint(str(d), runs=lint_card.Runs(offline=True))
-        self.assertIn("card: strix-halo spec_acceptance -7.7 % unexplained (beyond -3 %)", res["delta"])
-        r = self.row(self.session_acceptance(self.info(), accepted_per_pass=0.96))   # -1.5 %: within the band
-        self.assertFalse(r["regression"])
-
-    def test_acceptance_drop_in_points_is_relative(self):
-        info = self.info()
-        info["sdk_delta"]["comparisons"][0]["devices"]["strix-halo"]["metrics"]["spec_acceptance"] = 0.68
-        info = self.session_acceptance(info, loom=0.64)   # 68 % -> 64 %: -4 points, -5.9 % relative
-        r = self.row(info)
-        self.assertEqual((r["change"], r["relative"]), (round(0.64 - 0.68, 4), round(0.64 / 0.68 - 1, 4)))
-        self.assertTrue(r["regression"])
-        info["sdk_delta"]["comparisons"][0]["explanations"] = {"strix-halo": {"spec_acceptance": {"text": "the drafter changed"}}}
-        self.assertEqual(self.row(info)["explanation"], {"text": "the drafter changed"})
-
-    def test_spec_gate_only_old_card_has_no_delta(self):
-        info = self.info()
-        del info["sdk_delta"]["comparisons"][0]["devices"]["strix-halo"]["metrics"]["spec_acceptance_session"]
-        r = self.row(info)
-        self.assertTrue(r["different_workloads"])
-        self.assertIsNone(r["change"])
-        self.assertIsNone(r["per_pass"])
-        self.assertEqual((r["old"], r["accepted_per_pass"]), (0.68, 1.249))
-        import render_card
-        text = "\n".join(render_card.delta_lines(info, {"hrx_loom": "0.3.0"}, True, 3))
-        self.assertIn("68 % of proposals in its speculative-decoding gate, this card 1.25 per verification pass in the performance "
-                      "session (different workloads, no delta)", text)
-        self.assertNotIn("-38.8", text)
-
-
-if __name__ == "__main__":
-    unittest.main()
 
 
 class NoGenerator(unittest.TestCase):
@@ -339,75 +281,5 @@ class NoGenerator(unittest.TestCase):
         self.assertNotEqual(card_lib._check(bad, sub, schema, "versions", []), [])
 
 
-class NewPort(unittest.TestCase):
-    """A package with no card on the previous SDK: one generated delta line, accepted only when its repository is absent from the
-    production inventory of the migration (skills/loom-migrate/versions/vOLD-to-vNEW-production.json)."""
-    NEW = "loom-fun-staging/prism-ml-Ternary-Bonsai-2.5-27B-loom"   # a port first published on 0.3.0
-
-    def info_with(self, d, repo, comparisons=None):
-        info = json.loads((d / "info.json").read_text(encoding="utf-8"))
-        info["repo"] = repo
-        info["sdk_delta"] = {"comparisons": [] if comparisons is None else comparisons, "new_port": True}
-        (d / "info.json").write_text(json.dumps(info, indent=1), encoding="utf-8")
-        return info
-
-    def test_inventory_lookup(self):
-        with tempfile.TemporaryDirectory() as t:
-            Path(t, "v0.2.0-to-v0.3.0-production.json").write_text(json.dumps({"loom-fun/old-loom": "a" * 40}), encoding="utf-8")
-            self.assertEqual(card_lib.production_inventory("0.3.0", t)[0], "0.2.0")
-            self.assertIsNone(card_lib.new_port_problem("loom-fun-staging/new-loom", "0.3.0", t))
-            self.assertIn("production inventory", card_lib.new_port_problem("loom-fun-staging/old-loom", "0.3.0", t))   # any org, same name
-            self.assertIn("no production inventory", card_lib.new_port_problem("loom-fun/new-loom", "0.4.0", t))
-            self.assertEqual(card_lib.new_port_line("0.3.0", t), "New port in SDK 0.3.0: no SDK 0.2.0 card to compare.")
-
-    def test_render_and_schema(self):
-        with tempfile.TemporaryDirectory() as t:
-            d = Lint().card(t)
-            info = self.info_with(d, self.NEW)
-            self.assertFalse([e for e in card_lib.validate(info, "") if "sdk_delta" in e])
-            import render_card
-            text = "\n".join(render_card.delta_lines(info, {"hrx_loom": "0.3.0"}, True, 3))
-            self.assertIn("**New port in SDK 0.3.0: no SDK 0.2.0 card to compare.**", text)
-
-    def test_lint_accepts_only_a_new_port(self):
-        with tempfile.TemporaryDirectory() as t:
-            d = Lint().card(t)
-            self.info_with(d, self.NEW)
-            self.assertEqual(lint_card.lint(str(d), runs=lint_card.Runs(offline=True))["delta"], [])
-        with tempfile.TemporaryDirectory() as t:   # the golden card's repository IS in the 0.2.0 production inventory
-            d = Lint().card(t)
-            self.info_with(d, "loom-fun/ggml-org-Flint-loom")
-            res = lint_card.lint(str(d), runs=lint_card.Runs(offline=True))["delta"]
-            self.assertTrue(res and "not a new port" in res[0] and "production inventory" in res[0], res)
-        with tempfile.TemporaryDirectory() as t:   # a new-port line next to a previous-card comparison
-            d = Lint().card(t)
-            comps = json.loads((CARD / "test/sdk03/expected/info.json").read_text(encoding="utf-8"))["sdk_delta"]["comparisons"]
-            self.info_with(d, self.NEW, comps)
-            res = lint_card.lint(str(d), runs=lint_card.Runs(offline=True))["delta"]
-            self.assertTrue(any("not a new port: a card comparison too" in p for p in res), res)
-
-
-class KitKept(unittest.TestCase):
-    """Migration-only programs whose kit build lost its A/B: the card says why in one generated line (sdk_delta.kit)."""
-    REASON = "Strix Halo decode -4.2 % (confirmed in the same-job ABBA)"
-    URL = "https://github.com/loom-fun/loom-skills/actions/runs/1/job/2"
-
-    def test_lint_and_render(self):
-        with tempfile.TemporaryDirectory() as t:
-            d = Lint().card(t)
-            info = json.loads((d / "info.json").read_text(encoding="utf-8"))
-            info["sdk_delta"]["kit"] = {"reason": self.REASON, "url": self.URL}
-            self.assertFalse([e for e in card_lib.validate(info, "") if "sdk_delta" in e])
-            import render_card
-            text = "\n".join(render_card.delta_lines(info, {"hrx_loom": "0.3.0"}, True, 3))
-            self.assertIn(f"is not shipped: {self.REASON} ([evidence]({self.URL})).", text)
-            bad = dict(info, sdk_delta=dict(info["sdk_delta"], kit={"why": "x"}))
-            self.assertTrue([e for e in card_lib.validate(bad, "") if "sdk_delta" in e])
-
-    def test_make_info_keeps_and_checks(self):
-        ns = SimpleNamespace(previous_card=[], delta_explanations=None, kit_kept=None)
-        old = {"kit": {"reason": self.REASON, "url": None}, "comparisons": []}
-        self.assertEqual(make_info.sdk_delta(ns, old)["kit"], {"reason": self.REASON, "url": None})
-        ns.kit_kept = {"url": self.URL}
-        with self.assertRaises(SystemExit):
-            make_info.sdk_delta(ns, None)
+if __name__ == "__main__":
+    unittest.main()

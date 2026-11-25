@@ -36,24 +36,23 @@ RESULT = {"revision": "a" * 40, "sdk": {"old": "0.2.0", "new": "0.3.0"}, "pixels
 
 
 class Migrate(unittest.TestCase):
-    def test_mechanical_changes_and_the_delta_block(self):
-        t = image_card.migrate(README, "acme-Img-loom", RESULT, "https://x/job/1", "loom-fun-staging", "c" * 40)
+    def test_mechanical_changes_preserve_measured_sdk(self):
+        t = image_card.migrate(README, "acme-Img-loom", RESULT, "loom-fun-staging")
         self.assertIn('pipx install "hrx-loom[hf]==0.3.0"', t)
         self.assertIn("loom-fetch huggingface:loom-fun-staging/acme-Img-loom:image --output=img", t)
         self.assertNotIn("materialize", t)
         self.assertIn("- The weights come from acme at the pinned revision.", t)
         self.assertIn("supported by hrx-loom 0.3.0 can fetch", t)
-        self.assertIn("| Loom (this package; hrx-loom 0.2.0, Windows cross-engine session; SDK 0.3.0 re-measured on Linux below) | **7.1** | — |", t)
+        self.assertIn("| Loom (this package; SDK 0.2.0) | **7.1** | — |", t)
         self.assertIn("| Loom (this package) | 25.69 |", t)   # not a timing table: unchanged
-        self.assertIn("- Strix Halo: identical pixels (RGB sha256 `bbbbbbb` on both, 4 images each), s/image 10 → 9.9 (-1.0 %; lower is faster): "
-                      "the same programs on both SDKs in one [job](https://x/job/1).\n\n## Files", t)
-        self.assertIn("hrx-loom `0.3.0` (values above measured on `0.2.0` unless marked; card migrated by loom-skills `fleet/image_card.py` `ccccccc`);", t)
+        self.assertNotIn("Change from", t)
+        self.assertIn("hrx-loom `0.3.0`; programs from somewhere", t)
 
     def test_refuses_other_pixels_or_form(self):
         with self.assertRaises(ValueError):
-            image_card.migrate(README, "s", dict(RESULT, pixels_match=False), "u", "loom-fun-staging", "c")
+            image_card.migrate(README, "s", dict(RESULT, pixels_match=False), "loom-fun-staging")
         with self.assertRaises(ValueError):
-            image_card.migrate(README.replace("## Files", "## Other"), "s", RESULT, "u", "loom-fun-staging", "c")
+            image_card.migrate(README.replace("## Files", "## Other"), "s", RESULT, "loom-fun-staging")
 
 
 class Publish(unittest.TestCase):

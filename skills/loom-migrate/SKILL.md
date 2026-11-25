@@ -73,8 +73,7 @@ Order matters: each step's proof is the next step's precondition. Big outputs go
    When the old card and llama.cpp are already measured and unchanged, `--mode sdk-loom` is the cheaper sweep: Loom only on the new SDK, deltas
    against the old card's Loom rows, ONE targeted ABBA job only for a row outside +-3 % (`fleet/README.md` "SDK A/B"); the card then says
    Loom and llama.cpp come from different jobs on the same runner type.
-6. **Publish to the staging org** (`loom-fleet` `reference/publish.md`): each card shows its own new-SDK measurement and the delta line
-   against the old card; publish partial progress; verify the live card (session and programs hash). Never production.
+6. **Publish to the staging org** (`loom-fleet` `reference/publish.md`): use the existing card template with current measurements; publish partial progress; verify the live card (session and programs hash). Never production.
    **Before promotion** (owner's go-ahead), freeze `eligible.json` and `held.json` (every model repo of the production org in exactly one) and
    prepare the reviewed bundle: `scripts/replay_promotion.py prepare` composes the exact production bytes, checks them with the
    card file-set check, and plans the OUTGOING SDK tag at each production parent so the old card stays addressable at
@@ -84,7 +83,7 @@ Order matters: each step's proof is the next step's precondition. Big outputs go
    replay --execute` writes the cards. The card-tag rule: `loom-fleet` reference/publish.md "Card tags"; the promoted (new-SDK)
    cards get no tag now. A single card outside a release goes through `loom-benchmark/scripts/card/promote_staging.py`.
 7. **Report the perf delta** per model and device: equal or better on a supermajority of metrics, and every regression over 3 % explained
-   (an upstream issue, or here). A result without its explanation is not reported as "fine".
+   in the release report. Generate it with `fleet/sdk_delta_report.py EVIDENCE.json` from `fleet/regen.py evidence STATE.json -o EVIDENCE.json` and link it from the tracking issue. A result without its explanation is not reported as "fine".
 8. **Simplification ledger** (`notes/simplifications.md`): what the new SDK lets us delete (a flag, a computation, a workaround). Land what
    is inside the campaign scope; list the rest with the reason. Measure a simplification that depends on behaviour (for example
    dropping an explicit tuning flag) with an A/B before claiming it.

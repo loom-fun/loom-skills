@@ -619,8 +619,7 @@ assert od['baseline'] == pd['baseline'], 'the baseline block (build, arguments) 
   && echo "OK   loomonly: a device the previous card has no table for stops" || { echo "FAIL loomonly: perf --baseline-from-info accepted a device without a table"; bad=1; }
 # an SDK 0.3.0 migration card (sdk03): flint's frozen programs pinned to 0.3.0, re-measured on it (decode and prefill 1k/2k
 # 4 % slower than flint's first session; prefill 1k/2k regress against the card's values), full gates whose spec gate found accepted drafted tokens but no proposal count
-# (hrx-loom 0.3 with a service ABI 1 controller), the native-context admission check, and the delta line against the
-# published flint card (--previous-card) with one regression explained from evidence and the others not
+# (hrx-loom 0.3 with a service ABI 1 controller), the native-context admission check, and the current gate results
 S3=$here/sdk03/evidence; S3SRC=(--device "$F/evidence/device.json" --hrx-loom "$S3/hrx_loom.json")
 mkdir -p "$tmp/sdk03"; cp -r "$F/pkg/." "$tmp/sdk03/"
 py -c "import json, sys; p = sys.argv[1] + '/llm_config.json'; c = json.load(open(p)); c['sdk'] = {k: v for k, v in json.load(open(sys.argv[2])).items() if k != 'artifact_id' and k != 'branch'}
@@ -636,28 +635,16 @@ py "$C/make_info.py" perf --loom-jsonl "$tmp/s3_loom.jsonl" --llama-jsonl "$F/ev
   -o "$tmp/s3_perf.json" 2>/dev/null
 py "$C/make_info.py" gates "$S3/gates.json" "${S3SRC[@]}" --package "$tmp/sdk03" --source-kind devlab --run 3102 -o "$tmp/s3_gates.json" 2>/dev/null
 py "$C/make_info.py" gates "$S3/ktest.log" --time 2026-11-25T02:00:00 "${S3SRC[@]}" --package "$tmp/sdk03" --source-kind devlab --run 3102 -o "$tmp/s3_ktest.json" 2>/dev/null
-# the previous card failed the same kernel test: the failure is pre-existing, not a regression of the SDK
-py -c "import json, sys; i = json.load(open(sys.argv[1])); g = i['devices']['strix-halo']['gates']
-g['kernel_tests'] = dict(next(iter(g.values())), status='fail', level=None, detail='67/68; failed: moe_gemm_12')
-json.dump(i, open(sys.argv[2], 'w'), indent=1)" "$tmp/flint/info.json" "$tmp/s3_prev.json"
 py "$C/make_info.py" build "$tmp/sdk03" --generator-commit $GEN --from-info "$tmp/flint/info.json" --reset-performance \
-  --previous-card "card:loom-fun/ggml-org-Flint-loom@89abcdef0123456789abcdef0123456789abcdef=$tmp/s3_prev.json" \
-  --delta-explanations "$S3/explanations.json" --evidence "$tmp/s3_perf.json" "$tmp/s3_gates.json" "$tmp/s3_ktest.json" -o "$tmp/sdk03/info.json" 2>/dev/null
+ --evidence "$tmp/s3_perf.json" "$tmp/s3_gates.json" "$tmp/s3_ktest.json" -o "$tmp/sdk03/info.json" 2>/dev/null
 py -c "import sys; sys.path.insert(0, sys.argv[1]); import card_lib as c
 i = c.load_json(sys.argv[2]); d = i['devices']['strix-halo']
 assert c.validate(i) == [], c.validate(i)
 m = {k: v for k, (v, _) in c.card_metrics(c.gpu_view(i, 'strix-halo')).items()}
 assert m['spec_acceptance'] == {'loom': None, 'unreported': 'proposals', 'accepted_per_pass': 1.249}, m['spec_acceptance']
 assert d['admission']['admitted'] and d['admission']['tokens'] == 65410
-rows = c.delta_rows(i, {'hrx_loom': '0.3.0'}, i['sdk_delta']['comparisons'][0])['strix-halo']
-reg = [r['metric'] for r in rows if r['regression']]
-assert reg == ['prefill_1k', 'prefill_2k'], reg
-assert [r['metric'] for r in rows if r['regression'] and r['explanation']] == ['prefill_1k']
-acc = next(r for r in rows if r['metric'] == 'spec_acceptance'); assert acc['old'] == 0.68 and acc['unreported'] == 'proposals', acc
-rows3 = c.delta_rows(i, {'hrx_loom': '0.3.0'}, i['sdk_delta']['comparisons'][0], 3)['strix-halo']
-acc = next(r for r in rows3 if r['metric'] == 'spec_acceptance'); assert acc['per_pass'] == {'old': 0.975, 'new': 1.249} and not acc['different_workloads'], acc
-assert c.previous_gate(i, 'strix-halo', 'kernel_tests')['status'] == 'fail' and d['gates']['kernel_tests']['detail'].startswith('120/121')" "$C" "$tmp/sdk03/info.json" \
-  && echo "OK   sdk03: unreported acceptance, admission, delta rows vs the 0.2-era card" || { echo "FAIL sdk03: info.json"; bad=1; }
+assert 'sdk_delta' not in i and d['gates']['kernel_tests']['status'] == 'fail'" "$C" "$tmp/sdk03/info.json" \
+  && echo "OK   sdk03: unreported acceptance, admission, current gate results" || { echo "FAIL sdk03: info.json"; bad=1; }
 # card.carried "drop": the sdk02 card's values and gates measured on SDK 0.1.0 (not its pin 0.2.0rc1) are not shown; the GPU keeps its Quick start
 rm -rf "$tmp/sdk02_drop"; mkdir -p "$tmp/sdk02_drop"
 py -c "import json, sys; i = json.load(open(sys.argv[1] + '/info.json')); i['card']['carried'] = 'drop'; json.dump(i, open(sys.argv[2], 'w'))" "$tmp/sdk02" "$tmp/s2drop.json"

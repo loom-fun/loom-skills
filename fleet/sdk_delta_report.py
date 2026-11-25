@@ -120,6 +120,14 @@ def render(doc, band=3.0):
             values = ["-" if a.get(k) is None else f"{a[k]:.3g}" for k in ("old", "new")]
             acc = " -> ".join(values) + f" ({a.get('unit', 'unverified unit')})"
         ln.append(f"| {r['slug']} | {r['device']} | " + " | ".join(_pct(r["delta"].get(k)) for k in ROWS) + f" | {acc} |")
+    images = [r for r in rows if r["image"]]
+    if images:
+        ln += ["", "### Image timing (seconds per image)", "", "| Model | GPU | Old | New | Change |",
+               "|---|---|---:|---:|---:|"]
+        for r in images:
+            old, new = [(r["image"].get(side) or {}).get("median_s") for side in ("old", "new")]
+            change = f"{(new / old - 1) * 100:+.1f} %" if old and new is not None else "-"
+            ln.append(f"| {r['slug']} | {r['device']} | {old if old is not None else '-'} | {new if new is not None else '-'} | {change} |")
     regs = [(r, g) for r in rows for g in r["regressions"]]
     ln += ["", "### Regressions over the band", ""]
     if not regs:

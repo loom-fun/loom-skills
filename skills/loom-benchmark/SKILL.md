@@ -358,15 +358,10 @@ source for the report's numbers.
 The generated card sections, rows, publishing and republishing rules: `kb.py route --topic benchmark` (loom-kb).
 
 A card on a new hrx-loom version (`make_info.py build --help`):
-- The delta line is generated: `make_info.py build --previous-card card:REPO@REVISION=OLD/info.json` stores the published
-  card's values (and `migration=...` the migration-only build's, for programs changed beyond the migration);
-  `--delta-explanations` or `--sdk-evidence` adds the reason of every regression beyond 3 %. The card lists every metric
-  of every re-measured GPU; a regression without a reason renders "unexplained" and fails the lint.
-- Rows and gates measured on another SDK than the Quick start's pin are marked "measured on SDK X, not re-qualified on Y"
-  (`card.carried` "mark", the default) or left out ("drop"); never a plain pass. A gate the previous card also failed
-  is shown as pre-existing.
+- Keep the release template's sections and notes. Cite the measured SDK beside carried rows and gates.
+- Generate SDK comparisons and regression explanations in the release report from sweep evidence.
 - `card/lint_card.py DIR` (CI: `card/test/check.sh` goldens, `tests/test_card_sdk030.py`) fails a card that cites a
-  failed or unknown run, has no delta line or an unexplained regression, drops the acceptance row without a reason,
+  failed or unknown run, includes release history, drops the acceptance row without a reason,
   lacks the admission check, has inconsistent versions or "unknown" in its Versions line, is not exactly the
   generator's render, or holds files or staging text outside the card format (`card/card_files.py`, which
   `publish_package.py upload` enforces for the production org).
