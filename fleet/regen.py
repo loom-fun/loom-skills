@@ -2544,7 +2544,24 @@ def image_problem(v):
     return None
 
 
-def eligibility(doc, head=None):
+def explicitly_unsupported(info, gpu):
+    """An unsupported device is present with a memory requirement and without device results or serving settings."""
+    device = (info.get("devices") or {}).get(gpu) or {}
+    required = device.get("required_bytes")
+    return (device.get("state") == "unsupported" and type(required) is int and required > 0
+            and not any(device.get(k) for k in ("gates", "performance", "roofline", "serve_args", "execution", "admission")))
+
+
+def unsupported_on_both_cards(model, staging_revision, devices):
+    if not all(re.fullmatch(r"[0-9a-f]{40}", rev or "") for rev in (staging_revision, model.get("production_revision"))):
+        return set()
+    production = card_lib.load_info(hf_file(model["production"], "info.json", model["production_revision"]))
+    slug = model["production"].split("/")[-1]
+    staging = card_lib.load_info(hf_file(f"{STAGING_ORG}/{slug}", "info.json", staging_revision))
+    return {gpu for gpu in devices if explicitly_unsupported(production, gpu) and explicitly_unsupported(staging, gpu)}
+
+
+def eligibility(doc, head=None, unsupported=None):
     """(eligible, held, pending) of an sdk-evidence/1 document. Fail closed: a model is eligible only when every device its card claims that has a
     DevLab runner is `qualified` (a passing job of the shipped programs on the verified SDK; an image package: pixel-identical outputs) and the
     staging card is published; device_keys = the qualified devices; qualification run + job per device, never null (an image device adds its pixel
@@ -2572,6 +2589,15 @@ def eligibility(doc, head=None):
         published = sorted((v.get("published") or "", v["published_revision"]) for v in qual.values() if v.get("published_revision"))
         latest = published[-1][1] if published else None
         unpublished = sorted(d for d, v in qual.items() if not v.get("published_revision"))
+        skipped = {gpu for gpu, value in runner.items() if value["status"] == "does_not_fit"}
+        verified_unsupported = set()
+        if unsupported and skipped and qual and latest and bad.keys() <= skipped and not unpublished:
+            try:
+                verified_unsupported = skipped.intersection(unsupported(m, latest, skipped))
+            except Exception as err:
+                bad["staging"] = f"cannot verify unsupported devices: {err}"
+            for gpu in verified_unsupported:
+                del bad[gpu]
         if not bad and unpublished:
             bad["staging"] = f"the staging card is not published for {', '.join(unpublished)} yet"
         if not bad:
@@ -2590,6 +2616,7 @@ def eligibility(doc, head=None):
         eligible[slug] = {
             "production": m["production"], "target_revision": m["production_revision"], "frozen_production_revision": m["production_revision"],
             "programs_sha256": m["programs_sha256"], "device_keys": sorted(qual),
+            **({"unsupported_devices": sorted(verified_unsupported)} if verified_unsupported else {}),
             "qualification": {d: {"run": int(v["run"]), "job": int(v["job"]), "url": v["job_url"],
                                   **({"image": {**{k: v["image"].get(k) for k in IMAGE_VERDICT},
                                                 "deterministic": {s: v["image"][s]["deterministic"] for s in ("old", "new")}}}
@@ -2781,7 +2808,7 @@ def cmd_eligible(a):
         for device in doc["models"][slug]["devices"].values():
             if device["status"] not in ("no_runner", "not_claimed"):
                 device.update(status="pending", reason="waiting for final program revision and remeasurement")
-    eligible, held, pending = eligibility(doc, hf_head)
+    eligible, held, pending = eligibility(doc, hf_head, unsupported_on_both_cards)
     for slug, row in list(eligible.items()):
         if row["kind"] != "text":
             continue

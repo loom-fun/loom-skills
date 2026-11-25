@@ -321,6 +321,27 @@ class Eligibility(unittest.TestCase):
         self.assertEqual(pend, {})
         self.assertEqual(row["gates_not_rerun"], {})
 
+    def test_legacy_skipped_device_requires_both_cards_to_explicitly_exclude_it(self):
+        gpu = "radeon-r9700"
+        rev = "a" * 40
+        doc = self.doc({"strix-halo": self.dev(published_revision=rev), gpu: {"status": "does_not_fit"}})
+        unsupported = {"state": "unsupported", "required_bytes": 80_000_000_000}
+        def eligible(old, new, head=rev):
+            with mock.patch.object(regen, "hf_file", side_effect=lambda repo, name, revision: (repo, revision)) as reads, \
+                    mock.patch.object(regen.card_lib, "load_info", side_effect=[{"devices": {gpu: old}}, {"devices": {gpu: new}}]):
+                result = regen.eligibility(doc, lambda _: head, regen.unsupported_on_both_cards)
+                self.assertEqual(reads.call_args_list, [mock.call("loom-fun/" + TEXT, "info.json", REV[TEXT]),
+                                                         mock.call("loom-fun-staging/" + TEXT, "info.json", rev)])
+                return result
+        row = eligible(unsupported, unsupported)[0][TEXT]
+        self.assertEqual(row["device_keys"], ["strix-halo"])
+        self.assertEqual(row["unsupported_devices"], [gpu])
+        for bad in ({}, {"state": "not_measured"}, dict(unsupported, required_bytes=0), dict(unsupported, gates={"logits": {}})):
+            self.assertIn(TEXT, eligible(bad, unsupported)[2])
+            self.assertIn(TEXT, eligible(unsupported, bad)[2])
+        self.assertIn(TEXT, eligible(unsupported, unsupported, head="b" * 40)[2])
+        self.assertIn(TEXT, regen.eligibility(doc, self.HEAD)[2])
+
     def test_staging_revision_is_the_latest_publish_and_the_live_head(self):
         # retro review: sorted(revisions)[-1] picked the alphabetically largest sha ("f..."), not the latest publish ("a...")
         devs = {"strix-halo": self.dev(published_revision="a" * 40, published="2026-11-25T03:00:00Z"),
