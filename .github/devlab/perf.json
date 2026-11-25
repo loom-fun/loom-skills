@@ -40,7 +40,7 @@
    "bundle": {
     "build": {
      "extension": "loom-fun/loom-gufo-extension@cd2a18327bdafd36d091d0a779c4d1efa770ae04",
-     "gufo": "loom-fun/gufo@01778da1e6443329fc0ef7fd45950e6bb0dee1fd"
+     "gufo": "loom-fun/gufo@ec6d3d0724381585307d98ac760d75d2f8f325b8"
     }
    }
   },
@@ -71,7 +71,7 @@
    "bundle": {
     "build": {
      "extension": "loom-fun/loom-gufo-extension@cd2a18327bdafd36d091d0a779c4d1efa770ae04",
-     "gufo": "loom-fun/gufo@01778da1e6443329fc0ef7fd45950e6bb0dee1fd"
+     "gufo": "loom-fun/gufo@ec6d3d0724381585307d98ac760d75d2f8f325b8"
     }
    },
    "memory_bytes": 17000000000
