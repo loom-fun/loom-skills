@@ -3741,12 +3741,17 @@ SEG_MIN = int(os.environ.get("SEG_MIN", "8192"))
 # candidates, dropped n-gram drafting. Longer verification runs are cut into segments of at most this many tokens
 # (same bits). SEG_TS_MAX=N overrides (A/B switch).
 SEG_TS_MAX = int(os.environ.get("SEG_TS_MAX", "3" if D == 128 else "64"))
+# head_dim 256 (choice decode.attn.segment.d256; opt-in by scope): the span body for the qwen35 hybrids' verify spans (2 KV heads x 8
+# query heads, 4 verify tokens re-read the 64 MB/layer KV at 32k through the split kernel: 12 of a 47 ms step, Qwen3.6-35B Strix). The
+# score loop runs chunk-outer (each 32-dim K chunk feeds every token's dot, then dies: 8 chunks of K never live at once) and each
+# token's p values are read back four keys at a time where the values loop uses them; the arithmetic is the same per token.
+SEG_D256 = os.environ.get("SEG_D256", "0") == "1"
 
 
 def seg_tokens():
     """Tokens per segment: the verification span (draft depth + 1), capped so the q and p tiles fit 64 KB of
     workgroup memory (longer runs go one token at a time); 0 when the decode path keeps the split kernel."""
-    if not (os.environ.get("SEG_ATTN", "1") == "1" and gen_draft.enabled() and D in (64, 128) and KVH <= 2):
+    if not (os.environ.get("SEG_ATTN", "1") == "1" and gen_draft.enabled() and (D in (64, 128) or (D == 256 and SEG_D256)) and KVH <= 2):
         return 0
     # at least 3 tokens even for depth 1: a depth-1 build with 2-token segments ran slower at long context than the same
     # spans in 3-token segments (Qwen2.5-1.5B 16k-32k: 76 vs 95-98 tok/s), and tune measures depths on one build
@@ -3862,16 +3867,32 @@ def attention_seg(split_text):
       %kdb = index.scale %kdelta, %pb : index, offset -> offset
       %kofs = index.add %kbase, %kdb : offset
       %krow = buffer.view %arena[%kofs] : buffer -> view<{KVH}x{D}xf16>""")
-    for c in range(NC):
+    lazy = D == 256   # chunk-outer scores in a loop over 32-dim chunks, values in a loop over 4-key groups (SEG_D256)
+    if lazy:   # every token's dot, one 32-dim chunk of the key per step (each token's chunks in order, as the unrolled form)
+        L.append(f"""      %cnc = index.constant {NC} : index
+      {", ".join(f"%sdr{k}" for k in range(TS))} = scf.for %kc = [%c0 to %cnc step %c1]({", ".join(f"%sa{k} = %zero_f : f32" for k in range(TS))}) -> ({", ".join(["f32"] * TS)}) {{
+        %kdd = index.mul %kc, %c32k : index
+        %khh = vector.load %krow[%kv_head, %kdd] : view<{KVH}x{D}xf16> -> vector<32xf16>
+        %kff = vector.extf %khh : vector<32xf16> to vector<32xf32>""")
+        for k in range(TS):
+            L.append(f"""        %qq{k} = vector.load %q_row[%ck{k}, %wave, %kdd] : view<{TS}x{G}x{D}xf32> -> vector<32xf32>
+        %sn{k} = vector.dotf<reassoc|contract> %kff, %qq{k}, %sa{k} : vector<32xf32>, vector<32xf32>, f32""")
+        L.append("        scf.yield " + ", ".join(f"%sn{k}" for k in range(TS)) + " : " + ", ".join(["f32"] * TS) + "\n      }")
+    for c in range(0 if lazy else NC):
         L.append(f"""      %kd{c} = index.constant {32 * c} : index
       %kh{c} = vector.load %krow[%kv_head, %kd{c}] : view<{KVH}x{D}xf16> -> vector<32xf16>
       %kf{c} = vector.extf %kh{c} : vector<32xf16> to vector<32xf32>""")
     for k in range(TS):
         dots, prev = [], "%zero_f"
         for c in range(NC):
-            dots.append(f"""        %qc{k}_{c} = vector.load %q_row[%ck{k}, %wave, %kd{c}] : view<{TS}x{G}x{D}xf32> -> vector<32xf32>
+            if lazy:
+                continue
+            else:
+                dots.append(f"""        %qc{k}_{c} = vector.load %q_row[%ck{k}, %wave, %kd{c}] : view<{TS}x{G}x{D}xf32> -> vector<32xf32>
         %sd{k}_{c} = vector.dotf<reassoc|contract> %kf{c}, %qc{k}_{c}, {prev} : vector<32xf32>, vector<32xf32>, f32""")
             prev = f"%sd{k}_{c}"
+        if lazy:
+            prev = f"%sdr{k}"
         L.append(f"""      %bl{k} = index.cmp ult, %j, %hi_{k} : index
       %bh{k} = index.cmp ugt, %j32, %lo_{k} : index
       %bb{k} = scalar.andi %bl{k}, %bh{k} : i1
@@ -3909,11 +3930,44 @@ def attention_seg(split_text):
       %c31k = index.constant 31 : index
       %pe_hi_a = index.add %j, %c31k : index
       %pe_hi = index.min %pe_hi_a, %hi_u_less : index""")
-    for k in range(TS):   # each token's 32 p values of the block, 4 per load
-        for g in range(8):
-            L.append(f"""      %pq{k}_{g} = vector.load %p_lds[%wave, %ck{k}, %pg{g}] : view<{G}x{TS}x32xf32> -> vector<4xf32>""")
+    if not lazy:
+        for k in range(TS):   # each token's 32 p values of the block, 4 per load
+            for g in range(8):
+                L.append(f"""      %pq{k}_{g} = vector.load %p_lds[%wave, %ck{k}, %pg{g}] : view<{G}x{TS}x32xf32> -> vector<4xf32>""")
     prev = {k: f"%as{k}" for k in range(TS)}
-    for jj in range(0, 32, KS):   # keys jj .. jj + KS - 1, lane sub-group i takes key jj + i (KS <= 2)
+    if lazy:   # KS == 1 (32 lanes per key): 8 steps of 4 keys; keys 16..31 sit on the block's second page
+        VAs = ", ".join([VA] * TS)
+        L.append(f"""      %cvg4 = index.constant 4 : index
+      %cvg8 = index.constant 8 : index
+      {", ".join(f"%vr{k}" for k in range(TS))} = scf.for %vg = [%c0 to %cvg8 step %c1]({", ".join(f"%vacc{k} = %as{k} : {VA}" for k in range(TS))}) -> ({VAs}) {{
+        %vg4 = index.mul %vg, %cvg4 : index
+        %vsel = index.cmp uge, %vg, %cvg4 : index
+        %vbase = scf.select %vsel, %vhi, %vlo : offset
+        %vrow = buffer.view %arena[%vbase] : buffer -> view<16x{KVH}x{LPK}x{VW}xf16>
+        %vpe = scf.select %vsel, %pe_hi, %pe_lo : index
+        %vanc = scf.select %vsel, %anc_hi, %anc_lo : index
+        %vj = index.add %j, %vg4 : index""")
+        for k in range(TS):
+            L.append(f"""        %pqg{k} = vector.load %p_lds[%wave, %ck{k}, %vg4] : view<{G}x{TS}x32xf32> -> vector<4xf32>""")
+        cur = {k: f"%vacc{k}" for k in range(TS)}
+        for i in range(4):
+            L.append(f"""        %vci{i} = index.constant {i} : index
+        %vki{i} = index.add %vj, %vci{i} : index
+        %vkai{i} = index.min %vki{i}, %vpe : index
+        %vkci{i} = index.max %vkai{i}, %vanc : index
+        %vii{i} = index.sub %vkci{i}, %vanc : index
+        %vixi{i} = index.assume %vii{i} [range(%vii{i}, 0, 15)] : index
+        %vhi{i} = vector.load %vrow[%vixi{i}, %kv_head, %vlane, %c0] : view<16x{KVH}x{LPK}x{VW}xf16> -> vector<{VW}xf16>
+        %vfi{i} = vector.extf %vhi{i} : vector<{VW}xf16> to {VA}""")
+            for k in range(TS):
+                L.append(f"""        %pxi{i}_{k} = vector.extract %pqg{k}[{i}] : vector<4xf32> -> f32
+        %pei{i}_{k} = scf.select %use{k}, %pxi{i}_{k}, %zero_f : f32
+        %pvi{i}_{k} = vector.splat %pei{i}_{k} : {VA}
+        %vai{i}_{k} = vector.fmaf %pvi{i}_{k}, %vfi{i}, {cur[k]} : {VA}""")
+                cur[k] = f"%vai{i}_{k}"
+        L.append("        scf.yield " + ", ".join(cur[k] for k in range(TS)) + f" : {VAs}\n      }}")
+        prev = {k: f"%vr{k}" for k in range(TS)}
+    for jj in range(0, 32 if not lazy else 0, KS):   # keys jj .. jj + KS - 1, lane sub-group i takes key jj + i (KS <= 2)
         h = "hi" if jj >= 16 else "lo"
         L.append(f"""      %vc{jj} = index.constant {jj} : index
       %vk0_{jj} = index.add %j, %vc{jj} : index

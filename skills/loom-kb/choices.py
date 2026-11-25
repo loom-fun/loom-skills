@@ -224,6 +224,8 @@ CHOICE("decode.attn.span.min_kv_heads", "int", 8, "ATTN_MT_MIN_KV", rows=["decod
        doc="KV heads from which the span path is taken (8 KV heads +8..2x, 4 KV heads 0/-15 %, <= 2 KV heads -6..-27 %).")
 CHOICE("decode.attn.segment", "bool", True, "SEG_ATTN", rows=["decode_32k"], kernels=["g_attention_split", "g_attention_combine"],
        doc="Drafting builds with <= 2 KV heads and head_dim 64/128 decode long spans in segments (False: split kernel everywhere).")
+CHOICE("decode.attn.segment.d256", "bool", False, "SEG_D256", rows=["decode_32k"], kernels=["g_attention_split"],
+       doc="head_dim 256 drafting builds (<= 2 KV heads) take the segment path too: chunk-outer scores, p read where used (qwen35 hybrids' verify spans).")
 CHOICE("decode.attn.segment.min_ctx", "int", 8192, "SEG_MIN", rows=["decode_32k"], kernels=["g_attention_split"],
        doc="Visible keys from which the segment path applies.")
 CHOICE("decode.attn.segment.max_tokens", "int", None, "SEG_TS_MAX", rows=["decode_32k"], kernels=["g_attention_split"], dynamic=True,
