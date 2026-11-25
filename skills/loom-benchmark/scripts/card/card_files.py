@@ -31,7 +31,8 @@ TEXT = {"README.md", "REPORT.md", "model.json", "model.json.lock", "info.json", 
 # Production-form text never mentions staging (the org, a staging package, a staging main), a rehearsal, or the qualification
 # records the card format does not define.
 FORBIDDEN = [(re.compile(r"loom-fun-staging", re.I), "a loom-fun-staging reference"),
-             (re.compile(r"(?<!loom-fun-)\bstag(?:ing|ed)\b", re.I), "staging wording"),
+             (re.compile(r"(?<!loom-fun-)\bstag(?:ing|ed)\s+(?:package|main|org|organi[sz]ation|card|repo(?:sitory)?|copy|branch|"
+                         r"revision|head|preset|run|release)s?\b", re.I), "staging wording"),
              (re.compile(r"\brehears", re.I), "rehearsal wording"),
              (re.compile(r"(?:quick-start|sdk|sdk-capacity)-qualification|sdk-comparison", re.I), "a qualification-record reference")]
 
@@ -53,10 +54,15 @@ def package_files(directory):
     return out
 
 
+PROSE_STAGING = re.compile(r"(?<!loom-fun-)\bstaging\b", re.I)   # the card's own prose never says staging at all
+
+
 def text_problems(rel, text):
-    """The text rules of one card text file."""
+    """The text rules of one card text file (README.md and REPORT.md, the card's prose, never say "staging"; the
+    configs' recorded evidence strings may say "staged" for a kernel's pipeline, so only staging-flow phrases count)."""
     out = []
-    for pat, what in FORBIDDEN:
+    pats = FORBIDDEN + ([(PROSE_STAGING, "staging wording")] if rel in ("README.md", "REPORT.md") else [])
+    for pat, what in pats:
         hits = sorted({m.group(0) for m in pat.finditer(text)})
         if hits:
             line = next(i for i, ln in enumerate(text.splitlines(), 1) if pat.search(ln))

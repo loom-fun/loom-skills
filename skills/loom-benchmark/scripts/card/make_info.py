@@ -1195,7 +1195,7 @@ def cmd_perf(a):
     if a.differs and "baseline" in perf:   # the main baseline too: a Loom-side note or a cell llama.cpp cannot run (rule: never silent)
         perf["baseline"]["differs"] = a.differs
     write_json(a.o, {"evidence": EVIDENCE_ID, **gpu_key(a, session["source"]), "performance": perf})
-    print(f"wrote {a.o}: " + ", ".join(f"{k} {m.get('loom')}/{m['baseline']}" for k, m in metrics.items()), file=sys.stderr)
+    print(f"wrote {a.o}: " + ", ".join(f"{k} {m.get('loom')}/{m.get('baseline')}" for k, m in metrics.items()), file=sys.stderr)
 
 
 def draft_metrics_acceptance(paths):
