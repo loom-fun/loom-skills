@@ -1,47 +1,546 @@
 {
- "_comment": "R9700 per-model measurement (r9700_jobs.py): one job per model on one R9700 runner; loom-fun-staging card, llama.cpp ROCm b1375 + Vulkan b12211 with the matched drafting, reduced-context models served at served_context. Does not fit: none",
- "runner": "r9700",
- "memory_bytes": 34000000000,
+ "_comment": "pf-gemma reproduction (prefail, do not merge): logits gate of the staging package (fun: frozen programs; lmstudio 26B: already a kit build) vs the sdk030 kit build (staging) vs the build at the #1304 commit (fix = the frozen programs + the final softcap in g_logits_export); R9700: dev gates of the staging card served with the gfx1201-16gb Quick start (g16). logits campaign (logits_jobs.py): new side built from d632f23125c8ab1ba8732e17d2638b5970570ee3; Strix Halo A/B of the staging cards (strix_ab_jobs.py): per model one job on one Strix runner, loom-fun-staging package (fun) vs loom-fun-staging package (staging), same prompts and settings; compare with strix_ab_compare.py SDK A/B (--sdk-ab): fun = the published card on hrx-loom 0.3.0, staging = the package built in the job on 0.3.0.",
+ "runner": "strix",
+ "memory_bytes": 81000000000,
  "llama_spec": "matched",
  "jobs": [
   {
-   "name": "unsloth-qwen3-0-6b-loom",
-   "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
-   "kit": null,
-   "llamacpp": "b1375",
+   "name": "pfg-sab-unsloth-gemma-4-12b-it-loom",
+   "runner": "strix",
+   "card": "loom-fun-staging/unsloth-gemma-4-12B-it-loom",
+   "memory_bytes": 81000000000,
+   "kit": "gemma4",
+   "llamacpp": "b1374",
    "llamacpp_vulkan": "b12211",
-   "memory_bytes_r9700": 17000000000,
    "variants": [
     {
-     "name": "card",
-     "build": {}
+     "name": "fun",
+     "card": "loom-fun-staging/unsloth-gemma-4-12B-it-loom",
+     "sdk": "0.3.0"
     },
     {
-     "name": "nodraft",
+     "name": "staging",
      "build": {},
-     "execution": {
-      "draft_depth": 0
-     }
+     "build_args": [
+      "--memory-gib",
+      "4096"
+     ],
+     "sdk": "0.3.0",
+     "ref": "d632f23125c8ab1ba8732e17d2638b5970570ee3"
+    },
+    {
+     "name": "fix",
+     "build": {},
+     "build_args": [
+      "--memory-gib",
+      "4096"
+     ],
+     "sdk": "0.3.0",
+     "ref": "9221dc522e5e0ab216ea79ba4a249e2668337e14"
     }
    ],
    "steps": [
-    "func:card",
-    "ktest:card",
-    "gates:card:dev",
-    "perf:card:3",
-    "perf:card:3:long",
-    "c4:nodraft",
-    "llama@rocm.np1:3",
-    "llama@rocm.np1:3:long",
-    "llamac4@rocm.nodraft",
-    "llama@vulkan.np1:3",
-    "llama@vulkan.np1:3:long",
-    "llamac4@vulkan.perslot.nodraft"
-   ]
+    "logits:fun",
+    "logits:staging",
+    "ktest:staging",
+    "logits:fix",
+    "ktest:fix"
+   ],
+   "sdk": "0.3.0",
+   "bundle": {
+    "build": {
+     "extension": "loom-fun/loom-gufo-extension@cd2a18327bdafd36d091d0a779c4d1efa770ae04",
+     "gufo": "loom-fun/gufo@ec6d3d0724381585307d98ac760d75d2f8f325b8"
+    }
+   }
+  },
+  {
+   "name": "pfg-sab-unsloth-gemma-4-e2b-it-loom",
+   "runner": "strix",
+   "repeat_rows": 3,
+   "card": "loom-fun-staging/unsloth-gemma-4-E2B-it-loom",
+   "memory_bytes": 16000000000,
+   "kit": "gemma4",
+   "llamacpp": "b1374",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "fun",
+     "card": "loom-fun-staging/unsloth-gemma-4-E2B-it-loom",
+     "sdk": "0.3.0"
+    },
+    {
+     "name": "staging",
+     "build": {},
+     "build_args": [
+      "--memory-gib",
+      "4096"
+     ],
+     "sdk": "0.3.0",
+     "ref": "d632f23125c8ab1ba8732e17d2638b5970570ee3"
+    },
+    {
+     "name": "fix",
+     "build": {},
+     "build_args": [
+      "--memory-gib",
+      "4096"
+     ],
+     "sdk": "0.3.0",
+     "ref": "9221dc522e5e0ab216ea79ba4a249e2668337e14"
+    }
+   ],
+   "steps": [
+    "logits:fun",
+    "logits:staging",
+    "ktest:staging",
+    "logits:fix",
+    "ktest:fix"
+   ],
+   "sdk": "0.3.0",
+   "bundle": {
+    "build": {
+     "extension": "loom-fun/loom-gufo-extension@cd2a18327bdafd36d091d0a779c4d1efa770ae04",
+     "gufo": "loom-fun/gufo@ec6d3d0724381585307d98ac760d75d2f8f325b8"
+    }
+   }
+  },
+  {
+   "name": "pfg-sab-unsloth-gemma-4-e4b-it-loom",
+   "runner": "strix",
+   "card": "loom-fun-staging/unsloth-gemma-4-E4B-it-loom",
+   "memory_bytes": 31000000000,
+   "kit": "gemma4",
+   "llamacpp": "b1374",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "fun",
+     "card": "loom-fun-staging/unsloth-gemma-4-E4B-it-loom",
+     "sdk": "0.3.0"
+    },
+    {
+     "name": "staging",
+     "build": {},
+     "build_args": [
+      "--memory-gib",
+      "4096"
+     ],
+     "sdk": "0.3.0",
+     "ref": "d632f23125c8ab1ba8732e17d2638b5970570ee3"
+    },
+    {
+     "name": "fix",
+     "build": {},
+     "build_args": [
+      "--memory-gib",
+      "4096"
+     ],
+     "sdk": "0.3.0",
+     "ref": "9221dc522e5e0ab216ea79ba4a249e2668337e14"
+    }
+   ],
+   "steps": [
+    "logits:fun",
+    "logits:staging",
+    "ktest:staging",
+    "logits:fix",
+    "ktest:fix"
+   ],
+   "sdk": "0.3.0",
+   "bundle": {
+    "build": {
+     "extension": "loom-fun/loom-gufo-extension@cd2a18327bdafd36d091d0a779c4d1efa770ae04",
+     "gufo": "loom-fun/gufo@ec6d3d0724381585307d98ac760d75d2f8f325b8"
+    }
+   }
+  },
+  {
+   "name": "pfg-sab-unsloth-gemma-4-31b-it-loom",
+   "runner": "strix",
+   "card": "loom-fun-staging/unsloth-gemma-4-31B-it-loom",
+   "memory_bytes": 80000000000,
+   "kit": "gemma4",
+   "llamacpp": "b1374",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "fun",
+     "card": "loom-fun-staging/unsloth-gemma-4-31B-it-loom",
+     "sdk": "0.3.0"
+    },
+    {
+     "name": "staging",
+     "build": {},
+     "build_args": [
+      "--memory-gib",
+      "4096"
+     ],
+     "sdk": "0.3.0",
+     "ref": "d632f23125c8ab1ba8732e17d2638b5970570ee3"
+    },
+    {
+     "name": "fix",
+     "build": {},
+     "build_args": [
+      "--memory-gib",
+      "4096"
+     ],
+     "sdk": "0.3.0",
+     "ref": "9221dc522e5e0ab216ea79ba4a249e2668337e14"
+    }
+   ],
+   "steps": [
+    "logits:fun",
+    "logits:staging",
+    "ktest:staging",
+    "logits:fix",
+    "ktest:fix"
+   ],
+   "sdk": "0.3.0",
+   "bundle": {
+    "build": {
+     "extension": "loom-fun/loom-gufo-extension@cd2a18327bdafd36d091d0a779c4d1efa770ae04",
+     "gufo": "loom-fun/gufo@ec6d3d0724381585307d98ac760d75d2f8f325b8"
+    }
+   }
+  },
+  {
+   "name": "pfg-sab-lmstudio-community-gemma-4-26b-a",
+   "runner": "strix",
+   "card": "loom-fun-staging/lmstudio-community-gemma-4-26B-A4B-it-loom",
+   "memory_bytes": 81000000000,
+   "kit": "gemma4",
+   "llamacpp": "b1374",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "fun",
+     "card": "loom-fun-staging/lmstudio-community-gemma-4-26B-A4B-it-loom",
+     "sdk": "0.3.0"
+    }
+   ],
+   "steps": [
+    "logits:fun"
+   ],
+   "sdk": "0.3.0",
+   "bundle": {
+    "build": {
+     "extension": "loom-fun/loom-gufo-extension@cd2a18327bdafd36d091d0a779c4d1efa770ae04",
+     "gufo": "loom-fun/gufo@ec6d3d0724381585307d98ac760d75d2f8f325b8"
+    }
+   }
+  },
+  {
+   "llama_kv_rocm": 49152,
+   "name": "pfg-rab-unsloth-gemma-4-12b-it-loom",
+   "runner": "r9700",
+   "repeat_rows": 3,
+   "card": "loom-fun-staging/unsloth-gemma-4-12B-it-loom",
+   "memory_bytes_r9700": 34000000000,
+   "served_context": 51200,
+   "kit": "gemma4",
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "fun",
+     "card": "loom-fun-staging/unsloth-gemma-4-12B-it-loom",
+     "context": 51200,
+     "cap_pool": 51200,
+     "execution": {
+      "context_capacity": 51200,
+      "pool_capacity": 51200
+     },
+     "sdk": "0.3.0"
+    },
+    {
+     "name": "staging",
+     "execution": {
+      "context_capacity": 51200,
+      "pool_capacity": 51200
+     },
+     "cap_pool": 51200,
+     "build": {},
+     "build_args": [
+      "--memory-gib",
+      "4096"
+     ],
+     "sdk": "0.3.0",
+     "ref": "d632f23125c8ab1ba8732e17d2638b5970570ee3"
+    },
+    {
+     "name": "fix",
+     "execution": {
+      "context_capacity": 51200,
+      "pool_capacity": 51200
+     },
+     "cap_pool": 51200,
+     "build": {},
+     "build_args": [
+      "--memory-gib",
+      "4096"
+     ],
+     "sdk": "0.3.0",
+     "ref": "9221dc522e5e0ab216ea79ba4a249e2668337e14"
+    },
+    {
+     "name": "g16",
+     "card": "loom-fun-staging/unsloth-gemma-4-12B-it-loom",
+     "sdk": "0.3.0",
+     "memory_bytes": 15000000000,
+     "serve_args": [
+      "--preset=chat-16gb",
+      "--state_slab_bytes=4mib",
+      "--weight_slab_bytes=64mib"
+     ]
+    }
+   ],
+   "steps": [
+    "logits:fun",
+    "logits:staging",
+    "ktest:staging",
+    "logits:fix",
+    "ktest:fix",
+    "gates:g16:dev"
+   ],
+   "sdk": "0.3.0",
+   "bundle": {
+    "build": {
+     "extension": "loom-fun/loom-gufo-extension@cd2a18327bdafd36d091d0a779c4d1efa770ae04",
+     "gufo": "loom-fun/gufo@ec6d3d0724381585307d98ac760d75d2f8f325b8"
+    }
+   }
+  },
+  {
+   "name": "pfg-rab-unsloth-gemma-4-e2b-it-loom",
+   "runner": "r9700",
+   "repeat_rows": 3,
+   "card": "loom-fun-staging/unsloth-gemma-4-E2B-it-loom",
+   "require_preset_r9700": true,
+   "memory_bytes_r9700": 16000000000,
+   "kit": "gemma4",
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "fun",
+     "card": "loom-fun-staging/unsloth-gemma-4-E2B-it-loom",
+     "cap_pool": 588800,
+     "execution": {
+      "prefill_capacity": 4096
+     },
+     "sdk": "0.3.0"
+    },
+    {
+     "name": "staging",
+     "cap_pool": 588800,
+     "execution": {
+      "prefill_capacity": 4096
+     },
+     "build": {},
+     "build_args": [
+      "--prefill-device",
+      "radeon-r9700=4096"
+     ],
+     "sdk": "0.3.0",
+     "require_preset_r9700": false,
+     "ref": "d632f23125c8ab1ba8732e17d2638b5970570ee3"
+    },
+    {
+     "name": "fix",
+     "cap_pool": 588800,
+     "execution": {
+      "prefill_capacity": 4096
+     },
+     "build": {},
+     "build_args": [
+      "--prefill-device",
+      "radeon-r9700=4096"
+     ],
+     "sdk": "0.3.0",
+     "require_preset_r9700": false,
+     "ref": "9221dc522e5e0ab216ea79ba4a249e2668337e14"
+    },
+    {
+     "name": "g16",
+     "card": "loom-fun-staging/unsloth-gemma-4-E2B-it-loom",
+     "sdk": "0.3.0",
+     "memory_bytes": 15000000000,
+     "serve_args": [
+      "--preset=chat-16gb",
+      "--state_slab_bytes=4mib",
+      "--weight_slab_bytes=64mib"
+     ]
+    }
+   ],
+   "steps": [
+    "logits:fun",
+    "logits:staging",
+    "ktest:staging",
+    "logits:fix",
+    "ktest:fix",
+    "gates:g16:dev"
+   ],
+   "sdk": "0.3.0",
+   "bundle": {
+    "build": {
+     "extension": "loom-fun/loom-gufo-extension@cd2a18327bdafd36d091d0a779c4d1efa770ae04",
+     "gufo": "loom-fun/gufo@ec6d3d0724381585307d98ac760d75d2f8f325b8"
+    }
+   }
+  },
+  {
+   "name": "pfg-rab-unsloth-gemma-4-e4b-it-loom",
+   "runner": "r9700",
+   "repeat_rows": 3,
+   "card": "loom-fun-staging/unsloth-gemma-4-E4B-it-loom",
+   "memory_bytes_r9700": 31000000000,
+   "kit": "gemma4",
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "fun",
+     "card": "loom-fun-staging/unsloth-gemma-4-E4B-it-loom",
+     "cap_pool": 230400,
+     "execution": {},
+     "sdk": "0.3.0"
+    },
+    {
+     "name": "staging",
+     "cap_pool": 230400,
+     "build": {},
+     "build_args": [
+      "--memory-gib",
+      "4096"
+     ],
+     "sdk": "0.3.0",
+     "ref": "d632f23125c8ab1ba8732e17d2638b5970570ee3"
+    },
+    {
+     "name": "fix",
+     "cap_pool": 230400,
+     "build": {},
+     "build_args": [
+      "--memory-gib",
+      "4096"
+     ],
+     "sdk": "0.3.0",
+     "ref": "9221dc522e5e0ab216ea79ba4a249e2668337e14"
+    }
+   ],
+   "steps": [
+    "logits:fun",
+    "logits:staging",
+    "ktest:staging",
+    "logits:fix",
+    "ktest:fix"
+   ],
+   "sdk": "0.3.0",
+   "bundle": {
+    "build": {
+     "extension": "loom-fun/loom-gufo-extension@cd2a18327bdafd36d091d0a779c4d1efa770ae04",
+     "gufo": "loom-fun/gufo@ec6d3d0724381585307d98ac760d75d2f8f325b8"
+    }
+   }
+  },
+  {
+   "llama_kv_rocm": 36864,
+   "name": "pfg-rab-unsloth-gemma-4-31b-it-loom",
+   "runner": "r9700",
+   "card": "loom-fun-staging/unsloth-gemma-4-31B-it-loom",
+   "memory_bytes_r9700": 34000000000,
+   "served_context": 8192,
+   "kit": "gemma4",
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "fun",
+     "card": "loom-fun-staging/unsloth-gemma-4-31B-it-loom",
+     "context": 8192,
+     "cap_pool": 8192,
+     "execution": {
+      "context_capacity": 8192,
+      "pool_capacity": 8192
+     },
+     "sdk": "0.3.0"
+    },
+    {
+     "name": "staging",
+     "execution": {
+      "context_capacity": 8192,
+      "pool_capacity": 8192
+     },
+     "cap_pool": 8192,
+     "build": {},
+     "build_args": [
+      "--memory-gib",
+      "4096"
+     ],
+     "sdk": "0.3.0",
+     "ref": "d632f23125c8ab1ba8732e17d2638b5970570ee3"
+    },
+    {
+     "name": "fix",
+     "execution": {
+      "context_capacity": 8192,
+      "pool_capacity": 8192
+     },
+     "cap_pool": 8192,
+     "build": {},
+     "build_args": [
+      "--memory-gib",
+      "4096"
+     ],
+     "sdk": "0.3.0",
+     "ref": "9221dc522e5e0ab216ea79ba4a249e2668337e14"
+    }
+   ],
+   "steps": [
+    "logits:fun",
+    "logits:staging",
+    "ktest:staging",
+    "logits:fix",
+    "ktest:fix"
+   ],
+   "sdk": "0.3.0",
+   "bundle": {
+    "build": {
+     "extension": "loom-fun/loom-gufo-extension@cd2a18327bdafd36d091d0a779c4d1efa770ae04",
+     "gufo": "loom-fun/gufo@ec6d3d0724381585307d98ac760d75d2f8f325b8"
+    }
+   }
+  },
+  {
+   "name": "pfg-rab-lmstudio-community-gemma-4-26b-a",
+   "runner": "r9700",
+   "card": "loom-fun-staging/lmstudio-community-gemma-4-26B-A4B-it-loom",
+   "memory_bytes_r9700": 34000000000,
+   "kit": "gemma4",
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "sdk": "0.3.0",
+   "variants": [
+    {
+     "name": "fun",
+     "card": "loom-fun-staging/lmstudio-community-gemma-4-26B-A4B-it-loom",
+     "sdk": "0.3.0"
+    }
+   ],
+   "steps": [
+    "logits:fun"
+   ],
+   "bundle": {
+    "build": {
+     "extension": "loom-fun/loom-gufo-extension@cd2a18327bdafd36d091d0a779c4d1efa770ae04",
+     "gufo": "loom-fun/gufo@ec6d3d0724381585307d98ac760d75d2f8f325b8"
+    }
+   }
   }
  ],
- "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
+ "card": "loom-fun-staging/unsloth-gemma-4-12B-it-loom",
  "kit": null,
- "llamacpp": "b1375",
- "llamacpp_vulkan": "b12211"
+ "llamacpp": "b1374"
 }
