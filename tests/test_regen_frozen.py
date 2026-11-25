@@ -118,6 +118,7 @@ class AbJobsFrozen(unittest.TestCase):
         doc = ab_jobs.frozen(self.doc(), "card", "0.3.0", {TEXT: {"old": ref, "new": ref, "programs_sha256": H}})
         j = doc["jobs"][0]
         self.assertEqual(j["sdk"], "0.3.0")
+        self.assertNotIn("admit:staging", j["steps"])   # no gates in this job: no probe added
         by = {v["name"]: v for v in j["variants"]}
         for name in ("staging", "stagingnd"):
             self.assertNotIn("build", by[name])
@@ -238,6 +239,12 @@ class CollectFrozen(unittest.TestCase):
 
     def test_guard(self):
         e = {"dir": self.d, "programs_sha256": H, "conclusion": "success"}
+        self.assertIn("no native-context admission", regen.frozen_guard(self.st, e))
+        json.dump({"admitted": False, "tokens": 100, "context": 262144, "detail": "HTTP 400"}, open(os.path.join(self.d, "admit_staging.json"), "w"))
+        self.assertIn("refused", regen.frozen_guard(self.st, e))
+        json.dump({"admitted": True, "tokens": 262066, "context": 262144}, open(os.path.join(self.d, "admit_staging.json"), "w"))
+        open(os.path.join(self.d, "admit_staging.txt"), "w").write("WARN: the server did not cancel the request within 60s\nADMITTED\n")
+        self.assertEqual(regen.admission(self.d)["warnings"], ["WARN: the server did not cancel the request within 60s"])
         self.assertIsNone(regen.frozen_guard(self.st, e))
         self.assertIn("concluded failure", regen.frozen_guard(self.st, dict(e, conclusion="failure")))
         self.assertIn("not the production programs", regen.frozen_guard(self.st, dict(e, programs_sha256="b" * 64)))
