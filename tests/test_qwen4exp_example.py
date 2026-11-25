@@ -25,6 +25,19 @@ class Qwen4expExample(unittest.TestCase):
         self.assertEqual(pin["hrx_loom"], "0.3.0")
         self.assertEqual(pin["source"], "pypi")
 
+    def test_catalog_serving_flags_respect_an_explicit_null(self):
+        sys.path.insert(0, str(ROOT / "skills/loom-port-llm/starter"))
+        try:
+            from catalog import package_serve
+        finally:
+            sys.path.pop(0)
+        fixed = {"args": ["--pool_backing=fixed"]}
+        elastic = {"args": ["--pool_backing=elastic"]}
+        self.assertIsNone(package_serve({"serve": None}, {"serve": fixed}, "mtp"))
+        self.assertEqual(package_serve({"serve": fixed}, {"serve": elastic}, "mtp"), elastic)
+        self.assertEqual(package_serve({}, {"serve": fixed}, "mtp"), fixed)
+        self.assertEqual(package_serve({"serve": elastic}, {"serve": fixed}, None), elastic)
+
     def test_flatten_moves_shared_files(self):
         with tempfile.TemporaryDirectory() as t:
             lib, out = Path(t, "lib"), Path(t, "out")

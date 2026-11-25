@@ -54,6 +54,15 @@ def meta(cdir):
         return json.load(f)
 
 
+def package_serve(cfg, cat, kind):
+    """Use the current catalog's drafting flags unless the build explicitly clears them."""
+    if "serve" in cfg and cfg["serve"] is None:
+        return None
+    if kind == "mtp" and cat.get("serve"):
+        return cat["serve"]
+    return cfg.get("serve")
+
+
 def parameter_files(variant):
     """[(service, parameter name, entry)] of a variant's weight files."""
     return [(s, p, e) for s, svc in variant.get("services", {}).items() for p, par in svc.get("parameters", {}).items()
@@ -189,8 +198,7 @@ def build(a, cfg, cdir, tokenizer):
     if vis:   # llm_config "vision": the projector file, its family and the prompt markers (starter/vision/add_vision.py's block)
         vfile = next(os.path.basename(e["path"]) for _, p, e in files if p == "vision")
         bench["vision"] = {**vis["block"], "mmproj": os.path.join(gguf_dir, vfile)}
-    if kind == "mtp" and cat.get("serve"):   # flags the drafting package must be served with (serve.sh, README, DevLab and nightly read them)
-        bench["serve"] = cat["serve"]
+    bench["serve"] = package_serve(cfg, cat, kind)
     if "loom_thinking_default" in cat:   # the catalog chat program's own default (see Package.default_request)
         bench["loom_thinking_default"] = cat["loom_thinking_default"]
     bench.update(model_id=model_id, draft={"kind": "mtp", "depth": depth} if kind == "mtp" else None,
