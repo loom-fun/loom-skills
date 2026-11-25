@@ -316,6 +316,54 @@ class NoGenerator(unittest.TestCase):
         self.assertNotEqual(card_lib._check(bad, sub, schema, "versions", []), [])
 
 
+class NewPort(unittest.TestCase):
+    """A package with no card on the previous SDK: one generated delta line, accepted only when its repository is absent from the
+    production inventory of the migration (skills/loom-migrate/versions/vOLD-to-vNEW-production.json)."""
+    NEW = "loom-fun-staging/prism-ml-Ternary-Bonsai-2.5-27B-loom"   # a port first published on 0.3.0
+
+    def info_with(self, d, repo, comparisons=None):
+        info = json.loads((d / "info.json").read_text(encoding="utf-8"))
+        info["repo"] = repo
+        info["sdk_delta"] = {"comparisons": [] if comparisons is None else comparisons, "new_port": True}
+        (d / "info.json").write_text(json.dumps(info, indent=1), encoding="utf-8")
+        return info
+
+    def test_inventory_lookup(self):
+        with tempfile.TemporaryDirectory() as t:
+            Path(t, "v0.2.0-to-v0.3.0-production.json").write_text(json.dumps({"loom-fun/old-loom": "a" * 40}), encoding="utf-8")
+            self.assertEqual(card_lib.production_inventory("0.3.0", t)[0], "0.2.0")
+            self.assertIsNone(card_lib.new_port_problem("loom-fun-staging/new-loom", "0.3.0", t))
+            self.assertIn("production inventory", card_lib.new_port_problem("loom-fun-staging/old-loom", "0.3.0", t))   # any org, same name
+            self.assertIn("no production inventory", card_lib.new_port_problem("loom-fun/new-loom", "0.4.0", t))
+            self.assertEqual(card_lib.new_port_line("0.3.0", t), "New port in SDK 0.3.0: no SDK 0.2.0 card to compare.")
+
+    def test_render_and_schema(self):
+        with tempfile.TemporaryDirectory() as t:
+            d = Lint().card(t)
+            info = self.info_with(d, self.NEW)
+            self.assertFalse([e for e in card_lib.validate(info, "") if "sdk_delta" in e])
+            import render_card
+            text = "\n".join(render_card.delta_lines(info, {"hrx_loom": "0.3.0"}, True, 3))
+            self.assertIn("**New port in SDK 0.3.0: no SDK 0.2.0 card to compare.**", text)
+
+    def test_lint_accepts_only_a_new_port(self):
+        with tempfile.TemporaryDirectory() as t:
+            d = Lint().card(t)
+            self.info_with(d, self.NEW)
+            self.assertEqual(lint_card.lint(str(d), runs=lint_card.Runs(offline=True))["delta"], [])
+        with tempfile.TemporaryDirectory() as t:   # the golden card's repository IS in the 0.2.0 production inventory
+            d = Lint().card(t)
+            self.info_with(d, "loom-fun/ggml-org-Flint-loom")
+            res = lint_card.lint(str(d), runs=lint_card.Runs(offline=True))["delta"]
+            self.assertTrue(res and "not a new port" in res[0] and "production inventory" in res[0], res)
+        with tempfile.TemporaryDirectory() as t:   # a new-port line next to a previous-card comparison
+            d = Lint().card(t)
+            comps = json.loads((CARD / "test/sdk03/expected/info.json").read_text(encoding="utf-8"))["sdk_delta"]["comparisons"]
+            self.info_with(d, self.NEW, comps)
+            res = lint_card.lint(str(d), runs=lint_card.Runs(offline=True))["delta"]
+            self.assertTrue(any("not a new port: a card comparison too" in p for p in res), res)
+
+
 class KitKept(unittest.TestCase):
     """Migration-only programs whose kit build lost its A/B: the card says why in one generated line (sdk_delta.kit)."""
     REASON = "Strix Halo decode -4.2 % (confirmed in the same-job ABBA)"

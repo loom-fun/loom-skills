@@ -129,7 +129,8 @@ from card_lib import (DEFAULT_GPU, DRAFTED_ROWS, EVIDENCE_ID, GPUS, METRIC_KEYS,
                       programs_sha256, require_valid, fixed_pool_capacity, gpu_preset_execution, gpu_preset_name, with_gpu_preset, served_context, fit_served_context, upstream_facts, with_gate_features, write_json,
                       SERVE_HEADROOM, registry, fit_rows, non_targets, load_device_results, validate_device_results, with_device_preset, DEVICE_RESULTS_ID, card_serve_args, quick_start, serves,
                       emulated_gate_errors, historical_xsj_gate, sdk_serve_args, xsj_enabled, xsj_evidence_errors, xsj_measurement_errors, xsj_vulkan_comparison_errors,
-                      CAVEAT_MAX, DEVICE_RESULTS_DIR, QUICK_START_QUALIFICATION, qualified_bare_quick_start, text_errors, previous_values, stamped, SESSION_ACCEPTANCE_ROWS)
+                      CAVEAT_MAX, DEVICE_RESULTS_DIR, QUICK_START_QUALIFICATION, qualified_bare_quick_start, text_errors, previous_values, stamped, SESSION_ACCEPTANCE_ROWS,
+                      new_port_problem, sdk_version)
 
 
 # ---------------------------------------------------------------- sources
@@ -805,6 +806,16 @@ def cmd_build(a):
         if src.get("url") in jobs:
             src["conclusion"] = jobs[src["url"]]
     delta = sdk_delta(a, old_delta)
+    has_card = any(c["label"] == "card" for c in (delta or {}).get("comparisons", []))
+    if a.new_port or ((old_delta or {}).get("new_port") and not has_card):   # --from-info's new-port line stays until a previous card is given
+        if has_card:
+            sys.exit("--new-port: this card also has a previous-card comparison (--previous-card card:...)")
+        cfg = pkg["cfg"]
+        sdk = sdk_version(cfg.get("sdk")) or sdk_version((cfg.get("generator") or {}).get("hrx_loom"))
+        why = new_port_problem(info["repo"], sdk)
+        if why:
+            sys.exit(f"--new-port: {why}")
+        delta = {**(delta or {"comparisons": []}), "new_port": True}
     if delta:
         info["sdk_delta"] = delta
     used = {s["source"] for d in devices.values() for s in (d.get("performance") or {}).get("sessions", [])}
@@ -1717,6 +1728,10 @@ def main(argv=None):
                    help="an earlier card of this package whose stored Loom values the delta line compares with (repeat): card = the published "
                    "card this one replaces (its repo and revision), migration = this package's migration-only card on the new SDK (frozen "
                    "programs; no link, it is never published as the production card). Replaces --from-info's comparison of the same label")
+    b.add_argument("--new-port", action="store_true",
+                   help="this package had no card on the previous SDK (its repository is not in the production inventory of the migration to the "
+                   "package's SDK, skills/loom-migrate/versions/vOLD-to-vNEW-production.json; refused otherwise): the card's delta line says so, "
+                   "generated, instead of comparing with an earlier card. Kept by --from-info until a --previous-card card is given")
     b.add_argument("--kit-kept", type=load_json, metavar="KIT.json",
                    help='{"reason": ..., "url": ...}: these migration-only programs stay; the release kit build was A/B\'d against them on the new SDK '
                         "and not shipped (fleet/regen.py, phase 2): the card says why, one generated line")
