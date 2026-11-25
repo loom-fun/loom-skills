@@ -771,6 +771,10 @@ CHOICE("sampling.final_softcap", "bool", False, "FINAL_SOFTCAP", kernels=["g_hea
 CHOICE("feature.logits_export", "bool", True, "LLM_LOGITS", kernels=["g_logits_export"], rows=[], from_pr="loom-skills#736",
        doc="The package carries the opt-in logits readback (g_logits_export, a card-config-guarded tail of @llm_advance, a guarded larger "
            "outputs allocation). Off by default at load (card config llm.logits); False drops the code from the package.")
+CHOICE("telemetry.proposal_counts", "bool", False, "LLM_PROPOSAL_COUNTS", kernels=["program"], rows=[], from_pr="sdk030 sdkcap",
+       doc="publish_epoch takes the SDK 0.3.0 proposal_counts buffer (starter/proposal_counts.py): each verified drafted span reports "
+           "the candidates it presented (planned length minus the anchor; 0 for ordinary work), so /metrics keeps draft_proposed_tokens and "
+           "the acceptance rate is measurable (#1401). Version-1 ABI kept; host-side only, no device program changes. Needs hrx-loom >= 0.3.0.")
 
 # ======================================================================================================================
 # Not choices: everything else the generators and their tools read from the environment
