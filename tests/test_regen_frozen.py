@@ -487,3 +487,45 @@ class AcceptNoReference(unittest.TestCase):
             regen.main(["accept-no-reference", state, STRIX_ONLY, "--note", "no stock reference for inkling2"])
         e = regen.State(state).jobs["j"]
         self.assertEqual((e["stage"], e["decision"], e["no_reference"]), ("collected", "promote", "no stock reference for inkling2"))
+
+
+class KitVerdict(unittest.TestCase):
+    """Phase 2: ship the kit programs of a model only when every device's A/B passes; else keep the frozen ones and re-queue its cards."""
+    def write(self, t, name, doc):
+        p = os.path.join(t, name)
+        json.dump({"work": t, **doc}, open(p, "w"))
+        return p
+
+    def p2(self, t, name, jobs):
+        for n, e in jobs.items():
+            cmp = self.write(t, f"{n}.cmp.json", e.pop("cmpdoc", {"text": {"status": "MATCH", "prompts": 3, "identical": 3}, "gate_failures": []}))
+            e.update(cmp=cmp, job_url=f"https://github.com/loom-fun/loom-skills/actions/runs/1/job/{n}")
+        return self.write(t, name, {"mode": "sdk-ab", "opts": {"old_sdk_target": True, "base": "sdk030"}, "batches": [], "jobs": jobs})
+
+    def test_ship_keep_and_wait(self):
+        with tempfile.TemporaryDirectory() as t:
+            pub = {"stage": "published", "decision": "promote", "verified": {"ok": True}}
+            sweep = self.write(t, "sweep.json", {"mode": "sdk-loom", "opts": {"programs": "production"}, "batches": [], "jobs": {
+                "a-r": {"slug": "a", "device": "radeon-r9700", **pub}, "a-s": {"slug": "a", "device": "strix-halo", **pub},
+                "b-s": {"slug": "b", "device": "strix-halo", **pub}, "c-s": {"slug": "c", "device": "strix-halo", "stage": "running"}}})
+            ok = {"stage": "collected", "decision": "promote", "round": 1, "rows_pct": {"decode": -1.0, "prefill_8k": 2.0}}
+            r = self.p2(t, "p2r.json", {"ra": {"slug": "a", "device": "radeon-r9700", **ok}})
+            s = self.p2(t, "p2s.json", {
+                "sa": {"slug": "a", "device": "strix-halo", **ok},
+                "sb": {"slug": "b", "device": "strix-halo", **ok, "rows_pct": {"decode": 1.0, "decode_32k": -4.4},
+                       "cmpdoc": {"text": {"status": "DIFF", "prompts": 3, "identical": 2}, "gate_failures": []}},
+                "sc": {"slug": "c", "device": "strix-halo", **ok}})
+            out = os.path.join(t, "kv.json")
+            with contextlib.redirect_stdout(io.StringIO()):
+                regen.main(["kit-verdict", sweep, r, s, "--out", out])
+            kv = json.load(open(out))
+            self.assertEqual(kv["a"], {"ship": True})
+            self.assertFalse(kv["b"]["ship"])
+            self.assertEqual(kv["b"]["reason"], "Strix greedy text differs on 1/3 prompts; Strix decode_32k -4.4 %".replace("Strix", regen.card_lib.GPUS["strix-halo"]["short"]))
+            self.assertNotIn("c", kv)   # its migration-only card is not published yet
+            sw = regen.State(sweep)
+            self.assertEqual(sw.d["opts"]["kit_kept"]["b"]["url"], "https://github.com/loom-fun/loom-skills/actions/runs/1/job/sb")
+            self.assertEqual((sw.jobs["b-s"]["stage"], "verified" in sw.jobs["b-s"]), ("collected", False))
+            self.assertEqual(sw.jobs["a-s"]["stage"], "published")
+            self.assertEqual(regen.State(r).d["opts"]["ship"], ["a"])
+            self.assertEqual(regen.State(s).d["opts"]["ship"], ["a"])

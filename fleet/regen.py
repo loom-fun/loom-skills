@@ -1221,7 +1221,8 @@ def ingest_full(st, name, e, W):
     fleet_cfg = os.path.join(ROOT, "fleet", slug, "llm_config.json")   # a package outside the manifest (a hand-written one): its own config
     st_card = (json.load(open(fleet_cfg if os.path.isfile(fleet_cfg) else os.path.join(out, "llm_config.json"))).get("source") or {}).get("kind") == "safetensors"
     production = st.d["opts"].get("programs") == "production"
-    drafts = g(f"metrics_{V}_*.txt") if production and make_info_supports("perf", "--draft-metrics") else []
+    phase2 = phase2_state(st.d)   # the kit build vs the frozen programs on the target SDK: delta vs the production card AND the migration-only card
+    drafts = g(f"metrics_{V}_*.txt") if (production or phase2) and make_info_supports("perf", "--draft-metrics") else []
     if loom_only:   # the job measured Loom alone: the baseline rows (llama.cpp ROCm and Vulkan, or vLLM) are the previous card's, with their own run and date
         run_tool([f"{S}/make_info.py", "perf", "--gpu", dev, "--loom-jsonl", f"{d}/perf_{V}.jsonl", "--c4-loom", f"{d}/c4_{ND}.txt",
                   "--baseline-from-info", baseline_info, "--package", out, *src, "--device", "dev.json", "--hrx-loom", hrx,
@@ -1296,8 +1297,14 @@ def ingest_full(st, name, e, W):
         build += ["--perf-from", spec]
     # sdk-loom: the previous card's Loom sessions are the v0.1 rows this table replaces (its llama.cpp rows were copied into the new session above;
     # the Vulkan baselines stay as published)
-    if production and e.get("source_card") and make_info_supports("build", "--previous-card"):   # the delta line against the production card
+    if (production or phase2) and e.get("source_card") and make_info_supports("build", "--previous-card"):   # the delta line against the production card
         build += ["--previous-card", f"card:{e['source_card']}={baseline_info}"]
+    if phase2:   # the staging head's card before this one is the migration-only card (phase 1: the frozen programs on the target SDK)
+        build += ["--previous-card", "migration=info_prev.json"]
+    kept = (st.d["opts"].get("kit_kept") or {}).get(slug)
+    if production and kept and make_info_supports("build", "--kit-kept"):   # phase 2 kept these frozen programs: the card says why (kit-verdict)
+        json.dump(kept, open(os.path.join(W, "kit_kept.json"), "w"), indent=1)
+        build += ["--kit-kept", os.path.join(W, "kit_kept.json")]
     if production and make_info_supports("build", "--sdk-evidence"):   # regression explanations and every cited job's conclusion
         json.dump(build_evidence(st), open(os.path.join(W, "evidence.json"), "w"), indent=1)
         build += ["--sdk-evidence", os.path.join(W, "evidence.json")]
@@ -1474,6 +1481,9 @@ def package_one(st, slug, canon, sha, dry, env, prefill_changes=None, source_car
     if source_card:
         reference = os.path.join(W, "staging")
         hf_snapshot_small(repo, rev, reference)
+        for f in ("README.md", "info.json", "REPORT.md"):   # the card files stay the staging head's (the migration-only card) until the card step
+            if os.path.isfile(os.path.join(reference, f)):
+                shutil.copy2(os.path.join(reference, f), os.path.join(out, f))
         qualification = os.path.join(reference, card_lib.QUICK_START_QUALIFICATION)
         if os.path.isfile(qualification):
             # Keep the receipt. Card generation applies it only to the exact measured settings.
@@ -1612,6 +1622,11 @@ def cmd_package(a):
         picked = [(n, e) for n, e in st.jobs.items() if e["slug"] in a.slugs and e["stage"] not in ("skipped", "unsupported")]
     else:
         picked = [(n, e) for n, e in st.jobs.items() if e["stage"] in ok and e.get("decision") == "promote"]
+    if phase2_state(st.d):   # phase 2: a model's kit programs go out only once kit-verdict decided them on every device (one package for all)
+        held = sorted({e["slug"] for _, e in picked} - set(st.d["opts"].get("ship") or ()))
+        if held:
+            print(f"not packaged (no kit-verdict ship yet): {', '.join(held)}")
+        picked = [(n, e) for n, e in picked if e["slug"] in (st.d["opts"].get("ship") or ())]
     slugs = sorted({e["slug"] for _, e in picked})
     missing = sorted(set(a.slugs or ()) - set(slugs))
     if missing:
@@ -2160,8 +2175,9 @@ def cmd_eligible(a):
 
 
 def cmd_verify(a):
-    """--programs production: check each published card on the staging head (small files): the frozen programs, the target pin, this device's
-    session from the job, and lint_card.py --form staging. Records e["verified"] = {revision, ok, problems}; prints the problems."""
+    """--programs production (or phase 2): check each published card on the staging head (small files): the frozen programs (phase 2: the
+    kit package's), the target pin, this device's session from the job, and lint_card.py --form staging. Records e["verified"] = {revision, ok,
+    problems}; prints the problems."""
     st = State(a.state)
     pin = pinned_target(st.d)
     for name, e in st.jobs.items():
@@ -2173,8 +2189,9 @@ def cmd_verify(a):
         try:
             head = hf_head(repo)
             hf_snapshot_small(repo, head, d)
-            if card_lib.programs_sha256(d) != e.get("programs_sha256"):
-                problems.append("staging programs are not the production programs")
+            want = e.get("programs_sha256") or (e.get("package") or {}).get("programs_sha256")
+            if card_lib.programs_sha256(d) != want:
+                problems.append("staging programs are not the measured programs")
             got = (sdk_package.load(os.path.join(d, "llm_config.json")).get("sdk") or {})
             if pin and any(got.get(k) != v for k, v in pin.items()):
                 problems.append(f"llm_config pin {got.get('hrx_loom')} is not the verified {target_sdk(st.d)}")
@@ -2190,6 +2207,95 @@ def cmd_verify(a):
         print(f"{e['slug']} {e['device']}: " + ("ok" if not problems else "; ".join(problems)[:600]))
         shutil.rmtree(d, ignore_errors=True)
         st.save()
+
+
+def phase2_state(d):
+    """a phase-2 state: --mode sdk-ab --old-sdk target (the kit build A/B'd against the frozen programs, both on the target SDK)"""
+    return d.get("mode") == "sdk-ab" and bool(d["opts"].get("old_sdk_target")) and d["opts"].get("programs") != "production"
+
+
+def kit_job_verdict(st, name, e):
+    """(done, problems) of one phase-2 A/B job: the kit programs ship on this device only when the ratchet promoted, every gate passed,
+    every card row is within -SDK_REGRESSION (equal or better) and the greedy text is identical. problems: short generated phrases."""
+    if e["stage"] in ("planned", "submitted", "queued", "running", "done") or e.get("rerun_of_me") and \
+            st.jobs[e["rerun_of_me"]]["stage"] not in ("collected", "needs_decision", "failed"):
+        return False, []
+    last = st.jobs[e["rerun_of_me"]] if e.get("rerun_of_me") else e
+    if last["stage"] == "collected" and last.get("decision") in ("rerun", "confirm", "improved-pending") and not last.get("rerun_of_me"):
+        return False, []   # its confirming job is not planned yet (rerun)
+    gpu = card_lib.GPUS[e["device"]]["short"]
+    if last["stage"] == "failed":
+        return True, [f"{gpu} job did not complete"]
+    cmp = json.load(open(last["cmp"])) if last.get("cmp") and os.path.isfile(last["cmp"]) else {}
+    probs = []
+    if cmp.get("gate_failures"):
+        probs.append(f"{gpu} gate failed: " + ", ".join(cmp["gate_failures"]))
+    t = cmp.get("text") or {}
+    if t.get("status") == "DIFF":
+        probs.append(f"{gpu} greedy text differs on {t['prompts'] - t['identical']}/{t['prompts']} prompts")
+    rows = dict(e.get("rows_pct") or {})
+    if last is not e:   # a confirmed pair: a row is slower only when it is slower in both runs
+        rows = {k: max(v, (last.get("rows_pct") or {}).get(k, v)) for k, v in rows.items() if v is not None}
+    slow = sorted(((v, k) for k, v in rows.items() if v is not None and v < -SDK_REGRESSION * 100))
+    if slow:
+        probs.append(f"{gpu} " + ", ".join(f"{k} {v:+.1f} %" for v, k in slow[:3]))
+    if not probs and (last["stage"] != "collected" or last.get("decision") != "promote"):
+        probs.append(f"{gpu} not promoted by the ratchet ({last.get('decision') or last['stage']})")
+    return True, probs
+
+
+def cmd_kit_verdict(a):
+    """Phase 2 of a migration, per model: SHIP the kit programs when every device's A/B job (the phase-2 states) passes kit_job_verdict and the
+    model's phase-1 cards (the sweep state) are all published; else KEEP the frozen programs: the sweep state records kit_kept[slug] =
+    {reason, url} and re-queues that model's published phase-1 cards (ingest passes --kit-kept: the card says why). Writes --out."""
+    sweep = State(a.sweep)
+    states = [State(p) for p in a.states]
+    for s_ in states:
+        if not phase2_state(s_.d):
+            die(f"{s_.path}: not a phase-2 state (--mode sdk-ab --old-sdk target)")
+    out = json.load(open(a.out)) if os.path.isfile(a.out) else {}
+    slugs = sorted({e["slug"] for s_ in states for e in s_.jobs.values() if not e.get("prev") and e["stage"] != "skipped"})
+    for slug in slugs:
+        if slug in out and not a.redo:
+            continue
+        p1 = [e for e in sweep.jobs.values() if e["slug"] == slug and not e.get("prev") and e["stage"] not in ("skipped",)]
+        if not p1 or any(e["stage"] != "published" for e in p1):
+            continue   # the migration-only card first
+        verdicts, done, urls = [], True, []
+        for s_ in states:
+            for n, e in s_.jobs.items():
+                if e["slug"] != slug or e.get("prev") or e["stage"] == "skipped":
+                    continue
+                ok, probs = kit_job_verdict(s_, n, e)
+                done &= ok
+                verdicts += probs
+                if probs:
+                    urls.append((s_.jobs[e["rerun_of_me"]] if e.get("rerun_of_me") else e).get("job_url"))
+        if not done:
+            continue
+        if not verdicts:
+            out[slug] = {"ship": True}
+            for s_ in states:
+                if any(e["slug"] == slug for e in s_.jobs.values()):
+                    s_.d["opts"].setdefault("ship", [])
+                    if slug not in s_.d["opts"]["ship"]:
+                        s_.d["opts"]["ship"].append(slug)
+            print(f"{slug}: SHIP the kit programs")
+        else:
+            reason = "; ".join(verdicts[:3])
+            kept = {"reason": reason if len(reason) <= 230 else reason[:227].rsplit(" ", 1)[0] + " ...", "url": next((u for u in urls if u), None)}
+            out[slug] = {"ship": False, **kept}
+            sweep.d["opts"].setdefault("kit_kept", {})[slug] = kept
+            for e in p1:   # the published migration-only cards are rebuilt with the line (ingest -> publish -> verify)
+                e["stage"] = "collected"
+                e.pop("verified", None)
+            sweep.log(f"{slug}: kit build kept out ({kept['reason'][:120]}); migration-only cards re-queued")
+            print(f"{slug}: KEEP the frozen programs: {kept['reason']}")
+    if not a.dry_run:
+        sweep.save()
+        for s_ in states:
+            s_.save()
+        json.dump(out, open(a.out, "w"), indent=1)
 
 
 def cmd_accept_no_reference(a):
@@ -2310,6 +2416,13 @@ def main(argv=None):
     q = sub.add_parser("verify", help="--programs production: check the published staging cards (programs, pin, cited job, lint_card.py)")
     q.add_argument("state")
     q.set_defaults(fn=cmd_verify)
+    q = sub.add_parser("kit-verdict", help="phase 2: per model, ship the kit programs (every device's A/B passed) or keep the frozen ones (the card says why)")
+    q.add_argument("sweep", help="the phase-1 --programs production state (its published cards)")
+    q.add_argument("states", nargs="+", help="the phase-2 states (--mode sdk-ab --old-sdk target)")
+    q.add_argument("--out", required=True, help="kit_verdict.json {slug: {ship, reason, url}} (models already in it are skipped unless --redo)")
+    q.add_argument("--redo", action="store_true")
+    q.add_argument("--dry-run", action="store_true")
+    q.set_defaults(fn=cmd_kit_verdict)
     q = sub.add_parser("accept-no-reference", help="--programs production: gates that could not run (no reference engine for the checkpoint)")
     q.add_argument("state")
     q.add_argument("slug", nargs="+")
