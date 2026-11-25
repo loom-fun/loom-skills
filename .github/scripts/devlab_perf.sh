@@ -517,6 +517,20 @@ if "pool_capacity" in ex:   # a v0.1 card; a v0.2 card has none (the server deri
 json.dump(m, open(sys.argv[1].replace("model.json", "model_ab.json"), "w"), indent=1)
 print("execution", {k: ex[k] for k in ex if k in ("draft_depth", "rows", "prefill_capacity")})
 EOF
+  if [ "$job" = flash-final ]; then
+    "$T" - "$pkg" "$v" <<'VERIFY' || exit 1
+import json, pathlib, sys
+pkg, name = pathlib.Path(sys.argv[1]), sys.argv[2]
+base = name.startswith("base")
+cfg = json.loads((pkg / "llm_config.json").read_text())
+model = json.loads((pkg / "model.json").read_text())
+ex = next(iter(model["presets"].values()))["execution"]
+expected = ["--pool_backing=fixed" if base else "--pool_backing=elastic"]
+if cfg.get("serve", {}).get("args") != expected or ex["prefill_capacity"] != (4096 if base else 8192):
+    sys.exit(f"{name}: package disagrees with planned settings: {cfg.get('serve')}, {ex}")
+VERIFY
+    cp "$pkg/llm_config.json" "$out/config_$v.json"
+  fi
   cp "$pkg/model.json" "$out/model_$v.json"; sha256sum "$pkg"/program/*.loom > "$out/programs_$v.sha256"
   "$T" -I -c "import sys; sys.path.insert(0, sys.argv[1]); from card_lib import programs_sha256; print(programs_sha256(sys.argv[2]))" \
     "$here/skills/loom-benchmark/scripts/card" "$pkg" > "$out/programs_sha256_$v.txt" 2>/dev/null   # the aggregate hash of THIS variant's programs (a built variant's: make_info.py --fetched-programs)
@@ -761,6 +775,11 @@ while [ "$qi" -lt "${#queue[@]}" ]; do
   [ "$BK" = rocm ] || [ "$vtag" != - ] || { echo "$s: set llamacpp_vulkan"; res[$s]=ERROR; continue; }
   [ "${p2:-}" = - ] && p2=""
   case $kind in
+    flash-final)
+      winner=$("$T" "$here/.github/scripts/flash_final_pick.py" "$out") || exit 1
+      case "$winner" in base|p8k|a8k|b8k|ab8k) ;; *) exit 1 ;; esac
+      queue+=("func:$winner" "ktest:$winner" "gates:$winner:dev" "admit:$winner")
+      res[$s]="selected $winner";;
     ab)
       abr=(); for v in $variants; do sdk_root "$v" >/dev/null 2>&1; abr+=("${SDKR:-?}"); done
       abroots=$(printf '%s\n' "${abr[@]}" | sort -u | wc -l)
@@ -1128,3 +1147,20 @@ json.dump({"job": name, "runner": open(os.path.join(out, "runner.txt")).read().s
           open(os.path.join(out, "summary.json"), "w"), indent=1)
 EOF
 echo "SUMMARY $job"; cat "$out/results.tsv"
+
+# The generic experiment records individual errors. This qualification must fail on them.
+if [ "$job" = flash-final ]; then
+  "$T" - "$out" <<'PY_FINAL'
+import json, pathlib, sys
+p = pathlib.Path(sys.argv[1])
+winner = json.loads((p/"selection.json").read_text())["winner"]
+summary = json.loads((p/"summary.json").read_text())["results"]
+if any("ERROR" in value or "FAIL" in value for value in summary.values()):
+    sys.exit(f"failed qualification step: {summary}")
+gate_report = json.loads((p/f"gates_{winner}"/"gates.json").read_text())
+gates = gate_report["gates"]
+admit = json.loads((p/f"admit_{winner}.json").read_text())
+if gate_report["verdict"] != "PASS" or not gates or not all(g.get("pass") is True for g in gates.values()) or not admit.get("admitted"):
+    sys.exit(f"failed gates or context admission: {gates}, {admit}")
+PY_FINAL
+fi

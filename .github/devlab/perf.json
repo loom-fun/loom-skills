@@ -1,47 +1,200 @@
 {
- "_comment": "R9700 per-model measurement (r9700_jobs.py): one job per model on one R9700 runner; loom-fun-staging card, llama.cpp ROCm b1375 + Vulkan b12211 with the matched drafting, reduced-context models served at served_context. Does not fit: none",
- "runner": "r9700",
- "memory_bytes": 34000000000,
+ "_comment": "Original round-three candidates on elastic backing plus the chunk-4096 control. Select and gate one measured configuration.",
+ "runner": "strix",
+ "memory_bytes": 100000000000,
  "llama_spec": "matched",
  "jobs": [
   {
-   "name": "unsloth-qwen3-0-6b-loom",
-   "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
-   "kit": null,
-   "llamacpp": "b1375",
+   "name": "flash-final",
+   "runner": "strix",
+   "card": "loom-fun/unsloth-Qwen3.8-Flash-Next-loom@d847c21bc93c0c6bc45752a9edaf91d80ac74490",
+   "memory_bytes": 100000000000,
+   "kit": "qwen4exp",
+   "llamacpp": "b1371",
    "llamacpp_vulkan": "b12211",
-   "memory_bytes_r9700": 17000000000,
    "variants": [
     {
-     "name": "card",
-     "build": {}
+     "name": "base",
+     "build": {},
+     "sdk": "0.3.0",
+     "ref": "29c71e1b6d407e4194253476fad3a96ea1214dae",
+     "build_args": [
+      "--memory-gib",
+      "4096",
+      "--prefill",
+      "4096"
+     ],
+     "execution": {
+      "prefill_capacity": 4096
+     },
+     "programs_sha256": "cf81488403eaa6e082dffa92387842b456b251c6456141595ea6b4f0a34fa486"
     },
     {
-     "name": "nodraft",
+     "name": "basend",
      "build": {},
+     "sdk": "0.3.0",
+     "ref": "29c71e1b6d407e4194253476fad3a96ea1214dae",
+     "build_args": [
+      "--memory-gib",
+      "4096",
+      "--prefill",
+      "4096"
+     ],
+     "execution": {
+      "prefill_capacity": 4096,
+      "draft_depth": 0
+     },
+     "programs_sha256": "cf81488403eaa6e082dffa92387842b456b251c6456141595ea6b4f0a34fa486"
+    },
+    {
+     "name": "p8k",
+     "build": {},
+     "sdk": "0.3.0",
+     "ref": "d836f73f81ea57f00effd148dd8fcb8809e18170",
+     "build_args": [
+      "--memory-gib",
+      "4096",
+      "--prefill",
+      "8192"
+     ]
+    },
+    {
+     "name": "p8knd",
+     "build": {},
+     "sdk": "0.3.0",
+     "ref": "d836f73f81ea57f00effd148dd8fcb8809e18170",
+     "build_args": [
+      "--memory-gib",
+      "4096",
+      "--prefill",
+      "8192"
+     ],
+     "execution": {
+      "draft_depth": 0
+     }
+    },
+    {
+     "name": "a8k",
+     "build": {},
+     "sdk": "0.3.0",
+     "ref": "0edc5023e2781da58e0a07b6d12dd33d9f9f0d33",
+     "build_args": [
+      "--memory-gib",
+      "4096",
+      "--prefill",
+      "8192"
+     ]
+    },
+    {
+     "name": "a8knd",
+     "build": {},
+     "sdk": "0.3.0",
+     "ref": "0edc5023e2781da58e0a07b6d12dd33d9f9f0d33",
+     "build_args": [
+      "--memory-gib",
+      "4096",
+      "--prefill",
+      "8192"
+     ],
+     "execution": {
+      "draft_depth": 0
+     }
+    },
+    {
+     "name": "b8k",
+     "build": {},
+     "sdk": "0.3.0",
+     "ref": "c80c4b62c16c4bb425093505451c3a666c8146aa",
+     "build_args": [
+      "--memory-gib",
+      "4096",
+      "--prefill",
+      "8192"
+     ]
+    },
+    {
+     "name": "b8knd",
+     "build": {},
+     "sdk": "0.3.0",
+     "ref": "c80c4b62c16c4bb425093505451c3a666c8146aa",
+     "build_args": [
+      "--memory-gib",
+      "4096",
+      "--prefill",
+      "8192"
+     ],
+     "execution": {
+      "draft_depth": 0
+     }
+    },
+    {
+     "name": "ab8k",
+     "build": {},
+     "sdk": "0.3.0",
+     "ref": "2db5ef4f10f33b47314114191a96f4cc1446ca8e",
+     "build_args": [
+      "--memory-gib",
+      "4096",
+      "--prefill",
+      "8192"
+     ]
+    },
+    {
+     "name": "ab8knd",
+     "build": {},
+     "sdk": "0.3.0",
+     "ref": "2db5ef4f10f33b47314114191a96f4cc1446ca8e",
+     "build_args": [
+      "--memory-gib",
+      "4096",
+      "--prefill",
+      "8192"
+     ],
      "execution": {
       "draft_depth": 0
      }
     }
    ],
    "steps": [
-    "func:card",
-    "ktest:card",
-    "gates:card:dev",
-    "perf:card:3",
-    "perf:card:3:long",
-    "c4:nodraft",
-    "llama@rocm.np1:3",
-    "llama@rocm.np1:3:long",
-    "llamac4@rocm.nodraft",
-    "llama@vulkan.np1:3",
-    "llama@vulkan.np1:3:long",
-    "llamac4@vulkan.perslot.nodraft"
-   ]
+    "perf:base:1",
+    "perf:base:1:long",
+    "c4:basend",
+    "perf:p8k:1",
+    "perf:p8k:1:long",
+    "c4:p8knd",
+    "perf:a8k:1",
+    "perf:a8k:1:long",
+    "c4:a8knd",
+    "perf:b8k:1",
+    "perf:b8k:1:long",
+    "c4:b8knd",
+    "perf:ab8k:1",
+    "perf:ab8k:1:long",
+    "c4:ab8knd",
+    "perf:ab8k:1",
+    "perf:ab8k:1:long",
+    "c4:ab8knd",
+    "perf:b8k:1",
+    "perf:b8k:1:long",
+    "c4:b8knd",
+    "perf:a8k:1",
+    "perf:a8k:1:long",
+    "c4:a8knd",
+    "perf:p8k:1",
+    "perf:p8k:1:long",
+    "c4:p8knd",
+    "perf:base:1",
+    "perf:base:1:long",
+    "c4:basend",
+    "flash-final"
+   ],
+   "sdk": "0.3.0"
   }
  ],
- "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
+ "card": "loom-fun/unsloth-Qwen3.8-Flash-Next-loom@d847c21bc93c0c6bc45752a9edaf91d80ac74490",
  "kit": null,
- "llamacpp": "b1375",
- "llamacpp_vulkan": "b12211"
+ "llamacpp": "b1371",
+ "env": {
+  "MIN_MEMAVAIL_GB": 110
+ }
 }
