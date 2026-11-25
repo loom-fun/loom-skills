@@ -19,7 +19,7 @@
   "memory_bytes": 15000000000,
   "state_slab_bytes": "4mib",
   "weight_slab_bytes": "64mib (the default 1 GiB slab strands budget: +20-38 % context on 0.2.0, perf rows within +-3 % on 5 models)",
-  "parameter_mode": "preload: a stock Ubuntu host (8 MiB RLIMIT_MEMLOCK, Linux 7.0) cannot load any model in the default file mode or direct mode on 0.2.0 (the first request fails: io_uring 'buffer pin preparation failed (12)'); printed on cards. Alternative without it: systemd-run --user -p SystemCallFilter=~io_uring_setup -p SystemCallErrorNumber=ENOSYS loom-serve ..."
+  "parameter_mode": "preload was required on hrx-loom 0.2.0 (the flag is removed on 0.3.0 and the renderer drops it for 0.3.0 pins): a stock Ubuntu host (8 MiB RLIMIT_MEMLOCK, Linux 7.0) cannot load any model in the default file mode or direct mode on 0.2.0 (the first request fails: io_uring 'buffer pin preparation failed (12)'); printed on cards. Alternative without it: systemd-run --user -p SystemCallFilter=~io_uring_setup -p SystemCallErrorNumber=ENOSYS loom-serve ..."
  },
  "provenance": {
   "kind": "machine",

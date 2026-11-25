@@ -14,7 +14,7 @@
  "serve": {
   "device": "amdgpu://?completion_spin_ns=4294967295",
   "memory": "elastic backing, --memory_bytes inside the GTT (half of RAM by default)",
-  "host": "stock Ubuntu (RLIMIT_MEMLOCK 8 MiB, no root): serve with --parameter_mode=preload (host-memory parameter handles; no GPU file staging, whose io_uring pins exceed the limit). The evidence sessions ran in the default file mode under `systemd-run --user -p SystemCallFilter=~io_uring_setup -p SystemCallErrorNumber=ENOSYS` (POSIX I/O backend); preload was spot-checked against them on the same machine"
+  "host": "stock Ubuntu (RLIMIT_MEMLOCK 8 MiB, no root): on hrx-loom 0.2.0 serve with --parameter_mode=preload, which was required there (host-memory parameter handles; no GPU file staging, whose io_uring pins exceed the limit). The evidence sessions ran in the default file mode under `systemd-run --user -p SystemCallFilter=~io_uring_setup -p SystemCallErrorNumber=ENOSYS` (POSIX I/O backend); preload was spot-checked against them on the same machine. hrx-loom 0.3.0 removed the flag (default buffered file mode); the renderer drops it for 0.3.0 pins"
  },
  "provenance": {
   "kind": "machine",
@@ -44,7 +44,7 @@
     "--memory_bytes=14000000000",
     "--parameter_mode=preload"
    ],
-   "note": "--parameter_mode=preload is required on a stock host (8 MiB memlock; default file mode fails at the first request). Evidence: the full methodology ran in file mode under a no-root seccomp prefix (same programs); preload was checked on the same machine: decode 31.7/31.6 vs 31.1, prefill 1k/2k 1016/1029 vs 996/1016, streams4 82.6 vs 82.3, decode_2k within the acceptance spread; host RSS +3.4 GiB. 262144 is refused under a GTT-sized budget on 0.2.0 (code 8); depth 3 / chunk 1024 measured best",
+   "note": "On hrx-loom 0.2.0 --parameter_mode=preload was required on a stock host (8 MiB memlock; default file mode fails at the first request); hrx-loom 0.3.0 removed the flag and the renderer drops it for 0.3.0 pins. Evidence: the full methodology ran in file mode under a no-root seccomp prefix (same programs); preload was checked on the same machine: decode 31.7/31.6 vs 31.1, prefill 1k/2k 1016/1029 vs 996/1016, streams4 82.6 vs 82.3, decode_2k within the acceptance spread; host RSS +3.4 GiB. 262144 is refused under a GTT-sized budget on 0.2.0 (code 8); depth 3 / chunk 1024 measured best",
    "evidence": [
     {
      "evidence": "loom-card-evidence/2",
