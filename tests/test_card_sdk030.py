@@ -107,6 +107,16 @@ class CardFiles(unittest.TestCase):
                 with self.subTest(name=name, phrase=phrase):
                     self.assertTrue(any("release history" in p for p in card_files.text_problems(name, text)))
 
+    def test_markdown_commands_and_prose(self):
+        records = "- Commands:\n\n```bash\ndevlab_perf.sh ABBA\n```\nCommand: `perf:ws64:1 ABBA`"
+        for name in ("README.md", "REPORT.md"):
+            with self.subTest(name=name):
+                self.assertEqual(card_files.text_problems(name, records), [])
+                self.assertEqual(card_files.text_problems(name, records + " confirmed by ABBA"),
+                                 [f"{name}:6: release history (ABBA)"])
+                self.assertTrue(card_files.text_problems(name, records.replace("ABBA", "staging package")))
+                self.assertTrue(card_files.text_problems(name, "The `previous card` was faster."))
+
     def test_recorded_session_command_and_card_note(self):
         performance = {"sessions": [{"commands": ["perf:ws64:1 ABBA"]}]}
         info = {"devices": {"gfx1201-16gb": {"performance": performance}}}

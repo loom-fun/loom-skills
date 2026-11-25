@@ -78,13 +78,38 @@ def info_history_problems(value, path="info.json", prose=False):
             yield f"{path}: release history ({match.group()})"
 
 
+def markdown_history_lines(text):
+    """Yield prose with its source line number; fenced code and inline command records are evidence."""
+    fence = ""
+    for number, line in enumerate(text.splitlines(), 1):
+        marker = re.match(r"^ {0,3}(`{3,}|~{3,})(.*)$", line)
+        if fence:
+            if marker and marker[1].startswith(fence) and not marker[2].strip():
+                fence = ""
+            continue
+        if marker:
+            fence = marker[1]
+            continue
+        # The renderer labels its records "Commands". Preserve surrounding prose on the same line.
+        line = re.sub(r"(?i)(\bcommands?:\s*)`([^`]+)`", r"\1", line)
+        line = re.sub(r"`(?:[./\w-]+\.(?:sh|py)|loom-serve|loom-fetch|python3?|bash)\s+[^`]+`", "", line)
+        yield number, line
+
+
 def text_problems(rel, text):
     """The text rules of one card text file (README.md and REPORT.md, the card's prose, never say "staging"; the
     configs' recorded evidence strings may say "staged" for a kernel's pipeline, so only staging-flow phrases count)."""
     out = []
     pats = FORBIDDEN + ([(PROSE_STAGING, "staging wording")] if rel in ("README.md", "REPORT.md") else [])
     if rel in ("README.md", "REPORT.md"):
-        pats = pats + [(RELEASE_HISTORY, "release history")]
+        hits = set()
+        first = None
+        for number, line in markdown_history_lines(text):
+            for match in RELEASE_HISTORY.finditer(line):
+                first = first or number
+                hits.add(match.group())
+        if hits:
+            out.append(f"{rel}:{first}: release history ({', '.join(sorted(hits)[:3])})")
     for pat, what in pats:
         hits = sorted({m.group(0) for m in pat.finditer(text)})
         if hits:
