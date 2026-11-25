@@ -188,6 +188,61 @@ func.def inline @g_ptq1_0_values(%w: buffer, %origin: offset, %group: index) -> 
 """
 
 
+Q2_0_HELPERS = r"""
+// Q2_0 (GGML type 42, upstream llama.cpp; Ternary Bonsai's stock-runnable packing): 64 values per 18-byte block, F16 d then 16 bytes of
+// 2-bit codes, value j = byte j / 4 bits 2 (j % 4): code q, value (q - 1) d. A 32-value group is 8 bytes: (w >> 2k) & 0x03030303 holds
+// values 4i + k in byte i; a shuffle puts them in value order.
+func.def inline @g_q2_0_codes8(%w8: vector<2xi32>) -> (vector<8xi8>, vector<8xi8>, vector<8xi8>, vector<8xi8>) {
+  %m = vector.splati 50529027 : vector<2xi32>
+  %s2 = vector.splati 2 : vector<2xi32>
+  %s4 = vector.splati 4 : vector<2xi32>
+  %s6 = vector.splati 6 : vector<2xi32>
+  %r0 = vector.andi %w8, %m : vector<2xi32>
+  %t2 = vector.shrui %w8, %s2 : vector<2xi32>
+  %r1 = vector.andi %t2, %m : vector<2xi32>
+  %t4 = vector.shrui %w8, %s4 : vector<2xi32>
+  %r2 = vector.andi %t4, %m : vector<2xi32>
+  %t6 = vector.shrui %w8, %s6 : vector<2xi32>
+  %r3 = vector.andi %t6, %m : vector<2xi32>
+  %b0 = vector.bitcast %r0 : vector<2xi32> to vector<8xi8>
+  %b1 = vector.bitcast %r1 : vector<2xi32> to vector<8xi8>
+  %b2 = vector.bitcast %r2 : vector<2xi32> to vector<8xi8>
+  %b3 = vector.bitcast %r3 : vector<2xi32> to vector<8xi8>
+  func.return %b0, %b1, %b2, %b3 : vector<8xi8>, vector<8xi8>, vector<8xi8>, vector<8xi8>
+}
+
+func.def inline @g_q2_0_icodes(%w: buffer, %origin: offset, %group: index) -> (vector<32xi8>, f32, f32) {
+  %two = index.constant 2 : offset
+  %eight = index.constant 8 : offset
+  %d_view = buffer.view %w[%origin] : buffer -> view<1xf16>
+  %d_half = view.load %d_view[0] : view<1xf16> -> f16
+  %d = scalar.extf %d_half : f16 to f32
+  %qo = index.add %origin, %two : offset
+  %go = index.scale %group, %eight : index, offset -> offset
+  %co = index.add %qo, %go : offset
+  %c_view = buffer.view %w[%co] : buffer -> view<8xi8>
+  %c8 = vector.load %c_view[0] : view<8xi8> -> vector<8xi8>
+  %cw = vector.bitcast %c8 : vector<8xi8> to vector<2xi32>
+  %b0, %b1, %b2, %b3 = func.call @g_q2_0_codes8(%cw) : (vector<2xi32>) -> (vector<8xi8>, vector<8xi8>, vector<8xi8>, vector<8xi8>)
+  %b01 = vector.concat<0> %b0, %b1 : vector<8xi8>, vector<8xi8> -> vector<16xi8>
+  %b23 = vector.concat<0> %b2, %b3 : vector<8xi8>, vector<8xi8> -> vector<16xi8>
+  %all = vector.concat<0> %b01, %b23 : vector<16xi8>, vector<16xi8> -> vector<32xi8>
+  // all[8k + i] = value 4i + k: value j = 4i + k comes from lane 8 (j % 4) + j / 4
+  %codes = vector.shuffle<[0, 8, 16, 24, 1, 9, 17, 25, 2, 10, 18, 26, 3, 11, 19, 27, 4, 12, 20, 28, 5, 13, 21, 29, 6, 14, 22, 30, 7, 15, 23, 31]> %all : vector<32xi8>
+  func.return %codes, %d, %d : vector<32xi8>, f32, f32
+}
+
+func.def inline @g_q2_0_values(%w: buffer, %origin: offset, %group: index) -> (vector<32xf32>) {
+  %codes, %d, %dm = func.call @g_q2_0_icodes(%w, %origin, %group) : (buffer, offset, index) -> (vector<32xi8>, f32, f32)
+  %f = vector.sitofp %codes : vector<32xi8> to vector<32xf32>
+  %one = vector.splatf 1.0 : vector<32xf32>
+  %c = vector.subf %f, %one : vector<32xf32>
+  %ds = vector.splat %d : vector<32xf32>
+  %values = vector.mulf %c, %ds : vector<32xf32>
+  func.return %values : vector<32xf32>
+}
+"""
+
 def signs_rodata(cfg):
     """One read-only table per sign width: the +/-1 signs as bits (set = -1), little-endian 32-bit words."""
     had = cfg["hadamard"]

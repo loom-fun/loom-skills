@@ -6448,6 +6448,8 @@ if __name__ == "__main__":
         COMMON += Q5_0
     if any(t["type"] == "ptq1_0" for t in TENS.values()):   # PrismML ternary weights (ternary.py)
         COMMON += ternary.PTQ1_0_HELPERS
+    if any(t["type"] == "q2_0" for t in TENS.values()):   # upstream Q2_0 (Ternary Bonsai's stock packing; ternary.py)
+        COMMON += ternary.Q2_0_HELPERS
     if any(t["type"] == "mxfp4" for t in TENS.values()):
         COMMON += MXFP4
     if any(t["type"] in SPLIT for t in TENS.values()):

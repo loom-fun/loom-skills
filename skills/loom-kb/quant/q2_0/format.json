@@ -1,0 +1,22 @@
+{
+  "schema": "loom-kb/format/1",
+  "format": "q2_0",
+  "ggml_type": "Q2_0",
+  "block_size": 64,
+  "bytes_per_block": 18,
+  "bits_per_weight": 2.25,
+  "low_bit": false,
+  "int8_path": true,
+  "moe": false,
+  "dequant_helper": "ternary.py (@g_q2_0_values, @g_q2_0_icodes; emitted when used); gen_gemm.py dequant16 (HELPER)",
+  "ktest": {
+    "matvec_int8": true,
+    "gemm_default": true,
+    "gemm_all": true
+  },
+  "devices_verified": {
+    "rdna3": false,
+    "rdna4": false
+  },
+  "evidence": "upstream ggml Q2_0 (ggml-quants.c dequantize_row_q2_0); Ternary-Bonsai-2.5-27B port #1416 (PR #1435): the package's file (hrx-loom 0.3.0 reads GGML types < 43); kernels compile for gfx1151 and gfx1201; GPU qualification pending"
+}

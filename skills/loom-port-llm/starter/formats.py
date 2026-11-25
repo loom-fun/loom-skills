@@ -14,10 +14,11 @@ FMT = {  # bytes per superblock of SB[fmt] values
     # low nibble, 2j+1 high) and the E8M0 scales, one byte per 32 values, in a second tensor: gen_llm.MXFP4S, emitted when used. The
     # kernels take two operands (nibbles, scales); the block size below counts the nibble plane only.
     "mxfp4s": 16,
+    "q2_0": 18,    # upstream Q2_0 (Ternary Bonsai's stock packing): F16 d + 16 bytes of 2-bit codes per 64 values: ternary.py, emitted when used
     "ptq1_0": 28,  # PrismML ternary (Ternary Bonsai): 128 trits + F16 d per 28 bytes: ternary.py helpers, emitted when used
 }
 SB = {"q4_k": 256, "q5_k": 256, "q6_k": 256, "q8_0": 32, "f32": 32,
-      "q4_0": 32, "iq4_nl": 32, "iq4_xs": 256, "q3_k": 256, "iq3_s": 256, "q5_0": 32, "f16": 32, "bf16": 32, "mxfp4": 32, "mxfp4s": 32, "ptq1_0": 128}
+      "q4_0": 32, "iq4_nl": 32, "iq4_xs": 256, "q3_k": 256, "iq3_s": 256, "q5_0": 32, "f16": 32, "bf16": 32, "mxfp4": 32, "mxfp4s": 32, "ptq1_0": 128, "q2_0": 64}
 LOWBIT = {"q4_0", "iq4_nl", "iq4_xs", "q3_k", "iq3_s"}
 # Formats whose decode matvecs and head take int8 activations (ACT_Q8): gen_llm.py has their @g_<fmt>_icodes.
 import os as _os
@@ -25,7 +26,7 @@ import os as _os
 # Q4_0 (choice decode.q4_0.act_q8, env Q4_0_Q8): opt-in by scope; @g_q4_0_icodes (codes 0..15, minimum 8 d), as llama.cpp's
 # vec_dot_q4_0_q8_1. Dense matvecs, the head and the MoE expert matvecs (MOE_Q8) of Q4_0 weights take the int8 path.
 _OFF = ("", "0", "false", "no", "off")
-ICODES = frozenset({"q8_0", "q4_k", "q5_k", "q6_k", "q5_0", "ptq1_0"} | ({"mxfp4s"} if _os.environ.get("MXFP4S_Q8", "0").lower() not in _OFF else set())
+ICODES = frozenset({"q8_0", "q4_k", "q5_k", "q6_k", "q5_0", "ptq1_0", "q2_0"} | ({"mxfp4s"} if _os.environ.get("MXFP4S_Q8", "0").lower() not in _OFF else set())
                    | ({"q4_0"} if _os.environ.get("Q4_0_Q8", "0").lower() not in _OFF else set())
                    | ({"iq4_xs", "iq4_nl"} if _os.environ.get("IQ4_Q8", "0").lower() not in _OFF else set()))
 # IQ4_XS / IQ4_NL (choice decode.iq4.act_q8, env IQ4_Q8): opt-in by scope; @g_iq4_<fmt>_icodes (signed kvalues codes, one scale per

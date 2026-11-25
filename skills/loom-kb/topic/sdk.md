@@ -148,6 +148,11 @@ Recorded by the mxfp4st campaign, 2026-11-15/16 (hrx-loom 0.1.0 from PyPI, DevLa
   (`target = (old / G + 1) * G`). Cost against launches: device node `decode`. Unlock: cooperative launch with a residency check + a
   native grid barrier.
 
+- **GGUF tensor types (hrx-loom 0.3.0)**: the runtime GGUF parser (`runtime/src/iree/io/formats/gguf/gguf_parser.c`) has a trait
+  table for GGML types 0..42 only; a parameter file holding another type fails registration with `GGML tensor type 143 not supported`
+  (PrismML PTQ1_0, DevLab run 45530428087), whatever the program does with it. A fork-only type needs a file in a known packing (Ternary
+  Bonsai: its Q2_0 file, type 42) and, for a denser layout, a load-time weight policy.
+
 ## Verified to work (not limits)
 
 - Parameter views above 2^31 bytes (`view<2542796800xi8>`, the 2.54 GB bf16 embedding and head) load and run on gfx1201 (ktest

@@ -22,6 +22,7 @@ FMT = {
     # dequantized through gen_llm.py's @g_<fmt>_values helpers (quant_values.loom)
     "q4_0": dict(block_bytes=18, block_values=32),
     "ptq1_0": dict(block_bytes=28, block_values=128),
+    "q2_0": dict(block_bytes=18, block_values=64),
     "q5_0": dict(block_bytes=22, block_values=32),
     "iq4_nl": dict(block_bytes=18, block_values=32),
     "iq4_xs": dict(block_bytes=136, block_values=256),
@@ -48,7 +49,7 @@ def bv_const(bv):
     return "" if bv in (32, 256) else f"  %cbv{bv} = index.constant {bv} : index\n"
 
 
-HELPER = {"q4_0", "q5_0", "iq4_nl", "iq4_xs", "q3_k", "iq3_s", "f16", "mxfp4", "mxfp4s", "ptq1_0"}
+HELPER = {"q4_0", "q5_0", "iq4_nl", "iq4_xs", "q3_k", "iq3_s", "f16", "mxfp4", "mxfp4s", "ptq1_0", "q2_0"}
 # GEMM_Q4_0_NATIVE (choice prefill.gemm.q4_0_native): Q4_0 decodes its 16-value half-block straight to F16 (moe_q4_0.dequant16,
 # the same values as @g_q4_0_values + fptrunc) and so gets the 128/256-row kernels instead of the 64-row tile only.
 Q4_0_NATIVE = os.environ.get("GEMM_Q4_0_NATIVE", "0").strip().lower() not in ("", "0", "false", "no", "off")
