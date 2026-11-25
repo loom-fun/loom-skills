@@ -33,14 +33,14 @@ import make_info  # noqa: E402
 
 class DraftTelemetry(unittest.TestCase):
     def test_030_abi1_reports_accepted_without_proposals(self):
-        v = bench_common.draft_counters((TEL / "metrics_030_abi1.txt").read_text())
+        v = bench_common.draft_counters((TEL / "metrics_030_abi1.txt").read_text(encoding="utf-8"))
         self.assertEqual(v, {"draft_accepted_inputs": 736.0, "decode_tokens": 1393.0})
         self.assertTrue(bench_common.proposals_unreported(v))
         self.assertIsNone(bench_common.acceptance_between({}, v))   # never from the configured depth
         self.assertEqual(bench_common.per_pass_between({}, v), round(736 / (1393 - 736), 3))
 
     def test_020_reports_the_share_of_proposals(self):
-        v = bench_common.draft_counters((TEL / "metrics_020_abi1.txt").read_text())
+        v = bench_common.draft_counters((TEL / "metrics_020_abi1.txt").read_text(encoding="utf-8"))
         self.assertFalse(bench_common.proposals_unreported(v))
         self.assertEqual(bench_common.acceptance_between({}, v), round(736 / 1971, 3))
         # SDK 0.2 counted every verification as depth proposals: its share x depth is the accepted tokens per pass
@@ -58,16 +58,16 @@ class DraftTelemetry(unittest.TestCase):
         with tempfile.TemporaryDirectory() as t:
             p = Path(t, "gates_spec.log")
             p.write_text("SPEC_CHECK PASS: 16/16 completions identical, 0 near-tie, acceptance not reported (736 drafted tokens "
-                         "accepted in 657 verification passes, 1.120 per pass; the server counts no proposals)\n")
+                         "accepted in 657 verification passes, 1.120 per pass; the server counts no proposals)\n", encoding="utf-8")
             self.assertEqual(make_info.acceptance_metric([str(p)]),
                              {"loom": None, "unreported": "proposals", "accepted_per_pass": 1.12})
             self.assertIsNone(make_info.acceptance([str(p)]))
-            p.write_text("SPEC_CHECK PASS: 13/13 completions identical, 0 near-tie, acceptance 68% of 2709 proposals\n")
+            p.write_text("SPEC_CHECK PASS: 13/13 completions identical, 0 near-tie, acceptance 68% of 2709 proposals\n", encoding="utf-8")
             self.assertEqual(make_info.acceptance_metric([str(p)]), {"loom": 0.68})
 
     def test_recorded_perf_rows(self):
         def rows(name):
-            return [json.loads(x) for x in (TEL / name).read_text().splitlines() if x.strip()]
+            return [json.loads(x) for x in (TEL / name).read_text(encoding="utf-8").splitlines() if x.strip()]
         old = make_info.acceptance_samples([r for r in rows("perf_020_sage.jsonl") if r.get("kind") == "loom"])
         new = make_info.acceptance_samples([r for r in rows("perf_030_sage.jsonl") if r.get("kind") == "loom"])
         self.assertTrue(old["decode"] and old["decode_2k"])
@@ -80,7 +80,7 @@ class CardFiles(unittest.TestCase):
                     "weights.loom", "head_weights.loom", "program/llm.loom", "gen/flash2_cfg.json", "library/motif/x.loom",
                     ".gitattributes", *extra):
             Path(t, rel).parent.mkdir(parents=True, exist_ok=True)
-            Path(t, rel).write_text("{}" if rel.endswith(".json") else "x\n")
+            Path(t, rel).write_text("{}" if rel.endswith(".json") else "x\n", encoding="utf-8")
 
     def test_card_format_passes(self):
         with tempfile.TemporaryDirectory() as t:
@@ -90,8 +90,8 @@ class CardFiles(unittest.TestCase):
     def test_foreign_files_and_staging_text(self):
         with tempfile.TemporaryDirectory() as t:
             self.package(t, ("sdk-qualification.json", "quick-start-qualification.json", "dev/bench/a.json", "dev/b.json"))
-            Path(t, "REPORT.md").write_text("The staging package passed correctness checks.\n")
-            Path(t, "info.json").write_text(json.dumps({"repo": "loom-fun-staging/x-loom", "promotion_hold": {}}))
+            Path(t, "REPORT.md").write_text("The staging package passed correctness checks.\n", encoding="utf-8")
+            Path(t, "info.json").write_text(json.dumps({"repo": "loom-fun-staging/x-loom", "promotion_hold": {}}), encoding="utf-8")
             got = "\n".join(card_files.check_package(t))
             for want in ("sdk-qualification.json: not a file", "quick-start-qualification.json: not a file",
                          "dev/ (2 files)", "REPORT.md:1: staging wording", "info.json:1: a loom-fun-staging reference",
@@ -102,7 +102,7 @@ class CardFiles(unittest.TestCase):
     def test_program_identifiers_are_code(self):
         with tempfile.TemporaryDirectory() as t:
             self.package(t)
-            Path(t, "program/llm.loom").write_text("%staging = ...\n")
+            Path(t, "program/llm.loom").write_text("%staging = ...\n", encoding="utf-8")
             self.assertEqual(card_files.check_package(t), [])
 
 
@@ -133,7 +133,7 @@ class Requalification(unittest.TestCase):
         self.assertFalse(card_lib.sdk_uses_file_parameters({"hrx_loom": "0.2.0"}))
 
     def test_render_has_no_single_release_check(self):
-        text = (CARD / "render_card.py").read_text()
+        text = (CARD / "render_card.py").read_text(encoding="utf-8")
         self.assertNotIn('== "0.3.0"', text)
 
 
@@ -143,10 +143,10 @@ class Lint(unittest.TestCase):
     def card(self, t):
         d = Path(t, "card")
         shutil.copytree(CARD / "test/flint/pkg", d)
-        cfg = json.loads((d / "llm_config.json").read_text())
-        cfg["sdk"] = {k: v for k, v in json.loads((CARD / "test/sdk03/evidence/hrx_loom.json").read_text()).items()
+        cfg = json.loads((d / "llm_config.json").read_text(encoding="utf-8"))
+        cfg["sdk"] = {k: v for k, v in json.loads((CARD / "test/sdk03/evidence/hrx_loom.json").read_text(encoding="utf-8")).items()
                       if k not in ("artifact_id", "branch")}
-        (d / "llm_config.json").write_text(json.dumps(cfg, indent=1))
+        (d / "llm_config.json").write_text(json.dumps(cfg, indent=1), encoding="utf-8")
         for f in ("info.json", "README.md", "REPORT.md"):
             shutil.copy(CARD / "test/sdk03/expected" / f, d / f)
         return d
@@ -165,12 +165,12 @@ class Lint(unittest.TestCase):
     def test_hand_edit_failed_run_and_staging_text(self):
         with tempfile.TemporaryDirectory() as t:
             d = self.card(t)
-            readme = (d / "README.md").read_text()
-            (d / "README.md").write_text(readme.replace("## Features", "The staging package passed correctness checks.\n\n## Features"))
-            info = json.loads((d / "info.json").read_text())
+            readme = (d / "README.md").read_text(encoding="utf-8")
+            (d / "README.md").write_text(readme.replace("## Features", "The staging package passed correctness checks.\n\n## Features"), encoding="utf-8")
+            info = json.loads((d / "info.json").read_text(encoding="utf-8"))
             sid = next(iter(info["sources"]))
             info["sources"][sid]["conclusion"] = "failure"
-            (d / "info.json").write_text(json.dumps(info, indent=1))
+            (d / "info.json").write_text(json.dumps(info, indent=1), encoding="utf-8")
             res = lint_card.lint(str(d), runs=lint_card.Runs(offline=True))
             self.assertTrue(any("staging wording" in p for p in res["files"]), res["files"])
             self.assertTrue(any("concluded failure" in p for p in res["runs"]), res["runs"])
@@ -179,12 +179,12 @@ class Lint(unittest.TestCase):
     def test_dropped_acceptance_and_missing_delta(self):
         with tempfile.TemporaryDirectory() as t:
             d = self.card(t)
-            info = json.loads((d / "info.json").read_text())
+            info = json.loads((d / "info.json").read_text(encoding="utf-8"))
             info.pop("sdk_delta")
             for s in info["devices"]["strix-halo"]["performance"]["sessions"]:
                 s["metrics"].pop("spec_acceptance", None)
             info["devices"]["strix-halo"].pop("admission")
-            (d / "info.json").write_text(json.dumps(info, indent=1))
+            (d / "info.json").write_text(json.dumps(info, indent=1), encoding="utf-8")
             res = lint_card.lint(str(d), runs=lint_card.Runs(offline=True))
             self.assertTrue(res["delta"] and "no delta line" in res["delta"][0], res["delta"])
             self.assertTrue(res["acceptance"], res)
