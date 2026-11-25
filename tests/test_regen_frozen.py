@@ -195,6 +195,13 @@ class PlanFrozen(unittest.TestCase):
         self.assertEqual(st.jobs[f"skipped:{STRIX_ONLY}:radeon-r9700"]["reason"], "the production card does not claim this device")
         refs = json.load(open(os.path.join(st.work, "refs_strix-halo.json")))
         self.assertEqual(refs[STRIX_ONLY]["model"]["memory_bytes"], 33000000000)
+        self.assertNotIn("llamacpp", refs[STRIX_ONLY]["model"])
+
+    def test_llamacpp_override_of_an_unlisted_package(self):
+        st = self.plan(STRIX_ONLY, extra=("--llamacpp", f"{STRIX_ONLY}=b1384"))
+        self.assertEqual(json.load(open(os.path.join(st.work, "refs_strix-halo.json")))[STRIX_ONLY]["model"]["llamacpp"], "b1384")
+        with self.assertRaises(SystemExit):   # a package nightly-models.json lists keeps its own build
+            self.plan(TEXT, extra=("--llamacpp", f"{TEXT}=b1384"))
         # the image package: one image job on Strix Halo, none on the R9700
         img = [e for e in st.jobs.values() if e["slug"] == IMAGE]
         self.assertEqual([(e["device"], e["kind"]) for e in img], [("strix-halo", "image")])

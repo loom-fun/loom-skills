@@ -452,7 +452,7 @@ def image_jobs(st, device, slugs, refs, old_sdk):
 
 
 def cmd_plan(a):
-    for k, v in (("new_sdk", None), ("programs", "build"), ("old_sdk", "card"), ("held", None), ("image_device", "strix-halo")):
+    for k, v in (("new_sdk", None), ("programs", "build"), ("old_sdk", "card"), ("held", None), ("image_device", "strix-halo"), ("llamacpp", None)):
         if not hasattr(a, k):   # a caller that builds its own namespace (fleet/final_pass.py) without the SDK-mode options
             setattr(a, k, v)
     new_sdk = a.new_sdk or SDK_NEW
@@ -513,6 +513,9 @@ def cmd_plan(a):
             die(f"--mode {a.mode} finds its old package in the staging repo's history (no --old)")
         refs = {}
         nightly = {m["repo"].split("/")[-1] for m in json.load(open(os.path.join(ROOT, ".github", "nightly-models.json")))["models"]}
+        llamacpp = dict(x.split("=", 1) for x in a.llamacpp or [])
+        if set(llamacpp) - (set(slugs) - nightly):
+            die(f"--llamacpp names a package that is not planned or that .github/nightly-models.json lists: {sorted(set(llamacpp) - (set(slugs) - nightly))}")
         for s in slugs:
             repo = f"{a.new_org}/{s}"
             if accepted:
@@ -530,7 +533,8 @@ def cmd_plan(a):
                     refs[s].update(programs_sha256=f["programs_sha256"], kind=f["kind"], claimed=f["claimed"], generator=f.get("generator"),
                                    gates=f.get("gates") or {})
                     if s not in nightly and f["kind"] == "text":   # a hand-written package the nightly list does not hold: its card's facts
-                        refs[s]["model"] = {"repo": published, "slug": s.lower(), "memory_bytes": f["memory_bytes"], "kit": None, "features": f["features"]}
+                        refs[s]["model"] = {"repo": published, "slug": s.lower(), "memory_bytes": f["memory_bytes"], "kit": None, "features": f["features"],
+                                            **({"llamacpp": llamacpp[s]} if s in llamacpp else {})}
                 continue
             try:
                 head, old = hf_head(repo), old_sdk_revision(repo, new_sdk)
@@ -2170,6 +2174,9 @@ def main(argv=None):
                         "on the new SDK, e.g. the kit build against the frozen production programs: --mode sdk-ab --old-sdk target --no-baselines)")
     p.add_argument("--held", help="--programs production: held.json {slug: {reason}} of packages out of this release (refused by name, skipped by --all; "
                                   "default: the inventory's sibling vOLD-to-vNEW-held.json)")
+    p.add_argument("--llamacpp", action="append", metavar="SLUG=TAG", help="--programs production: the llama.cpp ROCm reference build of a package "
+                   ".github/nightly-models.json does not list (a hand-written port whose architecture needs a newer build), e.g. "
+                   "unsloth-Inkling-2-Mini-loom=b1384 (skills/loom-kb/arch/llm/moe/inkling2/porting.md)")
     p.add_argument("--image-device", default="strix-halo", help="--programs production: the device whose runner compares an image package (default %(default)s)")
     p.add_argument("--old", help="ORG of the old packages (default loom-fun) or a refs.json {slug: {old, new}} (card revisions pinned: org/repo@rev)")
     p.add_argument("--new-org", default=STAGING_ORG)

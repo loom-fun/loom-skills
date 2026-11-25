@@ -586,17 +586,6 @@
    "kit": "deepseek2",
    "llamacpp": "b1386",
    "features": []
-  },
-  {
-   "repo": "loom-fun/unsloth-Inkling-2-Mini-loom",
-   "slug": "inkling-2-mini-ud-q4_k_xl",
-   "memory_bytes": 33000000000,
-   "kit": null,
-   "llamacpp": "b1384",
-   "features": [
-    "draft",
-    "thinking-toggle"
-   ]
   }
  ]
 }
