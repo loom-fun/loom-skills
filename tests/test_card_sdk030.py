@@ -38,9 +38,10 @@ class GateSDK(unittest.TestCase):
         old = (("2026-11-18", -1), None, dict(base, level="full", source="published-job"))
         new = (("2026-11-24T11:12:13", 0), dict(base, level="dev", source=source("0.3.0")), None)
         sources = {"published-job": source("0.2.0")}
-        self.assertTrue(make_info.gate_supersedes(new, old, sources))
-        self.assertFalse(make_info.gate_supersedes(old, new, sources))
-        self.assertFalse(make_info.gate_supersedes(new, old, {"published-job": source("0.3.0")}))
+        self.assertFalse(make_info.gate_supersedes(new, old, sources, "0.2.0"))
+        self.assertTrue(make_info.gate_supersedes(new, old, sources, "0.3.0"))
+        self.assertFalse(make_info.gate_supersedes(old, new, sources, "0.3.0"))
+        self.assertFalse(make_info.gate_supersedes(new, old, {"published-job": source("0.3.0")}, "0.3.0"))
 
 
 class DraftTelemetry(unittest.TestCase):
