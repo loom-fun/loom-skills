@@ -69,13 +69,20 @@ def clip(text, n=DETAIL_MAX):
 SPECIAL = re.compile("^<[|\uff5c].+[|\uff5c]>$")   # <|im_end|>, <FULLWIDTH-BAR end of sentence FULLWIDTH-BAR>: the engines' spellings of special tokens
 
 
-def special_key(key):
+def special_key(key, keep_space=False):
     """A token's text as both engines print it: llama.cpp prints '' for a special token (<|im_end|>, the end-of-sentence marker), Gufo
     the marker: both are one key. A sentencepiece-style vocabulary has Gufo print ' are' as 'are' (llama.cpp keeps the space): leading
-    spaces do not count (a whitespace-only token keeps its text)."""
+    spaces do not count (a whitespace-only token keeps its text). With keep_space (Gufo prints leading spaces: a byte-level BPE vocabulary,
+    keeps_spaces) they do: ' *' and '*' are two tokens there, and folding them hid a divergence (gpt-oss '17 *' vs '17*')."""
     if SPECIAL.match(key):
         return ""
-    return key.lstrip(" ") or key
+    return key if keep_space else key.lstrip(" ") or key
+
+
+def keeps_spaces(loom_tops):
+    """Does Gufo print leading spaces in this package's vocabulary? Yes when any token it listed (not whitespace-only) starts with one:
+    a sentencepiece vocabulary prints none (special_key), a byte-level BPE one prints them on every word after the first."""
+    return any(k.startswith(" ") and k.strip() for steps in loom_tops for top in steps for k, _ in top)
 
 
 def eog_keys(pkg):
@@ -88,19 +95,19 @@ def eog_keys(pkg):
     return {k for k in out if k}
 
 
-def compare_key(key, eog=()):
+def compare_key(key, eog=(), keep_space=False):
     """special_key, and one key ('') for the model's end markers and for whitespace-only tokens (Gufo prints a whitespace-only token
     as '', llama.cpp keeps its text)."""
     if key in eog or not key.strip():
         return ""
-    return special_key(key)
+    return special_key(key, keep_space)
 
 
-def merge_keys(pairs, eog=()):
+def merge_keys(pairs, eog=(), keep_space=False):
     """best_by_key under compare_key (end markers and whitespace-only tokens count by their best entry)."""
     out = {}
     for key, lp in pairs:
-        key = compare_key(key, eog)
+        key = compare_key(key, eog, keep_space)
         if key not in out or lp > out[key]:
             out[key] = lp
     return out
@@ -112,36 +119,37 @@ def tail_tol(a, b):
     return next((tol for floor, tol in LOGPROB_TIERS if p >= floor), None)
 
 
-def best_by_key(pairs):
+def best_by_key(pairs, keep_space=False):
     """{key: best log-prob}: tokens that print as the same text (several special or empty-text tokens) count by their best entry."""
     out = {}
     for key, lp in pairs:
-        key = special_key(key)
+        key = special_key(key, keep_space)
         if key not in out or lp > out[key]:
             out[key] = lp
     return out
 
 
-def check_vs_llama(loom_tops, llama_keys, llama_tops, near_tie, eog=()):
+def check_vs_llama(loom_tops, llama_keys, llama_tops, near_tie, eog=(), keep_space=False):
     """Compare Loom's per-step top lists with llama.cpp's greedy continuation of the same prompt.
     loom_tops: per generated step [(key, logprob)] best first (key: the token's text); llama_keys: llama.cpp's greedy token per
     step; llama_tops: per step {key: logprob}. near_tie(top, gold, loom) -> bool (bench_common.near_tie). eog: the model's end-marker
     texts (eog_keys): llama.cpp ends an answer with an empty/special token where Loom's top-1 is the template's end marker, which is the
-    same token, so they compare equal and their log-probs are compared like any other.
+    same token, so they compare equal and their log-probs are compared like any other. keep_space: leading spaces are part of a token's
+    key (keeps_spaces).
     Returns (compared_steps, problems): stops at the first greedy divergence (judged as a near-tie, or a problem)."""
     compared, problems = 0, []
-    llama_keys = [compare_key(k, eog) for k in llama_keys]
-    llama_tops = [merge_keys(t.items(), eog) for t in llama_tops]
+    llama_keys = [compare_key(k, eog, keep_space) for k in llama_keys]
+    llama_tops = [merge_keys(t.items(), eog, keep_space) for t in llama_tops]
     for k, (top, gkey, ltop) in enumerate(zip(loom_tops, llama_keys, llama_tops)):
         if not top:
             problems.append(f"step {k}: no top-logprobs")
             break
-        lkey = compare_key(top[0][0], eog)
+        lkey = compare_key(top[0][0], eog, keep_space)
         if lkey != gkey:
             if not near_tie(ltop, gkey, lkey):
                 problems.append(f"step {k}: Loom top-1 {lkey!r} vs llama.cpp {gkey!r}, not a near-tie")
             break
-        for key, lp in merge_keys(top, eog).items():
+        for key, lp in merge_keys(top, eog, keep_space).items():
             if key in ltop:
                 allowed = tail_tol(lp, ltop[key])
                 if allowed is not None and abs(lp - ltop[key]) > allowed:
@@ -343,11 +351,12 @@ def stop_group(p, grace=60):
 
 def llama_reference(pkg, llama, prompt, steps):
     """llama.cpp's greedy continuation of the package's rendered prompt ids: (generated token texts, per-step {text: best logprob}); tokens
-    that print as the same text (several special tokens print '') count by their best entry."""
+    that print as the same text (several special tokens print '') count by their best entry. Texts keep their leading spaces
+    (check_vs_llama folds them where the vocabulary does not print them)."""
     from bench_common import llama_greedy
     ids = pkg.ids(pkg.render_messages([{"role": "user", "content": prompt}], enable_thinking=False))
     r, gen, cp = llama_greedy(llama, ids, steps, pkg)
-    return [x["token"] for x in cp], [best_by_key((t["token"], t["logprob"]) for t in x["top_logprobs"]) for x in cp]
+    return [x["token"] for x in cp], [best_by_key(((t["token"], t["logprob"]) for t in x["top_logprobs"]), True) for x in cp]
 
 
 # ---------------------------------------------------------------- the run
@@ -396,25 +405,30 @@ def run(a):
     finally:
         g.close()
     # (b) + (c): capability on
+    seen = {}
     g = Gufo(bundle, a.package, a.port, True, work + ".gufo_on.log", extra=preset_args)
     try:
         for p in prompts:
             dev, _ = g.chat(p, a.steps, False)
             host, lp = g.chat(p, a.steps, True)
-            ok, why = check_default_unchanged(off[p], dev, host)
-            checks.append({"name": "default_unchanged", "prompt": p[:40], "ok": ok, "why": why})
-            stats["prompts"] += 1
-            stats["steps"] += len(lp)
-            if a.llama:
-                lkeys, ltops = refs[p]
-                tops = [[(t["token"], t["logprob"]) for t in e.get("top_logprobs") or []] for e in lp]
-                n, problems = check_vs_llama(tops, lkeys, ltops, near_tie, eog)
-                compared_max = max(compared_max, n)
-                raw["prompts"][p] = {"loom_tops": tops, "llama_keys": lkeys, "llama_tops": ltops, "off_text": off[p], "device_text": dev, "host_text": host}
-                checks.append({"name": "llama", "prompt": p[:40], "ok": not problems, "compared": n, "why": "; ".join(problems[:3]), "problems": problems,
-                               "sample": {"loom": tops[:4], "llama": [[k, sorted(t.items(), key=lambda kv: -kv[1])[:5]] for k, t in zip(lkeys[:4], ltops[:4])]}})
+            seen[p] = (dev, host, [[(t["token"], t["logprob"]) for t in e.get("top_logprobs") or []] for e in lp])
     finally:
         g.close()
+    keep = keeps_spaces([tops for _, _, tops in seen.values()])   # judged once every prompt is in: the vocabulary prints its spaces or not
+    raw["keep_space"] = keep
+    for p in prompts:
+        dev, host, tops = seen[p]
+        ok, why = check_default_unchanged(off[p], dev, host)
+        checks.append({"name": "default_unchanged", "prompt": p[:40], "ok": ok, "why": why})
+        stats["prompts"] += 1
+        stats["steps"] += len(tops)
+        if a.llama:
+            lkeys, ltops = refs[p]
+            n, problems = check_vs_llama(tops, lkeys, ltops, near_tie, eog, keep)
+            compared_max = max(compared_max, n)
+            raw["prompts"][p] = {"loom_tops": tops, "llama_keys": lkeys, "llama_tops": ltops, "off_text": off[p], "device_text": dev, "host_text": host}
+            checks.append({"name": "llama", "prompt": p[:40], "ok": not problems, "compared": n, "why": "; ".join(problems[:3]), "problems": problems,
+                           "sample": {"loom": tops[:4], "llama": [[k, sorted(t.items(), key=lambda kv: -kv[1])[:5]] for k, t in zip(lkeys[:4], ltops[:4])]}})
     with open(work + ".raw.json", "w") as f:
         json.dump(raw, f)
     n_ok = sum(1 for c in checks if c["ok"])

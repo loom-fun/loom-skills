@@ -64,7 +64,8 @@
   "sdk_delta": {
    "type": "object", "additionalProperties": false, "required": ["comparisons"],
    "description": "Earlier cards of this package (make_info.py build --previous-card): their stored Loom values per GPU, so render_card.py generates the delta line of every metric on every GPU this card re-measured on its own SDK. A regression beyond the band needs an explanation from evidence (lint_card.py).",
-   "properties": {"kit": {"type": "object", "additionalProperties": false, "required": ["reason"],
+   "properties": {"new_port": {"const": true, "description": "this package had no card on the previous SDK (make_info.py build --new-port: its repository is absent from the production inventory of the migration to its SDK); render_card.py writes the generated new-port delta line, lint_card.py accepts it only for such a repository"},
+                  "kit": {"type": "object", "additionalProperties": false, "required": ["reason"],
      "description": "migration-only programs whose release kit build was A/B'd against them on the new SDK and not shipped (make_info.py build --kit-kept): why, generated from that A/B's decision, and its job",
      "properties": {"reason": {"type": "string"}, "url": {"type": ["string", "null"]}}},
     "comparisons": {"type": "array", "items": {
@@ -181,7 +182,7 @@
       "admission": {
        "type": "object", "additionalProperties": false, "required": ["admitted", "tokens", "context", "detail", "date", "source"],
        "description": "The native-context admission check of the latest gates run on this GPU (gates.sh context_admit, ctx_admit.py): one request filling the context the GPU serves, admitted or refused",
-       "properties": {"admitted": {"type": "boolean"}, "tokens": {"type": ["integer", "null"]}, "context": {"type": ["integer", "null"]},
+       "properties": {"emulated_on": {"$ref": "#/$defs/emulation"}, "admitted": {"type": "boolean"}, "tokens": {"type": ["integer", "null"]}, "context": {"type": ["integer", "null"]},
                       "detail": {"type": ["string", "null"]}, "date": {"type": ["string", "null"], "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"},
                       "source": {"type": "string"}, "programs_sha256": {"type": ["string", "null"]}}
       },
@@ -320,6 +321,10 @@
     "unreported": {"enum": ["proposals"], "description": "spec_acceptance only, with loom null: proposals = the SDK counted accepted drafted tokens but no proposals for this package's controller (hrx-loom 0.3 with a service ABI 1 controller; bench_common.proposals_unreported); never derived from the configured draft depth"}
    }
   },
+  "emulation": {
+   "type": "object", "additionalProperties": false, "required": ["device", "memory_bytes"],
+   "properties": {"device": {"type": "string"}, "memory_bytes": {"type": "integer"}}
+  },
   "gate": {
    "type": "object", "required": ["status", "level", "date", "source", "detail"],
    "properties": {
@@ -327,6 +332,7 @@
     "level": {"type": ["string", "null"], "description": "gates.sh LEVEL the evidence ran at"},
     "date": {"type": ["string", "null"], "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"},
     "source": {"type": "string"},
+    "emulated_on": {"$ref": "#/$defs/emulation"},
     "detail": {"type": ["string", "null"], "description": "a count from the gate's own output (e.g. 66/66), or null"},
     "programs_sha256": {"type": ["string", "null"]}
    }

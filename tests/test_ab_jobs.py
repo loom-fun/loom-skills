@@ -126,6 +126,30 @@ class SdkAb(unittest.TestCase):
             self.assertNotIn("card", v[n])
         self.assertEqual(v["stagingnd"]["execution"], {"draft_depth": 0})
 
+    def test_strix_built_side_takes_the_checkouts_prefill_scope_rule(self):
+        """a model whose Strix scope sets exec.prefill_capacity is built with that chunk (the package it publishes), first run and rerun alike"""
+        slug = "unsloth-Qwen3.5-35B-A3B-loom"
+        want = card_lib.scope_execution(slug, "strix-halo").get("prefill_capacity")
+        self.assertTrue(want)
+        d = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, d, True)
+        p = os.path.join(d, "refs.json")
+        json.dump({slug: {"old": f"loom-fun/{slug}@abc"}}, open(p, "w"))
+        for extra in ([], ["--suffix=-r2"]):
+            j = json.loads(run_script("ab_jobs.py", ["--device", "strix-halo", "--sdk-ab", "--refs", p, *extra, FAST, slug]))["jobs"]
+            v = {x["name"]: x for x in next(x for x in j if slug.lower().replace(".", "-") in x["name"])["variants"]}
+            for n in ("staging", "stagingnd"):
+                self.assertEqual(v[n]["build_args"], ["--memory-gib", "4096", "--prefill", str(want)])
+            self.assertNotIn("build_args", v["fun"])
+            f = {x["name"]: x for x in next(x for x in j if FAST.lower().replace(".", "-") in x["name"])["variants"]}
+            self.assertEqual(f["staging"]["build_args"], ["--memory-gib", "4096"])   # no Strix scope rule: unchanged
+
+    def test_the_built_side_gets_its_admission_probe(self):
+        for device in ("strix-halo", "radeon-r9700"):
+            extra = ["--fit", os.path.join(ROOT, ".github", "devlab", "r9700_fit.json")] if device == "radeon-r9700" else []
+            steps = self.jobs(device, *extra)["steps"]
+            self.assertEqual(steps.count("admit:staging"), 1, (device, steps))
+
     def test_abba_order_of_old_and_new_sessions(self):
         steps = self.jobs("strix-halo")["steps"]
         self.assertEqual(steps[:4], ["perf:fun:1", "perf:staging:1", "perf:staging:1", "perf:fun:1"])

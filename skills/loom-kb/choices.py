@@ -224,6 +224,11 @@ CHOICE("decode.attn.span.min_kv_heads", "int", 8, "ATTN_MT_MIN_KV", rows=["decod
        doc="KV heads from which the span path is taken (8 KV heads +8..2x, 4 KV heads 0/-15 %, <= 2 KV heads -6..-27 %).")
 CHOICE("decode.attn.segment", "bool", True, "SEG_ATTN", rows=["decode_32k"], kernels=["g_attention_split", "g_attention_combine"],
        doc="Drafting builds with <= 2 KV heads and head_dim 64/128 decode long spans in segments (False: split kernel everywhere).")
+CHOICE("decode.attn.segment.d256", "bool", False, "SEG_D256", rows=["decode_32k"], kernels=["g_attention_split"],
+       doc="head_dim 256 drafting builds (<= 2 KV heads) take the segment path too: chunk-outer scores, p read where used (qwen35 hybrids' verify spans).")
+CHOICE("decode.attn.segment.wmma", "bool", False, "SEG_WMMA", rows=["decode_32k"], kernels=["g_attention_split"],
+       doc="With decode.attn.segment.d256 (8 query heads per KV head): the span body on WMMA (f16 Q and P, f32 accumulation and softmax; "
+           "K/V staged once per 32-key block, the next block's loads in flight); a gfx12 twin of the split kernel carries its own WMMA layouts.")
 CHOICE("decode.attn.segment.min_ctx", "int", 8192, "SEG_MIN", rows=["decode_32k"], kernels=["g_attention_split"],
        doc="Visible keys from which the segment path applies.")
 CHOICE("decode.attn.segment.max_tokens", "int", None, "SEG_TS_MAX", rows=["decode_32k"], kernels=["g_attention_split"], dynamic=True,
@@ -523,12 +528,24 @@ CHOICE("moe.route.unroll", "int", 4, "MOE_ROUTE_U", doc="Experts per wave scored
 CHOICE("moe.route.tokens_per_wg", "int", 0, "ROUTE_TR", doc="Router tokens per workgroup (0: the largest of 1/2/4/8 whose LDS fits 48 KiB). "
        "A count whose x rows fit 64 KiB but not with the logits (8 at hidden 2048, 256 experts) keeps the logits in registers: same sums, half the weight reads of 4.",
        **_MO)
+CHOICE("moe.route.decode_split", "bool", False, "MOE_ROUTE_DSPLIT", kernels=["g_moe_route", "g_moe_route_lg", "g_moe_route_tk"],
+       rows=ROWS_DECODE + ROWS_STREAMS, from_pr="qwen35b lane",
+       doc="Decode-shaped epochs score the router once per epoch (g_moe_route_lg: one wave per 4 experts over every token) into a scratch, "
+           "then g_moe_route_tk does g_moe_route's softmax + top-k per token: each router weight read once per epoch; bit-identical ids/weights.")
 CHOICE("moe.fold", "bool", True, "MOE_FOLD", doc="Fold the routing weights into the expert matvec.", **_MO)
 CHOICE("moe.prefill.skip_empty", "bool", True, "MOE_SKIP_EMPTY", doc="Waves of empty expert tiles exit early.", **_MO)
 CHOICE("moe.prefill.prefetch", "bool", True, "MOE_PREFETCH", doc="Stage prefetch in the grouped expert GEMMs.", **_MO)
 CHOICE("moe.prefill.store16", "bool", False, "MOE_STORE16", kernels=["g_moe_gdn_*", "g_moe_combine_sorted*"], rows=ROWS_PREFILL, from_pr="qwen35 lane",
        doc="Numerics-moving: the grouped down GEMM stores its expert rows (ys_sorted) as f16 and g_moe_combine_sorted reads them as f16, in place "
            "(gen_moe.store16): half the DRAM traffic of prefill's largest intermediate (prompt rows x used experts x hidden).")
+CHOICE("moe.prefill.cw_q4k", "str", "0", "MOE_CW_Q4K", kernels=["g_moe_ggu_q4_k_*", "g_moe_gdn_q4_k_*", "g_moe_ggu_q5_k_*", "g_moe_gdn_q5_k_*"], rows=ROWS_PREFILL, from_pr="qwen35 lane (#1418)",
+       doc="Column-wave grouped MoE GEMMs for Q4_K and Q5_K experts (Q5_K: the qh fifth bit ORed in word-wide, 3 VALU per code word) in the starter (gen_moe_cw_q4k.py, gfx11 + gfx12 twin; '1' both, or a list of "
+           "swiglu,store): each wave owns output columns and dequantizes them straight into WMMA B fragments (no weight LDS stage), the "
+           "activation rows are staged once per 128 K, the chunk's 6-bit scales/mins are decoded word-wide once, and only the tile's live "
+           "16-row fragments get MMAs. Bit-identical to the 64-row tile kernels on live rows (same values, same K order). Loop VALU per 128 K "
+           "(32 weight columns per wave): gfx11 ~610 (each half-wave decodes its column's 16 values per K16) vs the 64-row kernel's "
+           "~1490 per 128 columns, gfx12 ~366 (8 values per lane, no duplicate). Token 'xch' (e.g. '1,xch'): gfx11 half-waves decode "
+           "one group each and swap through xor-16 shuffles (523 VALU + 64 ds_bpermute, 240 VGPRs; experiment). DevLab kbench pending.")
 _DS2 = dict(kits=["deepseek2"], rows=ROWS_PREFILL, from_pr="joyai-pfgemm")   # deepseek2 example kit (JoyAI-LLM-Flash campaign, PR #1361)
 CHOICE("prefill.gemm.t64_g32", "bool", False, "GEMM_T64_G32", kernels=["g_gemm_iq4_*", "g_moe_g*_iq4_*"], **_DS2,
        doc="The 64-row WMMA tile stages IQ4_XS / IQ4_NL a whole 32-group per thread (_g32_iq4, the iq4_f16lut values): grouped MoE "

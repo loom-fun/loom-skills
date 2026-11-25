@@ -237,3 +237,35 @@ command.def public @p() launch() {
         self.assertIn("index, index, i32, index, index, buffer, buffer, buffer, buffer, buffer, view<256xf32>", out)
         self.assertEqual(out.count("@g_split_qgate["), 1)                          # the MTP pair keeps its split
         self.assertIn("@g_qk_rope_store[%t](%t, %mtp_layer", out)
+
+
+class FlashSwaTwinTwoHeads(unittest.TestCase):
+    """FLASH2_SWA_TWIN=s at head_dim 256 with 2 query heads per KV head (gemma4 12B/26B/31B sliding layers): the gfx12 twin is gen_flash2s.py's
+    split-dims kernel only with its 16-key tiles (FLASH2_KT256__RDNA4=16: four waves stage a tile); 32-key tiles keep the generic twin; the gfx11
+    kernel is the generic one either way."""
+    CFG = ROOT / "fleet/unsloth-gemma-4-12B-it-loom/llm_config.json"
+
+    def gen(self, tmp, **env):
+        import json
+        cfg = json.loads(self.CFG.read_text())
+        cfg["head_dim"] = cfg["head_dim_swa"]                      # the sliding layers' flash kernel (head_dim 256, 16 heads / 8 KV heads)
+        cp = Path(tmp) / "cfg.json"; cp.write_text(json.dumps(cfg))
+        out = Path(tmp) / "flash2.loom"
+        e = {k: v for k, v in os.environ.items() if not k.startswith("FLASH2_")}
+        e.update(LLM_CONFIG=str(cp), FLASH2_TARGET="llm", FLASH2_OUT=str(out), **env)
+        subprocess.run([sys.executable, str(STARTER / "gen_flash2.py")], check=True, env=e, capture_output=True)
+        t = out.read_text()
+        a = t.index('export("g_attention_flash2_rdna4")')
+        return t[:a], t[a:]
+
+    def test_sixteen_key_tiles_take_the_split_dims_twin(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            g11_0, r4_0 = self.gen(tmp)
+            g11_s, r4_s = self.gen(tmp, FLASH2_SWA_TWIN="s")
+            g11_16, r4_16 = self.gen(tmp, FLASH2_SWA_TWIN="s", FLASH2_KT256__RDNA4="16")
+        self.assertEqual(r4_s, r4_0)                                # 32-key tiles: gen_flash2s.py needs 8 waves, the generic twin stays
+        self.assertIn("%clanes = index.constant 64 : index", r4_0)
+        self.assertIn("%clanes = index.constant 128 : index", r4_16)   # 2 heads x 2 waves of 128 dims
+        self.assertNotEqual(r4_16, r4_0)
+        self.assertEqual(g11_16, g11_0)                             # the gfx11 kernel is unchanged

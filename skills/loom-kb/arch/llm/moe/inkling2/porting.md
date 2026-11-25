@@ -22,6 +22,13 @@
   R9700S at both quantizations. [Upstream loop-scale fix](https://github.com/ggml-org/llama.cpp/pull/32704)
   [Stock ROCm b1384](https://github.com/lemonade-sdk/llamacpp-rocm/releases/tag/b1384)
   [Reference proof](https://github.com/loom-fun/loom-skills/actions/runs/45285206955)
+- The gates do this by themselves for the Strix package (checkpoint `ea0c79b2`, compact layout): `loom-benchmark`
+  `scripts/reference_models.json` maps its checkpoint to the sha256-pinned `Mainline_Support` file and refuses a llama.cpp
+  older than b1384, and `_lib.sh` renders its `call_format` `inkling2` with `scripts/renderers/inkling2/chat_probe.py`.
+  Without them stock llama.cpp cannot load the compact file (`blk.24.attn_q.weight not found`): every reference stays
+  pending, and the starter renderer turns each reply into zero tokens, so consistency and spec report a divergence "at
+  token 0" with no near-tie verdict possible. Those were the SDK 0.3.0 sweep's Strix gate failures, on 0.2.0 too.
+  [Fixed gates](https://github.com/loom-fun/loom-skills/actions/runs/45624503314/job/139241089705)
 - Point `LOOM_KIT` at the package's chat renderer for compare and agent. Select the renderer for its layout and chat
   policy. The Radeon kit ships `dev/kit/chat_probe.py`. Send `reasoning_effort` inside llama.cpp's
   `chat_template_kwargs` and confirm prompt counts. The Radeon Loom policy requires the tool message's `name` as well

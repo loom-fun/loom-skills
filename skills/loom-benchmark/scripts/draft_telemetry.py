@@ -2,6 +2,12 @@
 spec_check.py and the card scripts (make_info.py) read. bench_common re-exports them."""
 
 
+from statistics import median
+
+
+# This SDK defined proposed_tokens as verification_passes × configured draft depth.
+DEPTH_COUNTED_PROPOSAL_SDKS = {"0.2.0"}
+
 DRAFT_COUNTERS = ("draft_proposed_tokens", "draft_accepted_inputs", "decode_tokens")
 
 
@@ -51,3 +57,24 @@ def per_pass_between(before, after):
     acc = after["draft_accepted_inputs"] - before.get("draft_accepted_inputs", 0)
     passes = after["decode_tokens"] - before.get("decode_tokens", 0) - acc
     return round(acc / passes, 3) if passes > 0 else None
+
+
+def repeat_decode(out, key, metric, count, request):
+    """Median decode rate and mean request-level drafting measurements across successful repeats."""
+    vals = []
+    telemetry = {"acceptance": [], "accepted_per_pass": []}
+    for i in range(max(1, count)):
+        for field in telemetry:
+            out.get(field, {}).pop(key, None)
+        v = request(i)
+        if v is not None:
+            vals.append(v)
+            for field, values in telemetry.items():
+                if key in out.get(field, {}):
+                    values.append(out[field][key])
+    for field, values in telemetry.items():
+        if values:
+            out[field][key] = round(sum(values) / len(values), 4)
+    if count > 1 and vals:
+        out.setdefault("samples", {})[metric] = vals
+    return median(vals) if vals else None

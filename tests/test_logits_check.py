@@ -84,6 +84,31 @@ class Comparisons(unittest.TestCase):
         # Gufo prints a whitespace-only token as '', llama.cpp keeps its text
         self.assertEqual(lc.check_vs_llama([[("", -0.3)]], [" "], [{" ": -0.31}], near_tie), (1, []))
 
+    @unittest.skipIf(near_tie is None, "bench_common needs requests")
+    def test_leading_spaces_of_a_byte_level_vocabulary(self):
+        # gpt-oss (DevLab R9700): Loom wrote '17*' where llama.cpp wrote '17 *'; with leading spaces folded the two read as one token and the
+        # divergence surfaced one step later, after the texts had parted ('23' vs ' ', not a near-tie). Gufo prints this vocabulary's spaces.
+        loom = [[("17", -0.0)], [("*", -0.78), (" *", -0.86), (" times", -2.48)], [("23", -0.0003), ("20", -8.45)]]
+        keys = ["17", " *", " "]
+        tops = [{"17": -0.0}, {" *": -0.81, "*": -0.84, " times": -2.45}, {" ": -0.001, "23": -6.9}]
+        self.assertTrue(lc.keeps_spaces([loom]))
+        self.assertFalse(lc.keeps_spaces([[[("are", -0.1), ("is", -2.0)]], [[(" ", -0.2)]]]))    # sentencepiece; a whitespace-only token says nothing
+        n, probs = lc.check_vs_llama(loom, keys, tops, near_tie)              # folded: the divergence is found at step 2
+        self.assertEqual((n, len(probs)), (2, 1))
+        self.assertIn("step 2", probs[0])
+        self.assertEqual(lc.check_vs_llama(loom, keys, tops, near_tie, keep_space=True), (1, []))   # step 1: a near-tie (0.03 nats)
+        # stricter: a ' X' vs 'X' mismatch folding passed silently is now judged; llama.cpp sure of ' *' makes it a problem
+        self.assertEqual(lc.check_vs_llama(loom, keys, [tops[0], {" *": -0.01, "*": -5.0}, tops[2]], near_tie)[0], 2)
+        n, probs = lc.check_vs_llama(loom, keys, [tops[0], {" *": -0.01, "*": -5.0}, tops[2]], near_tie, keep_space=True)
+        self.assertTrue(probs and "step 1" in probs[0])
+        # and the two spellings' log-probs are compared each with its own, not the best of both
+        n, probs = lc.check_vs_llama([[("A", -0.1), (" B", -1.2), ("B", -6.0)]], ["A"], [{"A": -0.1, " B": -1.25, "B": -1.3}], near_tie, keep_space=True)
+        self.assertTrue(probs and "'B'" in probs[0])
+        self.assertEqual(lc.check_vs_llama([[("A", -0.1), (" B", -1.2), ("B", -6.0)]], ["A"], [{"A": -0.1, " B": -1.25, "B": -1.3}], near_tie), (1, []))
+        self.assertEqual(lc.special_key(" *", True), " *")
+        self.assertEqual(lc.special_key(" *"), "*")
+        self.assertEqual(lc.best_by_key([(" *", -0.6), ("*", -0.8)], True), {" *": -0.6, "*": -0.8})
+
     def test_eog_keys(self):
         class Tok:
             def decode(self, ids, skip_special_tokens=False):

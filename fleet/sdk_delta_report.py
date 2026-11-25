@@ -17,7 +17,7 @@ import sys
 
 ROWS = ["decode", "decode_2k", "decode_32k", "prefill_1k", "prefill_2k", "prefill_8k", "prefill_16k", "prefill_32k", "streams4"]
 SHORT = {"decode": "decode", "decode_2k": "dec 2k", "decode_32k": "dec 32k", "prefill_1k": "pf 1k", "prefill_2k": "pf 2k",
-         "prefill_8k": "pf 8k", "prefill_16k": "pf 16k", "prefill_32k": "pf 32k", "streams4": "4 streams"}
+         "prefill_8k": "pf 8k", "prefill_16k": "pf 16k", "prefill_32k": "pf 32k", "streams4": "4 streams", "spec_acceptance": "draft acceptance"}
 SUPERMAJORITY = 2 / 3
 
 
@@ -41,6 +41,9 @@ def _explanation(reg):
 def pair_summary(dev, band):
     """(measured rows, equal-or-better rows, rows worse than the band, regressions list) of one device entry"""
     delta = {k: v for k, v in (dev.get("delta_pct") or {}).items() if k in ROWS}
+    acc = dev.get("spec_acceptance") or {}
+    if acc.get("unit") and acc.get("old") and acc.get("new") is not None and not acc.get("incomparable"):
+        delta["spec_acceptance"] = round((acc["new"] / acc["old"] - 1) * 100, 4)
     worse = sorted(k for k, v in delta.items() if v < -band)
     return delta, len(delta) - len(worse), worse
 
@@ -66,8 +69,8 @@ def collect(doc, band=3.0):
                 if delta:
                     row["verdict"] = "pass" if ok / len(delta) >= SUPERMAJORITY else "FAIL"
                 acc = dev.get("spec_acceptance") or {}
-                if acc.get("old") is not None or acc.get("new") is not None:
-                    row["acceptance"] = (acc.get("old"), acc.get("new"))
+                if acc.get("required") or acc.get("old") is not None or acc.get("new") is not None:
+                    row["acceptance"] = acc
             out.append(row)
     return out
 
@@ -81,6 +84,10 @@ def problems(rows):
                 bad.append(f"{r['slug']} {r['device']} {g['row']} {g['pct']:+.1f} %: no explanation")
         if r["status"] == "qualified" and r["kind"] != "image" and not r["n"]:
             bad.append(f"{r['slug']} {r['device']}: qualified but no measured row")
+        acc = r["acceptance"]
+        if r["status"] == "qualified" and acc:
+            if not acc.get("unit") or acc.get("old") is None or acc.get("new") is None or acc.get("incomparable"):
+                bad.append(f"{r['slug']} {r['device']}: missing comparable spec_acceptance evidence")
         if r["verdict"] == "FAIL":
             bad.append(f"{r['slug']} {r['device']}: fewer than two thirds of the rows are equal or better ({r['ok']}/{r['n']})")
     return bad
@@ -102,12 +109,16 @@ def render(doc, band=3.0):
         worse = ", ".join(f"{SHORT[g['row']]} {g['pct']:+.1f} %" for g in r["regressions"]) or "-"
         score = f"{r['ok']}/{r['n']} ({r['verdict']})" if r["n"] else (r["reason"] or r["status"] or "-")
         ln.append(f"| {r['slug']} | {r['device']} | {r['status']} | {score} | {worse} | {_link('job', r['job_url']) if r['job_url'] else '-'} |")
-    ln += ["", "### Delta per row (percent)", "", "| Model | GPU | " + " | ".join(SHORT[k] for k in ROWS) + " | accepted per pass old -> new |",
+    ln += ["", "### Delta per row (percent)", "", "| Model | GPU | " + " | ".join(SHORT[k] for k in ROWS) + " | draft acceptance old -> new (unit) |",
            "|---|---|" + "---:|" * len(ROWS) + "---|"]
     for r in rows:
         if r["kind"] == "image" or not r["n"]:
             continue
-        acc = "-" if not r["acceptance"] else " -> ".join("-" if x is None else f"{x:.3g}" for x in r["acceptance"])
+        acc = "-"
+        if r["acceptance"]:
+            a = r["acceptance"]
+            values = ["-" if a.get(k) is None else f"{a[k]:.3g}" for k in ("old", "new")]
+            acc = " -> ".join(values) + f" ({a.get('unit', 'unverified unit')})"
         ln.append(f"| {r['slug']} | {r['device']} | " + " | ".join(_pct(r["delta"].get(k)) for k in ROWS) + f" | {acc} |")
     regs = [(r, g) for r in rows for g in r["regressions"]]
     ln += ["", "### Regressions over the band", ""]

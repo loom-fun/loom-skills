@@ -38,7 +38,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from card_files import check_package  # noqa: E402
 from card_lib import (DELTA_BAND, METRIC_KEYS, card_gpus, card_metrics, carried_sdk, delta_rows, free_text_errors, gpu_view,  # noqa: E402
-                      has_results, load_info, load_package, metric_applies, package_facts, requalified, sdk_version, validate)
+                      has_results, load_info, load_package, metric_applies, new_port_problem, package_facts, requalified, sdk_version, validate)
 
 def read(path):
     with open(path, encoding="utf-8", errors="replace") as f:
@@ -197,7 +197,12 @@ def info_problems(card, info, facts, feats, pin):
     re_measured = [g for g in gpus if requalified(info, g, pin)]
     comps = (info.get("sdk_delta") or {}).get("comparisons") or []
     card_comp = next((c for c in comps if c["label"] == "card"), None)
-    if re_measured and not card_comp:
+    new_port = bool((info.get("sdk_delta") or {}).get("new_port"))
+    if new_port:   # the generated new-port line is accepted only for a repository with no card on the previous SDK
+        why = "a card comparison too" if card_comp else new_port_problem(info.get("repo") or "", sdk_version(pin))
+        if why:
+            out["delta"].append(f"new-port delta line on a card that is not a new port: {why}")
+    elif re_measured and not card_comp:
         out["delta"].append("no delta line against the previous card (info.json sdk_delta has no card comparison)")
     for c in comps:
         rows = delta_rows(info, pin, c, (facts.get("spec") or (None, None))[1])   # the draft depth, as render_card.py compares acceptance

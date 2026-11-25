@@ -1364,6 +1364,36 @@ def sdk_version(x):
     return x.get("hrx_loom") if isinstance(x, dict) else None
 
 
+VERSIONS_DIR = os.path.normpath(os.path.join(HERE, "..", "..", "..", "loom-migrate", "versions"))
+
+
+def production_inventory(sdk, versions_dir=None):
+    """The accepted production inventory of the SDK migration TO version SDK (skills/loom-migrate/versions/vOLD-to-vSDK-production.json,
+    {org/repo: revision}) as (OLD, inventory), or None when this checkout has none."""
+    d = versions_dir or VERSIONS_DIR
+    hits = sorted(f for f in (os.listdir(d) if sdk and os.path.isdir(d) else []) if re.fullmatch(rf"v(.+)-to-v{re.escape(sdk)}-production\.json", f))
+    if not hits:
+        return None
+    return re.match(r"v(.+?)-to-v", hits[-1]).group(1), load_json(os.path.join(d, hits[-1]))
+
+
+def new_port_problem(repo, sdk, versions_dir=None):
+    """Why REPO (org/NAME, any org: staging cards keep the production names) is NOT a new port in SDK SDK, or None when it is: a new
+    port is a repository absent from the production inventory of the migration to SDK (it had no card on the previous SDK)."""
+    inv = production_inventory(sdk, versions_dir)
+    if inv is None:
+        return f"no production inventory of the migration to hrx-loom {sdk} in this checkout (skills/loom-migrate/versions)"
+    name = repo.rsplit("/", 1)[-1]
+    hit = next((r for r in inv[1] if r.rsplit("/", 1)[-1] == name), None)
+    return f"{hit} is in the hrx-loom {inv[0]} production inventory (it has a previous card to compare)" if hit else None
+
+
+def new_port_line(sdk, versions_dir=None):
+    """The delta line of a new port (info.json sdk_delta.new_port), generated: the previous SDK comes from the inventory's file name."""
+    inv = production_inventory(sdk, versions_dir)
+    return f"New port in SDK {sdk}: no SDK {inv[0] if inv else 'earlier'} card to compare."
+
+
 def sdk_at_least(x, major, minor):
     """Whether an hrx-loom identity or version string is major.minor or later (range-based, never == one release)."""
     v = x if isinstance(x, str) else sdk_version(x)
@@ -1389,13 +1419,29 @@ def carried_sdk(info, sid, pin):
     return have or UNRECORDED_SDK
 
 
+def emulated_gate_errors(gpu, gate, src):
+    """A DevLab gate on the 16 GB class must identify the physical runner and its budget."""
+    emulated = gate.get("emulated_on")
+    if gpu != "gfx1201-16gb" or src.get("kind") != "devlab":
+        return ["unexpected emulated_on for this device or source"] if emulated is not None else []
+    if emulated != {"device": "radeon-r9700", "memory_bytes": GPUS[gpu]["memory_bytes"]}:
+        return ["emulated_on must record the R9700 and the 16 GB Quick start budget"]
+    run = src.get("run") or ""
+    if not re.fullmatch(r"[1-9][0-9]*", run) or not re.fullmatch(
+            rf"{re.escape(SKILLS_URL)}/actions/runs/{run}/job/[1-9][0-9]*", src.get("url") or ""):
+        return ["emulated gate requires its DevLab job URL"]
+    if gpu_from_device(src.get("device")) != "radeon-r9700" or not sdk_version(src.get("hrx_loom")):
+        return ["emulated gate requires the R9700 source and its SDK version"]
+    return []
+
+
 def requalified(info, gpu, pin):
     """Whether a GPU of the card has any Loom value or gate measured on the pin's SDK (re-qualified on it)."""
     dev = (info.get("devices") or {}).get(gpu) or {}
     if not has_results(dev):
         return False
     sids = [s["source"] for s in (dev.get("performance") or {}).get("sessions", [])]
-    sids += [g["source"] for g in (dev.get("gates") or {}).values()]
+    sids += [g["source"] for g in (dev.get("gates") or {}).values() if not g.get("emulated_on")]
     return any(sids) and any(not carried_sdk(info, sid, pin) for sid in sids)
 
 
@@ -1573,8 +1619,12 @@ def validate(info, programs=None):
                 elif sources.get(sid, {}).get("kind") == "xsj":
                     errs.append(f"{at}.remeasure.{k}: cannot use XSJ evidence for re-measurement")
             rm = rm.get("previous")
+        admission = dev.get("admission") or {}
+        if admission:
+            errs += [f"{at}.admission: {msg}" for msg in emulated_gate_errors(gpu, admission, sources.get(admission["source"], {}))]
         for n, g in (dev.get("gates") or {}).items():
             errs += measurement(g, gpu, f"{at}.gates.{n}", expected=None)
+            errs += [f"{at}.gates.{n}: {msg}" for msg in emulated_gate_errors(gpu, g, sources.get(g["source"], {}))]
     return errs + free_text_errors(info)
 
 
