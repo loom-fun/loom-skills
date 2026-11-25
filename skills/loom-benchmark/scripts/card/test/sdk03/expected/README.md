@@ -93,19 +93,20 @@ curl http://127.0.0.1:8080/v1/chat/completions \
 
 | gate | description | result |
 |---|---|---|
-| `kernel_tests` | Unit tests of the generated kernels against reference implementations | ❌ no evidence |
-| `golden` | llama.cpp reference recorded on the same GGUF: greedy tokens and top-5 log-probs, short prompts and 1k-32k documents | ✅ pass ¹ |
-| `compare` | Greedy output vs the llama.cpp reference, token by token; every divergence is a near-tie | ✅ pass ¹ |
+| `kernel_tests` | Unit tests of the generated kernels against reference implementations | ❌ fail (120/121; failed: moe_gemm_12), pre-existing: the previous card failed it too (67/68; failed: moe_gemm_12) ¹ |
+| `golden` | llama.cpp reference recorded on the same GGUF: greedy tokens and top-5 log-probs, short prompts and 1k-32k documents | ✅ pass ² |
+| `compare` | Greedy output vs the llama.cpp reference, token by token; every divergence is a near-tie | ✅ pass ² |
 | `vision` | Image input vs llama.cpp with the same projector: identical prompt tokens, replies equal up to near-ties | — not applicable |
-| `consistency` | Concurrent requests give the same output as the same requests run alone | ✅ pass ¹ |
-| `spec` | Speculative decoding on gives exactly the output of speculative decoding off | ✅ pass ¹ |
-| `agent` | Multi-turn tool-calling loop: exact prompt rendering, history reuse, valid tool calls, output vs llama.cpp | ✅ pass ¹ |
+| `consistency` | Concurrent requests give the same output as the same requests run alone | ✅ pass ² |
+| `spec` | Speculative decoding on gives exactly the output of speculative decoding off | ✅ pass ² |
+| `agent` | Multi-turn tool-calling loop: exact prompt rendering, history reuse, valid tool calls, output vs llama.cpp | ✅ pass ² |
 | `agent_think_off` | The tool-calling loop with thinking off | — not applicable |
-| `sampling` | temperature, top_k and seed behave as specified; first-token distribution matches llama.cpp | ✅ pass ¹ |
-| `logits` | Host logits readback (llm.logits on): at T=0 every returned row's argmax is the device's token, the top-k matches llama.cpp, greedy text is unchanged | ✅ pass (128/128 steps, top-5 within 0.05) ¹ |
+| `sampling` | temperature, top_k and seed behave as specified; first-token distribution matches llama.cpp | ✅ pass ² |
+| `logits` | Host logits readback (llm.logits on): at T=0 every returned row's argmax is the device's token, the top-k matches llama.cpp, greedy text is unchanged | ✅ pass (128/128 steps, top-5 within 0.05) ² |
 | `decision` | Decision answers (choice, score, noul probabilities) vs llama.cpp on the same prompts | — not applicable |
 
-- ¹ DevLab Dispatch run 3102, LEVEL=full, 2026-11-25; device AMD RYZEN AI MAX+ 395 w/ Radeon 8060S, AMD Radeon 8060S Graphics, Ubuntu 26.04; hrx-loom `0.3.0` (hrx-system `e2c41a7`).
+- ¹ DevLab Dispatch run 3102, 2026-11-25; device AMD RYZEN AI MAX+ 395 w/ Radeon 8060S, AMD Radeon 8060S Graphics, Ubuntu 26.04; hrx-loom `0.3.0` (hrx-system `e2c41a7`).
+- ² DevLab Dispatch run 3102, LEVEL=full, 2026-11-25; device AMD RYZEN AI MAX+ 395 w/ Radeon 8060S, AMD Radeon 8060S Graphics, Ubuntu 26.04; hrx-loom `0.3.0` (hrx-system `e2c41a7`).
 - Context admission: one request filling the 65,536-token context admitted a 65,410-token request; DevLab Dispatch run 3102, 2026-11-25.
 - Gates are the loom-benchmark correctness gates (`gates.sh`); a gate without a recorded run shows no evidence.
 

@@ -28,7 +28,7 @@ from card_lib import (DEFAULT_GPU, FEATURES, GATE_NAMES, GATES, GPUS, HF, LOOM_U
                       TIMED, PRELOAD_FLAG, preload_mode, card_gpus, card_metrics, derived_tags, beyond_context, gate_applies, generator_commit, gpu_context, gpu_memory, recorded_quick_start, serves,
                       gpu_view, has_results, has_runner, load_info, load_json, load_package, metric_applies, native_context, over_context,
                       package_facts, programs_sha256, require_valid, stale_metrics, with_gate_features, historical_xsj_gate, sdk_uses_file_parameters, xsj_enabled,
-                      DELTA_BAND, DELTA_NAMES, GOOD_CONCLUSIONS, UNRECORDED_SDK, carried_sdk, delta_rows, drop_carried, sdk_at_least, sdk_version)
+                      DELTA_BAND, DELTA_NAMES, GOOD_CONCLUSIONS, UNRECORDED_SDK, carried_sdk, delta_rows, drop_carried, previous_gate, sdk_at_least, sdk_version)
 from matched_spec import TIE_BAND, classification  # noqa: E402
 
 YES, NO, NA, MISSING = "✅", "❌", "—", "—"
@@ -1114,7 +1114,10 @@ def render(d):
         if old and gt["status"] == "pass":   # a pass on another SDK is never shown as a plain pass under this pin
             return f"{UNKNOWN} pass" + (f" ({gt['detail']})" if gt["detail"] else "") + f", {carried_text(old, pin)} {mark(ev.index(key) + 1)}"
         res = (f"{YES} pass" if gt["status"] == "pass" else f"{NO} fail" + (f" on SDK {old}" if old else ""))
-        return res + (f" ({gt['detail']})" if gt["detail"] else "") + f" {mark(ev.index(key) + 1)}"
+        prev = previous_gate(info, g, name) if gt["status"] == "fail" and not old else None
+        pre = (", pre-existing: the previous card failed it too" + (f" ({prev['detail']})" if prev.get("detail") else "")
+               if prev and prev["status"] == "fail" else "")
+        return res + (f" ({gt['detail']})" if gt["detail"] else "") + pre + f" {mark(ev.index(key) + 1)}"
     vision_details = [(gpu_view(info, g)["gates"].get("vision", {}).get("detail") or "") for g in cols]
     for name, desc in GATES:
         if name == "vision" and (c["file"].endswith(".safetensors") or any(d.startswith("vLLM ") for d in vision_details)):

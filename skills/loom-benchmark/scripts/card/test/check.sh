@@ -633,9 +633,14 @@ py "$C/make_info.py" perf --loom-jsonl "$tmp/s3_loom.jsonl" --llama-jsonl "$F/ev
   --c4-llama "$F/evidence/c4_llama_runs.txt" --baseline-version b1355 --date 2026-11-25 "${S3SRC[@]}" --package "$tmp/sdk03" --run 3101 \
   -o "$tmp/s3_perf.json" 2>/dev/null
 py "$C/make_info.py" gates "$S3/gates.json" "${S3SRC[@]}" --package "$tmp/sdk03" --source-kind devlab --run 3102 -o "$tmp/s3_gates.json" 2>/dev/null
+py "$C/make_info.py" gates "$S3/ktest.log" --time 2026-11-25T02:00:00 "${S3SRC[@]}" --package "$tmp/sdk03" --source-kind devlab --run 3102 -o "$tmp/s3_ktest.json" 2>/dev/null
+# the previous card failed the same kernel test: the failure is pre-existing, not a regression of the SDK
+py -c "import json, sys; i = json.load(open(sys.argv[1])); g = i['devices']['strix-halo']['gates']
+g['kernel_tests'] = dict(next(iter(g.values())), status='fail', level=None, detail='67/68; failed: moe_gemm_12')
+json.dump(i, open(sys.argv[2], 'w'), indent=1)" "$tmp/flint/info.json" "$tmp/s3_prev.json"
 py "$C/make_info.py" build "$tmp/sdk03" --generator-commit $GEN --from-info "$tmp/flint/info.json" --reset-performance \
-  --previous-card "card:loom-fun/ggml-org-Flint-loom@89abcdef0123456789abcdef0123456789abcdef=$tmp/flint/info.json" \
-  --delta-explanations "$S3/explanations.json" --evidence "$tmp/s3_perf.json" "$tmp/s3_gates.json" -o "$tmp/sdk03/info.json" 2>/dev/null
+  --previous-card "card:loom-fun/ggml-org-Flint-loom@89abcdef0123456789abcdef0123456789abcdef=$tmp/s3_prev.json" \
+  --delta-explanations "$S3/explanations.json" --evidence "$tmp/s3_perf.json" "$tmp/s3_gates.json" "$tmp/s3_ktest.json" -o "$tmp/sdk03/info.json" 2>/dev/null
 py -c "import sys; sys.path.insert(0, sys.argv[1]); import card_lib as c
 i = c.load_json(sys.argv[2]); d = i['devices']['strix-halo']
 assert c.validate(i) == [], c.validate(i)
@@ -646,7 +651,8 @@ rows = c.delta_rows(i, {'hrx_loom': '0.3.0'}, i['sdk_delta']['comparisons'][0])[
 reg = [r['metric'] for r in rows if r['regression']]
 assert reg == ['prefill_1k', 'prefill_2k'], reg
 assert [r['metric'] for r in rows if r['regression'] and r['explanation']] == ['prefill_1k']
-acc = next(r for r in rows if r['metric'] == 'spec_acceptance'); assert acc['old'] == 0.68 and acc['unreported'] == 'proposals', acc" "$C" "$tmp/sdk03/info.json" \
+acc = next(r for r in rows if r['metric'] == 'spec_acceptance'); assert acc['old'] == 0.68 and acc['unreported'] == 'proposals', acc
+assert c.previous_gate(i, 'strix-halo', 'kernel_tests')['status'] == 'fail' and d['gates']['kernel_tests']['detail'].startswith('120/121')" "$C" "$tmp/sdk03/info.json" \
   && echo "OK   sdk03: unreported acceptance, admission, delta rows vs the 0.2-era card" || { echo "FAIL sdk03: info.json"; bad=1; }
 # card.carried "drop": the sdk02 card's values and gates measured on SDK 0.1.0 (not its pin 0.2.0rc1) are not shown; the GPU keeps its Quick start
 rm -rf "$tmp/sdk02_drop"; mkdir -p "$tmp/sdk02_drop"

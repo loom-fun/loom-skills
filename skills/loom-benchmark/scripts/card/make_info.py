@@ -782,6 +782,25 @@ def cmd_build(a):
         info["next_steps"] = a.next_steps
     if a.promotion_hold:
         info["promotion_hold"] = a.promotion_hold
+    jobs = {}
+    if a.sdk_evidence:   # the sweep's record of this model: explanations of its regressions and its jobs' conclusions
+        if a.sdk_evidence.get("schema") != "sdk-evidence/1":
+            sys.exit("--sdk-evidence: not an sdk-evidence/1 file")
+        model = (a.sdk_evidence.get("models") or {}).get(a.repo.split("/")[-1]) or {}
+        ex = {}
+        for gpu, dev in (model.get("devices") or {}).items():
+            if dev.get("job_url") and dev.get("conclusion"):
+                jobs[dev["job_url"]] = dev["conclusion"]
+            for r in dev.get("regressions") or []:
+                e = r.get("explanation")
+                if e:
+                    ex.setdefault(gpu, {})[r["row"]] = e if isinstance(e, dict) else {"text": e, "url": dev.get("job_url")}
+        if ex:
+            a.delta_explanations = {"card": {**ex, **((a.delta_explanations or {}).get("card") or {})},
+                                    **{k: v for k, v in (a.delta_explanations or {}).items() if k != "card"}}
+    for src in info["sources"].values():
+        if src.get("url") in jobs:
+            src["conclusion"] = jobs[src["url"]]
     delta = sdk_delta(a, old_delta)
     if delta:
         info["sdk_delta"] = delta
@@ -1571,6 +1590,9 @@ def main(argv=None):
                    help="an earlier card of this package whose stored Loom values the delta line compares with (repeat): card = the published "
                    "card this one replaces (its repo and revision), migration = this package's migration-only card on the new SDK (frozen "
                    "programs; no link, it is never published as the production card). Replaces --from-info's comparison of the same label")
+    b.add_argument("--sdk-evidence", type=load_json, metavar="EVIDENCE.json",
+                   help="an sdk-evidence/1 file (fleet/regen.py evidence): this card's regression explanations (as --delta-explanations "
+                   "card) and the conclusion of every job it cites (recorded on the sources; render_card.py refuses a failed one)")
     b.add_argument("--delta-explanations", type=load_json, metavar="FILE.json",
                    help='{"card"|"migration": {GPU: {METRIC: {"text": ..., "url": ...}}}}: why a metric regressed beyond the band, from '
                    "evidence (a confirming rerun, a root cause); merged over --from-info's")

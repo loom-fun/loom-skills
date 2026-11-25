@@ -85,6 +85,13 @@ How the values on this repository's model card were measured. Generated from `in
 
 ## Gate evidence
 
+### DevLab Dispatch run 3102, 2026-11-25
+
+- Gates: `kernel_tests` fail (120/121; failed: moe_gemm_12).
+- Device: AMD RYZEN AI MAX+ 395 w/ Radeon 8060S, AMD Radeon 8060S Graphics, Ubuntu 26.04.
+- Loom SDK: hrx-loom `0.3.0` (hrx-system `e2c41a7`).
+- Programs: sha256 `38d15afaed279db447f85fcaf44d876a7f83fe561fd4ec945f0217da7662bb5e`, the same as this repository's programs.
+
 ### DevLab Dispatch run 3102, LEVEL=full, 2026-11-25
 
 - Gates: `golden` pass, `compare` pass, `consistency` pass, `spec` pass, `agent` pass, `sampling` pass, `logits` pass (128/128 steps, top-5 within 0.05).

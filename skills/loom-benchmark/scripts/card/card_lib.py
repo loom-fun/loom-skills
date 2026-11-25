@@ -1413,24 +1413,36 @@ def drop_carried(info, pin):
 
 
 def previous_values(old):
-    """{gpu: {"hrx_loom": version or None, "metrics": {metric: Loom value}}} of an earlier card's info.json: the values
-    that card shows (card_metrics), what make_info.py build --previous-card stores in sdk_delta."""
+    """{gpu: {"hrx_loom": version or None, "metrics": {metric: Loom value}, "gates": {gate: {status, detail}}}} of an
+    earlier card's info.json: the values and gate results that card shows (card_metrics), what make_info.py build
+    --previous-card stores in sdk_delta (a gate this card fails that the earlier card failed too is pre-existing)."""
     old = normalize(old)
     out = {}
     for gpu, dev in (old.get("devices") or {}).items():
-        if not has_results(dev) or not dev.get("performance"):
+        if not has_results(dev):
             continue
         view = gpu_view(old, gpu)
-        sessions = view["performance"]["sessions"]
+        sessions = (view.get("performance") or {}).get("sessions", [])
         metrics, sdks = {}, set()
         for k, (m, i) in card_metrics(view).items():
             if k not in METRIC_KEYS or (m.get("loom") is None and k != "spec_acceptance"):
                 continue
             metrics[k] = m.get("loom")
             sdks.add(source_sdk(old, sessions[i]["source"]))
-        if metrics:
+        gates = {n: {"status": g["status"], "detail": g.get("detail")} for n, g in sorted((dev.get("gates") or {}).items())}
+        if metrics or gates:
             out[gpu] = {"hrx_loom": sdks.pop() if len(sdks) == 1 else None, "metrics": metrics}
+            if gates:
+                out[gpu]["gates"] = gates
     return out
+
+
+def previous_gate(info, gpu, name):
+    """The earlier (published) card's result of a gate on a GPU ({status, detail}, sdk_delta comparison "card"), or None."""
+    for c in (info.get("sdk_delta") or {}).get("comparisons") or []:
+        if c["label"] == "card":
+            return ((c["devices"].get(gpu) or {}).get("gates") or {}).get(name)
+    return None
 
 
 def delta_rows(info, pin, comparison):

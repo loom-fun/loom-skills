@@ -71,7 +71,10 @@
      "repo": {"type": "string", "description": "card only: the earlier card's repository"}, "revision": {"type": "string", "pattern": "^[0-9a-f]{40}$", "description": "card only: its revision"},
      "devices": {"type": "object", "additionalProperties": {"type": "object", "additionalProperties": false, "required": ["hrx_loom", "metrics"],
       "properties": {"hrx_loom": {"type": ["string", "null"], "description": "the hrx-loom version the earlier card measured this GPU's values with (null: not recorded, or several)"},
-                     "metrics": {"type": "object", "additionalProperties": {"type": ["number", "null"]}}}}},
+                     "metrics": {"type": "object", "additionalProperties": {"type": ["number", "null"]}},
+                     "gates": {"type": "object", "description": "the earlier card's gate results on this GPU: a gate this card fails that it failed too is shown as pre-existing",
+                               "additionalProperties": {"type": "object", "additionalProperties": false, "required": ["status", "detail"],
+                                                        "properties": {"status": {"enum": ["pass", "fail"]}, "detail": {"type": ["string", "null"]}}}}}}},
      "explanations": {"type": "object", "description": "GPU -> metric -> why it regressed beyond the band, from evidence (a confirming rerun, a root cause)",
       "additionalProperties": {"type": "object", "additionalProperties": {"type": "object", "additionalProperties": false, "required": ["text"],
        "properties": {"text": {"type": "string"}, "url": {"type": ["string", "null"]}}}}}}}}}
