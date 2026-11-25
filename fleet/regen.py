@@ -17,6 +17,8 @@
   regen.py accept  S.json SLUG... --note TEXT              a person's call: greedy text differs only at a near-tie, decide again with that accepted
   regen.py accept-regression S.json SLUG... --note TEXT   SDK modes: publish a CONFIRMED slowdown as measured (the note names its explanation)
   regen.py adopt   S.json --run RUN                        attach an already running / finished run to the state's jobs (by job name)
+  regen.py evidence S.json -o EVIDENCE.json               --programs production: the sdk-evidence/1 document (per model / device / metric, fail closed)
+  regen.py eligible S.json --out-dir DIR                  --programs production: the release's eligible.json / held.json / pending.json from the evidence
 
 Modes. sdk-ab: the SDK migration's A/B (ab_jobs.py --sdk-ab): per model and device ONE job, ABBA on one runner: variant "fun" = the published staging card
   (the staging repo's head at plan time) on its own SDK pin (hrx-loom 0.1.0), variant "staging" = the package built in the job from the job's branch on
@@ -31,6 +33,17 @@ Modes. sdk-ab: the SDK migration's A/B (ab_jobs.py --sdk-ab): per model and devi
   own pin vs the new package, same job) whose verdict decides (slower than 3 % there = needs_decision with the numbers, else promote). State per job:
   perf = the cross-job deltas, the ABBA ones on the confirmed rows, confirmed = {row: ABBA %}. `ingest` builds the device's table from the job's Loom rows
   plus the previous card's llama.cpp rows (copied with their own run and date, never re-measured); the card's methodology line says "different jobs".
+  --programs production (sdk-loom / sdk-ab): the FROZEN migration. The target SDK (--new-sdk, default the newest sdk_pin.VERIFIED_RELEASES entry) has an
+  accepted production inventory skills/loom-migrate/versions/vOLD-to-vNEW-production.json ({org/repo: revision}, fleet/sdk_inventory.py; held packages in
+  the sibling -held.json). Nothing is built: every job serves the production package at its inventory revision byte for byte on the target SDK (the
+  ABBA confirmation: the same package on its own old pin), each variant carries the production programs hash and devlab_perf.sh refuses to measure
+  anything else. plan reads each package's small files (programs hash, kind, the devices its card claims): a claimed device with a runner gets a job, a
+  claimed runner-less device is recorded (no_runner: carried under the owner's policy), an image package gets an image-service job (image_sdk_compare.py:
+  identical pixels on both SDKs). collect holds a job that concluded other than success, served other programs or ran another SDK wheel. package makes
+  the staging repo hold exactly the production package with only the llm_config.json pin stamped (card files the production card's until ingest);
+  `evidence` / `eligible` write the release's inputs (eligible only when every runner device is qualified by a passing job of those programs).
+  --old-sdk target (sdk-ab / sdk-loom, --programs build): the old package is served on the target SDK too: the kit build against the frozen
+  programs on the same SDK (phase 2 of a migration: --mode sdk-ab --old-sdk target --no-baselines; the baseline rows are the previous card's).
   ab: regeneration of a device that already has a package to compare with (ab_jobs.py: old vs new in ABBA sessions, text match, func, ktest, gates,
   llama.cpp baselines where the card's table comes from the job). card: a NEW device, no old package: one card measurement per model (device_jobs.py: card +
   nodraft variants, func, ktest, gates, llama.cpp ROCm + Vulkan baselines), no A/B: about half the runner time of ab.
@@ -48,10 +61,12 @@ import base64
 import contextlib
 import datetime
 import glob
+import hashlib
 import json
 import os
 import re
 import shutil
+import statistics
 import subprocess
 import sys
 import time
@@ -67,6 +82,7 @@ import card_lib  # noqa: E402
 import promote_check  # noqa: E402
 import sample_lib  # noqa: E402
 import sdk_package  # noqa: E402
+import sdk_pin  # noqa: E402
 from sdk_pin import VERIFIED_RELEASES  # noqa: E402
 from publish_package import parse_upload_receipt  # noqa: E402
 
@@ -92,28 +108,75 @@ SDK_MODES = ("sdk-ab", "sdk-loom")   # sdk-loom: Loom only on the new SDK, delta
 SDK_METRICS = {"decode": "decode", "prefill": "prefill_8k", "longctx": "decode_32k", "4stream": "streams4"}
 SDK_REGRESSION = 0.03
 # old side = "card": the pin of the published card (pin-less = 0.1.0; Flash-Next's card is pinned to a 0.2.0 dev build)
-SDK_OLD, SDK_NEW = "card", "0.2.0"
-SDK_030_PIN = {
-    "hrx_loom": "0.3.0",
-    "source": "pypi",
-    "hrx_system_sha": VERIFIED_RELEASES["0.3.0"]["hrx_system_sha"],
-    "wheel_sha256": VERIFIED_RELEASES["0.3.0"]["wheels"]["manylinux_2_39_x86_64"],
-}
+SDK_OLD = "card"
+
+
+def version_key(version):
+    """(major, minor, patch) of "X.Y.Z" (a release candidate or dev suffix sorts with its release): the ordering of SDK versions."""
+    m = re.match(r"(\d+)\.(\d+)\.(\d+)", str(version or ""))
+    if not m:
+        raise ValueError(f"not an SDK version: {version!r}")
+    return tuple(int(x) for x in m.groups())
+
+
+SDK_NEW = sdk_pin.newest_verified()   # what a migration moves TO by default (loom-setup/scripts/sdk_pin.py VERIFIED_RELEASES)
+LEGACY_NEW_SDK = "0.2.0"   # a state planned before plan recorded opts.new_sdk (the v0.1 -> v0.2 migration) targets this
+VERSIONS = os.path.join(ROOT, "skills", "loom-migrate", "versions")
+
+
+def release_pin(version):
+    """the llm_config.json "sdk" pin of a VERIFIED release (sdk_pin.release_pin), or None for an unverified version (a legacy target)"""
+    return sdk_pin.release_pin(version) if version in VERIFIED_RELEASES else None
+
+
+def repo_rel(path):
+    """PATH relative to the repository when it is inside it, else absolute (another drive on Windows)"""
+    try:
+        rel = os.path.relpath(path, ROOT)
+    except ValueError:
+        return os.path.abspath(path)
+    return os.path.abspath(path) if rel.startswith("..") else rel
+
+
+def inventory_path(version):
+    """skills/loom-migrate/versions/vOLD-to-vVERSION-production.json: the accepted production inventory {org/slug: revision} of the migration TO
+    version (its frozen programs are the ones a --programs production sweep measures), or None"""
+    hits = sorted(glob.glob(os.path.join(VERSIONS, f"v*-to-v{version}-production.json")))
+    if len(hits) > 1:
+        die(f"several production inventories for {version}: {hits}")
+    return hits[0] if hits else None
+
+
+def load_inventory(path):
+    """{org/repo: revision} of an inventory file (keys without a "/", e.g. "_drift", are its records, not packages)"""
+    return {k: v for k, v in sdk_package.load(path).items() if "/" in k}
+
+
+def inventory_old_version(path):
+    """the outgoing SDK of an inventory file name vOLD-to-vNEW-production.json"""
+    m = re.match(r"v(\d+\.\d+\.\d+)-to-v", os.path.basename(path))
+    return m.group(1) if m else None
 
 
 def target_sdk(state):
-    return state["opts"].get("new_sdk", SDK_NEW)
+    return state["opts"].get("new_sdk", LEGACY_NEW_SDK)
 
 
-def measured_sdk_030(job):
-    """Require the verified Linux wheel for both performance variants."""
+def pinned_target(state):
+    """the verified pin of the state's target SDK (a release in VERIFIED_RELEASES), else None (an unverified / legacy target)"""
+    return release_pin(target_sdk(state))
+
+
+def measured_sdk(job, version):
+    """Require the verified Linux wheel of VERSION for both performance variants (sdk_staging.json / sdk_stagingnd.json of the job)."""
+    want = release_pin(version)
     directory = job.get("dir")
-    if not directory:
+    if not directory or not want:
         return False
     try:
         for variant in ("staging", "stagingnd"):
             sdk = sdk_package.load(os.path.join(directory, f"sdk_{variant}.json"))
-            if any(sdk.get(key) != SDK_030_PIN[key] for key in ("hrx_loom", "wheel_sha256")):
+            if any(sdk.get(key) != want[key] for key in ("hrx_loom", "wheel_sha256")):
                 return False
     except (OSError, ValueError, AttributeError):
         return False
@@ -152,14 +215,14 @@ def hf_head(repo):
     return HfApi().model_info(repo).sha
 
 
-def new_sdk_pin(pin):
-    """True for a package pinned to the SDK this migration moves TO (SDK_NEW or one of its release candidates): every other pin, or none, is an
-    old card (0.1.0; Flash-Next's 0.2.0.dev0 CI build is its "previous" SDK)"""
-    base = SDK_NEW.split("rc")[0]   # works for SDK_NEW = "0.2.0rc1" and, after the final release, "0.2.0" alike
+def new_sdk_pin(pin, target=None):
+    """True for a package pinned to the SDK this migration moves TO (target, default SDK_NEW, or one of its release candidates): every other pin,
+    or none, is an old card (0.1.0; Flash-Next's 0.2.0.dev0 CI build is its "previous" SDK)"""
+    base = (target or SDK_NEW).split("rc")[0]   # works for a target "0.2.0rc1" and, after the final release, "0.2.0" alike
     return bool(pin) and (pin == base or str(pin).startswith(base + "rc"))
 
 
-def old_sdk_revision(repo):
+def old_sdk_revision(repo, target=None):
     """the newest commit of REPO whose llm_config.json is not pinned to the new SDK (None if there is none)"""
     from huggingface_hub import HfApi, hf_hub_download
     from huggingface_hub.utils import EntryNotFoundError
@@ -168,7 +231,7 @@ def old_sdk_revision(repo):
             pin = (json.load(open(hf_hub_download(repo, "llm_config.json", revision=c.commit_id))).get("sdk") or {}).get("hrx_loom")
         except EntryNotFoundError:   # a commit without llm_config.json (the repo's first commits) is not a package; any other error reaches plan's die
             continue
-        if not new_sdk_pin(pin):
+        if not new_sdk_pin(pin, target):
             return c.commit_id
     return None
 
@@ -252,10 +315,14 @@ def generator_cmd(st, device, slugs, suffix=""):
     d = st["opts"]
     if st["mode"] in ("ab", "logits", *SDK_MODES):   # logits: ab_jobs.py's job of the pinned staging package, steps cut down in gen_jobs
         cmd = [PY, os.path.join(SCRIPTS, "ab_jobs.py"), "--device", device, "--gates", d["gates"], "--new-org", d["new_org"], "--old-org", d["old_org"]]
+        old_sdk = target_sdk(st) if d.get("old_sdk_target") else SDK_OLD   # --old-sdk target: the old package on the target SDK too (programs-only A/B)
         if st["mode"] == "sdk-ab":
-            cmd += ["--sdk-ab", "--old-sdk", SDK_OLD, "--new-sdk", target_sdk(st), "--baselines"]   # the v0.2 card's own table needs the llama.cpp rows of the same job
+            # the new card's own table needs the llama.cpp rows of the same job, unless --no-baselines (rule 17: the previous card's rows are reused)
+            cmd += ["--sdk-ab", "--old-sdk", old_sdk, "--new-sdk", target_sdk(st)] + ([] if d.get("no_baselines") else ["--baselines"])
         elif st["mode"] == "sdk-loom":   # the new package alone; a confirming job (suffix -r2) is the sdk-ab ABBA of that model without baselines
-            cmd += ["--sdk-ab", "--old-sdk", SDK_OLD, "--new-sdk", target_sdk(st)] + ([] if suffix else ["--loom-only"])
+            cmd += ["--sdk-ab", "--old-sdk", old_sdk, "--new-sdk", target_sdk(st)] + ([] if suffix else ["--loom-only"])
+        if st["mode"] in SDK_MODES and d.get("programs") == "production":
+            cmd += ["--programs", "production"]   # every variant serves the pinned production package (frozen programs), nothing built
         if d.get("refs"):
             cmd += ["--refs", d["refs"]]
         if device != "strix-halo" and not d.get("no_baselines") and st["mode"] == "ab":
@@ -331,16 +398,93 @@ def fleet_slugs():
     return sorted(json.load(open(os.path.join(HERE, "manifest.json")))["models"])
 
 
+PRODUCTION_ORG = "loom-fun"
+SMALL_FILES = ["model.json", "info.json", "llm_config.json", "program/**"]   # what plan reads of a production package (never weights)
+
+
+def production_facts(repo, rev, cache):
+    """What a --programs production plan needs of a published package at REV (small files only, cached under CACHE/<slug>@<rev[:12]>):
+    {programs_sha256, kind: text|image, claimed: [devices of its card], memory_bytes, features, sdk}"""
+    d = os.path.join(cache, f"{repo.split('/')[-1]}@{rev[:12]}")
+    facts = os.path.join(d, "facts.json")
+    if os.path.isfile(facts):
+        return sdk_package.load(facts)
+    from huggingface_hub import snapshot_download
+    snapshot_download(repo, revision=rev, local_dir=d, allow_patterns=SMALL_FILES)
+    shutil.rmtree(os.path.join(d, ".cache"), ignore_errors=True)
+    model = sdk_package.load(os.path.join(d, "model.json"))
+    info = sdk_package.load(os.path.join(d, "info.json")) if os.path.isfile(os.path.join(d, "info.json")) else {}
+    cfg = sdk_package.load(os.path.join(d, "llm_config.json")) if os.path.isfile(os.path.join(d, "llm_config.json")) else None
+    kinds = {(sv or {}).get("kind") for sv in (model.get("services") or {}).values()}
+    out = {"programs_sha256": card_lib.programs_sha256(d), "kind": "image" if cfg is None and kinds == {"image"} else "text",
+           "claimed": sorted((info.get("devices") or {}).keys()), "memory_bytes": (info.get("card") or {}).get("memory_bytes"),
+           "gates": {d: sorted((v or {}).get("gates") or {}) for d, v in (info.get("devices") or {}).items()},   # the gates the card claims per device
+           "features": (info.get("card") or {}).get("features") or [], "sdk": (cfg or {}).get("sdk"),
+           # the commit that generated the package (its llm_config stamp), else the commit that generated its card
+           "generator": next((c for c in (((cfg or {}).get("generator") or {}).get("skills_commit"), (info.get("versions") or {}).get("card_generator"))
+                              if c and re.fullmatch(r"[0-9a-f]{40}", str(c))), None)}
+    if not out["programs_sha256"]:
+        raise RuntimeError(f"{repo}@{rev[:10]}: no program/ files")
+    json.dump(out, open(facts, "w"), indent=1)
+    return out
+
+
+def load_held(path):
+    """held.json {slug: {reason, ...}} (or a list of slugs): packages out of this release; plan refuses them and --all skips them"""
+    if not path:
+        return {}
+    d = sdk_package.load(path)
+    d = {s: {} for s in d} if isinstance(d, list) else d
+    return {k.split("/")[-1]: v for k, v in d.items()}
+
+
+def image_jobs(st, device, slugs, refs, old_sdk):
+    """(perf.json document, [job]) of image packages: one job per package on the device's runner (devlab_perf.sh job "kind": "image",
+    image_sdk_compare.py): the frozen package on old_sdk and on the target SDK, ABBA, identical pixels required"""
+    key = card_lib.registry.device(device)["runner"]["key"]
+    jobs = [{"name": f"{key[0]}img-{s.lower().replace('.', '-')}"[:40], "runner": key, "kind": "image", "card": refs[s]["new"],
+             "memory_bytes": 0, "variants": [], "steps": [],
+             "image": {"old_sdk": old_sdk, "new_sdk": target_sdk(st), "programs_sha256": refs[s]["programs_sha256"], "preset": None}} for s in slugs]
+    doc = {"_comment": f"Image packages (fleet/regen.py --programs production): the frozen package on hrx-loom {old_sdk} and {target_sdk(st)}, same runner, "
+                       "ABBA sessions, identical pixels (image_sdk_compare.py)", "runner": key, "memory_bytes": 0, "card": jobs[0]["card"] if jobs else None,
+           "jobs": jobs}
+    return doc, jobs
+
+
 def cmd_plan(a):
-    new_sdk = getattr(a, "new_sdk", SDK_NEW)
+    for k, v in (("new_sdk", None), ("programs", "build"), ("old_sdk", "card"), ("held", None), ("image_device", "strix-halo"), ("llamacpp", None)):
+        if not hasattr(a, k):   # a caller that builds its own namespace (fleet/final_pass.py) without the SDK-mode options
+            setattr(a, k, v)
+    new_sdk = a.new_sdk or SDK_NEW
+    try:
+        version_key(new_sdk)
+    except ValueError as x:
+        die(str(x))
     if new_sdk != SDK_NEW and a.mode not in SDK_MODES:
         die("--new-sdk selects the target of sdk-ab or sdk-loom")
-    slugs = fleet_slugs() if a.all else a.slugs
-    if new_sdk == "0.3.0":
-        inventory = os.path.join(ROOT, "skills", "loom-migrate", "versions", "v0.2.0-to-v0.3.0-production.json")
-        accepted = sdk_package.load(inventory)
-        if a.all:
-            slugs = [slug for slug in slugs if f"loom-fun/{slug}" in accepted]
+    production = a.programs == "production"
+    if production and a.mode not in SDK_MODES:
+        die("--programs production is a form of --mode sdk-loom / sdk-ab")
+    if a.old_sdk == "target" and (a.mode not in SDK_MODES or production):
+        die("--old-sdk target compares a BUILT package with the old one on the same SDK: --mode sdk-ab / sdk-loom with --programs build")
+    # a verified target with a production inventory (skills/loom-migrate/versions/vOLD-to-vNEW-production.json): the old side is the production
+    # package at its accepted revision, never a staging history walk
+    inventory = inventory_path(new_sdk) if a.mode in SDK_MODES and release_pin(new_sdk) else None
+    accepted = load_inventory(inventory) if inventory else None
+    if production and not accepted:
+        die(f"--programs production needs a verified SDK {new_sdk} (sdk_pin.VERIFIED_RELEASES) and its inventory {VERSIONS}/v*-to-v{new_sdk}-production.json")
+    sibling = inventory and inventory.replace("-production.json", "-held.json")
+    held = load_held(a.held or (sibling if production and os.path.isfile(sibling) else None))   # default: the inventory's sibling held.json
+    if production:
+        org_slugs = sorted(r.split("/", 1)[1] for r in accepted)
+        slugs = [s for s in org_slugs if s not in held] if a.all else a.slugs
+        bad = [s for s in slugs if s in held]
+        if bad:
+            die(f"held out of this release ({a.held}): {', '.join(bad)}")
+    else:
+        slugs = fleet_slugs() if a.all else a.slugs
+        if accepted and a.all:
+            slugs = [slug for slug in slugs if f"{PRODUCTION_ORG}/{slug}" in accepted]
     if not slugs:
         die("no models: give SLUG... or --all")
     state_path = os.path.abspath(a.state)
@@ -368,22 +512,36 @@ def cmd_plan(a):
         if a.old:
             die(f"--mode {a.mode} finds its old package in the staging repo's history (no --old)")
         refs = {}
+        nightly = {m["repo"].split("/")[-1] for m in json.load(open(os.path.join(ROOT, ".github", "nightly-models.json")))["models"]}
+        llamacpp = dict(x.split("=", 1) for x in a.llamacpp or [])
+        if set(llamacpp) - (set(slugs) - nightly):
+            die(f"--llamacpp names a package that is not planned or that .github/nightly-models.json lists: {sorted(set(llamacpp) - (set(slugs) - nightly))}")
         for s in slugs:
             repo = f"{a.new_org}/{s}"
-            if new_sdk == "0.3.0":
-                published = f"loom-fun/{s}"
+            if accepted:
+                published = f"{PRODUCTION_ORG}/{s}"
                 if published not in accepted:
-                    die(f"{published}: absent from the accepted SDK 0.3.0 production inventory")
+                    die(f"{published}: absent from the accepted SDK {new_sdk} production inventory ({repo_rel(inventory)})")
                 revision = accepted[published]
                 reference = f"{published}@{revision}"
                 refs[s] = {"old": reference, "new": reference}
+                if production:   # the frozen package: its programs hash (checked by the job before measuring), kind, the devices its card claims
+                    try:
+                        f = production_facts(published, revision, os.path.join(work, "production"))
+                    except Exception as x:
+                        die(f"{published}@{revision[:10]}: cannot read the production package ({x}); rerun plan")
+                    refs[s].update(programs_sha256=f["programs_sha256"], kind=f["kind"], claimed=f["claimed"], generator=f.get("generator"),
+                                   gates=f.get("gates") or {})
+                    if s not in nightly and f["kind"] == "text":   # a hand-written package the nightly list does not hold: its card's facts
+                        refs[s]["model"] = {"repo": published, "slug": s.lower(), "memory_bytes": f["memory_bytes"], "kit": None, "features": f["features"],
+                                            **({"llamacpp": llamacpp[s]} if s in llamacpp else {})}
                 continue
             try:
-                head, old = hf_head(repo), old_sdk_revision(repo)
+                head, old = hf_head(repo), old_sdk_revision(repo, new_sdk)
             except Exception as x:   # one transient Hub failure: a clear message, not a traceback
                 die(f"{repo}: cannot resolve its revisions on the Hub ({x}); rerun plan")
             if not old:
-                die(f"{repo}: no revision with an old-SDK package (pin other than {SDK_NEW}) in its history")
+                die(f"{repo}: no revision with an old-SDK package (pin other than {new_sdk}) in its history")
             refs[s] = {"old": f"{repo}@{old}", "new": f"{repo}@{head}"}
     elif a.mode in ("ab", "logits") and not a.no_pin:
         # pin the new package of every slug to the staging revision it is measured at (the card the run measures is the card ingested)
@@ -397,7 +555,9 @@ def cmd_plan(a):
         a.bundle_build = [pins["extension"].split("@")[1], pins["gufo"].split("@")[1]]
     st = {"schema": "regen/1", "created": now(), "mode": a.mode, "work": work, "state": state_path,
           "opts": {"gates": a.gates, "new_org": a.new_org, "base": a.base, "old_org": old_org, "batch": a.batch, "refs": None,
-                   **({"new_sdk": new_sdk} if new_sdk != SDK_NEW else {}),
+                   "new_sdk": new_sdk, **({"old_sdk_target": True} if a.old_sdk == "target" else {}),
+                   **({"programs": "production", "inventory": repo_rel(inventory),
+                                           "old_sdk": inventory_old_version(inventory), "held": held} if production else {}),
                    **({"replicas": a.replicas} if a.replicas > 1 else {}), **({"sequential": True} if a.sequential else {}),
                    **({"no_baselines": True} if a.no_baselines else {}), **({"bundle": a.bundle} if a.bundle else {}),
                    **({"bundle": {"build": {"extension": f"loom-fun/loom-gufo-extension@{a.bundle_build[0]}", "gufo": f"loom-fun/gufo@{a.bundle_build[1]}"}}}
@@ -414,9 +574,18 @@ def cmd_plan(a):
         if dref:
             json.dump(dref, open(os.path.join(work, f"refs_{dev}.json"), "w"), indent=1)
         st["opts"]["refs"] = os.path.join(work, f"refs_{dev}.json") if dref else None
-        for i in range(0, len(slugs), a.batch):
-            chunk = slugs[i:i + a.batch]
-            doc, jobs, skipped = gen_jobs(st, dev, chunk)
+        dev_slugs, images = slugs, []
+        if production:   # the devices the production card claims: those with a runner get a job here; an image package runs on --image-device
+            dev_slugs = [s for s in slugs if refs[s]["kind"] == "text" and dev in refs[s]["claimed"]]
+            images = [s for s in slugs if refs[s]["kind"] == "image" and dev == a.image_device]
+            for s in slugs:
+                if refs[s]["kind"] == "text" and dev not in refs[s]["claimed"]:
+                    st["jobs"][f"skipped:{s}:{dev}"] = {"slug": s, "device": dev, "stage": "skipped", "round": 1,
+                                                        "reason": "the production card does not claim this device"}
+        chunks = [(dev_slugs[i:i + a.batch], False) for i in range(0, len(dev_slugs), a.batch)]
+        chunks += [(images[i:i + a.batch], True) for i in range(0, len(images), a.batch)]
+        for chunk, is_image in chunks:
+            doc, jobs, skipped = image_jobs(st, dev, chunk, refs, st["opts"]["old_sdk"]) + ([],) if is_image else gen_jobs(st, dev, chunk)
             for s in skipped:
                 st["jobs"][f"skipped:{s}:{dev}"] = {"slug": s, "device": dev, "stage": "skipped", "reason": "the weights do not fit the device / no job",
                                                     "round": 1}
@@ -433,7 +602,8 @@ def cmd_plan(a):
                 rep_no = j.get("replica", 1)
                 st["jobs"][j["name"]] = {"slug": slug_of(j), "device": dev, "batch": bid, "round": rep_no, "stage": "planned",
                                          "card": j["card"], "steps": len(j["steps"]),
-                                         **({"source_card": e["old"]} if new_sdk == "0.3.0" else {}),
+                                         **({"source_card": e["old"]} if accepted else {}),
+                                         **({"programs_sha256": e["programs_sha256"], "kind": e["kind"]} if production else {}),
                                          "aa": a.mode not in SDK_MODES and bool(e.get("old") and e.get("old") == e.get("new")),   # old == new: the A/B shows noise only
                                          **({"old": e["old"]} if a.mode == "sdk-loom" and e.get("old") else {})}   # the old card the cross-job deltas are taken against
                 if rep_no == 1:
@@ -443,6 +613,13 @@ def cmd_plan(a):
                     f = first[slug_of(j)]
                     st["jobs"][j["name"]].update(prev=f, replica=j["replica"])
                     st["jobs"][f]["rerun_of_me"] = j["name"]
+    if production:   # a device the card claims that has no DevLab runner: carried under the owner's policy, never measured here
+        for s in slugs:
+            for d in refs[s]["claimed"]:
+                if d in card_lib.registry.devices() and not card_lib.has_runner(d):
+                    st["jobs"][f"no_runner:{s}:{d}"] = {"slug": s, "device": d, "stage": "skipped", "round": 1, "no_runner": True,
+                                                        "reason": "no DevLab runner: carried from the production card (rows marked with their SDK)"}
+        st["opts"]["refs_all"] = {s: {k: v for k, v in e.items() if k != "model"} for s, e in refs.items()}
     st["opts"]["refs"] = None
     os.makedirs(os.path.dirname(state_path) or ".", exist_ok=True)
     State.create(state_path, st).save()
@@ -472,6 +649,10 @@ def submit_batch(st, b, dry):
         print(f"[dry-run] branch {branch} from {base}, perf.json ({len(perf)} bytes, {len(b['jobs'])} jobs), PR '{title}', label devlab-perf")
         return
     sha = gh_api("GET", f"repos/{REPO}/git/ref/heads/{base}", jq=".object.sha")
+    stem, n = branch, 1
+    while sh(["gh", "api", f"repos/{REPO}/git/ref/heads/{branch}"], check=False).returncode == 0:   # a re-submitted batch (a job the runner lost)
+        n += 1
+        branch = f"{stem}-s{n}"
     gh_api("POST", f"repos/{REPO}/git/refs", {"ref": f"refs/heads/{branch}", "sha": sha})
     f = "repos/%s/contents/.github/devlab/perf.json" % REPO
     fsha = gh_api("GET", f"{f}?ref={branch}", jq=".sha")
@@ -549,19 +730,26 @@ def apply_run_jobs(st, b, run, jobs):
 def cmd_poll(a):
     st = State(a.state)
     pending = 0
-    for b in st.d["batches"]:
+    seen = []   # (batch id, run, jobs): the network part first, then ONE locked read-modify-write, so a step that saved the state meanwhile
+    for b in st.d["batches"]:   # (collect, rerun, accept: possibly in another shell) keeps its changes
         if b["stage"] == "planned":
-            pending += len(b["jobs"])
             continue
-        if not b.get("run"):
-            b["run"] = find_run(b)
-        if b.get("run"):
-            jobs = gh_json(["run", "view", str(b["run"]), "-R", REPO, "--json", "status,conclusion,jobs"])
-            apply_run_jobs(st, b, b["run"], jobs["jobs"])
+        run = b.get("run") or find_run(b)
+        if run:
+            seen.append((b["id"], run, gh_json(["run", "view", str(run), "-R", REPO, "--json", "status,conclusion,jobs"])["jobs"]))
+    with locked(st.path):
+        st.d = json.load(open(st.path))
+        for bid, run, jobs in seen:
+            b = next(x for x in st.d["batches"] if x["id"] == bid)
+            b["run"] = run
+            apply_run_jobs(st, b, run, jobs)
+        tmp = st.path + ".tmp"
+        json.dump(st.d, open(tmp, "w"), indent=1, sort_keys=True)
+        os.replace(tmp, st.path)
+    pending += sum(len(b["jobs"]) for b in st.d["batches"] if b["stage"] == "planned")
     for e in st.jobs.values():
         if e["stage"] in ("planned", "submitted", "queued", "running"):
             pending += 1
-    st.save()
     print_table(st)
     sys.exit(10 if pending else 0)
 
@@ -718,6 +906,11 @@ def sdk_loom_decide(st, name, e, cmp_path):
     gone = [k for k, v in perf.items() if v is None and (m.get(SDK_METRICS[k]) or {}).get("card") and not (m.get(SDK_METRICS[k]) or {}).get("new")]
     nocard = [k for k, v in perf.items() if v is None and (m.get(SDK_METRICS[k]) or {}).get("new") and not (m.get(SDK_METRICS[k]) or {}).get("card")]
     moved = {k: v for k, v in perf.items() if v is not None and abs(v) > limit}
+    if st.d["opts"].get("programs") == "production":   # every card row needs its delta explained: a row outside the band is confirmed too (by row name)
+        for row, x in m.items():
+            r = x.get("new_vs_card")
+            if row not in SDK_METRICS.values() and r and abs(r - 1) > SDK_REGRESSION:
+                moved[row] = round((r - 1) * 100, 1)
     if not any((m.get(r) or {}).get("new") for r in SDK_METRICS.values()):
         return "hold", ["the job measured none of decode, prefill, longctx, 4stream"], perf, rows
     reasons = []
@@ -742,6 +935,60 @@ def card_mode_verdict(d, e):
     return "promote", []
 
 
+def image_verdict(d, e):
+    """An image package's job (image_sdk_compare.py): promote only when both SDKs produced deterministic outputs, the pixels are identical and the
+    programs are the expected ones (summary "pixels" PASS); the result's facts go to e["image"]."""
+    s = json.load(open(os.path.join(d, "summary.json"))).get("results", {})
+    try:
+        r = json.load(open(os.path.join(d, "image_result.json")))
+        e["image"] = {k: r.get(k) for k in ("preset", "request_sha256", "pixels_match", "programs_match", "max_abs_channel_diff", "time_ratio", "error")}
+        e["image"].update({v: {"median_s": (r["runs"][v] or {}).get("median_s"), "deterministic": (r["runs"][v] or {}).get("deterministic"),
+                               "rgb_sha256": sorted({h for x in (r["runs"][v] or {}).get("sessions", []) for h in x["rgb_sha256"]})} for v in ("old", "new")})
+    except (OSError, ValueError, KeyError):
+        pass
+    if str(s.get("pixels", "")).startswith("PASS") and all(str(s.get(f"image:{v}", "")).startswith("PASS") for v in ("old", "new")):
+        return "promote", []
+    return "hold", [f"{k}: {str(v)[:160]}" for k, v in s.items() if not str(v).startswith("PASS")] or ["the image comparison did not pass"]
+
+
+def kernel_tests_not_applicable(st, e, d):
+    """--programs production: kernel tests the kit cannot GENERATE for this package (make_kernel_tests.py ended before a result: ktest ERROR, a
+    hand-written port's tensors) are not applicable when the production card claims no kernel-test gate on this device: the 0.2.0 card had none,
+    so the frozen card has none either. Recorded on the job (not_applicable) and removed from the compare's gate failures; a kernel test that
+    RAN and failed, or one the card claims, still holds."""
+    claimed = (((st.d["opts"].get("refs_all") or {}).get(e["slug"]) or {}).get("gates") or {}).get(e["device"])
+    if claimed is None or "kernel_tests" in claimed:
+        return
+    summ = json.load(open(os.path.join(d, "summary.json"))).get("results", {})
+    cmp = json.load(open(e["cmp"]))
+    na = [k for k in cmp.get("gate_failures") or [] if k.startswith("ktest:") and str(summ.get(k, "")).startswith("ERROR")]
+    if na:
+        cmp["gate_failures"] = [k for k in cmp["gate_failures"] if k not in na]
+        cmp["not_applicable"] = {k: "the kit's kernel-test generator does not cover this package and its production card claims no kernel tests" for k in na}
+        json.dump(cmp, open(e["cmp"], "w"), indent=1)
+        e["not_applicable"] = sorted(na)
+
+
+def frozen_guard(st, e):
+    """--programs production, fail closed: why this job cannot qualify the frozen package (None when it can): it must have concluded success, served
+    exactly the production programs and run the verified target SDK."""
+    if e.get("conclusion") and e["conclusion"] != "success":
+        return f"the job concluded {e['conclusion']} ({e.get('job_url')})"
+    if e.get("kind") == "image":
+        return None   # image_sdk_compare.py checked the programs hash of both fetches and the SDKs were installed by version (sdk_old/new.json)
+    built = job_programs(e)
+    if built != e.get("programs_sha256"):
+        return f"the job served programs {str(built)[:12]}, not the production programs {str(e.get('programs_sha256'))[:12]}"
+    if not measured_sdk(e, target_sdk(st.d)):
+        return f"the job's SDK is not the verified hrx-loom {target_sdk(st.d)} wheel (sdk_staging.json / sdk_stagingnd.json)"
+    adm = admission(e.get("dir")) if not e.get("prev") else {"result": "n/a"}   # an ABBA confirmation measures rows only
+    if adm is None:
+        return "the job recorded no native-context admission probe (admit:staging)"
+    if adm["result"] == "REFUSED":
+        return f"the native-context admission probe was refused: {adm.get('detail') or adm.get('tokens')}"
+    return None
+
+
 def collect_one(st, name, e):
     d = download(st, name, e)
     e["dir"] = d
@@ -750,11 +997,16 @@ def collect_one(st, name, e):
         e.update(stage="needs_decision" if e["round"] > 1 else "collected", decision="rerun" if e["round"] == 1 else "hold",
                  reason=f"the job {e.get('conclusion')} before writing summary.json (see {e.get('job_url')})")
         return
-    if mode == "sdk-ab":
+    production = st.d["opts"].get("programs") == "production"
+    if e.get("kind") == "image":
+        decision, reasons = image_verdict(d, e)
+    elif mode == "sdk-ab":
         e["cmp"] = compare(st, name, e, d)
         decision, reasons, e["perf"], e["rows_pct"] = sdk_decide(st, name, e, e["cmp"])
     elif mode == "sdk-loom" and not e.get("prev"):   # the sweep job: cross-job deltas against the old card's Loom rows
         e["cmp"] = compare(st, name, e, d)
+        if production:
+            kernel_tests_not_applicable(st, e, d)
         decision, reasons, e["perf"], e["rows_pct"] = sdk_loom_decide(st, name, e, e["cmp"])
         e["perf_cross"] = dict(e["perf"])
     elif mode == "sdk-loom":   # the targeted ABBA job: old card on its pin vs the new package, same job; its verdict decides
@@ -773,6 +1025,12 @@ def collect_one(st, name, e):
         decision, reasons = logits_verdict(d, e)
     else:
         decision, reasons = card_mode_verdict(d, e)
+    if production and decision != "hold":
+        why = frozen_guard(st, e)
+        if why:
+            decision, reasons = "hold", [why] + reasons
+            if e.get("prev") and mode == "sdk-loom":   # an ABBA confirmation that cannot count stops its first job too
+                sdk_loom_settle(st, e, "hold", [why])
     e["decision"], e["reason"] = decision, "; ".join(reasons)
     if mode in SDK_MODES and e.get("perf"):
         e["reason"] = e["reason"] or "perf " + " ".join(f"{k} {v:+.1f}%" for k, v in e["perf"].items() if v is not None)
@@ -792,10 +1050,14 @@ def sdk_loom_settle(st, e, decision, reasons):
     """sdk-loom: the ABBA job e answers its first job's question. promote: the first job's rows that moved take the ABBA deltas (state: confirmed =
     {row: ABBA %}, perf = the cross-job deltas with those rows replaced) and the first job promotes; hold: the first job stops with the ABBA numbers."""
     f = st.jobs[e["prev"]]
-    abba = e.get("perf_abba") or {}
+    abba = {**(e.get("rows_pct") or {}), **(e.get("perf_abba") or {})}   # metric keys (decode, prefill, ...) and card row names (prefill_2k, ...)
     rows = f.get("confirm_rows") or []
+    slower = {k: abba[k] for k in rows if k not in SDK_METRICS and abba.get(k) is not None and abba[k] < -SDK_REGRESSION * 100}
+    if decision == "promote" and slower:   # a card row the ratchet's four metrics do not cover, confirmed slower in the same job
+        decision, reasons = "hold", [f"slower than -{SDK_REGRESSION:.0%} in the same-job ABBA: " + ", ".join(f"{k} {v:+.1f} %" for k, v in slower.items())] + list(reasons)
     if decision == "promote":
         f["confirmed"] = {k: abba[k] for k in rows if abba.get(k) is not None}
+        f["confirmed_by"] = e.get("job_url")
         f["perf"] = {k: (f["confirmed"][k] if k in f["confirmed"] else v) for k, v in (f.get("perf_cross") or f.get("perf") or {}).items()}
         f.update(decision="promote", reason="confirmed by ABBA job " + e["run"] + ": " + ", ".join(f"{k} {v:+.1f} %" for k, v in f["confirmed"].items()))
     else:
@@ -851,7 +1113,7 @@ def cmd_rerun(a):
             s = slug_of(j)
             st.jobs[j["name"]] = {"slug": s, "device": dev, "batch": bid, "round": 2, "stage": "planned", "card": j["card"], "steps": len(j["steps"]),
                                   "prev": first[s], "aa": st.jobs[first[s]].get("aa", False),
-                                  **({key: st.jobs[first[s]][key] for key in ("old", "source_card")
+                                  **({key: st.jobs[first[s]][key] for key in ("old", "source_card", "programs_sha256", "kind")
                                       if key in st.jobs[first[s]]})}
             st.jobs[first[s]]["rerun_of_me"] = j["name"]
         st.log(f"confirming batch {bid} ({dev}): {', '.join(slugs)}")
@@ -900,29 +1162,38 @@ def ingest_full(st, name, e, W):
     V, ND = VARIANT[st.d["mode"]]
     S = CARD
     sdk = st.d["mode"] in SDK_MODES
-    sdk_030 = sdk and target_sdk(st.d) == "0.3.0"
-    loom_only = st.d["mode"] == "sdk-loom"
+    pin = pinned_target(st.d) if sdk else None   # a verified target release: the staging head must carry exactly its pin
+    verified = bool(pin)
+    # sdk-loom, or an sdk-ab job planned with --no-baselines (no llama.cpp files): the Loom rows are the job's, the baseline rows the previous card's
+    loom_only = st.d["mode"] == "sdk-loom" or (st.d["mode"] == "sdk-ab" and not glob.glob(os.path.join(d, "perf_llamacpp-rocm.np1_n*.jsonl"))
+                                               and bool(st.d["opts"].get("no_baselines")))
     # sdk-ab: the job measured a package BUILT from the branch; the card is made on the staging head, which must hold exactly those programs (the
     # v0.2 package published before this card-only step): make_info.py refuses a different programs hash
-    rev = hf_head(f"{st.d['opts']['new_org']}/{slug}") if sdk else e["card_revision"].split("@")[-1]
     out = os.path.join(W, "out")
-    hf_snapshot(f"{st.d['opts']['new_org']}/{slug}", rev, out)
+    dry = INGEST_DRY   # ingest --dry-run (--programs production): the card is made on the locally assembled frozen package
+    if dry:
+        rev = None
+        frozen_assemble(e["source_card"], target_sdk(st.d), out)
+        e = dict(e, package={"programs_sha256": card_lib.programs_sha256(out)})
+    else:
+        rev = hf_head(f"{st.d['opts']['new_org']}/{slug}") if sdk else e["card_revision"].split("@")[-1]
+        hf_snapshot(f"{st.d['opts']['new_org']}/{slug}", rev, out)
     if sdk:   # the package step's programs, whatever the head's revision is now (another device's card may have been published since)
         got = card_lib.programs_sha256(out)
         if got != e["package"]["programs_sha256"]:
             raise RuntimeError(f"the staging head {rev[:10]} holds programs {str(got)[:12]}, not the published v0.2 package's {e['package']['programs_sha256'][:12]}: "
                                f"another publish replaced them; run `regen.py package` again")
-    if sdk_030:
+    if verified:
         try:
             published_pin = sdk_package.load(os.path.join(out, "llm_config.json")).get("sdk") or {}
         except (OSError, ValueError, AttributeError) as ex:
-            raise RuntimeError(f"cannot read the SDK pin from staging head {rev[:10]}") from ex
-        if any(published_pin.get(key) != value for key, value in SDK_030_PIN.items()):
-            raise RuntimeError(f"the staging head {rev[:10]} no longer has the verified SDK 0.3.0 pin")
+            raise RuntimeError(f"cannot read the SDK pin from staging head {str(rev)[:10]}") from ex
+        if any(published_pin.get(key) != value for key, value in pin.items()):
+            raise RuntimeError(f"the staging head {str(rev)[:10]} no longer has the verified SDK {target_sdk(st.d)} pin")
     shutil.copy(os.path.join(out, "info.json"), os.path.join(W, "info_prev.json"))
     prev = json.load(open(os.path.join(W, "info_prev.json")))
     baseline_info = "info_prev.json"
-    if sdk_030:
+    if verified and e.get("source_card"):   # the inventory's production card is the old side of the delta
         source, revision = e["source_card"].split("@", 1)
         baseline_info = hf_file(source, "info.json", revision)
     mem = prev["card"]["memory_bytes"]
@@ -930,17 +1201,20 @@ def ingest_full(st, name, e, W):
     src = ["--source-kind", "devlab", "--run", run, "--url", url]
     rd = lambda f: read(os.path.join(d, f))
     g = lambda pat: sorted(glob.glob(os.path.join(d, pat)))
-    hrx = os.path.abspath(os.path.join(d, f"sdk_{V}.json")) if sdk_030 else "hrx.json"
+    hrx = os.path.abspath(os.path.join(d, f"sdk_{V}.json")) if verified else "hrx.json"
     identity = [f"{S}/pull_devlab.py", "--identity", d, "--gpu", dev, "--device-out", "dev.json"]
-    run_tool(identity + ([] if sdk_030 else ["--hrx-out", hrx]), W)
+    run_tool(identity + ([] if verified else ["--hrx-out", hrx]), W)
     llm, vk = g("perf_llamacpp-rocm.np1_n*.jsonl"), g("perf_llamacpp-vulkan.np1_n*.jsonl")
     c4l, c4v = g("c4_llamacpp-rocm.nodraft_n*.txt"), g("c4_llamacpp-vulkan.perslot.nodraft_n*.txt")
     vl, c4vl = g("perf_vllm_n*.jsonl"), g("c4_vllm_n*.txt")   # a safetensors card: vLLM ROCm is the baseline engine (devlab_perf.sh vllm: steps)
-    st_card = (json.load(open(os.path.join(ROOT, "fleet", slug, "llm_config.json"))).get("source") or {}).get("kind") == "safetensors"
+    fleet_cfg = os.path.join(ROOT, "fleet", slug, "llm_config.json")   # a package outside the manifest (a hand-written one): its own config
+    st_card = (json.load(open(fleet_cfg if os.path.isfile(fleet_cfg) else os.path.join(out, "llm_config.json"))).get("source") or {}).get("kind") == "safetensors"
+    production = st.d["opts"].get("programs") == "production"
+    drafts = g(f"metrics_{V}_*.txt") if production and make_info_supports("perf", "--draft-metrics") else []
     if loom_only:   # the job measured Loom alone: the baseline rows (llama.cpp ROCm and Vulkan, or vLLM) are the previous card's, with their own run and date
         run_tool([f"{S}/make_info.py", "perf", "--gpu", dev, "--loom-jsonl", f"{d}/perf_{V}.jsonl", "--c4-loom", f"{d}/c4_{ND}.txt",
                   "--baseline-from-info", baseline_info, "--package", out, *src, "--device", "dev.json", "--hrx-loom", hrx,
-                  "--fetched-programs", rd("programs_sha256_staging.txt"), "-o", "ev_perf.json"], W)
+                  "--fetched-programs", rd("programs_sha256_staging.txt"), *(["--draft-metrics", *drafts] if drafts else []), "-o", "ev_perf.json"], W)
     else:
         if not st_card and not (llm and c4l):
             raise RuntimeError("the job has no llama.cpp ROCm files (a job without --baselines cannot make this device's table)")
@@ -974,6 +1248,15 @@ def ingest_full(st, name, e, W):
                   *src, "--device", "none", "--hrx-loom", "none", "-o", "ev_vulkan.json"], W)
         ev.append("ev_vulkan.json")
     gfiles = [f for f in (f"{d}/gates_{V}/gates.json", f"{d}/ktest_{V}.log") if os.path.exists(f)]
+    adm = os.path.join(d, f"admit_{V}.json")
+    if gfiles and gfiles[0].endswith("gates.json") and os.path.isfile(adm):
+        # the frozen job's admission probe (admit:V, the served preset's native context; the gates ran at the dev level, which has none): the card
+        # reads it from the gates file's context_admit, so the job's gates.json is passed with it (nothing else changes)
+        gj = json.load(open(gfiles[0]))
+        if not gj.get("context_admit"):
+            gj["context_admit"] = {k: v for k, v in json.load(open(adm)).items() if k in ("admitted", "tokens", "context", "detail")}
+            gfiles[0] = os.path.join(W, "gates_with_admission.json")
+            json.dump(gj, open(gfiles[0], "w"), indent=1)
     if gfiles:
         run_tool([f"{S}/make_info.py", "gates", "--gpu", dev, "--time", end, *gfiles, "--package", out, *src, "--device", "dev.json", "--hrx-loom", hrx,
                   "-o", "ev_gates.json"], W)
@@ -981,6 +1264,13 @@ def ingest_full(st, name, e, W):
     run_tool([f"{S}/make_info.py", "roofline", "--gpu", dev, "--device", card_lib.registry.device(dev)["roofline"]["default"], "--package", out,
               "--evidence", "ev_perf.json", "-o", "ev_roof.json"], W)
     ev.append("ev_roof.json")
+    if production:   # the frozen package carries no generator stamp of this branch: the production card's, named as such
+        gen = ((st.d["opts"].get("refs_all") or {}).get(slug) or {}).get("generator")
+        if gen:
+            json.dump({"evidence": "loom-card-evidence/2", "gpu": dev, "versions": {"package": {"skills_commit": {"commit": gen, "recovered": True,
+                                                                                                        "basis": "production card"}}}},
+                      open(os.path.join(W, "ev_versions.json"), "w"), indent=1)
+            ev.append("ev_versions.json")
     gpus = [x for x in card_lib.registry.devices() if x in (prev.get("devices") or {}) or x == dev]
     fit = card_lib.registry.device(dev).get("fit_table")
     build = [f"{S}/make_info.py", "build", out, "--org", st.d["opts"]["new_org"], "--gpus", ",".join(gpus)]
@@ -993,12 +1283,29 @@ def ingest_full(st, name, e, W):
         build += ["--perf-from", spec]
     # sdk-loom: the previous card's Loom sessions are the v0.1 rows this table replaces (its llama.cpp rows were copied into the new session above;
     # the Vulkan baselines stay as published)
+    if production and e.get("source_card") and make_info_supports("build", "--previous-card"):   # the delta line against the production card
+        build += ["--previous-card", f"card:{e['source_card']}={baseline_info}"]
+    if production and make_info_supports("build", "--sdk-evidence"):   # regression explanations and every cited job's conclusion
+        json.dump(build_evidence(st), open(os.path.join(W, "evidence.json"), "w"), indent=1)
+        build += ["--sdk-evidence", os.path.join(W, "evidence.json")]
     run_tool(build + ["--memory-bytes", str(mem), "--from-info", "info_prev.json", *(["--reset-performance"] if loom_only else []), "--evidence", *ev,
                       "-o", "info_new.json"], W)
     shutil.copy(os.path.join(W, "info_new.json"), os.path.join(out, "info.json"))
     msg = card_message(e, dev, run, loom_only, sdk, target_sdk(st.d))
-    parent = rev if target_sdk(st.d) == "0.3.0" else hf_head(f"{st.d['opts']['new_org']}/{slug}")
+    parent = rev if verified or dry else hf_head(f"{st.d['opts']['new_org']}/{slug}")
     return out, parent, msg
+
+
+_MAKE_INFO_HELP = {}
+INGEST_DRY = False   # ingest --dry-run: ingest_full assembles the frozen package locally instead of reading the staging head
+
+
+def make_info_supports(sub, flag):
+    """whether this checkout's make_info.py SUB takes FLAG (the card generator gains options independently of regen)"""
+    if sub not in _MAKE_INFO_HELP:
+        r = subprocess.run([PY, os.path.join(CARD, "make_info.py"), sub, "--help"], capture_output=True, text=True)
+        _MAKE_INFO_HELP[sub] = r.stdout + r.stderr
+    return flag in _MAKE_INFO_HELP[sub]
 
 
 def ingest_strix(st, name, e, W):
@@ -1030,8 +1337,8 @@ def sdk_ingest_ready(st, name, e):
     version = target_sdk(st.d)
     if not pkg:
         why = f"the {version} package is not published yet: run `regen.py package` first"
-    elif version == "0.3.0" and (not built or not measured_sdk_030(e)):
-        why = "the job has no matching programs hash and verified 0.3.0 SDK identities"
+    elif release_pin(version) and (not built or not measured_sdk(e, version)):
+        why = f"the job has no matching programs hash and verified {version} SDK identities"
     elif built and built != pkg["programs_sha256"]:
         why = f"the published {version} package's programs ({pkg['programs_sha256'][:12]}) are not the ones the job built and measured ({built[:12]})"
     if why:
@@ -1045,7 +1352,8 @@ def cmd_ingest(a):
     st = State(a.state)
     if st.d["mode"] == "logits":
         die("a logits-mode state has no performance to ingest: fleet/final_pass.py card builds the final cards from it")
-    todo = [(n, e) for n, e in st.jobs.items() if e["stage"] == "collected" and e.get("decision") == "promote"]
+    todo = [(n, e) for n, e in st.jobs.items() if e["stage"] == "collected" and e.get("decision") == "promote" and e.get("kind") != "image"]   # an image
+    # package's card is not an info.json table: its evidence is the job (regen.py evidence), its README the image tooling's
     # a model with a round-2 job: the second run ingests, the first is superseded
     if st.d["mode"] == "sdk-loom":   # the sweep job's rows go on the card (its ABBA confirmation settled the first job's decision)
         todo = [(n, e) for n, e in todo if not e.get("prev")]
@@ -1053,8 +1361,13 @@ def cmd_ingest(a):
         todo = [(n, e) for n, e in todo if not e.get("rerun_of_me")]
     if a.slug:
         todo = [(n, e) for n, e in todo if e["slug"] in a.slug]
-    if st.d["mode"] in SDK_MODES:
+    dry = getattr(a, "dry_run", False)
+    if dry and st.d["opts"].get("programs") != "production":
+        die("ingest --dry-run builds a --programs production card on the local frozen package (other modes need the staging package)")
+    if st.d["mode"] in SDK_MODES and not dry:
         todo = [(n, e) for n, e in todo if sdk_ingest_ready(st, n, e)]
+    global INGEST_DRY
+    INGEST_DRY = dry
     for name, e in todo:
         W = os.path.join(st.work, "cards", f"{e['slug']}.{e['device']}")
         shutil.rmtree(W, ignore_errors=True)
@@ -1068,9 +1381,15 @@ def cmd_ingest(a):
                     os.remove(os.path.join(out, f))
             run_tool([f"{CARD}/render_card.py", "--check", out, os.path.join(out, "README.md")], W)
         except (RuntimeError, SystemExit) as ex:
+            if dry:
+                print(f"{e['slug']} {e['device']}: dry-run ingest failed: {str(ex)[-600:]}")
+                continue
             e.update(stage="needs_decision", reason=f"ingest failed: {str(ex)[-400:]}")
             st.log(f"{e['slug']} {e['device']}: ingest failed")
             st.save()
+            continue
+        if dry:   # nothing recorded: the card is only built (and checked) for review
+            print(f"{e['slug']} {e['device']}: dry-run card at {out}")
             continue
         e.update(stage="ingested", card_dir=out, parent=parent, message=msg)
         if str(e.get("reason", "")).startswith("ingest failed"):
@@ -1138,13 +1457,11 @@ def package_one(st, slug, canon, sha, dry, env, prefill_changes=None, source_car
         if os.path.isfile(qualification):
             # Keep the receipt. Card generation applies it only to the exact measured settings.
             shutil.copy2(qualification, os.path.join(out, card_lib.QUICK_START_QUALIFICATION))
-    if version == "0.3.0":
-        path = os.path.join(out, "llm_config.json")
-        config = sdk_package.load(path)
-        config["sdk"] = dict(SDK_030_PIN)
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(config, f, indent=1)
-            f.write("\n")
+    if release_pin(version):   # the pin is the emitter's (the kit at --ref writes it into llm_config.json): a different one stops the model
+        got_pin = sdk_package.load(os.path.join(out, "llm_config.json")).get("sdk") or {}
+        if any(got_pin.get(k) != v for k, v in release_pin(version).items()):
+            raise RuntimeError(f"the canonical build of {sha[:10]} pins hrx-loom {got_pin.get('hrx_loom')}, not the verified {version} "
+                               f"(the kit's emitter must write the target pin; nothing is stamped over it)")
     if sdk_package.same_files(reference, out):   # the head already holds exactly this package (programs AND llm_config pin, model.json, ...)
         return {"revision": rev, "programs_sha256": want, "base": sha, "already": True}
     msg = f"Loom package rebuilt for hrx-loom {version} from loom-skills {sha[:10]} (card files unchanged until the card step)"
@@ -1156,6 +1473,110 @@ def package_one(st, slug, canon, sha, dry, env, prefill_changes=None, source_car
     print(f"{slug}: {r.stdout.strip().splitlines()[-1][:300]}\n   programs_sha256 {got}; model.json changes: {', '.join(k + ' ' + p for k, p in changes) or 'nothing'}")
     return {"revision": None if dry else receipt["commit"], "programs_sha256": got, "base": sha,
             **({"receipt": receipt} if receipt else {})}
+
+
+WEIGHT_PATTERNS = re.compile(r"(^|/)parameter/|\.(gguf|safetensors|bin|mmproj)$")
+
+
+def staging_to_main(value):
+    """llm_config.json's knowledge-base evidence strings name the branch a fact was verified on; a frozen package was verified on what is now
+    main, so "staging main" reads "main" (DECISIONS D6 b: the only text change of a frozen llm_config.json besides the pin)"""
+    if isinstance(value, dict):
+        return {k: staging_to_main(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [staging_to_main(v) for v in value]
+    return value.replace("staging main", "main") if isinstance(value, str) else value
+
+
+def frozen_assemble(source, version, out):
+    """The frozen package of SOURCE (org/repo@rev) in OUT: its files at that revision (no weights), llm_config.json with only the "sdk" pin of
+    VERSION and the staging-main evidence wording changed (staging_to_main). -> its programs hash"""
+    source_repo, _, source_rev = source.partition("@")
+    hf_snapshot_small(source_repo, source_rev, out)
+    cfg = os.path.join(out, "llm_config.json")
+    config = staging_to_main(sdk_package.load(cfg))
+    config["sdk"] = release_pin(version)
+    with open(cfg, "w", encoding="utf-8") as f:
+        json.dump(config, f, indent=1)
+        f.write("\n")
+    return card_lib.programs_sha256(out)
+
+
+def package_frozen(st, slug, jobs, dry):
+    """--programs production: the staging package IS the production package at its inventory revision, byte for byte (programs, model files,
+    tokenizer, card files until `ingest` replaces the card), with only llm_config.json's "sdk" pin stamped to the target release. Every selected job of
+    the model must have promoted on exactly the production programs with the verified SDK. The upload makes the staging repo hold exactly these files
+    (one commit, parent = the staging head at the time: a concurrent publish fails it; files absent from the production package are deleted).
+    -> {revision, programs_sha256, base, deleted}"""
+    from huggingface_hub import CommitOperationAdd, CommitOperationDelete, HfApi
+    org, version = st.d["opts"]["new_org"], target_sdk(st.d)
+    if org != STAGING_ORG:
+        raise RuntimeError(f"package writes {STAGING_ORG} only")
+    sources = {e.get("source_card") for e in jobs}
+    want = {e.get("programs_sha256") for e in jobs}
+    if len(sources) != 1 or None in sources or len(want) != 1 or None in want:
+        raise RuntimeError("no single pinned production package / programs hash in the selected jobs")
+    (source,), (want,) = sources, want
+    source_repo, _, source_rev = source.partition("@")
+    for e in jobs:
+        if e.get("kind") == "image":
+            raise RuntimeError("an image package has no llm_config pin: its card is migrated by the image tooling (loom-port-image), not here")
+        if e.get("decision") != "promote" or job_programs(e) != want or not measured_sdk(e, version):
+            raise RuntimeError(f"the {e['device']} job did not promote on the production programs {want[:12]} with the verified {version} SDK")
+    api = HfApi()
+    weights = [f for f in api.list_repo_files(source_repo, revision=source_rev) if WEIGHT_PATTERNS.search(f)]
+    if weights:
+        raise RuntimeError(f"the production package holds weight files in its repo ({', '.join(weights[:3])}): not a frozen-path package")
+    W = os.path.join(st.work, "package", slug)
+    out = os.path.join(W, "pkg")
+    got = frozen_assemble(source, version, out)
+    if got != want:
+        raise RuntimeError(f"the production snapshot's programs {str(got)[:12]} are not the measured {want[:12]}")
+    repo = f"{org}/{slug}"
+    head = hf_head(repo)
+    files = sorted(os.path.relpath(os.path.join(r, n), out).replace(os.sep, "/") for r, ds, fs in os.walk(out) for n in fs)
+    extras = sorted(f for f in api.list_repo_files(repo, revision=head) if f not in files and f != ".gitattributes")
+    staged = os.path.join(W, "staging")
+    hf_snapshot_small(repo, head, staged)
+    if sdk_package.same_files(staged, out) and not [f for f in extras if f not in ("README.md", "info.json", "REPORT.md")]:
+        # the head already holds this package (another device's job packaged it; its card step may have replaced the card files since: keep them)
+        shutil.rmtree(W, ignore_errors=True)
+        return {"revision": head, "programs_sha256": got, "base": source, "deleted": [], "already": True}
+    print(f"{slug}: staging {head[:10]} <- {source_repo}@{source_rev[:10]} ({len(files)} files, programs {got[:12]}, pin hrx-loom {version}); "
+          f"delete {len(extras)}: {', '.join(extras[:8])}{' ...' if len(extras) > 8 else ''}")
+    if dry:
+        return {"revision": None, "programs_sha256": got, "base": source, "deleted": extras}
+    ops = [CommitOperationAdd(path_in_repo=f, path_or_fileobj=os.path.join(out, f)) for f in files] + [CommitOperationDelete(path_in_repo=f) for f in extras]
+    info = api.create_commit(repo, operations=ops, parent_commit=head,
+                             commit_message=f"Loom package: {source_repo}@{source_rev[:10]} (frozen programs), pinned to hrx-loom {version}",
+                             commit_description="Programs and model files byte-identical to the production package; only the SDK pin changes. "
+                                                "The card files are the production card's until this device's card step.")
+    shutil.rmtree(W, ignore_errors=True)
+    return {"revision": info.oid, "programs_sha256": got, "base": source, "deleted": extras}
+
+
+def cmd_package_frozen(st, a, picked):
+    slugs = sorted({e["slug"] for _, e in picked})
+    for slug in slugs:
+        jobs = [e for _, e in picked if e["slug"] == slug and not e.get("prev")]   # the sweep jobs (an ABBA confirmation is not a card job)
+        if not a.dry_run and all(e.get("package") for e in jobs):
+            print(f"{slug}: package already published ({jobs[0]['package']['revision'][:10]})")
+            continue
+        try:
+            res = package_frozen(st, slug, jobs, a.dry_run)
+        except (RuntimeError, ValueError) as ex:
+            print(f"{slug}: package stopped: {str(ex)[-400:]}")
+            if not a.dry_run:
+                for e in jobs:
+                    e.update(stage="needs_decision", reason=f"package: {str(ex)[-300:]}")
+                st.log(f"{slug}: package stopped")
+                st.save()
+            continue
+        if not a.dry_run:
+            for e in jobs:
+                e["package"] = {**res, "at": now()}
+            st.log(f"{slug}: frozen package at {res['revision'][:10]} (programs {res['programs_sha256'][:12]})")
+            st.save()
 
 
 def cmd_package(a):
@@ -1176,6 +1597,10 @@ def cmd_package(a):
         die(f"no job in the state for: {', '.join(missing)}")
     if not slugs:
         return print("nothing to package")
+    if st.d["opts"].get("programs") == "production":
+        if a.prefill_transition or a.ref:
+            die("--programs production packages the production revision: no --ref / --prefill-transition")
+        return cmd_package_frozen(st, a, picked)
     transitions = {}
     for spec in a.prefill_transition:
         try:
@@ -1200,7 +1625,7 @@ def cmd_package(a):
             if not want:
                 raise RuntimeError("the canonical build has no programs")
             source = None
-            if target_sdk(st.d) == "0.3.0":
+            if any(e.get("source_card") for _, e in picked if e["slug"] == slug):
                 sources = {e.get("source_card") for _, e in picked if e["slug"] == slug}
                 if len(sources) != 1 or None in sources:
                     raise RuntimeError("no single pinned production package in the selected evidence")
@@ -1208,8 +1633,8 @@ def cmd_package(a):
             for _, e in picked:   # validate measured programs before package_one can upload anything
                 built = job_programs(e) if e["slug"] == slug else None
                 if source and e["slug"] == slug and not a.dry_run:
-                    if e.get("decision") != "promote" or not built or not measured_sdk_030(e):
-                        raise RuntimeError(f"the {e['device']} job has no passing decision, programs hash, or verified 0.3.0 SDK identities")
+                    if e.get("decision") != "promote" or not built or not measured_sdk(e, target_sdk(st.d)):
+                        raise RuntimeError(f"the {e['device']} job has no passing decision, programs hash, or verified {target_sdk(st.d)} SDK identities")
                 if built and built != want:
                     raise RuntimeError(f"the job {e['device']} built programs {built[:12]}, the canonical build of {sha[:10]} has {want[:12]} (the base moved since the job was submitted)")
                 if e["slug"] == slug and slug in transitions:
@@ -1264,6 +1689,11 @@ def cmd_publish(a):
             e["dry_run_ok"] = True
             print(f"{e['slug']} {e['device']}: dry run OK\n" + "\n".join("   " + ln for ln in r.stdout.strip().splitlines()[-6:]))
         else:
+            try:   # the staging commit this card landed as (eligible.json's staging_revision)
+                receipt = parse_upload_receipt(r.stdout, f"{org}/{e['slug']}", e["parent"], (env or {}).get("HF_ENDPOINT"))
+                e["published_revision"] = receipt["commit"]
+            except Exception:   # an older publish_package.py without a receipt line: the revision is read from the Hub by `eligible`
+                pass
             e.update(stage="published", published=now())
             st.log(f"{e['slug']} {e['device']}: published to {org}")
         st.save()
@@ -1482,6 +1912,229 @@ def cmd_accept_gate_failure(a):
     print("accepted: " + (", ".join(done) or "nothing"))
 
 
+# ---------------------------------------------------------------- evidence / eligible (--programs production: the release's inputs, fail closed)
+
+EVIDENCE_ROWS = [k for k in card_lib.METRIC_KEYS]   # decode ... streams4, spec_acceptance
+
+
+def job_id(e):
+    """the numeric job id of a collected job's URL (.../job/ID), or None"""
+    m = re.search(r"/job/(\d+)", e.get("job_url") or "")
+    return m.group(1) if m else None
+
+
+def admission(d):
+    """the native-context admission probe of a job (gates.sh context_admit in gates_staging/gates.json, its log): {result, tokens, served_context,
+    warnings, log} or None when the job ran no gates"""
+    g = os.path.join(d or "", "gates_staging", "gates.json")
+    ca, logf = None, os.path.join("gates_staging", "gates_context_admit.log")
+    try:
+        ca = json.load(open(g)).get("context_admit")
+    except (OSError, ValueError):
+        pass
+    if not ca:   # the job's own admit:staging step (devlab_perf.sh, ctx_admit.py --out): the frozen jobs' probe at the gates' dev level
+        try:
+            ca, logf = json.load(open(os.path.join(d or "", "admit_staging.json"))), "admit_staging.txt"
+        except (OSError, ValueError):
+            return None
+    if not ca:
+        return None
+    log = read(os.path.join(d, logf), "") or ""
+    warn = sorted({ln.strip()[:200] for ln in log.splitlines() if "WARN" in ln or "did not cancel" in ln})
+    return {"result": "ADMITTED" if ca.get("admitted") else "REFUSED", "tokens": ca.get("tokens"), "served_context": ca.get("context"),
+            "detail": ca.get("detail"), "warnings": warn, "log": logf}
+
+
+def device_evidence(st, e, info_cache):
+    """sdk-evidence/1 entry of one collected sweep job (notes/evidence_schema.md)"""
+    d = e.get("dir")
+    ev = {"run": e.get("run"), "job": job_id(e), "job_url": e.get("job_url"), "conclusion": e.get("conclusion"), "artifact": f"devlab-perf-{e.get('name')}"}
+    if e.get("kind") == "image":
+        ev["image"] = e.get("image")
+        return ev
+    built = job_programs(e)
+    ev.update(programs_sha256=built, programs_match=bool(built) and built == e.get("programs_sha256"))
+    try:
+        sdk = sdk_package.load(os.path.join(d, "sdk_staging.json"))
+        ev["sdk"] = {k: sdk.get(k) for k in ("hrx_loom", "wheel_sha256", "hrx_system_sha")}
+        ev["sdk"]["verified"] = measured_sdk(e, target_sdk(st.d))
+    except (OSError, ValueError, TypeError):
+        ev["sdk"] = None
+    cmp = sdk_package.load(e["cmp"]) if e.get("cmp") and os.path.isfile(e["cmp"]) else {}
+    m = cmp.get("metrics") or {}
+    old_ref = e.get("old") or e.get("source_card")
+    old_rows, session = {}, None
+    if old_ref:
+        if old_ref not in info_cache:
+            repo, _, rev = old_ref.partition("@")
+            info_cache[old_ref] = card_lib.load_info(hf_file(repo, "info.json", rev or None))
+        view = card_lib.gpu_view(info_cache[old_ref], e["device"])
+        sessions = (view.get("performance") or {}).get("sessions", [])
+        for k, (row, i) in card_lib.card_metrics(view).items():
+            old_rows[k] = row.get("loom")
+            if k == "decode":
+                session = {key: sessions[i].get(key) for key in ("date", "source", "programs_sha256")}
+    acc = cmp.get("acceptance") or {}
+    new_acc = [x["new"] for x in acc.values() if x.get("new") is not None]
+    new_rows = {k: (m.get(k) or {}).get("new") for k in EVIDENCE_ROWS if k != "spec_acceptance"}
+    new_rows["spec_acceptance"] = round(statistics.median(new_acc), 4) if new_acc else None
+    ev["old"] = {"session": session, "rows": {k: old_rows.get(k) for k in EVIDENCE_ROWS}}
+    ev["new"] = {"rows": new_rows}
+    ev["delta_pct"] = {k: round((new_rows[k] / old_rows[k] - 1) * 100, 1) for k in EVIDENCE_ROWS
+                       if new_rows.get(k) and old_rows.get(k) and k != "spec_acceptance"}
+    conf = e.get("confirmed") or {}
+    ev["confirmed"] = {SDK_METRICS.get(k, k): v for k, v in conf.items()}
+    if e.get("confirmed_by"):
+        ev["confirmed_by"] = e["confirmed_by"]
+    exact = {k: (m.get(k) or {}).get("new_vs_card") for k in ev["delta_pct"]}
+    ev["regressions"] = []
+    for k in sorted(ev["delta_pct"]):
+        if not exact.get(k) or exact[k] - 1 >= -SDK_REGRESSION:
+            continue
+        c = ev["confirmed"].get(k)
+        expl = None
+        if c is not None and c >= -SDK_REGRESSION * 100 and e.get("confirmed_by"):   # the ratchet's same-job ABBA settled it: a generated explanation
+            expl = {"text": f"same-job ABBA (the same programs on hrx-loom {o_sdk(st)} and {target_sdk(st.d)}): {c:+.1f} %, within the band; "
+                            f"the {ev['delta_pct'][k]:+.1f} % against the previous card is the difference between two jobs", "url": e["confirmed_by"]}
+        ev["regressions"].append({"row": k, "pct": ev["delta_pct"][k], "confirmed_abba_pct": c, "explanation": expl})
+    summ = {}
+    try:
+        summ = json.load(open(os.path.join(d, "summary.json"))).get("results", {})
+    except (OSError, ValueError, TypeError):
+        pass
+    try:
+        gj = json.load(open(os.path.join(d, "gates_staging", "gates.json")))
+        ev["gates"] = {k: ("PASS" if g.get("pass") else "FAIL") for k, g in (gj.get("gates") or {}).items()}
+    except (OSError, ValueError, TypeError):
+        ev["gates"] = None
+    ev["ktest"] = next((re.findall(r"\d+/\d+", v)[-1] for k, v in summ.items() if k.startswith("ktest:") and re.findall(r"\d+/\d+", v)), None)
+    ev["func"] = next((v[:120] for k, v in summ.items() if k.startswith("func:")), None)
+    ev["admission"] = admission(d)
+    raw = sorted(os.path.basename(f) for f in glob.glob(os.path.join(d or "", "metrics_staging_*.txt")))
+    ev["spec_acceptance"] = {"old": old_rows.get("spec_acceptance"), "new": new_rows["spec_acceptance"], "per_row": {k: x.get("new") for k, x in acc.items()},
+                             "raw": raw}
+    return ev
+
+
+def o_sdk(st):
+    return st.d["opts"].get("old_sdk") or "the old SDK"
+
+
+def device_status(e):
+    if e["stage"] == "skipped":
+        return "no_runner" if e.get("no_runner") else "does_not_fit" if "fit" in (e.get("reason") or "") else "not_claimed"
+    if e["stage"] in ("planned", "submitted", "queued", "running", "done", "failed"):
+        return "pending"
+    if e["stage"] == "needs_decision" or e.get("decision") == "hold":
+        return "failed" if e.get("decision") == "hold" else "needs_decision"
+    if e.get("decision") == "promote":
+        return "qualified"
+    if e["stage"] == "collected" and e.get("decision") in ("confirm", "rerun", "improved-pending"):
+        return "confirming"   # its same-job ABBA confirmation is queued or running (`rerun`)
+    return "needs_decision"
+
+
+def build_evidence(st):
+    """the sdk-evidence/1 document of a --programs production state (notes/evidence_schema.md in the campaign; one entry per model and device)"""
+    o = st.d["opts"]
+    if o.get("programs") != "production":
+        die("evidence / eligible need a --programs production state")
+    refs = o.get("refs_all") or {}
+    inv = os.path.join(ROOT, o["inventory"])
+    doc = {"schema": "sdk-evidence/1", "generated": now(), "state": st.path,
+           "harness": {"branch": o.get("base"), "commit": resolve_ref("origin/" + o["base"]) if o.get("base") else None},
+           "sdk": {"old": o.get("old_sdk"), "new": target_sdk(st.d), "new_pin": release_pin(target_sdk(st.d))},
+           "inventory": {"path": o["inventory"], "sha256": hashlib.sha256(open(inv, "rb").read()).hexdigest() if os.path.isfile(inv) else None},
+           "models": {}, "held": {}}
+    held = o.get("held") or {}
+    accepted = load_inventory(inv) if os.path.isfile(inv) else {}
+    for s in held:
+        doc["held"][s] = {**(held[s] if isinstance(held, dict) else {}), "production": f"{PRODUCTION_ORG}/{s}",
+                          "production_revision": accepted.get(f"{PRODUCTION_ORG}/{s}"),
+                          "tag_revision": accepted.get(f"{PRODUCTION_ORG}/{s}")}   # the production head that gets the outgoing tag
+    info_cache = {}
+    sweep = {n: e for n, e in st.jobs.items() if not e.get("prev")}   # an ABBA confirmation's numbers live on its first job (confirmed)
+    for name, e in sorted(sweep.items(), key=lambda kv: (kv[1]["slug"], kv[1]["device"])):
+        r = refs.get(e["slug"]) or {}
+        src = (r.get("old") or e.get("source_card") or "@").split("@")
+        mod = doc["models"].setdefault(e["slug"], {"production": src[0], "production_revision": src[1], "programs_sha256": r.get("programs_sha256"),
+                                                   "kind": r.get("kind", e.get("kind", "text")), "claimed_devices": r.get("claimed", []), "devices": {},
+                                                   **({"versions": {"package": {"skills_commit": {"commit": r["generator"], "recovered": True,
+                                                                                                  "basis": "production card"}}}}
+                                                      if r.get("generator") else {})})
+        status = device_status(e)
+        dv = {"status": status, "reason": e.get("reason")}
+        if status not in ("no_runner", "not_claimed", "does_not_fit", "pending"):
+            dv.update(device_evidence(st, dict(e, name=name), info_cache))
+        if e.get("package"):
+            dv["package"] = {k: e["package"].get(k) for k in ("revision", "programs_sha256", "base")}
+        if e.get("published_revision"):
+            dv["published_revision"] = e["published_revision"]
+        if e.get("accepted_regression"):
+            dv["accepted_regression"] = e["accepted_regression"]
+        mod["devices"][e["device"]] = dv
+    return doc
+
+
+def cmd_evidence(a):
+    st = State(a.state)
+    doc = build_evidence(st)
+    json.dump(doc, open(a.out, "w"), indent=1, sort_keys=True)
+    by = {}
+    for m in doc["models"].values():
+        for dv in m["devices"].values():
+            by[dv["status"]] = by.get(dv["status"], 0) + 1
+    print(f"evidence: {len(doc['models'])} models, devices {dict(sorted(by.items()))}: {a.out}")
+
+
+def eligibility(doc):
+    """(eligible, held, pending) of an sdk-evidence/1 document. Fail closed: a model is eligible only when every device its card claims that has a
+    DevLab runner is `qualified` (a passing job of the shipped programs on the verified SDK) and the staging card is published; device_keys = the
+    qualified devices; qualification run + job per device, never null. Runner-less claimed devices are listed as carried (owner policy)."""
+    eligible, pending = {}, {}
+    held = {s: dict(v, reason=v.get("reason") or "held out of this release") for s, v in doc.get("held", {}).items()}
+    for slug, m in sorted(doc["models"].items()):
+        devs = m["devices"]
+        runner = {d: v for d, v in devs.items() if v["status"] not in ("no_runner", "not_claimed")}
+        bad = {d: f"{v['status']}: {(v.get('reason') or '')[:160]}" for d, v in runner.items() if v["status"] != "qualified"}
+        if not runner:
+            bad["-"] = "no device with a DevLab runner was qualified"
+        qual = {d: v for d, v in runner.items() if v["status"] == "qualified"}
+        for d, v in qual.items():
+            if not (v.get("run") and v.get("job")):
+                bad[d] = "qualified without a run and job id"
+            elif v.get("conclusion") != "success":
+                bad[d] = f"the qualification job concluded {v.get('conclusion')}"
+            elif m["kind"] == "text" and not v.get("programs_match"):
+                bad[d] = "the qualification job served other programs"
+        staged = sorted({v.get("published_revision") for v in qual.values() if v.get("published_revision")})
+        unpublished = sorted(d for d, v in qual.items() if not v.get("published_revision"))
+        if not bad and m["kind"] == "text" and unpublished:
+            bad["staging"] = f"the staging card is not published for {', '.join(unpublished)} yet"
+        if bad:
+            pending[slug] = {"production": m["production"], "reasons": bad}
+            continue
+        eligible[slug] = {
+            "production": m["production"], "target_revision": m["production_revision"], "frozen_production_revision": m["production_revision"],
+            "programs_sha256": m["programs_sha256"], "device_keys": sorted(qual),
+            "qualification": {d: {"run": int(v["run"]), "job": int(v["job"]), "url": v["job_url"]} for d, v in sorted(qual.items())},
+            "carried_devices": sorted(d for d, v in devs.items() if v["status"] == "no_runner"),
+            "staging": f"{STAGING_ORG}/{slug}", "staging_revision": staged[-1] if staged else None, "kind": m["kind"]}
+    return eligible, held, pending
+
+
+def cmd_eligible(a):
+    st = State(a.state)
+    doc = build_evidence(st)
+    eligible, held, pending = eligibility(doc)
+    os.makedirs(a.out_dir, exist_ok=True)
+    for name, d in (("eligible.json", eligible), ("held.json", held), ("pending.json", pending)):
+        json.dump(d, open(os.path.join(a.out_dir, name), "w"), indent=1, sort_keys=True)
+    print(f"eligible {len(eligible)}, held {len(held)}, pending {len(pending)}: {a.out_dir}")
+    for s, p in pending.items():
+        print(f"  pending {s}: " + "; ".join(f"{k}: {v}" for k, v in p["reasons"].items())[:300])
+
+
 def cmd_adopt(a):
     st = State(a.state)
     jobs = gh_json(["run", "view", a.run, "-R", REPO, "--json", "jobs"])["jobs"]
@@ -1510,8 +2163,21 @@ def main(argv=None):
     p.add_argument("--bundle-build", nargs=2, metavar=("EXT_REV", "GUFO_REV"), help="logits mode: the devlab-perf run BUILDS the Gufo bundle "
                    "(loom-fun/loom-gufo-extension@EXT_REV, loom-fun/gufo@GUFO_REV; Nix in Docker on a hosted runner, cached by the two revisions)")
     p.add_argument("--all", action="store_true", help="every model of the fleet manifest (a device skips the ones that do not fit)")
-    p.add_argument("--new-sdk", choices=(SDK_NEW, "0.3.0"), default=SDK_NEW,
-                   help="explicit SDK target for sdk-ab or sdk-loom (default: %(default)s)")
+    p.add_argument("--new-sdk", default=None,
+                   help=f"SDK target of sdk-ab or sdk-loom (default: the newest verified release, {SDK_NEW}; sdk_pin.VERIFIED_RELEASES)")
+    p.add_argument("--programs", choices=("build", "production"), default="build",
+                   help="SDK modes: build = the new package is built in the job from --base (the kit's programs); production = the FROZEN form: every "
+                        "job serves the production package at its inventory revision (skills/loom-migrate/versions/vOLD-to-vNEW-production.json) "
+                        "byte for byte, programs hash checked by the job, only the SDK differs; image packages get an image-service job")
+    p.add_argument("--old-sdk", choices=("card", "target"), default="card",
+                   help="SDK modes: the SDK the OLD package is served with: card = its own pin (the SDK A/B), target = the --new-sdk too (a programs-only A/B "
+                        "on the new SDK, e.g. the kit build against the frozen production programs: --mode sdk-ab --old-sdk target --no-baselines)")
+    p.add_argument("--held", help="--programs production: held.json {slug: {reason}} of packages out of this release (refused by name, skipped by --all; "
+                                  "default: the inventory's sibling vOLD-to-vNEW-held.json)")
+    p.add_argument("--llamacpp", action="append", metavar="SLUG=TAG", help="--programs production: the llama.cpp ROCm reference build of a package "
+                   ".github/nightly-models.json does not list (a hand-written port whose architecture needs a newer build), e.g. "
+                   "unsloth-Inkling-2-Mini-loom=b1384 (skills/loom-kb/arch/llm/moe/inkling2/porting.md)")
+    p.add_argument("--image-device", default="strix-halo", help="--programs production: the device whose runner compares an image package (default %(default)s)")
     p.add_argument("--old", help="ORG of the old packages (default loom-fun) or a refs.json {slug: {old, new}} (card revisions pinned: org/repo@rev)")
     p.add_argument("--new-org", default=STAGING_ORG)
     p.add_argument("--base", required=True, help="the integration branch the experiment branches are cut from and the PRs target (its devlab "
@@ -1550,11 +2216,22 @@ def main(argv=None):
             q.add_argument("--run", required=True)
         if name == "ingest":
             q.add_argument("--slug", action="append")
+            q.add_argument("--dry-run", action="store_true", help="--programs production: build each card on the locally assembled frozen package "
+                                                                  "(no staging package needed), record nothing; for review and lint_card.py")
         if name == "package":
             q.add_argument("--slugs", nargs="+", help="only these models, whatever their stage (default: the collected jobs that were promoted)")
             q.add_argument("--ref", help="the git ref the canonical build is made at (default: origin/<the state's base>)")
             q.add_argument("--prefill-transition", action="append", default=[], metavar="SLUG:PRESET:OLD:NEW",
                            help="explicit measured prefill change; every selected job must provide matching programs and preset execution")
+    for name, fn, help_ in (("evidence", cmd_evidence, "the sdk-evidence/1 document of a --programs production state (per model / device / metric)"),
+                            ("eligible", cmd_eligible, "eligible.json / held.json / pending.json of the release from a --programs production state (fail closed)")):
+        q = sub.add_parser(name, help=help_)
+        q.add_argument("state")
+        if name == "evidence":
+            q.add_argument("-o", "--out", required=True)
+        else:
+            q.add_argument("--out-dir", required=True)
+        q.set_defaults(fn=fn)
     q = sub.add_parser("rerender")
     q.add_argument("--slugs", nargs="+")
     q.add_argument("--all", action="store_true", help="every model of the fleet manifest")
