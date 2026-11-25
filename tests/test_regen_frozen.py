@@ -458,3 +458,26 @@ class KernelTestsNotApplicable(unittest.TestCase):
             json.dump({"gate_failures": ["ktest:staging"]}, open(cmp, "w"))
             regen.kernel_tests_not_applicable(st, {"slug": STRIX_ONLY, "device": "strix-halo", "cmp": cmp}, d)
             self.assertEqual(json.load(open(cmp))["gate_failures"], ["ktest:staging"])
+
+
+class AcceptNoReference(unittest.TestCase):
+    def test_only_gates_whose_reference_could_not_start(self):
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, True)
+        d = os.path.join(tmp, "job")
+        os.makedirs(d)
+        cmp = os.path.join(tmp, "cmp.json")
+        json.dump({"gate_failures": ["gates:staging:dev"], "metrics": {k: {"new": 100.0, "card": 100.0, "new_vs_card": 1.0} for k in regen.SDK_METRICS.values()}},
+                  open(cmp, "w"))
+        state = os.path.join(tmp, "s.json")
+        job = {"slug": STRIX_ONLY, "device": "strix-halo", "stage": "needs_decision", "round": 1, "cmp": cmp, "dir": d}
+        json.dump({"work": tmp, "mode": "sdk-loom", "opts": {"programs": "production", "new_sdk": "0.3.0"}, "jobs": {"j": job}, "batches": []}, open(state, "w"))
+        open(os.path.join(d, "gates_staging.out"), "w").write("== golden: 3 llama.cpp references pending\n")
+        with contextlib.redirect_stdout(io.StringIO()):
+            regen.main(["accept-no-reference", state, STRIX_ONLY, "--note", "n"])
+        self.assertEqual(regen.State(state).jobs["j"]["stage"], "needs_decision")   # a reference that ran: never accepted
+        open(os.path.join(d, "gates_staging.out"), "w").write("could not start llama-server: x\n== golden: references still pending after 5 rounds (FAIL)\n")
+        with contextlib.redirect_stdout(io.StringIO()):
+            regen.main(["accept-no-reference", state, STRIX_ONLY, "--note", "no stock reference for inkling2"])
+        e = regen.State(state).jobs["j"]
+        self.assertEqual((e["stage"], e["decision"], e["no_reference"]), ("collected", "promote", "no stock reference for inkling2"))

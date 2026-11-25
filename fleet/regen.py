@@ -1248,6 +1248,10 @@ def ingest_full(st, name, e, W):
                   *src, "--device", "none", "--hrx-loom", "none", "-o", "ev_vulkan.json"], W)
         ev.append("ev_vulkan.json")
     gfiles = [f for f in (f"{d}/gates_{V}/gates.json", f"{d}/ktest_{V}.log") if os.path.exists(f)]
+    if e.get("no_reference") and gfiles and gfiles[0].endswith("gates.json"):   # accept-no-reference: the job's gates did not run; the card keeps
+        gj = json.load(open(gfiles[0]))   # the previous ones (marked as not re-run on this SDK), only the admission probe is this job's
+        gfiles[0] = os.path.join(W, "gates_not_run.json")
+        json.dump({"gates": {}, **{k: gj[k] for k in ("ts", "level", "context_admit") if k in gj}}, open(gfiles[0], "w"), indent=1)
     adm = os.path.join(d, f"admit_{V}.json")
     if gfiles and gfiles[0].endswith("gates.json") and os.path.isfile(adm):
         # the frozen job's admission probe (admit:V, the served preset's native context; the gates ran at the dev level, which has none): the card
@@ -1368,6 +1372,14 @@ def cmd_ingest(a):
         todo = [(n, e) for n, e in todo if sdk_ingest_ready(st, n, e)]
     global INGEST_DRY
     INGEST_DRY = dry
+    if not dry and st.d["mode"] in SDK_MODES:   # one card per model at a time: each device's card is built on the staging head the previous one published
+        busy = {e["slug"] for e in st.jobs.values() if e["stage"] == "ingested"}
+        one = []
+        for n, e in todo:
+            if e["slug"] not in busy:
+                busy.add(e["slug"])
+                one.append((n, e))
+        todo = one
     for name, e in todo:
         W = os.path.join(st.work, "cards", f"{e['slug']}.{e['device']}")
         shutil.rmtree(W, ignore_errors=True)
@@ -1556,7 +1568,7 @@ def package_frozen(st, slug, jobs, dry):
 
 
 def cmd_package_frozen(st, a, picked):
-    slugs = sorted({e["slug"] for _, e in picked})
+    slugs = sorted({e["slug"] for _, e in picked if e.get("kind") != "image"})   # an image card is migrated by the image tooling (its job is the evidence)
     for slug in slugs:
         jobs = [e for _, e in picked if e["slug"] == slug and not e.get("prev")]   # the sweep jobs (an ABBA confirmation is not a card job)
         if not a.dry_run and all(e.get("package") for e in jobs):
@@ -2072,6 +2084,10 @@ def build_evidence(st):
             dv["published_revision"] = e["published_revision"]
         if e.get("accepted_regression"):
             dv["accepted_regression"] = e["accepted_regression"]
+        if e.get("no_reference"):
+            dv["gates_not_run"] = e["no_reference"]
+        if e.get("not_applicable"):
+            dv["not_applicable"] = e["not_applicable"]
         mod["devices"][e["device"]] = dv
     return doc
 
@@ -2133,6 +2149,66 @@ def cmd_eligible(a):
     print(f"eligible {len(eligible)}, held {len(held)}, pending {len(pending)}: {a.out_dir}")
     for s, p in pending.items():
         print(f"  pending {s}: " + "; ".join(f"{k}: {v}" for k, v in p["reasons"].items())[:300])
+
+
+def cmd_verify(a):
+    """--programs production: check each published card on the staging head (small files): the frozen programs, the target pin, this device's
+    session from the job, and lint_card.py --form staging. Records e["verified"] = {revision, ok, problems}; prints the problems."""
+    st = State(a.state)
+    pin = pinned_target(st.d)
+    for name, e in st.jobs.items():
+        if e["stage"] != "published" or (e.get("verified") or {}).get("ok"):
+            continue
+        repo = f"{st.d['opts']['new_org']}/{e['slug']}"
+        d = os.path.join(st.work, "verify", e["slug"])
+        problems = []
+        try:
+            head = hf_head(repo)
+            hf_snapshot_small(repo, head, d)
+            if card_lib.programs_sha256(d) != e.get("programs_sha256"):
+                problems.append("staging programs are not the production programs")
+            got = (sdk_package.load(os.path.join(d, "llm_config.json")).get("sdk") or {})
+            if pin and any(got.get(k) != v for k, v in pin.items()):
+                problems.append(f"llm_config pin {got.get('hrx_loom')} is not the verified {target_sdk(st.d)}")
+            info = card_lib.load_info(os.path.join(d, "info.json"))
+            srcs = {s_.get("url") for s_ in (info.get("sources") or {}).values()}
+            if e.get("job_url") not in srcs:
+                problems.append(f"the card does not cite this device's job {e.get('job_url')}")
+            r = sh([PY, os.path.join(CARD, "lint_card.py"), d, "--form", "staging"], check=False)
+            problems += [ln.split(": ", 1)[-1] for ln in r.stdout.splitlines() if "[carried]" not in ln and ": [" in ln]
+        except Exception as x:
+            problems.append(f"verify failed: {x}")
+        e["verified"] = {"revision": locals().get("head"), "ok": not problems, "problems": problems, "at": now()}
+        print(f"{e['slug']} {e['device']}: " + ("ok" if not problems else "; ".join(problems)[:600]))
+        shutil.rmtree(d, ignore_errors=True)
+        st.save()
+
+
+def cmd_accept_no_reference(a):
+    """--programs production: a model whose gates could not run because the reference engine cannot serve its checkpoint (gates.sh: llama-server
+    would not start, "references still pending after 5 rounds"; e.g. an architecture only a hand-made reference serves) is decided on its other
+    evidence; its card carries the previous gates, shown not re-run on this SDK (the job's gate results are not ingested). The note names why.
+    A gate that ran against a reference and failed is never accepted here."""
+    st = State(a.state)
+    if st.d["opts"].get("programs") != "production":
+        die("accept-no-reference is for --programs production states")
+    done = []
+    for name, e in st.jobs.items():
+        if e["slug"] not in a.slug or e["stage"] != "needs_decision" or e.get("prev") or not e.get("cmp"):
+            continue
+        fails = json.load(open(e["cmp"])).get("gate_failures") or []
+        out = read(os.path.join(e.get("dir") or "", "gates_staging.out"), "") or ""
+        if not fails or any(not f.startswith("gates:") for f in fails) or "references still pending after 5 rounds" not in out \
+                or "could not start llama-server" not in out:
+            print(f"{e['slug']} {e['device']}: not a reference that could not start ({', '.join(fails) or 'no gate failure'}), not accepted")
+            continue
+        decision, reasons, perf, rows = _decide_without(st, name, e, True)
+        e.update(perf=perf, rows_pct=rows, perf_cross=dict(perf), decision=decision, reason="; ".join(reasons), no_reference=a.note)
+        e["stage"] = "collected" if decision in ("promote", "confirm") else "needs_decision"
+        st.log(f"{e['slug']} {e['device']}: gates not run (no reference): {a.note} -> {e['stage']} ({decision})")
+        done.append(f"{e['slug']} {e['device']} ({decision})")
+    st.save()
+    print("accepted: " + (", ".join(done) or "nothing"))
 
 
 def cmd_adopt(a):
@@ -2223,6 +2299,14 @@ def main(argv=None):
             q.add_argument("--ref", help="the git ref the canonical build is made at (default: origin/<the state's base>)")
             q.add_argument("--prefill-transition", action="append", default=[], metavar="SLUG:PRESET:OLD:NEW",
                            help="explicit measured prefill change; every selected job must provide matching programs and preset execution")
+    q = sub.add_parser("verify", help="--programs production: check the published staging cards (programs, pin, cited job, lint_card.py)")
+    q.add_argument("state")
+    q.set_defaults(fn=cmd_verify)
+    q = sub.add_parser("accept-no-reference", help="--programs production: gates that could not run (no reference engine for the checkpoint)")
+    q.add_argument("state")
+    q.add_argument("slug", nargs="+")
+    q.add_argument("--note", required=True, help="why no reference serves it, e.g. 'stock llama.cpp b1384 cannot load the inkling2 GGUF (KB inkling2/porting.md)'")
+    q.set_defaults(fn=cmd_accept_no_reference)
     for name, fn, help_ in (("evidence", cmd_evidence, "the sdk-evidence/1 document of a --programs production state (per model / device / metric)"),
                             ("eligible", cmd_eligible, "eligible.json / held.json / pending.json of the release from a --programs production state (fail closed)")):
         q = sub.add_parser(name, help=help_)
