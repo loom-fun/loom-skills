@@ -1,47 +1,80 @@
 {
- "_comment": "R9700 per-model measurement (r9700_jobs.py): one job per model on one R9700 runner; loom-fun-staging card, llama.cpp ROCm b1375 + Vulkan b12211 with the matched drafting, reduced-context models served at served_context. Does not fit: none",
- "runner": "r9700",
- "memory_bytes": 34000000000,
+ "_comment": "pf-gemma r5 (do not merge): gemma-4-E2B chat-16gb on the R9700 limited to 15 GB (elastic, card Quick start flags): native-context admission and perf at prefill_capacity 4096 (current preset, inherited from chat-r9700) vs 2048 vs 1024 (the default preset the 16 GB max_context was measured at), ABBA; dev gates on the 1024/2048 candidates.",
+ "runner": "strix",
+ "memory_bytes": 81000000000,
  "llama_spec": "matched",
  "jobs": [
   {
-   "name": "unsloth-qwen3-0-6b-loom",
-   "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
-   "kit": null,
+   "name": "pfg5-rab-gemma-4-e2b-16gb-prefill",
+   "runner": "r9700",
+   "repeat_rows": 3,
+   "card": "loom-fun-staging/unsloth-gemma-4-E2B-it-loom",
+   "require_preset_r9700": true,
+   "memory_bytes_r9700": 16000000000,
+   "kit": "gemma4",
    "llamacpp": "b1375",
    "llamacpp_vulkan": "b12211",
-   "memory_bytes_r9700": 17000000000,
    "variants": [
     {
-     "name": "card",
-     "build": {}
+     "card": "loom-fun-staging/unsloth-gemma-4-E2B-it-loom",
+     "sdk": "0.3.0",
+     "memory_bytes": 15000000000,
+     "serve_args": [
+      "--preset=chat-16gb",
+      "--state_slab_bytes=4mib",
+      "--weight_slab_bytes=64mib"
+     ],
+     "name": "p4k"
     },
     {
-     "name": "nodraft",
-     "build": {},
+     "card": "loom-fun-staging/unsloth-gemma-4-E2B-it-loom",
+     "sdk": "0.3.0",
+     "memory_bytes": 15000000000,
+     "serve_args": [
+      "--preset=chat-16gb",
+      "--state_slab_bytes=4mib",
+      "--weight_slab_bytes=64mib"
+     ],
+     "name": "p1k",
      "execution": {
-      "draft_depth": 0
+      "prefill_capacity": 1024
+     }
+    },
+    {
+     "card": "loom-fun-staging/unsloth-gemma-4-E2B-it-loom",
+     "sdk": "0.3.0",
+     "memory_bytes": 15000000000,
+     "serve_args": [
+      "--preset=chat-16gb",
+      "--state_slab_bytes=4mib",
+      "--weight_slab_bytes=64mib"
+     ],
+     "name": "p2k",
+     "execution": {
+      "prefill_capacity": 2048
      }
     }
    ],
    "steps": [
-    "func:card",
-    "ktest:card",
-    "gates:card:dev",
-    "perf:card:3",
-    "perf:card:3:long",
-    "c4:nodraft",
-    "llama@rocm.np1:3",
-    "llama@rocm.np1:3:long",
-    "llamac4@rocm.nodraft",
-    "llama@vulkan.np1:3",
-    "llama@vulkan.np1:3:long",
-    "llamac4@vulkan.perslot.nodraft"
-   ]
+    "admit:p4k",
+    "admit:p2k",
+    "admit:p1k",
+    "perf:p1k:1",
+    "perf:p2k:1",
+    "perf:p4k:1",
+    "perf:p4k:1",
+    "perf:p2k:1",
+    "perf:p1k:1",
+    "perf:p1k:1:long",
+    "perf:p2k:1:long",
+    "perf:p4k:1:long",
+    "gates:p1k:dev",
+    "gates:p2k:dev"
+   ],
+   "sdk": "0.3.0"
   }
  ],
- "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
+ "card": "loom-fun-staging/unsloth-gemma-4-12B-it-loom",
  "kit": null,
- "llamacpp": "b1375",
- "llamacpp_vulkan": "b12211"
+ "llamacpp": "b1374"
 }
