@@ -1,0 +1,128 @@
+// Qwen3.8 asynchronous text execution.
+// Preparation supplies opaque stage IDs and retained buffer bindings. The
+// runner imports enqueue proposal, target verification, feedback transfer, and
+// accepted-state catch-up. Feedback banks remain immutable while private draft
+// state catches up; the returned work completion does not join feedback.
+// The native caller retains bindings and joins both timelines before reuse.
+
+type.decl import("hal", "buffer") @HalBuffer
+
+func.decl @qwen38_feedback_bank_bytes(%capacity: index) -> (offset)
+
+func.decl @qwen38_feedback_tagged_bytes(%capacity: index) -> (offset)
+
+func.decl import("runner") @timestamp(%target: ptr<@HalBuffer>, %offset: i64) -> (i64)
+
+// Preparation owns the IDs for target, proposal, catch-up, verification, and
+// continuation. An absent catch-up stage means this model runs target-only.
+template.decl @qwen38.epoch.stages(%state: buffer, %mixed: i1, %token_count: i32, %span_count: i32) -> (i32, i32, i32, i32, i32)
+
+template.decl @qwen38.epoch.feedback_bank(%state: buffer, %requested: i32) -> (i1)
+
+func.decl import("runner") @execute_3(%stage: i32, %b0: ptr<@HalBuffer>, %b1: ptr<@HalBuffer>, %b2: ptr<@HalBuffer>) -> (i64)
+
+func.decl import("runner") @execute_6(%stage: i32, %b0: ptr<@HalBuffer>, %b1: ptr<@HalBuffer>, %b2: ptr<@HalBuffer>, %b3: ptr<@HalBuffer>, %b4: ptr<@HalBuffer>, %b5: ptr<@HalBuffer>) -> (i64)
+
+template.decl @qwen38.epoch.target(%control_state: buffer, %verify: i1, %mixed: i1, %target_stage: i32, %verify_stage: i32, %residual: ptr<@HalBuffer>, %metadata: ptr<@HalBuffer>, %origins: ptr<@HalBuffer>, %state: ptr<@HalBuffer>, %tokens: ptr<@HalBuffer>, %outputs: ptr<@HalBuffer>, %committed: ptr<@HalBuffer>, %results: ptr<@HalBuffer>) -> (i64)
+
+func.decl import("runner") @feedback(%slot: i32, %source: ptr<@HalBuffer>, %offset: i64, %length: i64) -> (i64)
+
+// The program is shared; all request state arrives as buffer bindings.
+func.def public @text_step_v2(%state: buffer, %initialize: i32, %source_position: i32, %input_count: i32, %residual: ptr<@HalBuffer>, %control: ptr<@HalBuffer>, %gdn: ptr<@HalBuffer>, %attention: ptr<@HalBuffer>, %tokens: ptr<@HalBuffer>, %progress: ptr<@HalBuffer>) -> (i64, i32) {
+  %origin = index.constant 0 : offset
+  %steps = buffer.view %state[%origin] : buffer -> view<2xi32>
+  %prefill = view.load %steps[0] : view<2xi32> -> i32
+  %decode = view.load %steps[1] : view<2xi32> -> i32
+  %c0 = scalar.constant 0 : i32
+  %is_prefill = scalar.cmpi ne, %initialize, %c0 : i32
+  %stage = scf.select %is_prefill, %prefill, %decode : i32
+  %completion = func.call @execute_6(%stage, %residual, %control, %gdn, %attention, %tokens, %progress) : (i32, ptr<@HalBuffer>, ptr<@HalBuffer>, ptr<@HalBuffer>, ptr<@HalBuffer>, ptr<@HalBuffer>, ptr<@HalBuffer>) -> (i64)
+  %next_source_position = scalar.addi %source_position, %input_count : i32
+  func.return %completion, %next_source_position : i64, i32
+}
+
+// Feedback slot zero holds ordinary tokens; slots one/two hold separate
+// verification banks. Neither branch waits: the owner joins both timelines
+// before advancing host frontiers.
+func.def @epoch_once(%control_state: buffer, %mixed: i1, %token_count: i32, %proposes: i32, %verifies: i32, %span_count: i32, %output_count: i32, %feedback_slot: i32, %residual: ptr<@HalBuffer>, %metadata: ptr<@HalBuffer>, %origins: ptr<@HalBuffer>, %state: ptr<@HalBuffer>, %tokens: ptr<@HalBuffer>, %outputs: ptr<@HalBuffer>, %carry: ptr<@HalBuffer>, %committed: ptr<@HalBuffer>, %results: ptr<@HalBuffer>, %draft_cache: ptr<@HalBuffer>, %draft_origins: ptr<@HalBuffer>) -> (i64, i32) {
+  %target_stage, %draft_stage, %warm_stage, %verify_stage, %continuation = template.apply<@qwen38.epoch.stages>(%control_state, %mixed, %token_count, %span_count) : (buffer, i1, i32, i32) -> (i32, i32, i32, i32, i32)
+  %c0 = scalar.constant 0 : i32
+  %c2 = scalar.constant 2 : i32
+  %c0_2 = scalar.constant 0 : i64
+  %propose = scalar.cmpi ne, %proposes, %c0 : i32
+  %verify = template.apply<@qwen38.epoch.feedback_bank>(%control_state, %verifies) : (buffer, i32) -> (i1)
+  scf.if %verify {
+    %started = func.call @timestamp(%results, %c0_2) : (ptr<@HalBuffer>, i64) -> (i64)
+  }
+  scf.if %propose {
+    %proposal = func.call @execute_6(%draft_stage, %metadata, %tokens, %draft_origins, %draft_cache, %carry, %results) : (i32, ptr<@HalBuffer>, ptr<@HalBuffer>, ptr<@HalBuffer>, ptr<@HalBuffer>, ptr<@HalBuffer>, ptr<@HalBuffer>) -> (i64)
+  }
+  scf.if %verify {
+    %target_offset = scalar.constant 8 : i64
+    %target_started = func.call @timestamp(%results, %target_offset) : (ptr<@HalBuffer>, i64) -> (i64)
+  }
+  %computed = template.apply<@qwen38.epoch.target>(%control_state, %verify, %mixed, %target_stage, %verify_stage, %residual, %metadata, %origins, %state, %tokens, %outputs, %committed, %results) : (buffer, i1, i1, i32, i32, ptr<@HalBuffer>, ptr<@HalBuffer>, ptr<@HalBuffer>, ptr<@HalBuffer>, ptr<@HalBuffer>, ptr<@HalBuffer>, ptr<@HalBuffer>, ptr<@HalBuffer>) -> (i64)
+  %target = scf.if %verify -> (i64) {
+    %end_offset = scalar.constant 16 : i64
+    %measured = func.call @timestamp(%results, %end_offset) : (ptr<@HalBuffer>, i64) -> (i64)
+    %capacity = index.cast %span_count : i32 to index
+    %tagged = scalar.cmpi eq, %feedback_slot, %c2 : i32
+    %extent = scf.if %tagged -> (offset) {
+      // Compaction may retire owners. The submitted span count bounds the
+      // transfer without a device readback.
+      %bytes = func.call @qwen38_feedback_tagged_bytes(%capacity) : (index) -> (offset)
+      scf.yield %bytes : offset
+    } else {
+      %bytes = func.call @qwen38_feedback_bank_bytes(%capacity) : (index) -> (offset)
+      scf.yield %bytes : offset
+    }
+    %length = index.cast %extent : offset to i64
+    %feedback = func.call @feedback(%feedback_slot, %results, %c0_2, %length) : (i32, ptr<@HalBuffer>, i64, i64) -> (i64)
+    scf.yield %measured : i64
+  } else {
+    %has_output = scalar.cmpi ne, %output_count, %c0 : i32
+    scf.if %has_output {
+      %count = scalar.extui %output_count : i32 to i64
+      %token_bytes = scalar.constant 4 : i64
+      %length = scalar.muli %count, %token_bytes : i64
+      %feedback = func.call @feedback(%c0, %outputs, %c0_2, %length) : (i32, ptr<@HalBuffer>, i64, i64) -> (i64)
+    }
+    scf.yield %computed : i64
+  }
+  // Catch-up only mutates the private draft cache and committed carry. Target
+  // feedback stays immutable and can transfer concurrently with this command.
+  %draft_enabled = scalar.cmpi ne, %warm_stage, %c0 : i32
+  %completion = scf.if %draft_enabled -> (i64) {
+    %accepted = scf.if %verify -> (ptr<@HalBuffer>) {
+      scf.yield %committed : ptr<@HalBuffer>
+    } else {
+      scf.yield %metadata : ptr<@HalBuffer>
+    }
+    %warm = func.call @execute_6(%warm_stage, %residual, %accepted, %draft_origins, %draft_cache, %carry, %tokens) : (i32, ptr<@HalBuffer>, ptr<@HalBuffer>, ptr<@HalBuffer>, ptr<@HalBuffer>, ptr<@HalBuffer>, ptr<@HalBuffer>) -> (i64)
+    scf.yield %warm : i64
+  } else {
+    scf.yield %target : i64
+  }
+  func.return %completion, %continuation : i64, i32
+}
+
+// A bounded cohort reuses retained state on the work timeline, while each
+// feedback bank stays immutable on its independent transfer branch. Acceptance
+// produces the next input and position entirely on device; neither call waits.
+func.def public @text_epoch_v2(%control_state: buffer, %token_count: i32, %proposes: i32, %verifies: i32, %span_count: i32, %output_count: i32, %next_span_count: i32, %next_token_count: i32, %continuation_proposes: i32, %first_media_count: i32, %next_media_count: i32, %residual: ptr<@HalBuffer>, %metadata: ptr<@HalBuffer>, %origins: ptr<@HalBuffer>, %state: ptr<@HalBuffer>, %tokens: ptr<@HalBuffer>, %outputs: ptr<@HalBuffer>, %carry: ptr<@HalBuffer>, %committed: ptr<@HalBuffer>, %results: ptr<@HalBuffer>, %draft_cache: ptr<@HalBuffer>, %draft_origins: ptr<@HalBuffer>, %next_results: ptr<@HalBuffer>) -> (i64) {
+  %c0 = scalar.constant 0 : i32
+  %c1 = scalar.constant 1 : i32
+  %c2 = scalar.constant 2 : i32
+  %media_count = scalar.addi %first_media_count, %next_media_count : i32
+  %mixed = scalar.cmpi ne, %media_count, %c0 : i32
+  %first, %continuation = func.call @epoch_once(%control_state, %mixed, %token_count, %proposes, %verifies, %span_count, %output_count, %c1, %residual, %metadata, %origins, %state, %tokens, %outputs, %carry, %committed, %results, %draft_cache, %draft_origins) : (buffer, i1, i32, i32, i32, i32, i32, i32, ptr<@HalBuffer>, ptr<@HalBuffer>, ptr<@HalBuffer>, ptr<@HalBuffer>, ptr<@HalBuffer>, ptr<@HalBuffer>, ptr<@HalBuffer>, ptr<@HalBuffer>, ptr<@HalBuffer>, ptr<@HalBuffer>, ptr<@HalBuffer>) -> (i64, i32)
+  %continues = scalar.cmpi ne, %next_span_count, %c0 : i32
+  %completion = scf.if %continues -> (i64) {
+    %ready = func.call @execute_3(%continuation, %metadata, %tokens, %results) : (i32, ptr<@HalBuffer>, ptr<@HalBuffer>, ptr<@HalBuffer>) -> (i64)
+    %next, %next_continuation = func.call @epoch_once(%control_state, %mixed, %next_token_count, %continuation_proposes, %c1, %next_span_count, %c0, %c2, %residual, %metadata, %origins, %state, %tokens, %outputs, %carry, %committed, %next_results, %draft_cache, %draft_origins) : (buffer, i1, i32, i32, i32, i32, i32, i32, ptr<@HalBuffer>, ptr<@HalBuffer>, ptr<@HalBuffer>, ptr<@HalBuffer>, ptr<@HalBuffer>, ptr<@HalBuffer>, ptr<@HalBuffer>, ptr<@HalBuffer>, ptr<@HalBuffer>, ptr<@HalBuffer>, ptr<@HalBuffer>) -> (i64, i32)
+    scf.yield %next : i64
+  } else {
+    scf.yield %first : i64
+  }
+  func.return %completion : i64
+}

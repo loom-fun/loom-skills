@@ -22,7 +22,7 @@ class Qwen4expExample(unittest.TestCase):
         pin = json.loads((cat / "catalog.json").read_text())["sdk"]
         fleet = json.loads((ROOT / "fleet/unsloth-Qwen3.8-Flash-Next-loom/llm_config.json").read_text())["sdk"]
         self.assertEqual(pin, fleet)
-        self.assertEqual(pin["hrx_loom"], "0.2.0")
+        self.assertEqual(pin["hrx_loom"], "0.3.0")
         self.assertEqual(pin["source"], "pypi")
 
     def test_flatten_moves_shared_files(self):
