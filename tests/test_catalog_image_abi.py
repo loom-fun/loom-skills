@@ -2,7 +2,9 @@
 
 hrx-loom 0.2.0 calls `text_image_run_v1(state, stage, input, output, batch)`; the library's Flash-Next vision_control.loom (rc1, 0.2.0 and main) still declares the
 3-argument form, so every image request of the rebuilt Flash-Next package failed with "model export 'text_image_run_v1' argument count mismatch: host expects 5,
-source declares 3" (0.2.0 sweep: func image_input, gates vision and spec FAIL on Strix)."""
+source declares 3" (0.2.0 sweep: func image_input, gates vision and spec FAIL on Strix).
+From the library's v0.3.0 package on, the catalog passes HAL buffers with explicit ownership (`ptr<@HalBuffer>`), which hrx-loom 0.3.0
+accepts in place of the legacy `hal.buffer`: the two spellings compare equal here, the argument count and order must not change."""
 import re
 import unittest
 from pathlib import Path
@@ -11,13 +13,14 @@ ROOT = Path(__file__).resolve().parents[1]
 CATALOG = ROOT / "skills/loom-port-llm/reference/qwen4exp-example/catalog/program"
 GEN = ROOT / "skills/loom-port-llm/starter/vision/gen_component.py"
 DEF = re.compile(r"func\.def public @(text_image_\w+_v1)\(([^)]*)\)")
+HAL = {"ptr<@HalBuffer>": "hal.buffer"}   # explicit HAL ownership (SDK 0.3.0) == the legacy signature
 
 
 def arg_types(text):
     """{export: [argument types]} of the text_image_*_v1 definitions in TEXT."""
     out = {}
     for name, args in DEF.findall(text):
-        out[name] = [a.split(":", 1)[1].strip() for a in args.split(", ") if a.strip()]
+        out[name] = [HAL.get(t, t) for t in (a.split(":", 1)[1].strip() for a in args.split(", ") if a.strip())]
     return out
 
 

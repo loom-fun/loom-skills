@@ -33,6 +33,12 @@
      "data": [
       "program/weights.loom"
      ],
+     "path": "program/ple_prepare.loom"
+    },
+    {
+     "data": [
+      "program/weights.loom"
+     ],
      "path": "program/prepare.loom"
     },
     "program/shared/program/text/qwen3_8/chat.loom",
@@ -46,22 +52,37 @@
     "program/last_layer.loom",
     "program/layer.loom",
     "program/mtp.loom",
+    "program/ple_epoch.loom",
     "program/ple_residual.loom",
     "program/propose.loom",
     "program/qsa_attention.loom",
     "program/qsa_residual.loom",
     "program/speculation.loom",
     "program/verify.loom",
-    "program/text_epoch.loom",
+    "program/ple_control.loom",
+    "program/shared/program/text/qwen3_8/encode.loom",
+    "program/shared/program/text/qwen3_8/epoch.loom",
+    {
+     "data": [
+      "program/shared/program/text/publication.h"
+     ],
+     "format": "cxx",
+     "options": [
+      "cxx:'I=../../..'"
+     ],
+     "path": "program/shared/program/text/qwen3_8/publish.cxx"
+    },
+    "program/ple_cache_layout.loom",
     "program/shared/motif/sequence/qwen3_8/packet.loom",
     "program/shared/motif/sequence/qwen3_8/feedback.loom",
-    "program/text_storage.loom",
+    "program/shared/program/text/qwen3_8/epoch_target.loom",
+    "program/shared/program/text/qwen3_8/speculation.loom",
+    "program/shared/program/text/qwen3_8/storage.loom",
     "program/shared/program/text/qwen3_8/chat_history.loom",
     "program/shared/program/text/qwen3_8/chat_media.loom",
     "program/shared/program/text/qwen3_8/vision_geometry.loom",
     "program/config.loom",
     "program/shared/kernel/sequence/qwen3_8/accept.loom",
-    "program/shared/kernel/sequence/qwen3_8/continuation.loom",
     "program/shared/kernel/sequence/qwen3_8/mtp_proposal.loom",
     "program/dispatch/embedding.loom",
     "program/dispatch/experts.loom",
@@ -71,7 +92,6 @@
     "program/dispatch/ple_consumer.loom",
     "program/dispatch/ple_hash.loom",
     "program/dispatch/ple_lookup.loom",
-    "program/dispatch/ple_stage.loom",
     "program/dispatch/projection.loom",
     "program/dispatch/qsa_split_attention.loom",
     "program/dispatch/routing.loom",
@@ -119,6 +139,8 @@
     "program/kernel/speculation.loom",
     "program/kernel/weights_prepare.loom",
     "program/kernel/work.loom",
+    "program/kernel/ple_cache.loom",
+    "program/kernel/ple_cache_lookup.loom",
     "program/shared/motif/format/ggml/iq4_nl.loom",
     "program/shared/motif/format/ggml/q4_k.loom",
     "program/shared/motif/format/ggml/q5_1.loom",
@@ -131,13 +153,22 @@
     "program/shared/motif/tensor/sampling.loom",
     "program/shared/program/text/qwen3_8/media.loom",
     "program/shared/motif/linear/ggml/q8_0_bf16_matrix.loom",
-    "program/shared/motif/tensor/matrix_publication.loom"
+    "program/shared/motif/sequence/qwen3_8/draft_vocabulary.loom",
+    "program/shared/motif/tensor/gated_delta.loom",
+    "program/shared/motif/tensor/matrix_publication.loom",
+    "program/shared/motif/cache/cohort.loom"
    ]
   },
   "vision-source": {
    "directory": "program",
    "origin": "./",
    "inputs": [
+    {
+     "data": [
+      "program/weights.loom"
+     ],
+     "path": "program/ple_prepare.loom"
+    },
     {
      "data": [
       "program/weights.loom"
@@ -162,19 +193,35 @@
     "program/last_layer.loom",
     "program/layer.loom",
     "program/mtp.loom",
+    "program/ple_epoch.loom",
     "program/ple_residual.loom",
     "program/propose.loom",
     "program/qsa_attention.loom",
     "program/qsa_residual.loom",
     "program/speculation.loom",
     "program/verify.loom",
-    "program/text_epoch.loom",
+    "program/ple_control.loom",
+    "program/shared/program/text/qwen3_8/encode.loom",
+    "program/shared/program/text/qwen3_8/epoch.loom",
+    {
+     "data": [
+      "program/shared/program/text/publication.h"
+     ],
+     "format": "cxx",
+     "options": [
+      "cxx:'I=../../..'"
+     ],
+     "path": "program/shared/program/text/qwen3_8/publish.cxx"
+    },
     "program/vision_projector.loom",
     "program/shared/program/text/qwen3_8/vision_pixels.loom",
     "program/shared/program/text/qwen3_8/vision_stages.loom",
+    "program/ple_cache_layout.loom",
     "program/shared/motif/sequence/qwen3_8/packet.loom",
     "program/shared/motif/sequence/qwen3_8/feedback.loom",
-    "program/text_storage.loom",
+    "program/shared/program/text/qwen3_8/epoch_target.loom",
+    "program/shared/program/text/qwen3_8/speculation.loom",
+    "program/shared/program/text/qwen3_8/storage.loom",
     "program/shared/program/text/qwen3_8/chat_history.loom",
     "program/shared/program/text/qwen3_8/chat_media.loom",
     "program/shared/program/text/qwen3_8/vision_geometry.loom",
@@ -183,7 +230,6 @@
     "program/shared/motif/vision/qwen3_8/workspace.loom",
     "program/config.loom",
     "program/shared/kernel/sequence/qwen3_8/accept.loom",
-    "program/shared/kernel/sequence/qwen3_8/continuation.loom",
     "program/shared/kernel/sequence/qwen3_8/mtp_proposal.loom",
     "program/dispatch/embedding.loom",
     "program/dispatch/experts.loom",
@@ -193,7 +239,6 @@
     "program/dispatch/ple_consumer.loom",
     "program/dispatch/ple_hash.loom",
     "program/dispatch/ple_lookup.loom",
-    "program/dispatch/ple_stage.loom",
     "program/dispatch/projection.loom",
     "program/dispatch/qsa_split_attention.loom",
     "program/dispatch/routing.loom",
@@ -241,6 +286,8 @@
     "program/kernel/speculation.loom",
     "program/kernel/weights_prepare.loom",
     "program/kernel/work.loom",
+    "program/kernel/ple_cache.loom",
+    "program/kernel/ple_cache_lookup.loom",
     "program/shared/motif/format/ggml/iq4_nl.loom",
     "program/shared/motif/format/ggml/q4_k.loom",
     "program/shared/motif/format/ggml/q5_1.loom",
@@ -253,7 +300,10 @@
     "program/shared/motif/tensor/sampling.loom",
     "program/shared/program/text/qwen3_8/media.loom",
     "program/shared/motif/linear/ggml/q8_0_bf16_matrix.loom",
+    "program/shared/motif/sequence/qwen3_8/draft_vocabulary.loom",
+    "program/shared/motif/tensor/gated_delta.loom",
     "program/shared/motif/tensor/matrix_publication.loom",
+    "program/shared/motif/cache/cohort.loom",
     "program/dispatch/vision.loom",
     "program/shared/motif/vision/qwen3_8/attention.loom",
     "program/shared/motif/vision/qwen3_8/ffn.loom",
@@ -270,7 +320,7 @@
  "services": {
   "chat": {
    "kind": "text",
-   "version": 1,
+   "version": 2,
    "options": [
     "sampling"
    ],
@@ -297,23 +347,17 @@
      "scope": "model",
      "order": "Metadata shard first, followed by three tensor payload shards."
     },
-    "drafting": "One through seven recursive Q8_0 MTP proposals verified by the target text service; canonical presets select three."
+    "drafting": "The target verifies up to fifteen history candidates or up to seven recursive Q8_0 neural predictions. Confidence and the live cohort bound neural work."
    },
    "constraints": {
     "targets": [
      "AMDGPU RDNA"
     ],
-    "draft_depth": [
-     0,
-     1,
-     2,
-     3,
-     4,
-     5,
-     6,
-     7
-    ],
-    "mtp": "Depths one through seven require parameters.draft; depth zero uses target-only execution.",
+    "draft_depth": {
+     "minimum": 0,
+     "maximum": 15
+    },
+    "mtp": "Positive draft depths require parameters.draft. Depth zero selects target-only execution.",
     "continuation_epochs": [
      1,
      2
@@ -336,7 +380,7 @@
   },
   "vision-chat": {
    "kind": "text",
-   "version": 1,
+   "version": 2,
    "options": [
     "sampling"
    ],
@@ -363,23 +407,17 @@
      "scope": "model",
      "order": "Metadata shard first, followed by three tensor payload shards."
     },
-    "drafting": "One through seven recursive Q8_0 MTP proposals verified by the target text service; canonical presets select three."
+    "drafting": "The target verifies up to fifteen history candidates or up to seven recursive Q8_0 neural predictions. Confidence and the live cohort bound neural work."
    },
    "constraints": {
     "targets": [
      "AMDGPU RDNA"
     ],
-    "draft_depth": [
-     0,
-     1,
-     2,
-     3,
-     4,
-     5,
-     6,
-     7
-    ],
-    "mtp": "Depths one through seven require parameters.draft; depth zero uses target-only execution.",
+    "draft_depth": {
+     "minimum": 0,
+     "maximum": 15
+    },
+    "mtp": "Positive draft depths require parameters.draft. Depth zero selects target-only execution.",
     "continuation_epochs": [
      1,
      2
@@ -429,7 +467,7 @@
  },
  "variants": {
   "ud-q4-k-xl": {
-   "description": "Four ordered UD-Q4_K_XL text shards. Reads per_layer_token_embd.weight rows on demand (parameters.gather) instead of keeping the 26.82 GiB table resident.",
+   "description": "Four ordered UD-Q4_K_XL text shards.",
    "services": {
     "chat": {
      "programs": [
@@ -467,15 +505,12 @@
        "origin": "@checkpoint/tokenizer.json",
        "format": "huggingface-json"
       }
-     },
-     "config": {
-      "flash_next.ple_resident_heads": 0
      }
     }
    }
   },
   "ud-q4-k-xl-mtp": {
-   "description": "Four ordered UD-Q4_K_XL text shards plus the Q8_0 MTP checkpoint. Reads per_layer_token_embd.weight rows on demand (parameters.gather) instead of keeping the 26.82 GiB table resident.",
+   "description": "Four ordered UD-Q4_K_XL text shards plus the Q8_0 MTP checkpoint.",
    "services": {
     "chat": {
      "programs": [
@@ -522,15 +557,12 @@
        "origin": "@checkpoint/tokenizer.json",
        "format": "huggingface-json"
       }
-     },
-     "config": {
-      "flash_next.ple_resident_heads": 0
      }
     }
    }
   },
   "ud-q4-k-xl-vision": {
-   "description": "Four ordered UD-Q4_K_XL text shards. Includes the matching original BF16 image projector. Reads per_layer_token_embd.weight rows on demand (parameters.gather) instead of keeping the 26.82 GiB table resident.",
+   "description": "Four ordered UD-Q4_K_XL text shards. Includes the matching original BF16 image projector.",
    "services": {
     "vision-chat": {
      "programs": [
@@ -579,14 +611,13 @@
       }
      },
      "config": {
-      "flash_next.image_inputs": true,
-      "flash_next.ple_resident_heads": 0
+      "flash_next.image_inputs": true
      }
     }
    }
   },
   "ud-q4-k-xl-vision-mtp": {
-   "description": "Four ordered UD-Q4_K_XL text shards plus the Q8_0 MTP checkpoint. Includes the matching original BF16 image projector. Reads per_layer_token_embd.weight rows on demand (parameters.gather) instead of keeping the 26.82 GiB table resident.",
+   "description": "Four ordered UD-Q4_K_XL text shards plus the Q8_0 MTP checkpoint. Includes the matching original BF16 image projector.",
    "services": {
     "vision-chat": {
      "programs": [
@@ -644,230 +675,7 @@
       }
      },
      "config": {
-      "flash_next.image_inputs": true,
-      "flash_next.ple_resident_heads": 0
-     }
-    }
-   }
-  },
-  "ud-q4-k-xl-ple-k12": {
-   "description": "Four ordered UD-Q4_K_XL text shards. Partial residency, needs about 110 GiB of host memory (prefill 10 to 25 percent faster). Keeps the first 12 of 16 PLE hash heads of per_layer_token_embd.weight resident and reads the rest on demand.",
-   "services": {
-    "chat": {
-     "programs": [
-      "source"
-     ],
-     "parameters": {
-      "model": {
-       "files": [
-        {
-         "path": "parameter/model-00001.gguf",
-         "origin": "@quantized/UD-Q4_K_XL/Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf",
-         "format": "gguf"
-        },
-        {
-         "path": "parameter/model-00002.gguf",
-         "origin": "@quantized/UD-Q4_K_XL/Qwen3.8-Flash-Next-UD-Q4_K_XL-00002-of-00004.gguf",
-         "format": "gguf"
-        },
-        {
-         "path": "parameter/model-00003.gguf",
-         "origin": "@quantized/UD-Q4_K_XL/Qwen3.8-Flash-Next-UD-Q4_K_XL-00003-of-00004.gguf",
-         "format": "gguf"
-        },
-        {
-         "path": "parameter/model-00004.gguf",
-         "origin": "@quantized/UD-Q4_K_XL/Qwen3.8-Flash-Next-UD-Q4_K_XL-00004-of-00004.gguf",
-         "format": "gguf"
-        }
-       ]
-      }
-     },
-     "tokenizers": {
-      "text": {
-       "path": "tokenizer.json",
-       "origin": "@checkpoint/tokenizer.json",
-       "format": "huggingface-json"
-      }
-     },
-     "config": {
-      "flash_next.ple_resident_heads": 12
-     }
-    }
-   }
-  },
-  "ud-q4-k-xl-mtp-ple-k10": {
-   "description": "Four ordered UD-Q4_K_XL text shards plus the Q8_0 MTP checkpoint. Partial residency, needs about 110 GiB of host memory (prefill 10 to 25 percent faster). Keeps the first 10 of 16 PLE hash heads of per_layer_token_embd.weight resident and reads the rest on demand.",
-   "services": {
-    "chat": {
-     "programs": [
-      "source"
-     ],
-     "parameters": {
-      "model": {
-       "files": [
-        {
-         "path": "parameter/model-00001.gguf",
-         "origin": "@quantized/UD-Q4_K_XL/Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf",
-         "format": "gguf"
-        },
-        {
-         "path": "parameter/model-00002.gguf",
-         "origin": "@quantized/UD-Q4_K_XL/Qwen3.8-Flash-Next-UD-Q4_K_XL-00002-of-00004.gguf",
-         "format": "gguf"
-        },
-        {
-         "path": "parameter/model-00003.gguf",
-         "origin": "@quantized/UD-Q4_K_XL/Qwen3.8-Flash-Next-UD-Q4_K_XL-00003-of-00004.gguf",
-         "format": "gguf"
-        },
-        {
-         "path": "parameter/model-00004.gguf",
-         "origin": "@quantized/UD-Q4_K_XL/Qwen3.8-Flash-Next-UD-Q4_K_XL-00004-of-00004.gguf",
-         "format": "gguf"
-        }
-       ]
-      },
-      "draft": {
-       "files": [
-        {
-         "path": "parameter/mtp.gguf",
-         "origin": "@quantized/mtp-Qwen3.8-Flash-Next-Q8_0.gguf",
-         "format": "gguf"
-        }
-       ]
-      }
-     },
-     "tokenizers": {
-      "text": {
-       "path": "tokenizer.json",
-       "origin": "@checkpoint/tokenizer.json",
-       "format": "huggingface-json"
-      }
-     },
-     "config": {
-      "flash_next.ple_resident_heads": 10
-     }
-    }
-   }
-  },
-  "ud-q4-k-xl-vision-ple-k12": {
-   "description": "Four ordered UD-Q4_K_XL text shards. Includes the matching original BF16 image projector. Partial residency, needs about 110 GiB of host memory (prefill 10 to 25 percent faster). Keeps the first 12 of 16 PLE hash heads of per_layer_token_embd.weight resident and reads the rest on demand.",
-   "services": {
-    "vision-chat": {
-     "programs": [
-      "vision-source"
-     ],
-     "parameters": {
-      "model": {
-       "files": [
-        {
-         "path": "parameter/model-00001.gguf",
-         "origin": "@quantized/UD-Q4_K_XL/Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf",
-         "format": "gguf"
-        },
-        {
-         "path": "parameter/model-00002.gguf",
-         "origin": "@quantized/UD-Q4_K_XL/Qwen3.8-Flash-Next-UD-Q4_K_XL-00002-of-00004.gguf",
-         "format": "gguf"
-        },
-        {
-         "path": "parameter/model-00003.gguf",
-         "origin": "@quantized/UD-Q4_K_XL/Qwen3.8-Flash-Next-UD-Q4_K_XL-00003-of-00004.gguf",
-         "format": "gguf"
-        },
-        {
-         "path": "parameter/model-00004.gguf",
-         "origin": "@quantized/UD-Q4_K_XL/Qwen3.8-Flash-Next-UD-Q4_K_XL-00004-of-00004.gguf",
-         "format": "gguf"
-        }
-       ]
-      },
-      "vision": {
-       "files": [
-        {
-         "path": "parameter/mmproj.gguf",
-         "origin": "@quantized/mmproj-BF16.gguf",
-         "format": "gguf"
-        }
-       ]
-      }
-     },
-     "tokenizers": {
-      "text": {
-       "path": "tokenizer.json",
-       "origin": "@checkpoint/tokenizer.json",
-       "format": "huggingface-json"
-      }
-     },
-     "config": {
-      "flash_next.image_inputs": true,
-      "flash_next.ple_resident_heads": 12
-     }
-    }
-   }
-  },
-  "ud-q4-k-xl-vision-mtp-ple-k10": {
-   "description": "Four ordered UD-Q4_K_XL text shards plus the Q8_0 MTP checkpoint. Includes the matching original BF16 image projector. Partial residency, needs about 110 GiB of host memory (prefill 10 to 25 percent faster). Keeps the first 10 of 16 PLE hash heads of per_layer_token_embd.weight resident and reads the rest on demand.",
-   "services": {
-    "vision-chat": {
-     "programs": [
-      "vision-source"
-     ],
-     "parameters": {
-      "model": {
-       "files": [
-        {
-         "path": "parameter/model-00001.gguf",
-         "origin": "@quantized/UD-Q4_K_XL/Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf",
-         "format": "gguf"
-        },
-        {
-         "path": "parameter/model-00002.gguf",
-         "origin": "@quantized/UD-Q4_K_XL/Qwen3.8-Flash-Next-UD-Q4_K_XL-00002-of-00004.gguf",
-         "format": "gguf"
-        },
-        {
-         "path": "parameter/model-00003.gguf",
-         "origin": "@quantized/UD-Q4_K_XL/Qwen3.8-Flash-Next-UD-Q4_K_XL-00003-of-00004.gguf",
-         "format": "gguf"
-        },
-        {
-         "path": "parameter/model-00004.gguf",
-         "origin": "@quantized/UD-Q4_K_XL/Qwen3.8-Flash-Next-UD-Q4_K_XL-00004-of-00004.gguf",
-         "format": "gguf"
-        }
-       ]
-      },
-      "draft": {
-       "files": [
-        {
-         "path": "parameter/mtp.gguf",
-         "origin": "@quantized/mtp-Qwen3.8-Flash-Next-Q8_0.gguf",
-         "format": "gguf"
-        }
-       ]
-      },
-      "vision": {
-       "files": [
-        {
-         "path": "parameter/mmproj.gguf",
-         "origin": "@quantized/mmproj-BF16.gguf",
-         "format": "gguf"
-        }
-       ]
-      }
-     },
-     "tokenizers": {
-      "text": {
-       "path": "tokenizer.json",
-       "origin": "@checkpoint/tokenizer.json",
-       "format": "huggingface-json"
-      }
-     },
-     "config": {
-      "flash_next.image_inputs": true,
-      "flash_next.ple_resident_heads": 10
+      "flash_next.image_inputs": true
      }
     }
    }
@@ -906,8 +714,8 @@
     "max_tokens": 64
    },
    "memory": {
-    "weights_bytes": 82869011456,
-    "workload": "Resident packed parameter bank without the 26.82 GiB per_layer_token_embd.weight, whose rows are read on demand with parameters.gather (about 22 KiB of staging per packed token in the residual buffer). KV pools, recurrent endpoints, command workspace, allocator backing, tokenizer, compiler, and driver overhead are additional; peak transients are unknown."
+    "weights_bytes": 82678120448,
+    "workload": "Resident target parameters with PLE streaming, rounded up to 77 GiB. The 26.82 GiB packed PLE table stays in its checkpoint file and is read into a bounded row cache. KV pools, recurrent endpoints, the PLE row cache and request list, command workspace, allocator backing, tokenizer, compiler, and driver overhead are additional; peak transients are unknown."
    }
   },
   "mtp": {
@@ -925,7 +733,7 @@
     "rows": 4,
     "context_capacity": 16384,
     "prefill_capacity": 16384,
-    "draft_depth": 3,
+    "draft_depth": 7,
     "continuation_epochs": 1,
     "checkpoint_capacity": 4,
     "max_tokens": 256
@@ -942,8 +750,8 @@
     "max_tokens": 64
    },
    "memory": {
-    "weights_bytes": 86090236928,
-    "workload": "Resident packed parameter bank without the 26.82 GiB per_layer_token_embd.weight, whose rows are read on demand with parameters.gather (about 22 KiB of staging per packed token in the residual buffer). KV pools, recurrent endpoints, command workspace, allocator backing, tokenizer, compiler, and driver overhead are additional; peak transients are unknown."
+    "weights_bytes": 85899345920,
+    "workload": "Resident target and MTP parameters with PLE streaming, rounded up to 80 GiB. The 26.82 GiB packed PLE table stays in its checkpoint file and is read into a bounded row cache. KV pools, recurrent endpoints, the PLE row cache and request list, command workspace, allocator backing, tokenizer, compiler, and driver overhead are additional; peak transients are unknown."
    }
   },
   "mtp-continuation": {
@@ -961,7 +769,7 @@
     "rows": 4,
     "context_capacity": 16384,
     "prefill_capacity": 16384,
-    "draft_depth": 3,
+    "draft_depth": 15,
     "continuation_epochs": 2,
     "checkpoint_capacity": 4,
     "max_tokens": 256
@@ -978,8 +786,8 @@
     "max_tokens": 64
    },
    "memory": {
-    "weights_bytes": 86090236928,
-    "workload": "Resident packed parameter bank without the 26.82 GiB per_layer_token_embd.weight, whose rows are read on demand with parameters.gather (about 22 KiB of staging per packed token in the residual buffer). KV pools, recurrent endpoints, command workspace, allocator backing, tokenizer, compiler, and driver overhead are additional; peak transients are unknown."
+    "weights_bytes": 85899345920,
+    "workload": "Resident target and MTP parameters with PLE streaming, rounded up to 80 GiB. The 26.82 GiB packed PLE table stays in its checkpoint file and is read into a bounded row cache. KV pools, recurrent endpoints, the PLE row cache and request list, command workspace, allocator backing, tokenizer, compiler, and driver overhead are additional; peak transients are unknown."
    }
   },
   "long-context": {
@@ -1014,8 +822,8 @@
     "max_tokens": 64
    },
    "memory": {
-    "weights_bytes": 82869011456,
-    "workload": "Resident packed parameter bank without the 26.82 GiB per_layer_token_embd.weight, whose rows are read on demand with parameters.gather (about 22 KiB of staging per packed token in the residual buffer). KV pools, recurrent endpoints, command workspace, allocator backing, tokenizer, compiler, and driver overhead are additional; peak transients are unknown."
+    "weights_bytes": 82678120448,
+    "workload": "Resident target parameters with PLE streaming, rounded up to 77 GiB. The 26.82 GiB packed PLE table stays in its checkpoint file and is read into a bounded row cache. KV pools, recurrent endpoints, the PLE row cache and request list, command workspace, allocator backing, tokenizer, compiler, and driver overhead are additional; peak transients are unknown."
    }
   },
   "long-context-mtp": {
@@ -1033,7 +841,7 @@
     "rows": 8,
     "context_capacity": 262144,
     "prefill_capacity": 16384,
-    "draft_depth": 3,
+    "draft_depth": 7,
     "continuation_epochs": 1,
     "checkpoint_capacity": 8,
     "max_tokens": 256
@@ -1050,8 +858,8 @@
     "max_tokens": 64
    },
    "memory": {
-    "weights_bytes": 86090236928,
-    "workload": "Resident packed parameter bank without the 26.82 GiB per_layer_token_embd.weight, whose rows are read on demand with parameters.gather (about 22 KiB of staging per packed token in the residual buffer). KV pools, recurrent endpoints, command workspace, allocator backing, tokenizer, compiler, and driver overhead are additional; peak transients are unknown."
+    "weights_bytes": 85899345920,
+    "workload": "Resident target and MTP parameters with PLE streaming, rounded up to 80 GiB. The 26.82 GiB packed PLE table stays in its checkpoint file and is read into a bounded row cache. KV pools, recurrent endpoints, the PLE row cache and request list, command workspace, allocator backing, tokenizer, compiler, and driver overhead are additional; peak transients are unknown."
    }
   },
   "vision": {
@@ -1086,8 +894,8 @@
     "max_tokens": 64
    },
    "memory": {
-    "weights_bytes": 83942753280,
-    "workload": "Resident packed parameter bank without the 26.82 GiB per_layer_token_embd.weight, whose rows are read on demand with parameters.gather (about 22 KiB of staging per packed token in the residual buffer). KV pools, recurrent endpoints, command workspace, allocator backing, tokenizer, compiler, and driver overhead are additional; peak transients are unknown."
+    "weights_bytes": 83751862272,
+    "workload": "Resident target parameters with PLE streaming, rounded up to 78 GiB. The 26.82 GiB packed PLE table stays in its checkpoint file and is read into a bounded row cache. KV pools, recurrent endpoints, the PLE row cache and request list, command workspace, allocator backing, tokenizer, compiler, and driver overhead are additional; peak transients are unknown. The on-demand BF16 image projector adds less than 1 GiB of parameters, included in this rounded estimate; image uploads, encoder workspace, and retained features are additional."
    }
   },
   "vision-mtp": {
@@ -1122,260 +930,8 @@
     "max_tokens": 64
    },
    "memory": {
-    "weights_bytes": 87163978752,
-    "workload": "Resident packed parameter bank without the 26.82 GiB per_layer_token_embd.weight, whose rows are read on demand with parameters.gather (about 22 KiB of staging per packed token in the residual buffer). KV pools, recurrent endpoints, command workspace, allocator backing, tokenizer, compiler, and driver overhead are additional; peak transients are unknown."
-   }
-  },
-  "chat-ple-k12": {
-   "service": "chat",
-   "variant": "ud-q4-k-xl-ple-k12",
-   "programs": "source",
-   "options": {
-    "sampling": {
-     "temperature": 0,
-     "top_p": 1,
-     "top_k": 0
-    }
-   },
-   "execution": {
-    "rows": 4,
-    "context_capacity": 16384,
-    "prefill_capacity": 16384,
-    "draft_depth": 0,
-    "continuation_epochs": 1,
-    "checkpoint_capacity": 4,
-    "max_tokens": 256
-   },
-   "request": {
-    "messages": [
-     {
-      "role": "user",
-      "content": "What is 2+2?"
-     }
-    ],
-    "enable_thinking": false,
-    "temperature": 0,
-    "max_tokens": 64
-   },
-   "memory": {
-    "weights_bytes": 104469083636,
-    "workload": "Resident packed parameter bank with the first 12 of 16 PLE hash heads of per_layer_token_embd.weight (rows 0 to 240000802); the other heads' rows are read on demand with parameters.gather (about 22 KiB of staging per packed token in the residual buffer). KV pools, recurrent endpoints, command workspace, allocator backing, tokenizer, compiler, and driver overhead are additional; peak transients are unknown."
-   }
-  },
-  "mtp-ple-k10": {
-   "service": "chat",
-   "variant": "ud-q4-k-xl-mtp-ple-k10",
-   "programs": "source",
-   "options": {
-    "sampling": {
-     "temperature": 0,
-     "top_p": 1,
-     "top_k": 0
-    }
-   },
-   "execution": {
-    "rows": 4,
-    "context_capacity": 16384,
-    "prefill_capacity": 16384,
-    "draft_depth": 3,
-    "continuation_epochs": 1,
-    "checkpoint_capacity": 4,
-    "max_tokens": 256
-   },
-   "request": {
-    "messages": [
-     {
-      "role": "user",
-      "content": "What is 2+2?"
-     }
-    ],
-    "enable_thinking": false,
-    "temperature": 0,
-    "max_tokens": 64
-   },
-   "memory": {
-    "weights_bytes": 104090286248,
-    "workload": "Resident packed parameter bank with the first 10 of 16 PLE hash heads of per_layer_token_embd.weight (rows 0 to 200000548); the other heads' rows are read on demand with parameters.gather (about 22 KiB of staging per packed token in the residual buffer). KV pools, recurrent endpoints, command workspace, allocator backing, tokenizer, compiler, and driver overhead are additional; peak transients are unknown."
-   }
-  },
-  "mtp-continuation-ple-k10": {
-   "service": "chat",
-   "variant": "ud-q4-k-xl-mtp-ple-k10",
-   "programs": "source",
-   "options": {
-    "sampling": {
-     "temperature": 0,
-     "top_p": 1,
-     "top_k": 0
-    }
-   },
-   "execution": {
-    "rows": 4,
-    "context_capacity": 16384,
-    "prefill_capacity": 16384,
-    "draft_depth": 3,
-    "continuation_epochs": 2,
-    "checkpoint_capacity": 4,
-    "max_tokens": 256
-   },
-   "request": {
-    "messages": [
-     {
-      "role": "user",
-      "content": "What is 2+2?"
-     }
-    ],
-    "enable_thinking": false,
-    "temperature": 0,
-    "max_tokens": 64
-   },
-   "memory": {
-    "weights_bytes": 104090286248,
-    "workload": "Resident packed parameter bank with the first 10 of 16 PLE hash heads of per_layer_token_embd.weight (rows 0 to 200000548); the other heads' rows are read on demand with parameters.gather (about 22 KiB of staging per packed token in the residual buffer). KV pools, recurrent endpoints, command workspace, allocator backing, tokenizer, compiler, and driver overhead are additional; peak transients are unknown."
-   }
-  },
-  "long-context-ple-k12": {
-   "service": "chat",
-   "variant": "ud-q4-k-xl-ple-k12",
-   "programs": "source",
-   "options": {
-    "sampling": {
-     "temperature": 0,
-     "top_p": 1,
-     "top_k": 0
-    }
-   },
-   "execution": {
-    "rows": 8,
-    "context_capacity": 262144,
-    "prefill_capacity": 16384,
-    "draft_depth": 0,
-    "continuation_epochs": 1,
-    "checkpoint_capacity": 8,
-    "max_tokens": 256
-   },
-   "request": {
-    "messages": [
-     {
-      "role": "user",
-      "content": "What is 2+2?"
-     }
-    ],
-    "enable_thinking": false,
-    "temperature": 0,
-    "max_tokens": 64
-   },
-   "memory": {
-    "weights_bytes": 104469083636,
-    "workload": "Resident packed parameter bank with the first 12 of 16 PLE hash heads of per_layer_token_embd.weight (rows 0 to 240000802); the other heads' rows are read on demand with parameters.gather (about 22 KiB of staging per packed token in the residual buffer). KV pools, recurrent endpoints, command workspace, allocator backing, tokenizer, compiler, and driver overhead are additional; peak transients are unknown."
-   }
-  },
-  "long-context-mtp-ple-k10": {
-   "service": "chat",
-   "variant": "ud-q4-k-xl-mtp-ple-k10",
-   "programs": "source",
-   "options": {
-    "sampling": {
-     "temperature": 0,
-     "top_p": 1,
-     "top_k": 0
-    }
-   },
-   "execution": {
-    "rows": 8,
-    "context_capacity": 262144,
-    "prefill_capacity": 16384,
-    "draft_depth": 3,
-    "continuation_epochs": 1,
-    "checkpoint_capacity": 8,
-    "max_tokens": 256
-   },
-   "request": {
-    "messages": [
-     {
-      "role": "user",
-      "content": "What is 2+2?"
-     }
-    ],
-    "enable_thinking": false,
-    "temperature": 0,
-    "max_tokens": 64
-   },
-   "memory": {
-    "weights_bytes": 104090286248,
-    "workload": "Resident packed parameter bank with the first 10 of 16 PLE hash heads of per_layer_token_embd.weight (rows 0 to 200000548); the other heads' rows are read on demand with parameters.gather (about 22 KiB of staging per packed token in the residual buffer). KV pools, recurrent endpoints, command workspace, allocator backing, tokenizer, compiler, and driver overhead are additional; peak transients are unknown."
-   }
-  },
-  "vision-ple-k12": {
-   "service": "vision-chat",
-   "variant": "ud-q4-k-xl-vision-ple-k12",
-   "programs": "vision-source",
-   "options": {
-    "sampling": {
-     "temperature": 0,
-     "top_p": 1,
-     "top_k": 0
-    }
-   },
-   "execution": {
-    "rows": 4,
-    "context_capacity": 16384,
-    "prefill_capacity": 16384,
-    "draft_depth": 0,
-    "continuation_epochs": 1,
-    "checkpoint_capacity": 4,
-    "max_tokens": 256
-   },
-   "request": {
-    "messages": [
-     {
-      "role": "user",
-      "content": "What is 2+2?"
-     }
-    ],
-    "enable_thinking": false,
-    "temperature": 0,
-    "max_tokens": 64
-   },
-   "memory": {
-    "weights_bytes": 105542825460,
-    "workload": "Resident packed parameter bank with the first 12 of 16 PLE hash heads of per_layer_token_embd.weight (rows 0 to 240000802); the other heads' rows are read on demand with parameters.gather (about 22 KiB of staging per packed token in the residual buffer). KV pools, recurrent endpoints, command workspace, allocator backing, tokenizer, compiler, and driver overhead are additional; peak transients are unknown."
-   }
-  },
-  "vision-mtp-ple-k10": {
-   "service": "vision-chat",
-   "variant": "ud-q4-k-xl-vision-mtp-ple-k10",
-   "programs": "vision-source",
-   "options": {
-    "sampling": {
-     "temperature": 0,
-     "top_p": 1,
-     "top_k": 0
-    }
-   },
-   "execution": {
-    "rows": 4,
-    "context_capacity": 16384,
-    "prefill_capacity": 16384,
-    "draft_depth": 3,
-    "continuation_epochs": 1,
-    "checkpoint_capacity": 4,
-    "max_tokens": 256
-   },
-   "request": {
-    "messages": [
-     {
-      "role": "user",
-      "content": "What is 2+2?"
-     }
-    ],
-    "enable_thinking": false,
-    "temperature": 0,
-    "max_tokens": 64
-   },
-   "memory": {
-    "weights_bytes": 105164028072,
-    "workload": "Resident packed parameter bank with the first 10 of 16 PLE hash heads of per_layer_token_embd.weight (rows 0 to 200000548); the other heads' rows are read on demand with parameters.gather (about 22 KiB of staging per packed token in the residual buffer). KV pools, recurrent endpoints, command workspace, allocator backing, tokenizer, compiler, and driver overhead are additional; peak transients are unknown."
+    "weights_bytes": 86973087744,
+    "workload": "Resident target and MTP parameters with PLE streaming, rounded up to 81 GiB. The 26.82 GiB packed PLE table stays in its checkpoint file and is read into a bounded row cache. KV pools, recurrent endpoints, the PLE row cache and request list, command workspace, allocator backing, tokenizer, compiler, and driver overhead are additional; peak transients are unknown. The on-demand BF16 image projector adds less than 1 GiB of parameters, included in this rounded estimate; image uploads, encoder workspace, and retained features are additional."
    }
   }
  }

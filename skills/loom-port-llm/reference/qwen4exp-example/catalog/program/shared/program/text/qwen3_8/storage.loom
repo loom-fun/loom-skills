@@ -1,0 +1,176 @@
+// Control storage keeps the ten-word stage header and resident sampling
+// directory at stable offsets. Model-owned preparation facts, the speculation
+// catalog, and a cold layout recipe precede the upload table.
+// Growth changes capacity without declaring stages or touching parameters.
+// The isolated step reads the first two words for its prefill and decode
+// handles. Each model owns the packed phase handles in its provider payload.
+
+// Writes one of eleven {bytes, alignment, initial_zero_bytes} bootstrap
+// records. Each requests 256-byte alignment; sizes and zeroing extents come
+// from the caller. Only the selected record changes. Device
+// allocations and their completion frontiers remain with the materializer.
+func.def public @qwen38.allocation(%records: buffer, %slot: index, %bytes: i64, %initial_zero_bytes: i64) {
+  %origin = index.constant 0 : offset
+  %bounded_slot = index.assume %slot [range(%slot, 0, 10)] : index
+  %view = buffer.view %records[%origin] : buffer -> view<11x3xi64>
+  %alignment = scalar.constant 256 : i64
+  view.store %bytes, %view[%bounded_slot, 0] : i64, view<11x3xi64>
+  view.store %alignment, %view[%bounded_slot, 1] : i64, view<11x3xi64>
+  view.store %initial_zero_bytes, %view[%bounded_slot, 2] : i64, view<11x3xi64>
+  func.return
+}
+
+// Writes one {byte_offset, byte_length} private arena view. Four views per
+// resident appear in control/attention/input/progress order. Recurrent slots
+// have a separate geometry record. The caller supplies validated row/slot
+// indices and computed byte extents; all other records remain untouched.
+func.def public @qwen38.row_view(%records: buffer, %row_count: index, %row: index, %slot: index, %offset: i64, %length: i64) {
+  %origin = index.constant 0 : offset
+  %bounded_row = index.assume %row [range(%row, 0, 2147483647), lt(%row, %row_count)] : index
+  %bounded_slot = index.assume %slot [range(%slot, 0, 3)] : index
+  %view = buffer.view %records[%origin] : buffer -> view<[%row_count]x4x2xi64>
+  view.store %offset, %view[%bounded_row, %bounded_slot, 0] : i64, view<[%row_count]x4x2xi64>
+  view.store %length, %view[%bounded_row, %bounded_slot, 1] : i64, view<[%row_count]x4x2xi64>
+  func.return
+}
+
+// The token planes are sized in pairs; submitted work can use any prefix.
+func.def public pure @qwen38.padded_tokens(%tokens: i64) -> (i64) {
+  %pair = scalar.constant 2 : i64
+  %c1_i64 = scalar.constant 1 : i64
+  %rounded = scalar.addi %tokens, %c1_i64 : i64
+  %pairs = scalar.divui %rounded, %pair : i64
+  %extent = scalar.muli %pairs, %pair : i64
+  func.return %extent : i64
+}
+
+// Proposal catalogs contain capacities 1, 2, 4, ... . The level rounds a
+// positive live cohort upward without coupling execution to resident capacity.
+func.def public @qwen38.proposal_level(%count: i32) -> (i32) {
+  %bias = scalar.constant 1 : i32
+  %bits = scalar.constant 32 : i32
+  %previous = scalar.subi %count, %bias : i32
+  %leading = scalar.ctlzi %previous : i32
+  %level = scalar.subi %bits, %leading : i32
+  func.return %level : i32
+}
+
+// Each host upload describes two buffer ranges with five 64-bit words.
+func.def public pure inline @qwen38.transfer_bytes() -> (offset) {
+  %size = index.constant 520 : offset
+  func.return %size : offset
+}
+
+func.def pure inline @control_trailer_bytes() -> (offset) {
+  %recipe_bytes = index.constant 72 : offset
+  %transfer_bytes = func.call pure @qwen38.transfer_bytes() : () -> (offset)
+  %bytes = index.add %recipe_bytes, %transfer_bytes : offset
+  func.return %bytes : offset
+}
+
+// The source's speculation catalog moves with resident growth; neither device
+// commands nor the native service interpret it. The trailing recipe and upload
+// table retain their offsets relative to the end of control storage.
+func.def public pure @qwen38.speculation_origin(%state: buffer) -> (offset) {
+  %bytes = buffer.length %state
+  %catalog_bytes = index.constant 48 : offset
+  %trailer = func.call pure @control_trailer_bytes() : () -> (offset)
+  %tail = index.add %catalog_bytes, %trailer : offset
+  %origin = index.sub %bytes, %tail : offset
+  func.return %origin : offset
+}
+
+// Provider bytes are an eight-byte-aligned extent owned by the model. Zero
+// keeps the ordinary controller layout and requires no separate allocation.
+func.def public @qwen38.control_create(%packet_capacity: i64, %feedback_capacity: i64, %context: i64, %pool: i64, %rows_arg: i64, %pins: i64, %packed: i1, %enabled: i1, %dflash: i1, %provider_bytes: offset) -> (buffer) {
+  %rows = scalar.assume %rows_arg [range(%rows_arg, 1, 2147483647)] : i64
+  %count = index.cast %rows : i64 to index
+  %origin = index.constant 0 : offset
+  %policy_stride = index.constant 24 : offset
+  %policy_bytes = index.scale %count, %policy_stride : index, offset -> offset
+  %header_bytes = index.constant 40 : offset
+  %provider_origin = index.add %header_bytes, %policy_bytes : offset
+  %catalog_origin = index.add %provider_origin, %provider_bytes : offset
+  %catalog_bytes = index.constant 48 : offset
+  %recipe_origin = index.add %catalog_origin, %catalog_bytes : offset
+  %trailer_bytes = func.call pure @control_trailer_bytes() : () -> (offset)
+  %state_bytes = index.add %recipe_origin, %trailer_bytes : offset
+  %state = buffer.alloca<private> align(8) %state_bytes : buffer
+  %c0_i32 = scalar.constant 0 : i32
+  buffer.fill %c0_i32, %state[%origin], %state_bytes : i32
+  %recipe = buffer.view %state[%recipe_origin] : buffer -> view<9xi64>
+  %packed_word = scalar.extui %packed : i1 to i64
+  %enabled_word = scalar.extui %enabled : i1 to i64
+  %dflash_word = scalar.extui %dflash : i1 to i64
+  view.store %packet_capacity, %recipe[0] : i64, view<9xi64>
+  view.store %context, %recipe[1] : i64, view<9xi64>
+  view.store %pool, %recipe[2] : i64, view<9xi64>
+  view.store %rows, %recipe[3] : i64, view<9xi64>
+  view.store %pins, %recipe[4] : i64, view<9xi64>
+  view.store %packed_word, %recipe[5] : i64, view<9xi64>
+  view.store %enabled_word, %recipe[6] : i64, view<9xi64>
+  view.store %dflash_word, %recipe[7] : i64, view<9xi64>
+  view.store %feedback_capacity, %recipe[8] : i64, view<9xi64>
+  func.return %state : buffer
+}
+
+func.def pure inline @control_recipe_origin(%state: buffer) -> (offset) {
+  %length = buffer.length %state
+  %trailer = func.call pure @control_trailer_bytes() : () -> (offset)
+  %origin = index.sub %length, %trailer : offset
+  func.return %origin : offset
+}
+
+func.def public readonly @qwen38.control_has_draft(%state: buffer) -> (i1) {
+  %origin = func.call pure @control_recipe_origin(%state) : (buffer) -> (offset)
+  %recipe = buffer.view %state[%origin] : buffer -> view<9xi64>
+  %word = view.load %recipe[6] : view<9xi64> -> i64
+  %c0_i64 = scalar.constant 0 : i64
+  %enabled = scalar.cmpi ne, %word, %c0_i64 : i64
+  func.return %enabled : i1
+}
+
+// Returns prepared packet capacity and the model-owned payload origin. The
+// storage owner interprets its recipe; model providers interpret only their bytes.
+func.def public @qwen38.control_context(%state: buffer) -> (i64, offset) {
+  %recipe_origin = func.call pure @control_recipe_origin(%state) : (buffer) -> (offset)
+  %recipe = buffer.view %state[%recipe_origin] : buffer -> view<9xi64>
+  %packet_capacity = view.load %recipe[0] : view<9xi64> -> i64
+  %rows_word = view.load %recipe[3] : view<9xi64> -> i64
+  %rows = index.cast %rows_word : i64 to index
+  %header_bytes = index.constant 40 : offset
+  %policy_stride = index.constant 24 : offset
+  %policy_bytes = index.scale %rows, %policy_stride : index, offset -> offset
+  %provider_origin = index.add %header_bytes, %policy_bytes : offset
+  func.return %packet_capacity, %provider_origin : i64, offset
+}
+
+func.def public @qwen38.control_resize(%state: buffer, %rows: i64) -> (buffer, i64, i64, i64, i64, i64, i1, i1, i1) {
+  %origin = index.constant 0 : offset
+  %recipe_origin = func.call pure @control_recipe_origin(%state) : (buffer) -> (offset)
+  %recipe = buffer.view %state[%recipe_origin] : buffer -> view<9xi64>
+  %packet_capacity = view.load %recipe[0] : view<9xi64> -> i64
+  %context = view.load %recipe[1] : view<9xi64> -> i64
+  %pool = view.load %recipe[2] : view<9xi64> -> i64
+  %pins = view.load %recipe[4] : view<9xi64> -> i64
+  %packed_word = view.load %recipe[5] : view<9xi64> -> i64
+  %enabled_word = view.load %recipe[6] : view<9xi64> -> i64
+  %dflash_word = view.load %recipe[7] : view<9xi64> -> i64
+  %feedback_capacity = view.load %recipe[8] : view<9xi64> -> i64
+  %c0_i64 = scalar.constant 0 : i64
+  %packed = scalar.cmpi ne, %packed_word, %c0_i64 : i64
+  %enabled = scalar.cmpi ne, %enabled_word, %c0_i64 : i64
+  %dflash = scalar.cmpi ne, %dflash_word, %c0_i64 : i64
+  %old_packet_capacity, %old_provider_origin = func.call @qwen38.control_context(%state) : (buffer) -> (i64, offset)
+  %catalog_origin = func.call pure @qwen38.speculation_origin(%state) : (buffer) -> (offset)
+  %provider_bytes = index.sub %catalog_origin, %old_provider_origin : offset
+  %grown = func.call @qwen38.control_create(%packet_capacity, %feedback_capacity, %context, %pool, %rows, %pins, %packed, %enabled, %dflash, %provider_bytes) : (i64, i64, i64, i64, i64, i64, i1, i1, i1, offset) -> (buffer)
+  %new_packet_capacity, %new_provider_origin = func.call @qwen38.control_context(%grown) : (buffer) -> (i64, offset)
+  // Preserve stages and existing sampling policies. New residents keep empty
+  // policies; prepared model facts and the speculation catalog move together.
+  // The new recipe and upload scratch come from control_create.
+  %retained_bytes = index.sub %recipe_origin, %old_provider_origin : offset
+  buffer.copy %state[%origin], %grown[%origin], %old_provider_origin
+  buffer.copy %state[%old_provider_origin], %grown[%new_provider_origin], %retained_bytes
+  func.return %grown, %packet_capacity, %feedback_capacity, %context, %pool, %pins, %packed, %enabled, %dflash : buffer, i64, i64, i64, i64, i64, i1, i1, i1
+}
