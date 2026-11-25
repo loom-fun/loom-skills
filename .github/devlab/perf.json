@@ -1,5 +1,5 @@
 {
- "_comment": "pf-misc Qwen3-1.7B A/B (#1590): kit build at origin/sdk030 (fun) vs this branch (staging), ABBA, gates dev, both GPUs",
+ "_comment": "pf-misc Qwen3-1.7B A/B (#1590 v2: decode.mv.act_q8 off): kit build at origin/sdk030 (fun) vs the branch (staging), ABBA, gates dev, both GPUs",
  "runner": "r9700",
  "memory_bytes": 34000000000,
  "llama_spec": "matched",
@@ -30,7 +30,7 @@
     {
      "name": "staging",
      "build": {},
-     "ref": "93ba94043e01b89a475063c898c2a72cb09f6da7",
+     "ref": "d88266c9c00f4f192966521dfe93fddd9b4732b0",
      "cap_pool": 258048,
      "execution": {
       "prefill_capacity": 4096
@@ -49,7 +49,7 @@
     {
      "name": "stagingnd",
      "build": {},
-     "ref": "93ba94043e01b89a475063c898c2a72cb09f6da7",
+     "ref": "d88266c9c00f4f192966521dfe93fddd9b4732b0",
      "cap_pool": 258048,
      "execution": {
       "prefill_capacity": 4096,
@@ -116,7 +116,7 @@
     {
      "name": "staging",
      "build": {},
-     "ref": "93ba94043e01b89a475063c898c2a72cb09f6da7"
+     "ref": "d88266c9c00f4f192966521dfe93fddd9b4732b0"
     },
     {
      "name": "funnd",
@@ -129,7 +129,7 @@
     {
      "name": "stagingnd",
      "build": {},
-     "ref": "93ba94043e01b89a475063c898c2a72cb09f6da7",
+     "ref": "d88266c9c00f4f192966521dfe93fddd9b4732b0",
      "execution": {
       "draft_depth": 0
      }
