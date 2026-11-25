@@ -84,6 +84,7 @@ def example_formats():
 def header_stub(repo, path, size, f):
     """Write the GGUF's header into open file f, sparse to the full size (metadata and tensor infos read like the real
     file; tensor data reads as zeros and takes no disk). Returns its GGUFReader, or None."""
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))); import gguf_ext  # noqa: F401,E401  PTQ1_0
     from gguf import GGUFReader
     url = f"https://huggingface.co/{repo}/resolve/main/{path}"
     for n in (16 << 20, 64 << 20):

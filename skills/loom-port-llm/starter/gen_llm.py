@@ -30,6 +30,8 @@ FF_UNIFORM = len(set(FFL)) == 1
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "draft"))
 import gen_draft  # noqa: E402  speculative decoding (LLM_DRAFT, set by build.py): verify + drafter programs
 MTP_LAYER = None
+import ternary  # noqa: E402  PrismML ternary checkpoints: PTQ1_0 helpers, prism.hadamard rotation
+HADAMARD = ternary.setup(CFG)
 from gen_gdn import single_form  # noqa: E402
 single_form(gen_draft.DRAFT["kind"] if gen_draft.enabled() else None)
 if gen_draft.enabled() and gen_draft.DRAFT["kind"] == "mtp":
@@ -6444,6 +6446,8 @@ if __name__ == "__main__":
             spec_kernels += gen_draft.mtp_kernels(gfacts) + gen_assist.kernels(gfacts)
     if any(t["type"] == "q5_0" for t in TENS.values()):
         COMMON += Q5_0
+    if any(t["type"] == "ptq1_0" for t in TENS.values()):   # PrismML ternary weights (ternary.py)
+        COMMON += ternary.PTQ1_0_HELPERS
     if any(t["type"] == "mxfp4" for t in TENS.values()):
         COMMON += MXFP4
     if any(t["type"] in SPLIT for t in TENS.values()):
@@ -6478,6 +6482,9 @@ if __name__ == "__main__":
             if PHEAD_ROWS and PHEAD_ROWS[2] < V:
                 _pt = _pt.replace("@g_head_select[", "@g_head_select_p[")
             program = program[:_pm.start()] + _pt + program[_pm.end():]
+    if HADAMARD:   # prism.hadamard: the quantizers feeding folded weights rotate (after quant/head wiring, before the row-scale fusions)
+        program, _had_used = ternary.wiring(program, CFG)
+        COMMON += ternary.kernels(CFG, _had_used)
     if os.environ.get("ROW_SCALE_LIVE", "1") != "0":   # after quant_wiring (it matches g_row_scale_f16); =0 A/B it off
         program = live_row_scale(program)
         COMMON += ROW_SCALE_LIVE
@@ -6591,6 +6598,8 @@ if __name__ == "__main__":
         from rope_qg import fuse as _rope_qg
         text, _nqg = _rope_qg(text)
         print("rope_qg launches:", _nqg)
+    if HADAMARD:   # prism.hadamard: the token embedding stores rotated rows
+        text = ternary.embed_patch(text, H)
     if os.environ.get("LIVE_ROW_SKIP", "1") != "0":   # =0 A/B it off
         text = live_row_skip(text)
     if GDN and os.environ.get("GDN_AB_WMMA", "0").strip().lower() not in ("", "0", "false", "no", "off"):   # choice prefill.gdn.ab_wmma (gen_gdn_ab.py)

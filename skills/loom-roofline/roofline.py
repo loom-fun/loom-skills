@@ -70,6 +70,7 @@ EXPERT = re.compile(r"_exps\.weight$")
 
 def load(path):
     import gguf
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "loom-port-llm", "starter")); import gguf_ext  # noqa: F401,E401  PTQ1_0
     r = gguf.GGUFReader(path)
     meta = {}
     for f in r.fields.values():

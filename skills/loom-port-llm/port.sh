@@ -30,6 +30,7 @@
 set -u
 spec=$1; work=$(mkdir -p "$2" && cd "$2" && pwd); port=${3:-8160}; mem_gib=${4:-auto}; model_id=${5:-}
 here=$(cd "$(dirname "$0")" && pwd); K=${KIT:-$here/starter}; S=$here/../loom-setup/scripts
+export GGUF_EXT_DIR=$here/starter   # gguf_ext.py: GGML types newer than the pinned gguf package (PTQ1_0), for the inline readers below
 export LOOM_KB_ROOT=${LOOM_KB_ROOT:-$here/../loom-kb}   # the choices build.py resolves (a kit copy finds the knowledge base here)
 use_root() {   # the Loom install (SDK venv + tools venv) every later stage uses
   root=$1; bin=$root/.tools/bin; [ -d "$bin" ] || bin=$root/.tools/Scripts
@@ -113,6 +114,7 @@ done
 tokrepos=$("$T" - "$gguf" "$repo" <<'EOF'
 import re, sys
 from urllib.parse import urlparse
+import os as _o, sys as _s; _s.path.insert(0, _o.environ["GGUF_EXT_DIR"]); import gguf_ext  # noqa: F401
 from gguf import GGUFReader
 r = GGUFReader(sys.argv[1]); out = []
 for k, f in r.fields.items():
@@ -149,6 +151,7 @@ fi
 tok_ok() {
   "$T" - "$gguf" "$1" <<'EOF'
 import json, sys
+import os as _o, sys as _s; _s.path.insert(0, _o.environ["GGUF_EXT_DIR"]); import gguf_ext  # noqa: F401
 from gguf import GGUFReader
 r = GGUFReader(sys.argv[1]); f = lambda k: r.fields[k].contents() if k in r.fields else None
 toks, types, tpl = f("tokenizer.ggml.tokens") or [], f("tokenizer.ggml.token_type") or [], f("tokenizer.chat_template") or ""

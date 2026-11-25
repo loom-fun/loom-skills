@@ -132,6 +132,7 @@ def family_of(name):
 
 
 def gguf_profile(path, repo=None):
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "starter")); import gguf_ext  # noqa: F401,E401  PTQ1_0
     from gguf import GGUFReader
     r = GGUFReader(path)
 

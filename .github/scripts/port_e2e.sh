@@ -65,6 +65,13 @@ export LOOM_SKILLS_COMMIT
 export LLAMACPP_HOME=${LLAMACPP_HOME:-$D/llamacpp} SEARCH_ROOT=${SEARCH_ROOT:-${LLAMACPP_HOME:-$D/llamacpp}}
 mkdir -p "$LLAMACPP_HOME"
 
+# REF_GGUF=ORG/REPO:FILE (a job's "env"): the GGUF the llama.cpp reference and baselines load (llamacpp_server.sh LLAMA_REF_GGUF),
+# for a package whose own GGUF stock llama.cpp cannot read (the same weights in another packing); downloaded to the HF cache.
+if [ -n "${REF_GGUF:-}" ]; then
+  LLAMA_REF_GGUF=$("$T" -c "import sys; from huggingface_hub import hf_hub_download as d; r, f = sys.argv[1].split(':', 1); print(d(r, f))" "$REF_GGUF") \
+    || { result failed ref_gguf 2; exit 2; }
+  export LLAMA_REF_GGUF; echo "llama.cpp reference GGUF: $LLAMA_REF_GGUF"
+fi
 ph port
 # port.sh leaves its server running for qualify.sh, so the lock is held from port to finalize as one GPU job. Each
 # stage runs with fd 9 closed (9>&-): a server it leaves running must not inherit the lock (flock -o, as in lock()).
@@ -73,6 +80,7 @@ ph port
   "$P/port.sh" "$spec" "$W" "$port" "${MEMORY_GIB:-auto}" $model_id > "$out/port.log" 2>&1 9>&-; rc=$?
   tail -4 "$out/port.log"
   [ $rc = 0 ] || { echo "port.sh exit $rc"; exit $rc; }
+  [ "${PORT_ONLY:-0}" = 1 ] && exit 0   # PORT_ONLY=1: build, kernel tests and smoke only (an iteration on a new kit)
   gguf=$(ls "$W"/gguf/*.gguf | head -1)
   [ -s "$W/loom_root" ] && export LOOM_ROOT=$(cat "$W/loom_root") VENV=$(cat "$W/loom_root")/.venv
   echo "$(date +%s) qualify" >> "$D/phases.log"
@@ -84,6 +92,7 @@ ph port
   exit 0
 ) ; rc=$?
 [ $rc = 0 ] || { ph done; save_logs; result failed port $rc; exit $rc; }
+[ "${PORT_ONLY:-0}" = 1 ] && { ph done; save_logs; result ok port 0; exit 0; }
 
 ph evidence
 [ -s "$W/loom_root" ] && { root=$(cat "$W/loom_root"); export LOOM_ROOT=$root VENV=$root/.venv; T=$root/.tools/bin/python; }

@@ -21,6 +21,7 @@ FMT = {
     "q6_k": dict(block_bytes=210, block_values=256),
     # dequantized through gen_llm.py's @g_<fmt>_values helpers (quant_values.loom)
     "q4_0": dict(block_bytes=18, block_values=32),
+    "ptq1_0": dict(block_bytes=28, block_values=128),
     "q5_0": dict(block_bytes=22, block_values=32),
     "iq4_nl": dict(block_bytes=18, block_values=32),
     "iq4_xs": dict(block_bytes=136, block_values=256),
@@ -37,7 +38,17 @@ FMT = {
     # directly, rounded to F16 for the MMA
     "f32": dict(block_bytes=128, block_values=32),
 }
-HELPER = {"q4_0", "q5_0", "iq4_nl", "iq4_xs", "q3_k", "iq3_s", "f16", "mxfp4", "mxfp4s"}
+def bv_name(bv):
+    """The index constant of a format's block size: %c32 / %c256 exist in every GEMM kernel; another size (PTQ1_0: 128)
+    gets its own constant (bv_const), so the other formats' kernels stay byte-identical."""
+    return f"%c{bv}" if bv in (32, 256) else f"%cbv{bv}"
+
+
+def bv_const(bv):
+    return "" if bv in (32, 256) else f"  %cbv{bv} = index.constant {bv} : index\n"
+
+
+HELPER = {"q4_0", "q5_0", "iq4_nl", "iq4_xs", "q3_k", "iq3_s", "f16", "mxfp4", "mxfp4s", "ptq1_0"}
 # GEMM_Q4_0_NATIVE (choice prefill.gemm.q4_0_native): Q4_0 decodes its 16-value half-block straight to F16 (moe_q4_0.dequant16,
 # the same values as @g_q4_0_values + fptrunc) and so gets the 128/256-row kernels instead of the 64-row tile only.
 Q4_0_NATIVE = os.environ.get("GEMM_Q4_0_NATIVE", "0").strip().lower() not in ("", "0", "false", "no", "off")
@@ -595,7 +606,7 @@ def gemm(fmt, mode, fmt2=None):
   %result_row = index.add %row_origin, %wave_row : index
   %result_col0 = index.add %out_origin, %wave_out : index
   %result_col1 = index.add %result_col0, %c16 : index
-  %blocks = index.div %k, %c{f["block_values"]} : index
+{bv_const(f["block_values"])}  %blocks = index.div %k, {bv_name(f["block_values"])} : index
   %row_bytes = index.scale %blocks, %block_bytes : index, offset -> offset{{MIXED_ROW}}
   %x_view = buffer.view %x[%origin] : buffer -> view<[%rows]x[%k]xf16>
   // 64x64 output tile with the full row stride n.
@@ -766,7 +777,7 @@ def gemm_big(fmt, mode, tn=None, suffix=""):
   %wave_col = index.assume %wave_col_value [range(%wave_col_value, 0, {TN - wave_cols})] : index
   %row_origin = index.mul %row_group, %c128 : index
   %out_origin = index.mul %out_group, %tn : index
-  %blocks = index.div %k, %c{f["block_values"]} : index
+{bv_const(f["block_values"])}  %blocks = index.div %k, {bv_name(f["block_values"])} : index
   %row_bytes = index.scale %blocks, %block_bytes : index, offset -> offset
   %x_view = buffer.view %x[%origin] : buffer -> view<[%rows]x[%k]xf16>
   %s_view = buffer.view %scales[%origin] : buffer -> view<[%rows]x2xf32>
@@ -1305,7 +1316,7 @@ def gemm_big256(fmt, mode, fmt2=None, g32=None, bal=None, a32_=None):
   %wave_col = index.assume %wave_col_value [range(%wave_col_value, 0, {TN - wave_cols})] : index
   %row_origin = index.mul %row_group, %c256 : index
   %out_origin = index.mul %out_group, %tn : index
-  %blocks = index.div %k, %c{f["block_values"]} : index{"" if not fmt2 or FMT[fmt2]["block_values"] == f["block_values"] else chr(10) + "  %blocks2 = index.div %k, %c" + str(FMT[fmt2]["block_values"]) + " : index"}
+{bv_const(f["block_values"])}  %blocks = index.div %k, {bv_name(f["block_values"])} : index{"" if not fmt2 or FMT[fmt2]["block_values"] == f["block_values"] else chr(10) + "  %blocks2 = index.div %k, %c" + str(FMT[fmt2]["block_values"]) + " : index"}
   %row_bytes = index.scale %blocks, %block_bytes : index, offset -> offset
   %x_view = buffer.view %x[%origin] : buffer -> view<[%rows]x[%k]xf16>
   %s_view = buffer.view %scales[%origin] : buffer -> view<[%rows]x2xf32>
@@ -1724,7 +1735,7 @@ def gemm_big256_db(fmt, mode):
   %wave_col = index.assume %wave_col_value [range(%wave_col_value, 0, {TN - wave_cols})] : index
   %row_origin = index.mul %row_group, %c256 : index
   %out_origin = index.mul %out_group, %tn : index
-  %blocks = index.div %k, %c{f["block_values"]} : index
+{bv_const(f["block_values"])}  %blocks = index.div %k, {bv_name(f["block_values"])} : index
   %row_bytes = index.scale %blocks, %block_bytes : index, offset -> offset
   %x_view = buffer.view %x[%origin] : buffer -> view<[%rows]x[%k]xf16>
   %s_view = buffer.view %scales[%origin] : buffer -> view<[%rows]x2xf32>

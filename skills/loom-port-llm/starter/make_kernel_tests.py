@@ -15,6 +15,8 @@ import json, sys, os, numpy as np
 from gguf import GGUFReader
 from gguf.quants import dequantize
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import gguf_ext  # noqa: E402,F401  GGML types newer than the pinned gguf package (PTQ1_0, Q2_0): GGUFReader + dequantize
+import ternary  # noqa: E402  prism.hadamard numpy references
 import kb_choices  # noqa: E402  the choices the model's kernels were generated with (resolved.env of the package, else resolved here)
 kb_choices.apply_for_tests(json.load(open(sys.argv[1])))
 from mv_rows import pick_r, iq_r, flash2_deep_from  # noqa: E402
@@ -140,6 +142,7 @@ VARGS = ", %meta, %tinfo" if VIS else ""
 VTYPES = f", tensor<4xi32>, tensor<{t}x4xi32>" if VIS else ""
 E = deq("token_embd.weight"); w = deq("blk.0.attn_norm.weight")
 x = E[ids]
+if cfg.get("hadamard"): x = ternary.np_unrotate_embed(x, cfg)   # a latent (rotated) table: the lookup returns D (H z)
 if cfg.get("embed_norm"): x = x / np.sqrt((x * x).mean(-1, keepdims=True) + 1e-5)  # weightless embedding RMSNorm
 if cfg.get("embed_scale"): x = x * cfg["embed_scale"]
 h = x / np.sqrt((x * x).mean(-1, keepdims=True) + eps) * w
@@ -157,6 +160,64 @@ cases.append(f"""check.case public @embed {{
   kernel.launch @g_embed[%t](%t, %ids{VARGS}, %tab, %w, %x, %h) : [index](index, {ty(ids)}{VTYPES}, {ty(tab)}, tensor<{H}xf32>, tensor<{t}x{H}xf32>, tensor<{t}x{H}xf32>)
   check.expect.close actual(%x) expected(%ex) atol(1.0e-4) rtol(1.0e-3) nan(different) : tensor<{t}x{H}xf32>
   check.expect.close actual(%h) expected(%eh) atol(1.0e-3) rtol(1.0e-3) nan(different) : tensor<{t}x{H}xf32>
+  check.return
+}}
+""")
+if cfg.get("hadamard"):   # the rotating quantizers (ternary.wiring), each followed by a folded projection of its width
+    _hrng = np.random.default_rng(11)
+    _gdn = [li for li in cfg.get("recurrent_layers", [])]
+    _attn = [li for li in range(cfg["layers"]) if li not in set(_gdn)]
+    _probe = [(H, False, "blk.0.attn_qkv.weight" if "blk.0.attn_qkv.weight" in T else "blk.0.attn_q.weight"), (cfg["ffn"] if isinstance(cfg["ffn"], int) else cfg["ffn"][0], False, "blk.0.ffn_down.weight")]
+    if _attn: _probe.append((int(T[f"blk.{_attn[0]}.attn_output.weight"].shape[0]), False, f"blk.{_attn[0]}.attn_output.weight"))
+    if _gdn: _probe.append((int(T[f"blk.{_gdn[0]}.ssm_out.weight"].shape[0]), bool(cfg["hadamard"].get("gdn_v_grouped")), f"blk.{_gdn[0]}.ssm_out.weight"))
+    for _W, _p, _nm in _probe:
+        _fmt = T[_nm].tensor_type.name.lower(); _n = int(T[_nm].shape[1]); _Wd = deq(_nm)
+        _sfx = f"w{_W}{'p' if _p else ''}"
+        for tg in (1, 4):
+            xs = _hrng.standard_normal((tg, _W)).astype(np.float32)
+            xr = ternary.np_rotate(xs, cfg, _W, _p).astype(np.float32)
+            y = q8_ref(xr).astype(np.float64) @ _Wd.T.astype(np.float64)
+            tag = f"had_q8_{_sfx}_t{tg}"
+            save(tag + "_w", raw(_nm)); save(tag + "_x", xs); save(tag + "_y", y.astype(np.float32))
+            _R = iq_r(_n, _W, tg)
+            kern = f"g_mv_{_fmt}_k{_W}" + (f"_t{tg}" if tg > 1 else "") + "_q8" + (f"_r{_R}" if _R != 16 else "")
+            cases.append(f"""check.case public @{tag} {{{{
+  %n = check.literal value({_n}) : index
+  %t = check.literal value({tg}) : index
+  %k = check.literal value({_W}) : index
+  %acc = check.literal value(0) : i32
+  %w = check.file.read.npy path("{tag}_w.npy") : {ty(raw(_nm))}
+  %x = check.file.read.npy path("{tag}_x.npy") : tensor<{tg}x{_W}xf32>
+  %e = check.file.read.npy path("{tag}_y.npy") : tensor<{tg}x{_n}xf32>
+  %xq = check.generate.fill value(0) : tensor<{tg}x{2 * _W}xi8>
+  %y = check.generate.fill value(0.0) : tensor<{tg}x{_n}xf32>
+  kernel.launch @g_had_q8_{_sfx}[%t, %k](%t, %k, %x, %xq) : [index, index](index, index, tensor<{tg}x{_W}xf32>, tensor<{tg}x{2 * _W}xi8>)
+  kernel.launch @{kern}[%n, %t](%n, %t, %acc, %xq, %w, %y) : [index, index](index, index, i32, tensor<{tg}x{2 * _W}xi8>, {ty(raw(_nm))}, tensor<{tg}x{_n}xf32>)
+  check.expect.close actual(%y) expected(%e) atol(2.0e-3) rtol(2.0e-3) nan(different) : tensor<{tg}x{_n}xf32>
+  check.return
+}}}}
+""".replace("{{", "{").replace("}}", "}"))
+        # the F16 row-scaled copy (prefill GEMM operand): rotated values x the row's power-of-two scale (g_row_scale_f16's rule)
+        tr = 3
+        xs = (_hrng.standard_normal((tr, _W)) * np.array([[1.0], [40.0], [1e-3]])).astype(np.float32)
+        xr = ternary.np_rotate(xs, cfg, _W, _p)
+        mx = np.abs(xr).max(-1).astype(np.float32)
+        e_ = np.clip(((mx.view(np.int32) >> 23) & 255) - 127 - 13, 0, 100)
+        sc = (2.0 ** -e_).astype(np.float32); inv = (2.0 ** e_).astype(np.float32)
+        x16 = (xr * sc[:, None]).astype(np.float16)
+        tag = f"had_rs16_{_sfx}"
+        save(tag + "_x", xs); save(tag + "_h", x16); save(tag + "_s", np.stack([sc, inv], -1).astype(np.float32))
+        cases.append(f"""check.case public @{tag} {{
+  %t = check.literal value({tr}) : index
+  %k = check.literal value({_W}) : index
+  %x = check.file.read.npy path("{tag}_x.npy") : tensor<{tr}x{_W}xf32>
+  %eh = check.file.read.npy path("{tag}_h.npy") : tensor<{tr}x{_W}xf16>
+  %es = check.file.read.npy path("{tag}_s.npy") : tensor<{tr}x2xf32>
+  %s = check.generate.fill value(0.0) : tensor<{tr}x2xf32>
+  %h = check.generate.fill value(0.0) : tensor<{tr}x{_W}xf16>
+  kernel.launch @g_had_rs16_{_sfx}[%t](%t, %k, %x, %s, %h) : [index](index, index, tensor<{tr}x{_W}xf32>, tensor<{tr}x2xf32>, tensor<{tr}x{_W}xf16>)
+  check.expect.close actual(%s) expected(%es) atol(0.0) rtol(0.0) nan(different) : tensor<{tr}x2xf32>
+  check.expect.close actual(%h) expected(%eh) atol(1.0e-3) rtol(2.0e-3) nan(different) : tensor<{tr}x{_W}xf16>
   check.return
 }}
 """)

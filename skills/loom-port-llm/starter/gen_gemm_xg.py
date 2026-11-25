@@ -10,6 +10,7 @@ while this step's MMAs read the current one, one barrier per 64-K step instead o
 The kernel keeps the m256 name and launch interface (rows, k, n, x, scales, w[, w2], y), so the program is unchanged.
 A 512-row tile over an epoch of 256 * odd rows computes its upper half on clamped rows and does not store it.
 Lane l of an A fragment holds row l % 16, 16 consecutive K values (the RDNA3 layout, same as the B fragments' columns)."""
+from gen_gemm import bv_name, bv_const  # noqa: E402
 import os
 import re as _re
 import gen_gemm as G
@@ -114,7 +115,7 @@ def gemm_xg(fmt, mode, fmt2=None, M=None, db=None, g32=None):
   %wave_col = index.assume %wave_col_value [range(%wave_col_value, 0, {TN - wave_cols})] : index
   %row_origin = index.mul %row_group, %c{M} : index
   %out_origin = index.mul %out_group, %tn : index
-  %blocks = index.div %k, %c{f["block_values"]} : index
+{bv_const(f["block_values"])}  %blocks = index.div %k, {bv_name(f["block_values"])} : index
   %row_bytes = index.scale %blocks, %block_bytes : index, offset -> offset
   %x_view = buffer.view %x[%origin] : buffer -> view<[%rows]x[%k]xf16>
   %s_view = buffer.view %scales[%origin] : buffer -> view<[%rows]x2xf32>
