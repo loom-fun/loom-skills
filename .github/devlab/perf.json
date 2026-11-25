@@ -1,47 +1,449 @@
 {
- "_comment": "R9700 per-model measurement (r9700_jobs.py): one job per model on one R9700 runner; loom-fun-staging card, llama.cpp ROCm b1375 + Vulkan b12211 with the matched drafting, reduced-context models served at served_context. Does not fit: none",
- "runner": "r9700",
- "memory_bytes": 34000000000,
- "llama_spec": "matched",
+ "_comment": "qwen35 lane round 2: + f16 expert rows (moe.prefill.store16) + 8-token router workgroups, on the round-1 stacks; long profiles",
  "jobs": [
   {
-   "name": "unsloth-qwen3-0-6b-loom",
-   "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
+   "name": "r2-s-q35",
+   "runner": "strix",
+   "card": "loom-fun/unsloth-Qwen3.5-35B-A3B-loom@89e9db91429a851ccf55e5f31f3c81d1c3b7bea4",
+   "memory_bytes": 49000000000,
    "kit": null,
-   "llamacpp": "b1375",
+   "llamacpp": "b1374",
    "llamacpp_vulkan": "b12211",
-   "memory_bytes_r9700": 17000000000,
    "variants": [
     {
-     "name": "card",
-     "build": {}
+     "name": "s8",
+     "build": {
+      "QG_SPLIT": "1",
+      "GDN_CHUNK11": "1",
+      "GDN_CHUNK11_CN": "16",
+      "GEMM_M256_F16O": "1",
+      "FLASH2_KT256": "16",
+      "GDN_CHUNK": "1",
+      "GDN_COPY_SPLIT": "8",
+      "FLASH2_TRIM": "1"
+     },
+     "build_args": [
+      "--memory-gib",
+      "4096"
+     ],
+     "sdk": "0.3.0",
+     "execution": {
+      "prefill_capacity": 8192
+     }
     },
     {
-     "name": "nodraft",
-     "build": {},
+     "name": "s8x",
+     "build": {
+      "QG_SPLIT": "1",
+      "GDN_CHUNK11": "1",
+      "GDN_CHUNK11_CN": "16",
+      "GEMM_M256_F16O": "1",
+      "FLASH2_KT256": "16",
+      "GDN_CHUNK": "1",
+      "GDN_COPY_SPLIT": "8",
+      "FLASH2_TRIM": "1",
+      "MOE_STORE16": "1",
+      "ROUTE_TR": "8"
+     },
+     "build_args": [
+      "--memory-gib",
+      "4096"
+     ],
+     "sdk": "0.3.0",
      "execution": {
+      "prefill_capacity": 8192
+     }
+    },
+    {
+     "name": "s8xnd",
+     "build": {
+      "QG_SPLIT": "1",
+      "GDN_CHUNK11": "1",
+      "GDN_CHUNK11_CN": "16",
+      "GEMM_M256_F16O": "1",
+      "FLASH2_KT256": "16",
+      "GDN_CHUNK": "1",
+      "GDN_COPY_SPLIT": "8",
+      "FLASH2_TRIM": "1",
+      "MOE_STORE16": "1",
+      "ROUTE_TR": "8"
+     },
+     "build_args": [
+      "--memory-gib",
+      "4096"
+     ],
+     "sdk": "0.3.0",
+     "execution": {
+      "prefill_capacity": 8192,
       "draft_depth": 0
      }
     }
    ],
    "steps": [
-    "func:card",
-    "ktest:card",
-    "gates:card:dev",
-    "perf:card:3",
-    "perf:card:3:long",
-    "c4:nodraft",
-    "llama@rocm.np1:3",
-    "llama@rocm.np1:3:long",
-    "llamac4@rocm.nodraft",
-    "llama@vulkan.np1:3",
-    "llama@vulkan.np1:3:long",
-    "llamac4@vulkan.perslot.nodraft"
-   ]
+    "perf:s8:1",
+    "perf:s8x:1",
+    "perf:s8x:1",
+    "perf:s8:1",
+    "perf:s8:1:long",
+    "perf:s8x:1:long",
+    "perf:s8x:1:long",
+    "perf:s8:1:long",
+    "c4:s8xnd",
+    "ktest:s8x",
+    "smoke:s8x",
+    "profile:s8x:pf8k,pf32k,dec,dec32k"
+   ],
+   "sdk": "0.3.0",
+   "llama_spec": "matched"
+  },
+  {
+   "name": "r2-r-q35",
+   "runner": "r9700",
+   "repeat_rows": 3,
+   "card": "loom-fun/unsloth-Qwen3.5-35B-A3B-loom@89e9db91429a851ccf55e5f31f3c81d1c3b7bea4",
+   "require_preset_r9700": true,
+   "memory_bytes_r9700": 34000000000,
+   "served_context": 56320,
+   "kit": null,
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "s",
+     "cap_pool": 90112,
+     "execution": {
+      "context_capacity": 56320,
+      "prefill_capacity": 2048
+     },
+     "build": {
+      "QG_SPLIT": "1",
+      "GDN_CHUNK11": "1",
+      "GDN_CHUNK11_CN": "16",
+      "GEMM_M256_F16O": "1",
+      "FLASH2_KT256": "16",
+      "GDN_CHUNK": "1",
+      "GDN_COPY_SPLIT": "8",
+      "FLASH2_TRIM": "1"
+     },
+     "build_args": [
+      "--memory-gib",
+      "4096"
+     ],
+     "sdk": "0.3.0",
+     "require_preset_r9700": false
+    },
+    {
+     "name": "sx",
+     "cap_pool": 90112,
+     "execution": {
+      "context_capacity": 56320,
+      "prefill_capacity": 2048
+     },
+     "build": {
+      "QG_SPLIT": "1",
+      "GDN_CHUNK11": "1",
+      "GDN_CHUNK11_CN": "16",
+      "GEMM_M256_F16O": "1",
+      "FLASH2_KT256": "16",
+      "GDN_CHUNK": "1",
+      "GDN_COPY_SPLIT": "8",
+      "FLASH2_TRIM": "1",
+      "MOE_STORE16": "1",
+      "ROUTE_TR": "8"
+     },
+     "build_args": [
+      "--memory-gib",
+      "4096"
+     ],
+     "sdk": "0.3.0",
+     "require_preset_r9700": false
+    },
+    {
+     "name": "sxnd",
+     "cap_pool": 90112,
+     "execution": {
+      "context_capacity": 56320,
+      "prefill_capacity": 2048,
+      "draft_depth": 0
+     },
+     "build": {
+      "QG_SPLIT": "1",
+      "GDN_CHUNK11": "1",
+      "GDN_CHUNK11_CN": "16",
+      "GEMM_M256_F16O": "1",
+      "FLASH2_KT256": "16",
+      "GDN_CHUNK": "1",
+      "GDN_COPY_SPLIT": "8",
+      "FLASH2_TRIM": "1",
+      "MOE_STORE16": "1",
+      "ROUTE_TR": "8"
+     },
+     "build_args": [
+      "--memory-gib",
+      "4096"
+     ],
+     "sdk": "0.3.0",
+     "require_preset_r9700": false
+    }
+   ],
+   "steps": [
+    "perf:s:1",
+    "perf:sx:1",
+    "perf:sx:1",
+    "perf:s:1",
+    "perf:s:1:long",
+    "perf:sx:1:long",
+    "perf:sx:1:long",
+    "perf:s:1:long",
+    "c4:sxnd",
+    "ktest:sx",
+    "smoke:sx",
+    "profile:sx:pf2k,pf8k,pf32k,dec,dec32k"
+   ],
+   "sdk": "0.3.0",
+   "memory_bytes": 34000000000,
+   "llama_spec": "matched"
+  },
+  {
+   "name": "r2-s-q36",
+   "runner": "strix",
+   "card": "loom-fun/ggml-org-Qwen3.6-35B-A3B-loom@9a06cc9ba5ca93e2de3a5fa40b2ad4e415d191fe",
+   "memory_bytes": 48000000000,
+   "kit": null,
+   "llamacpp": "b1374",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "s8",
+     "build": {
+      "QG_SPLIT": "1",
+      "GDN_CHUNK11": "1",
+      "GDN_CHUNK11_CN": "16",
+      "GEMM_M256_F16O": "1",
+      "FLASH2_KT256": "16",
+      "GDN_CHUNK": "1",
+      "GDN_COPY_SPLIT": "8",
+      "FLASH2_TRIM": "1"
+     },
+     "build_args": [
+      "--memory-gib",
+      "4096"
+     ],
+     "sdk": "0.3.0",
+     "execution": {
+      "prefill_capacity": 8192
+     }
+    },
+    {
+     "name": "s8x",
+     "build": {
+      "QG_SPLIT": "1",
+      "GDN_CHUNK11": "1",
+      "GDN_CHUNK11_CN": "16",
+      "GEMM_M256_F16O": "1",
+      "FLASH2_KT256": "16",
+      "GDN_CHUNK": "1",
+      "GDN_COPY_SPLIT": "8",
+      "FLASH2_TRIM": "1",
+      "MOE_STORE16": "1",
+      "ROUTE_TR": "8"
+     },
+     "build_args": [
+      "--memory-gib",
+      "4096"
+     ],
+     "sdk": "0.3.0",
+     "execution": {
+      "prefill_capacity": 8192
+     }
+    },
+    {
+     "name": "s8xnd",
+     "build": {
+      "QG_SPLIT": "1",
+      "GDN_CHUNK11": "1",
+      "GDN_CHUNK11_CN": "16",
+      "GEMM_M256_F16O": "1",
+      "FLASH2_KT256": "16",
+      "GDN_CHUNK": "1",
+      "GDN_COPY_SPLIT": "8",
+      "FLASH2_TRIM": "1",
+      "MOE_STORE16": "1",
+      "ROUTE_TR": "8"
+     },
+     "build_args": [
+      "--memory-gib",
+      "4096"
+     ],
+     "sdk": "0.3.0",
+     "execution": {
+      "prefill_capacity": 8192,
+      "draft_depth": 0
+     }
+    }
+   ],
+   "steps": [
+    "perf:s8:1",
+    "perf:s8x:1",
+    "perf:s8x:1",
+    "perf:s8:1",
+    "perf:s8:1:long",
+    "perf:s8x:1:long",
+    "perf:s8x:1:long",
+    "perf:s8:1:long",
+    "c4:s8xnd",
+    "ktest:s8x",
+    "smoke:s8x",
+    "profile:s8x:pf8k,pf32k,dec,dec32k"
+   ],
+   "sdk": "0.3.0",
+   "llama_spec": "matched"
+  },
+  {
+   "name": "r2-r-q36",
+   "runner": "r9700",
+   "repeat_rows": 3,
+   "card": "loom-fun/ggml-org-Qwen3.6-35B-A3B-loom@9a06cc9ba5ca93e2de3a5fa40b2ad4e415d191fe",
+   "require_preset_r9700": true,
+   "memory_bytes_r9700": 34000000000,
+   "served_context": 84992,
+   "kit": null,
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "s",
+     "cap_pool": 117760,
+     "execution": {
+      "context_capacity": 84992,
+      "prefill_capacity": 2048
+     },
+     "build": {
+      "QG_SPLIT": "1",
+      "GDN_CHUNK11": "1",
+      "GDN_CHUNK11_CN": "16",
+      "GEMM_M256_F16O": "1",
+      "FLASH2_KT256": "16",
+      "GDN_CHUNK": "1",
+      "GDN_COPY_SPLIT": "8",
+      "FLASH2_TRIM": "1"
+     },
+     "build_args": [
+      "--memory-gib",
+      "4096"
+     ],
+     "sdk": "0.3.0",
+     "require_preset_r9700": false
+    },
+    {
+     "name": "sx",
+     "cap_pool": 117760,
+     "execution": {
+      "context_capacity": 84992,
+      "prefill_capacity": 2048
+     },
+     "build": {
+      "QG_SPLIT": "1",
+      "GDN_CHUNK11": "1",
+      "GDN_CHUNK11_CN": "16",
+      "GEMM_M256_F16O": "1",
+      "FLASH2_KT256": "16",
+      "GDN_CHUNK": "1",
+      "GDN_COPY_SPLIT": "8",
+      "FLASH2_TRIM": "1",
+      "MOE_STORE16": "1",
+      "ROUTE_TR": "8"
+     },
+     "build_args": [
+      "--memory-gib",
+      "4096"
+     ],
+     "sdk": "0.3.0",
+     "require_preset_r9700": false
+    },
+    {
+     "name": "sxnd",
+     "cap_pool": 117760,
+     "execution": {
+      "context_capacity": 84992,
+      "prefill_capacity": 2048,
+      "draft_depth": 0
+     },
+     "build": {
+      "QG_SPLIT": "1",
+      "GDN_CHUNK11": "1",
+      "GDN_CHUNK11_CN": "16",
+      "GEMM_M256_F16O": "1",
+      "FLASH2_KT256": "16",
+      "GDN_CHUNK": "1",
+      "GDN_COPY_SPLIT": "8",
+      "FLASH2_TRIM": "1",
+      "MOE_STORE16": "1",
+      "ROUTE_TR": "8"
+     },
+     "build_args": [
+      "--memory-gib",
+      "4096"
+     ],
+     "sdk": "0.3.0",
+     "require_preset_r9700": false
+    }
+   ],
+   "steps": [
+    "perf:s:1",
+    "perf:sx:1",
+    "perf:sx:1",
+    "perf:s:1",
+    "perf:s:1:long",
+    "perf:sx:1:long",
+    "perf:sx:1:long",
+    "perf:s:1:long",
+    "c4:sxnd",
+    "ktest:sx",
+    "smoke:sx",
+    "profile:sx:pf2k,pf8k,pf32k,dec,dec32k"
+   ],
+   "sdk": "0.3.0",
+   "memory_bytes": 34000000000,
+   "llama_spec": "matched"
+  },
+  {
+   "name": "r2-sdkab-q35",
+   "runner": "strix",
+   "card": "loom-fun/unsloth-Qwen3.5-35B-A3B-loom@89e9db91429a851ccf55e5f31f3c81d1c3b7bea4",
+   "memory_bytes": 49000000000,
+   "kit": null,
+   "llamacpp": "b1374",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "name": "f02",
+     "card": "loom-fun/unsloth-Qwen3.5-35B-A3B-loom@89e9db91429a851ccf55e5f31f3c81d1c3b7bea4",
+     "sdk": "0.2.0"
+    },
+    {
+     "name": "f03",
+     "card": "loom-fun/unsloth-Qwen3.5-35B-A3B-loom@89e9db91429a851ccf55e5f31f3c81d1c3b7bea4",
+     "sdk": "0.3.0"
+    }
+   ],
+   "steps": [
+    "perf:f02:1:long",
+    "perf:f03:1:long",
+    "perf:f03:1:long",
+    "perf:f02:1:long",
+    "perf:f02:1",
+    "perf:f03:1",
+    "perf:f03:1",
+    "perf:f02:1"
+   ],
+   "sdk": "0.3.0",
+   "llama_spec": "matched"
   }
  ],
- "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
+ "memory_bytes": 49000000000,
+ "llama_spec": "matched",
+ "llamacpp": "b1374",
  "kit": null,
- "llamacpp": "b1375",
- "llamacpp_vulkan": "b12211"
+ "runner": "strix"
 }
