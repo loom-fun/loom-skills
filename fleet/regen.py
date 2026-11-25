@@ -1894,6 +1894,8 @@ def device_status(e):
         return "failed" if e.get("decision") == "hold" else "needs_decision"
     if e.get("decision") == "promote":
         return "qualified"
+    if e["stage"] == "collected" and e.get("decision") in ("confirm", "rerun", "improved-pending"):
+        return "confirming"   # its same-job ABBA confirmation is queued or running (`rerun`)
     return "needs_decision"
 
 
