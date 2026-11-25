@@ -1,6 +1,7 @@
 """fleet/regen.py --programs production (the frozen SDK migration), the version-generic SDK constants, the evidence / eligible generator,
 ab_jobs.py --programs production and the image comparison's request (no network, no GPU)."""
 import contextlib
+import glob
 import io
 import json
 import os
@@ -615,3 +616,37 @@ class Share(unittest.TestCase):
             self.assertEqual((sw.jobs["sab-a"]["stage"], sw.jobs["sab-a"]["run"], sw.jobs["sab-a"]["job_url"]), ("done", "22", "u"))
             self.assertEqual(regen.download(sw, "sab-a", sw.jobs["sab-a"]), sw.jobs["sab-a"]["shared_dir"])
             self.assertEqual(sw.jobs["sab-b"]["stage"], "needs_decision")
+
+
+class RooflineStub(unittest.TestCase):
+    def test_stub_only_when_the_checkpoint_is_not_cached(self):
+        dump = sorted(glob.glob(os.path.join(ROOT, "fleet", "unsloth-Qwen3-0.6B-loom", "gguf", "*.json.gz")))[0]
+        name = os.path.basename(dump)[:-len(".json.gz")]
+        ck = {"repo": "unsloth/Qwen3-0.6B-GGUF", "revision": "r" * 40, "file": name}
+        with tempfile.TemporaryDirectory() as t, mock.patch.dict(os.environ, {"HF_HOME": os.path.join(t, "hf")}), \
+                mock.patch.object(regen.card_lib, "load_package", lambda p: {}), \
+                mock.patch.object(regen.card_lib, "package_facts", lambda f: {"checkpoint": ck}):
+            p = regen.roofline_stub("unsloth-Qwen3-0.6B-loom", t, t)
+            self.assertEqual(os.path.basename(p), name)   # the card names the checkpoint file, not a stub path
+            with open(p, "rb") as f:
+                self.assertEqual(f.read(4), b"GGUF")
+            snap = os.path.join(t, "hf", "hub", "models--unsloth--Qwen3-0.6B-GGUF", "snapshots", "r" * 40)
+            os.makedirs(snap)
+            open(os.path.join(snap, name), "w").close()
+            self.assertIsNone(regen.roofline_stub("unsloth-Qwen3-0.6B-loom", t, t))   # cached: make_info reads the real file
+            self.assertIsNone(regen.roofline_stub("no-such-model", t, t))
+
+
+class ConfirmationRows(unittest.TestCase):
+    def test_a_row_the_sweep_job_never_had_is_not_missing(self):
+        with tempfile.TemporaryDirectory() as t:
+            p = os.path.join(t, "cmp.json")
+            json.dump({"metrics": {"decode": {"old": 63.3, "new": 62.5, "ratio": 0.987}, "prefill_2k": {"old": 1416.5, "new": 1371.7, "ratio": 0.968},
+                                   "streams4": {"old": 109.5, "new": 108.4, "ratio": 0.99}}, "gate_failures": [], "text": {"status": "MATCH"}}, open(p, "w"))
+            first = {"rows_pct": {"decode": -2.0, "prefill_2k": -3.9, "streams4": -1.1}, "round": 1}
+            st = SimpleNamespace(d={"mode": "sdk-loom", "opts": {}}, jobs={"a": first})
+            d, r, *_ = regen.sdk_decide(st, "a-r2", {"prev": "a", "round": 2}, p, use_prev=False)
+            self.assertFalse(any("missing" in x for x in r), r)   # no 8k prefill on this card: not measured, not missing
+            first["rows_pct"]["prefill_8k"] = -1.0
+            d, r, *_ = regen.sdk_decide(st, "a-r2", {"prev": "a", "round": 2}, p, use_prev=False)
+            self.assertTrue(any("missing" in x for x in r), r)   # the sweep job measured it: the confirmation must too
