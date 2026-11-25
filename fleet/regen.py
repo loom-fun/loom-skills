@@ -429,6 +429,17 @@ def production_facts(repo, rev, cache):
     return out
 
 
+NO_GENERATOR = "hand-written package, no generator"
+
+
+def package_generator(ref):
+    """versions.package.skills_commit of a frozen production package: the commit that generated it (its llm_config stamp, else its
+    card generator), named as recovered from the production card; a package neither records is hand-written (commit null, said so)."""
+    if ref.get("generator"):
+        return {"commit": ref["generator"], "recovered": True, "basis": "production card"}
+    return {"commit": None, "basis": NO_GENERATOR}
+
+
 def load_held(path):
     """held.json {slug: {reason, ...}} (or a list of slugs): packages out of this release; plan refuses them and --all skips them"""
     if not path:
@@ -1269,12 +1280,10 @@ def ingest_full(st, name, e, W):
               "--evidence", "ev_perf.json", "-o", "ev_roof.json"], W)
     ev.append("ev_roof.json")
     if production:   # the frozen package carries no generator stamp of this branch: the production card's, named as such
-        gen = ((st.d["opts"].get("refs_all") or {}).get(slug) or {}).get("generator")
-        if gen:
-            json.dump({"evidence": "loom-card-evidence/2", "gpu": dev, "versions": {"package": {"skills_commit": {"commit": gen, "recovered": True,
-                                                                                                        "basis": "production card"}}}},
-                      open(os.path.join(W, "ev_versions.json"), "w"), indent=1)
-            ev.append("ev_versions.json")
+        json.dump({"evidence": "loom-card-evidence/2", "gpu": dev,
+                   "versions": {"package": {"skills_commit": package_generator((st.d["opts"].get("refs_all") or {}).get(slug) or {})}}},
+                  open(os.path.join(W, "ev_versions.json"), "w"), indent=1)
+        ev.append("ev_versions.json")
     gpus = [x for x in card_lib.registry.devices() if x in (prev.get("devices") or {}) or x == dev]
     fit = card_lib.registry.device(dev).get("fit_table")
     build = [f"{S}/make_info.py", "build", out, "--org", st.d["opts"]["new_org"], "--gpus", ",".join(gpus)]
@@ -2071,9 +2080,8 @@ def build_evidence(st):
         src = (r.get("old") or e.get("source_card") or "@").split("@")
         mod = doc["models"].setdefault(e["slug"], {"production": src[0], "production_revision": src[1], "programs_sha256": r.get("programs_sha256"),
                                                    "kind": r.get("kind", e.get("kind", "text")), "claimed_devices": r.get("claimed", []), "devices": {},
-                                                   **({"versions": {"package": {"skills_commit": {"commit": r["generator"], "recovered": True,
-                                                                                                  "basis": "production card"}}}}
-                                                      if r.get("generator") else {})})
+                                                   **({"versions": {"package": {"skills_commit": package_generator(r)}}}
+                                                      if r.get("generator") or r.get("kind", e.get("kind", "text")) == "text" else {})})
         status = device_status(e)
         dv = {"status": status, "reason": e.get("reason")}
         if status not in ("no_runner", "not_claimed", "does_not_fit", "pending"):
