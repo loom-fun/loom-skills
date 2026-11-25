@@ -9,9 +9,9 @@
  "choices": [
   {
    "set": {
-    "prefill.gemm.kq_deq_f32": true
+    "prefill.gemm.kq_zero_point": true
    },
-   "evidence": "moe_gemm_12 kernel test (unchanged f64 ggml oracle) fails on the f16 Q4_K dequant on 0.2.0 (run 44088653570) and 0.3.0 (job 138973316618): layer 12 expert block scales are f16-subnormal (d <= 5.6e-5, 98.5 % of d*sc below 2^-14); CPU emulation of the fixture on the real layer-12 experts: f16 dequant 1.41x the tolerance, f32 dequant 0.36x (= ideal f16 weights). DevLab A/B: see the PR."
+   "evidence": "moe_gemm_12 kernel test (unchanged f64 ggml oracle) FAIL on the default f16 Q4_K dequant on 0.2.0 (run 44088653570) and 0.3.0 (job 138973316618, and 139250183226 at the sdk030 base); PASS with the exact-rounding dequant (job 139250183226). Layer 12 experts read from the GGUF: default dequant 81-99 % of weights equal ggml rounded once, this form 99.97 %. DevLab A/B: PR #1574."
   }
  ]
 }
