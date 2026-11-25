@@ -1,5 +1,5 @@
 {
- "_comment": "Ternary Bonsai 27B (#1416): the round-3 winner (model node skills/loom-kb/model/prism-ml-Ternary-Bonsai-2.5-27B-loom: native Q2_0 GEMM staging, 81920-row Q2_0 proposal head, the per-family prefill settings) built from this branch with the card's slug; gates full once + the card measurement on both GPUs (llama.cpp ROCm rows reused: same build and model, rule 17; Strix Halo adds its missing Vulkan baseline)",
+ "_comment": "Ternary Bonsai 27B (#1416): the shipped round-3 winner (model node skills/loom-kb/model/prism-ml-Ternary-Bonsai-2.5-27B-loom: native Q2_0 GEMM staging, 81920-row Q2_0 proposal head, the per-family GDN / flash prefill settings; without the fused epilogues that failed compare on the R9700, diagnostic run 45649607839) built from this branch with the card's slug; gates full once + the card measurement on both GPUs (llama.cpp ROCm rows reused: same build and model, rule 17; Strix Halo adds its missing Vulkan baseline)",
  "card": "loom-fun-staging/prism-ml-Ternary-Bonsai-2.5-27B-loom",
  "kit": null,
  "memory_bytes": 39000000000,
@@ -7,7 +7,7 @@
  "llamacpp_vulkan": "b12211",
  "jobs": [
   {
-   "name": "bonsai-win-r9700",
+   "name": "bonsai-ship-r9700",
    "runner": "r9700",
    "card": "loom-fun-staging/prism-ml-Ternary-Bonsai-2.5-27B-loom",
    "kit": null,
@@ -49,7 +49,7 @@
    "repeat_rows": 3
   },
   {
-   "name": "bonsai-win-strix",
+   "name": "bonsai-ship-strix",
    "card": "loom-fun-staging/prism-ml-Ternary-Bonsai-2.5-27B-loom",
    "kit": null,
    "llamacpp": "b1387",

@@ -47,12 +47,9 @@
     "hybrid.gdn.chunk11_gate": true,
     "hybrid.gdn.chunk11_cn": 16,
     "hybrid.gdn.chunk11_opt": "kbo",
-    "hybrid.gdn.skip_long": true,
-    "prefill.gdn.ab_wmma": true,
-    "prefill.fuse.resid_epi": true,
-    "prefill.fuse.qg_split": true
+    "hybrid.gdn.skip_long": true
    },
-   "evidence": "bonsai round 3 (https://github.com/loom-fun/loom-skills/actions/runs/45582278639, job bonsai-r3-strix): the gfx11 prefill settings of the same-architecture Qwen3.8-27B node on top of the native Q2_0 GEMM: Strix Halo prefill 1k/2k/8k/16k/32k 473.8/467.8/469.8/449.6/412.5 -> 489.5/485.3/491.7/474.1/438.6 tok/s (+3.3/+3.7/+4.7/+5.4/+6.3 %), decode ties (44.6/44.6); ktest 119/119."
+   "evidence": "bonsai round 3 (https://github.com/loom-fun/loom-skills/actions/runs/45582278639, job bonsai-r3-strix): the gfx11 GDN and flash prefill settings of the same-architecture Qwen3.8-27B node on top of the native Q2_0 GEMM: Strix Halo prefill 1k/2k/8k/16k/32k 473.8/467.8/469.8/449.6/412.5 -> 489.5/485.3/491.7/474.1/438.6 tok/s (+3.3/+3.7/+4.7/+5.4/+6.3 %, measured together with the fused epilogues below), decode ties; ktest 119/119. Not set: that node's fused epilogues (prefill.fuse.resid_epi, prefill.fuse.qg_split, prefill.gdn.ab_wmma): with them the R9700 runs their gfx12 twins and the compare and consistency gates fail (1/14 prompts match llama.cpp, max gap 2.61), without them both pass (12/14, max gap 0.033; diagnostic run https://github.com/loom-fun/loom-skills/actions/runs/45649607839, variants d2 vs d1)."
   }
  ]
 }
