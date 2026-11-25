@@ -17,6 +17,7 @@ import json
 import math
 import os
 import re
+import statistics
 import sys
 from datetime import datetime
 from statistics import median
@@ -1419,6 +1420,10 @@ def drop_carried(info, pin):
     return out
 
 
+SESSION_ACCEPTANCE_KEY = "spec_acceptance_session"   # in the stored metrics, beside the spec gate's spec_acceptance
+SESSION_ACCEPTANCE_ROWS = ("decode", "decode_2k", "decode_32k")
+
+
 def previous_values(old):
     """{gpu: {"hrx_loom": version or None, "metrics": {metric: Loom value}, "gates": {gate: {status, detail}}}} of an
     earlier card's info.json: the values and gate results that card shows (card_metrics), what make_info.py build
@@ -1439,6 +1444,11 @@ def previous_values(old):
         gates = {n: {"status": g["status"], "detail": g.get("detail")} for n, g in sorted((dev.get("gates") or {}).items())}
         if metrics or gates:
             out[gpu] = {"hrx_loom": sdks.pop() if len(sdks) == 1 else None, "metrics": metrics}
+            # the drafted-token acceptance of the perf session's decode requests: the like-for-like old side of the acceptance delta
+            # (the spec gate's value, in metrics, decodes another prompt set)
+            sess = [m["acceptance"] for k, (m, _) in card_metrics(view).items() if k in SESSION_ACCEPTANCE_ROWS and m.get("acceptance") is not None]
+            if sess:
+                out[gpu]["metrics"][SESSION_ACCEPTANCE_KEY] = round(statistics.median(sess), 3)
             if gates:
                 out[gpu]["gates"] = gates
     return out
@@ -1458,7 +1468,9 @@ def delta_rows(info, pin, comparison, depth=None):
     (change: the relative change, spec_acceptance the change in points; None when one side has no value).
     spec_acceptance measured as accepted tokens per verification pass (unreported proposals) is compared with the
     earlier card's share of proposals x the draft depth (depth): SDK 0.2 counted every verification as depth proposals,
-    so that product is exactly its accepted tokens per pass (row per_pass: {old, new})."""
+    so that product is exactly its accepted tokens per pass (row per_pass: {old, new}). The old side is the earlier card's
+    perf-session acceptance of its decode rows (metrics.spec_acceptance_session), the same workload as the new value; an earlier card that
+    has only the spec gate's value decoded another prompt set: the row carries different_workloads and no change."""
     out = {}
     expl = comparison.get("explanations") or {}
     for gpu, prev in comparison["devices"].items():
@@ -1478,15 +1490,19 @@ def delta_rows(info, pin, comparison, depth=None):
             old = prev["metrics"].get(k)
             m = current[k][0] if k in current else {}
             new = m.get("loom")
-            change, per_pass = None, None
+            change, per_pass, different = None, None, False
             if old is not None and new is not None:
                 change = round(new - old, 4) if k == "spec_acceptance" else round(new / old - 1, 4) if old else None
-            elif k == "spec_acceptance" and old is not None and m.get("accepted_per_pass") is not None and depth:
-                per_pass = {"old": round(old * depth, 3), "new": m["accepted_per_pass"]}
-                change = round(per_pass["new"] / per_pass["old"] - 1, 4) if per_pass["old"] else None
+            elif k == "spec_acceptance" and old is not None and m.get("accepted_per_pass") is not None:
+                if prev["metrics"].get(SESSION_ACCEPTANCE_KEY) is not None:
+                    if depth:
+                        per_pass = {"old": round(prev["metrics"][SESSION_ACCEPTANCE_KEY] * depth, 3), "new": m["accepted_per_pass"]}
+                        change = round(per_pass["new"] / per_pass["old"] - 1, 4) if per_pass["old"] else None
+                else:
+                    different = True
             regression = change is not None and k != "spec_acceptance" and change < -DELTA_BAND
             rows.append({"metric": k, "old": old, "new": new, "change": change, "unreported": m.get("unreported"), "per_pass": per_pass,
-                         "missing": k not in current, "regression": regression,
+                         "different_workloads": different, "accepted_per_pass": m.get("accepted_per_pass"), "missing": k not in current, "regression": regression,
                          "explanation": (expl.get(gpu) or {}).get(k)})
         out[gpu] = rows
     return out

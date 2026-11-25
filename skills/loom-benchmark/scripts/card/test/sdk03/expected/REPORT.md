@@ -4,7 +4,7 @@ How the values on this repository's model card were measured. Generated from `in
 
 **Change from the previous card** ([revision `89abcde`](https://huggingface.co/loom-fun/ggml-org-Flint-loom/tree/89abcdef0123456789abcdef0123456789abcdef), hrx-loom 0.1.0; this card: hrx-loom 0.3.0):
 
-- decode +0.7 %, decode at 2k +0.0 %, decode at 32k +0.0 %, prefill 1k -15.0 % ¹, prefill 2k -4.0 % ², prefill 8k +0.0 %, prefill 16k +0.0 %, prefill 32k +0.0 %, 4 streams +0.0 %, drafted tokens accepted per verification pass 2.04 → 1.25 (-38.8 %; the previous card's 68 % of depth-3 proposals as SDK 0.1.0 counted them).
+- decode +0.7 %, decode at 2k +0.0 %, decode at 32k +0.0 %, prefill 1k -15.0 % ¹, prefill 2k -4.0 % ², prefill 8k +0.0 %, prefill 16k +0.0 %, prefill 32k +0.0 %, 4 streams +0.0 %, drafted tokens accepted per verification pass 0.97 → 1.25 (+28.1 %; both in the performance session's decode requests, the previous card's share of depth-3 proposals as SDK 0.1.0 counted them).
 - ¹ Strix Halo prefill 1k -15.0 % (956.9 → 813.6 tok/s): confirmed by a same-runner rerun of both SDKs (fixture) ([evidence](https://github.com/loom-fun/loom-skills/actions/runs/3103/job/3104)).
 - ² Strix Halo prefill 2k -4.0 % (1316.4 → 1263.8 tok/s): unexplained.
 - Change: (this card / previous card - 1) × 100 % of the Loom value; beyond -3 % a regression needs a confirmed explanation.
