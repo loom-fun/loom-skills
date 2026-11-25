@@ -51,6 +51,7 @@ import time
 
 import requests
 
+from draft_telemetry import repeat_decode
 from bench_common import acceptance_between, accepted_between, doc, per_pass_between, long_prompt, perf_metrics, proposals_unreported, server_draft_counters, stream, thinking_extra
 
 
@@ -171,25 +172,7 @@ def median(v):
 
 
 def repeats(key, metric, make, f):
-    """f(make(i)) for i in range(--repeat-rows) (repeat 0 is the plain run); the successful values' median, with all of
-    them in out["samples"][metric] when there are several. The drafted-token acceptance of the repeats is averaged."""
-    vals = []
-    telemetry = {"acceptance": [], "accepted_per_pass": []}
-    for i in range(max(1, a.repeat_rows)):
-        for field in telemetry:
-            out.get(field, {}).pop(key, None)
-        v = f(make(i))
-        if v is not None:
-            vals.append(v)
-            for field, values in telemetry.items():
-                if key in out.get(field, {}):
-                    values.append(out[field][key])
-    for field, values in telemetry.items():
-        if values:
-            out[field][key] = round(sum(values) / len(values), 4)
-    if a.repeat_rows > 1 and vals:
-        out.setdefault("samples", {})[metric] = vals
-    return median(vals) if vals else None
+    return repeat_decode(out, key, metric, a.repeat_rows, lambda i: f(make(i)))
 
 
 if a.decode_ctx:
