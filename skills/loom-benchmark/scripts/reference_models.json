@@ -1,0 +1,18 @@
+{
+ "_comment": "Reference GGUFs for packages whose own GGUF llama.cpp cannot load. Keyed by the checkpoint the package serves (model.json origins.checkpoint repository@revision + llm_config.json gguf): the gates' llama-server loads `reference` instead (fetched and sha256-checked by reference_model.py), which must hold the same tensors in a layout mainline llama.cpp reads, published by the checkpoint's own publisher at the same revision. llamacpp_min: the oldest lemonade-sdk/llamacpp-rocm release that serves it correctly (older builds give wrong output, not an error). Never a different quantization or checkpoint: that would be an easier oracle.",
+ "models": [
+  {
+   "checkpoint": "unsloth/Inkling-2-Mini-GGUF@ea0c79b2ecd73669e774c8519b79bfabfddbc027",
+   "gguf": "Inkling-2-Mini-UD-Q4_K_XL.gguf",
+   "reference": {
+    "repo": "unsloth/Inkling-2-Mini-GGUF",
+    "revision": "ea0c79b2ecd73669e774c8519b79bfabfddbc027",
+    "file": "Mainline_Support/Inkling-2-Mini-UD-Q4_K_XL.gguf_file",
+    "size": 17629760736,
+    "sha256": "e64276656f072e9b2197a61723667cbdb71da66a716ffd966e572c21088f3cd3"
+   },
+   "llamacpp_min": "b1384",
+   "why": "the root file is Unsloth's compact inkling2 layout (24 physical blocks); mainline llama.cpp reads the publisher's Mainline_Support inkling2_loop file (same tensors byte for byte, its README) and needs llama.cpp PR 32704 (ROCm b1384) for the looped layers' per-expert NVFP4 scales; skills/loom-kb/arch/llm/moe/inkling2/porting.md"
+  }
+ ]
+}
