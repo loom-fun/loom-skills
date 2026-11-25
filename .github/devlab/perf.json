@@ -1,11 +1,11 @@
 {
- "_comment": "qwen35b lane round b1 (Strix, Qwen3.6): segment-path verify attention at head_dim 256 (SEG_D256) vs the shipped set; profiles pf1k/pf2k (per-request cost), dec32k (both), c4 (4-stream)",
+ "_comment": "qwen35b lane round b2 (Strix, Qwen3.5): segment-path verify attention at head_dim 256 + drafting at every context (SPEC_CTX_MAX=0; the shipped gate 3500 kept decode_32k undrafted) vs the shipped set",
  "jobs": [
   {
-   "name": "b1-s-q36",
+   "name": "b2-s-q35",
    "runner": "strix",
-   "card": "loom-fun/ggml-org-Qwen3.6-35B-A3B-loom@9a06cc9ba5ca93e2de3a5fa40b2ad4e415d191fe",
-   "memory_bytes": 48000000000,
+   "card": "loom-fun/unsloth-Qwen3.5-35B-A3B-loom@89e9db91429a851ccf55e5f31f3c81d1c3b7bea4",
+   "memory_bytes": 49000000000,
    "kit": null,
    "llamacpp": "b1374",
    "llamacpp_vulkan": "b12211",
@@ -23,22 +23,10 @@
      }
     },
     {
-     "name": "basend",
-     "build": {},
-     "build_args": [
-      "--memory-gib",
-      "4096"
-     ],
-     "sdk": "0.3.0",
-     "execution": {
-      "prefill_capacity": 8192,
-      "draft_depth": 0
-     }
-    },
-    {
-     "name": "seg",
+     "name": "segc",
      "build": {
-      "SEG_D256": "1"
+      "SEG_D256": "1",
+      "SPEC_CTX_MAX": "0"
      },
      "build_args": [
       "--memory-gib",
@@ -52,24 +40,22 @@
    ],
    "steps": [
     "perf:base:1",
-    "perf:seg:1",
-    "perf:seg:1",
+    "perf:segc:1",
+    "perf:segc:1",
     "perf:base:1",
     "perf:base:1:long",
-    "perf:seg:1:long",
-    "perf:seg:1:long",
+    "perf:segc:1:long",
+    "perf:segc:1:long",
     "perf:base:1:long",
-    "ktest:seg",
-    "smoke:seg",
-    "profile:seg:dec32k",
-    "profile:base:dec32k,pf1k,pf2k",
-    "profile:basend:c4"
+    "ktest:segc",
+    "smoke:segc",
+    "profile:segc:dec32k"
    ],
    "sdk": "0.3.0",
    "llama_spec": "matched"
   }
  ],
- "memory_bytes": 48000000000,
+ "memory_bytes": 49000000000,
  "llama_spec": "matched",
  "llamacpp": "b1374",
  "kit": null,
