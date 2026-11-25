@@ -415,7 +415,7 @@ class ProductionFacts(unittest.TestCase):
                 os.makedirs(os.path.join(local_dir, "program"))
                 open(os.path.join(local_dir, "program", "llm.loom"), "w").write("x")
                 json.dump({"services": {"chat": {"kind": "text"}}, "presets": {}}, open(os.path.join(local_dir, "model.json"), "w"))
-                json.dump({"card": {"memory_bytes": 5, "features": ["draft"]}, "devices": {"strix-halo": {}, "gfx1150": {}},
+                json.dump({"card": {"memory_bytes": 5, "features": ["draft"]}, "devices": {"strix-halo": {}, "gfx1150": {}, "radeon-r9700": {"state": "not_a_target", "reason": "x"}},
                            "versions": {"card_generator": "38b84928d947d45615439ffe54dc3d66899f7b0b"}}, open(os.path.join(local_dir, "info.json"), "w"))
                 json.dump({"sdk": {"hrx_loom": "0.2.0"}, "generator": {"skills_commit": "unknown"}}, open(os.path.join(local_dir, "llm_config.json"), "w"))
             with mock.patch.dict(sys.modules, {"huggingface_hub": SimpleNamespace(snapshot_download=snapshot_download)}):

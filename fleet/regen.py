@@ -417,7 +417,8 @@ def production_facts(repo, rev, cache):
     cfg = sdk_package.load(os.path.join(d, "llm_config.json")) if os.path.isfile(os.path.join(d, "llm_config.json")) else None
     kinds = {(sv or {}).get("kind") for sv in (model.get("services") or {}).values()}
     out = {"programs_sha256": card_lib.programs_sha256(d), "kind": "image" if cfg is None and kinds == {"image"} else "text",
-           "claimed": sorted((info.get("devices") or {}).keys()), "memory_bytes": (info.get("card") or {}).get("memory_bytes"),
+           # the devices the card shows results for: a GPU with a state (not_a_target, unsupported, not_measured) claims nothing
+           "claimed": sorted(g for g, v in (info.get("devices") or {}).items() if not (v or {}).get("state")), "memory_bytes": (info.get("card") or {}).get("memory_bytes"),
            "gates": {d: sorted((v or {}).get("gates") or {}) for d, v in (info.get("devices") or {}).items()},   # the gates the card claims per device
            "features": (info.get("card") or {}).get("features") or [], "sdk": (cfg or {}).get("sdk"),
            # the commit that generated the package (its llm_config stamp), else the commit that generated its card
