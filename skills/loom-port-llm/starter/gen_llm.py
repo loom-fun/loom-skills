@@ -6676,6 +6676,10 @@ if __name__ == "__main__":
     if os.environ.get("GEMM_PRUNE", "0").strip().lower() not in ("", "0", "false", "no", "off"):   # choice prefill.gemm.prune
         text, _pruned = prune_gemm(text)
         print("pruned unlaunched GEMM kernels:", _pruned)
+    _gmin = int(os.environ.get("GEMM_MIN_T", "64"))   # choice prefill.gemm.min_tokens_dense: epoch tokens from which prefill takes the f16 GEMM path
+    if _gmin != 64:
+        text, _ng = re.subn(r"(?m)^(  )%gemm = index\.cmp uge, %t, %c64 : index$", rf"\1%c_gemm_min = index.constant {_gmin} : index\n\1%gemm = index.cmp uge, %t, %c_gemm_min : index", text)
+        assert _ng, "GEMM_MIN_T: no prefill GEMM threshold in the program"
     out = os.path.join(out_dir, "model.loom")
     open(out, "w", newline="\n").write(text)
     print("wrote", out)

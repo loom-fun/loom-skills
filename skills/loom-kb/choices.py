@@ -480,6 +480,10 @@ CHOICE("prefill.ple.gemm", "bool", True, "PLE_GEMM", kits=["gemma4"], kernels=["
        doc="gemma4 kit: the per-layer-embedding projection takes the GEMM at prefill (False: matvec).")
 CHOICE("prefill.gemm.min_tokens", "int", 64, "GEMM_MIN_TOKENS", kits=["lfm2moe"], kernels=["g_gemm_*"], rows=ROWS_PREFILL,
        doc="lfm2moe kit: epoch tokens from which the GEMM path is taken.")
+CHOICE("prefill.gemm.min_tokens_dense", "int", 64, "GEMM_MIN_T", kernels=["g_gemm_*", "g_mv_*_q8*", "g_quant_q8"], rows=ROWS_PREFILL, from_pr="pf-misc",
+       doc="Starter: epoch tokens from which prefill takes the f16-activation GEMM path; shorter epochs take the int8-activation matvecs "
+           "(q8_1, 32-value groups). Lower it where those int8 activations measurably move the logits of short prompts (Qwen3-1.7B: the "
+           "first token of a 22-token prompt by 1.4 nats against a float64 forward of the GGUF).")
 
 # ======================================================================================================================
 # MoE (gen_moe.py, gen_llm.py; lfm2moe and flint-moe reference kits)
