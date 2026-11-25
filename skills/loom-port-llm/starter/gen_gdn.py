@@ -528,7 +528,7 @@ kernel.def export("g_gdn_recurrence") @g_gdn_recurrence(%spans: index) {{
                 from gen_gdn_chunk import chunk_kernel
                 if rdna4_twins() and not chunk_mode(G):
                     T.append(_as_rdna4(pf.replace("g_gdn_recurrence", "g_gdn_recurrence_pf"), "g_gdn_recurrence_pf"))
-                pf = chunk_kernel(G, NG, LB, guard_open, guard_close, arch="rdna3").replace("g_gdn_chunk", "g_gdn_recurrence")
+                pf = chunk_kernel(G, NG, LB, guard_open, guard_close, arch="rdna3", cn=chunk11_cn(G)).replace("g_gdn_chunk", "g_gdn_recurrence")
             T.append(pf.replace("g_gdn_recurrence", "g_gdn_recurrence_pf"))
         elif c11:   # single-form models: g_gdn_recurrence takes spans under PF_SPAN, g_gdn_chunk (launched in GEMM epochs) the rest
             from gen_gdn_chunk import chunk_kernel
@@ -679,9 +679,9 @@ def chunk11_fuse(G):
 
 def chunk11_cn(G):
     """hybrid.gdn.chunk11_cn (GDN_CHUNK11_CN, 16 or 32, default 32): g_gdn_chunk's chunk length on gfx11 (16: half the staging LDS and
-    a 16-row serial solve per chunk, twice the chunks)."""
+    a 16-row serial solve per chunk, twice the chunks), in both chunk11 modes ("group", and "pf": the chunk kernel in g_gdn_recurrence_pf's place)."""
     v = os.environ.get("GDN_CHUNK11_CN", "32")
-    return int(v) if v in ("16", "32") and chunk11_mode(G) == "group" else None
+    return int(v) if v in ("16", "32") and chunk11_mode(G) else None
 
 
 def chunk11_alias(G):
