@@ -518,6 +518,9 @@ CHOICE("moe.route.tokens_per_wg", "int", 0, "ROUTE_TR", doc="Router tokens per w
 CHOICE("moe.fold", "bool", True, "MOE_FOLD", doc="Fold the routing weights into the expert matvec.", **_MO)
 CHOICE("moe.prefill.skip_empty", "bool", True, "MOE_SKIP_EMPTY", doc="Waves of empty expert tiles exit early.", **_MO)
 CHOICE("moe.prefill.prefetch", "bool", True, "MOE_PREFETCH", doc="Stage prefetch in the grouped expert GEMMs.", **_MO)
+CHOICE("moe.prefill.store16", "bool", False, "MOE_STORE16", kernels=["g_moe_gdn_*", "g_moe_combine_sorted*"], rows=ROWS_PREFILL, from_pr="qwen35 lane",
+       doc="Numerics-moving: the grouped down GEMM stores its expert rows (ys_sorted) as f16 and g_moe_combine_sorted reads them as f16, in place "
+           "(gen_moe.store16): half the DRAM traffic of prefill's largest intermediate (prompt rows x used experts x hidden).")
 _DS2 = dict(kits=["deepseek2"], rows=ROWS_PREFILL, from_pr="joyai-pfgemm")   # deepseek2 example kit (JoyAI-LLM-Flash campaign, PR #1361)
 CHOICE("prefill.gemm.t64_g32", "bool", False, "GEMM_T64_G32", kernels=["g_gemm_iq4_*", "g_moe_g*_iq4_*"], **_DS2,
        doc="The 64-row WMMA tile stages IQ4_XS / IQ4_NL a whole 32-group per thread (_g32_iq4, the iq4_f16lut values): grouped MoE "
