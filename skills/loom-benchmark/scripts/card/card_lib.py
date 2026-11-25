@@ -1464,8 +1464,9 @@ def previous_gate(info, gpu, name):
 
 def delta_rows(info, pin, comparison, depth=None):
     """The delta line of one sdk_delta comparison: {gpu: [row]} for every GPU of the comparison this card re-measured
-    on the pin's SDK; a row {metric, old, new, change, unreported, regression, explanation} per metric either side has
-    (change: the relative change, spec_acceptance the change in points; None when one side has no value).
+    on the pin's SDK; a row {metric, old, new, change, relative, unreported, regression, explanation} per metric either side has
+    (change: the relative change, spec_acceptance the change in points; relative: the relative change of every metric, spec_acceptance
+    included; None when one side has no value). regression: relative below -DELTA_BAND, the drafted-token acceptance like any other metric.
     spec_acceptance measured as accepted tokens per verification pass (unreported proposals) is compared with the
     earlier card's share of proposals x the draft depth (depth): SDK 0.2 counted every verification as depth proposals,
     so that product is exactly its accepted tokens per pass (row per_pass: {old, new}). The old side is the earlier card's
@@ -1500,8 +1501,9 @@ def delta_rows(info, pin, comparison, depth=None):
                         change = round(per_pass["new"] / per_pass["old"] - 1, 4) if per_pass["old"] else None
                 else:
                     different = True
-            regression = change is not None and k != "spec_acceptance" and change < -DELTA_BAND
-            rows.append({"metric": k, "old": old, "new": new, "change": change, "unreported": m.get("unreported"), "per_pass": per_pass,
+            relative = change if k != "spec_acceptance" or per_pass else round(new / old - 1, 4) if change is not None and old else None
+            regression = relative is not None and relative < -DELTA_BAND
+            rows.append({"metric": k, "old": old, "new": new, "change": change, "relative": relative, "unreported": m.get("unreported"), "per_pass": per_pass,
                          "different_workloads": different, "accepted_per_pass": m.get("accepted_per_pass"), "missing": k not in current, "regression": regression,
                          "explanation": (expl.get(gpu) or {}).get(k)})
         out[gpu] = rows

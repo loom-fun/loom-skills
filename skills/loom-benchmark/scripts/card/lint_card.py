@@ -4,7 +4,9 @@
 usage: lint_card.py DIR [DIR ...] [--form production|staging] [--offline] [--generator SCRIPTS_DIR] [--json OUT]
 
 DIR is a card repository's files (README.md, model.json, info.json, llm_config.json, program/ ...). Exit 1 when any card
-has a problem; each problem is printed as "DIR: [check] text". publish_package.py runs it before a production publish.
+has a problem; each problem is printed as "DIR: [check] text". Run it before publishing a card: publish_package.py runs only the
+files check itself (card_files.check_package, on an upload to the production org; --card-only: the card files' problems) and its
+own card-text checks, never this lint (regen.py verify runs it with --form staging on each published staging card).
 
 Checks (each problem names its check):
   files      card_files.check_package: only card-format files; no staging, rehearsal or qualification-record text
@@ -17,7 +19,8 @@ Checks (each problem names its check):
   render     README.md (and a generated REPORT.md) is exactly what render_card.py renders from the card's files: no
              hand-written text (--generator: the card generator scripts to render with, default this checkout's)
   delta      a card measured on a new SDK carries the delta line (info.json sdk_delta, comparison "card") for every
-             GPU it re-measured, and every regression beyond the band has an explanation (else "unexplained")
+             GPU it re-measured, and every regression beyond the band (a drafted-token acceptance drop too) has an explanation
+             (else "unexplained")
   acceptance a drafting card's re-measured GPUs record the drafted-token acceptance, or why it is not reported
   admission  a chat card's re-measured GPUs record the native-context admission check
   carried    (informational) GPUs and values carried from another SDK, shown marked
@@ -197,14 +200,14 @@ def info_problems(card, info, facts, feats, pin):
     if re_measured and not card_comp:
         out["delta"].append("no delta line against the previous card (info.json sdk_delta has no card comparison)")
     for c in comps:
-        rows = delta_rows(info, pin, c)
+        rows = delta_rows(info, pin, c, (facts.get("spec") or (None, None))[1])   # the draft depth, as render_card.py compares acceptance
         for g in re_measured:
             if g in c["devices"] and g not in rows:
                 out["delta"].append(f"{c['label']}: {g} has no metric re-measured on the pin to compare")
         for g, rs in rows.items():
             for r in rs:
                 if r["regression"] and not r["explanation"]:
-                    out["delta"].append(f"{c['label']}: {g} {r['metric']} {r['change'] * 100:+.1f} % unexplained (beyond -{DELTA_BAND * 100:g} %)")
+                    out["delta"].append(f"{c['label']}: {g} {r['metric']} {r['relative'] * 100:+.1f} % unexplained (beyond -{DELTA_BAND * 100:g} %)")
     for g in gpus:
         view = gpu_view(info, g)
         sessions = (view.get("performance") or {}).get("sessions", [])
