@@ -645,6 +645,10 @@ def submit_batch(st, b, dry):
         print(f"[dry-run] branch {branch} from {base}, perf.json ({len(perf)} bytes, {len(b['jobs'])} jobs), PR '{title}', label devlab-perf")
         return
     sha = gh_api("GET", f"repos/{REPO}/git/ref/heads/{base}", jq=".object.sha")
+    stem, n = branch, 1
+    while sh(["gh", "api", f"repos/{REPO}/git/ref/heads/{branch}"], check=False).returncode == 0:   # a re-submitted batch (a job the runner lost)
+        n += 1
+        branch = f"{stem}-s{n}"
     gh_api("POST", f"repos/{REPO}/git/refs", {"ref": f"refs/heads/{branch}", "sha": sha})
     f = "repos/%s/contents/.github/devlab/perf.json" % REPO
     fsha = gh_api("GET", f"{f}?ref={branch}", jq=".sha")
