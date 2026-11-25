@@ -513,7 +513,8 @@ CHOICE("moe.decode.rows_per_wg", "int", None, "MOE_R", dynamic=True, kit_legacy=
            "10 % faster at R=2 than R=8).", **_MO)
 CHOICE("moe.decode.act_q8", "bool", True, "MOE_Q8", doc="Decode expert matvecs read int8 activations (with decode.mv.act_q8).", **_MO)
 CHOICE("moe.route.unroll", "int", 4, "MOE_ROUTE_U", doc="Experts per wave scored together in the router.", **_MO)
-CHOICE("moe.route.tokens_per_wg", "int", 0, "ROUTE_TR", doc="Router tokens per workgroup (0: the largest of 1/2/4/8 whose LDS fits 48 KiB).",
+CHOICE("moe.route.tokens_per_wg", "int", 0, "ROUTE_TR", doc="Router tokens per workgroup (0: the largest of 1/2/4/8 whose LDS fits 48 KiB). "
+       "A count whose x rows fit 64 KiB but not with the logits (8 at hidden 2048, 256 experts) keeps the logits in registers: same sums, half the weight reads of 4.",
        **_MO)
 CHOICE("moe.fold", "bool", True, "MOE_FOLD", doc="Fold the routing weights into the expert matvec.", **_MO)
 CHOICE("moe.prefill.skip_empty", "bool", True, "MOE_SKIP_EMPTY", doc="Waves of empty expert tiles exit early.", **_MO)

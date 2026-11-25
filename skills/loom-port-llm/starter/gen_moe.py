@@ -268,6 +268,10 @@ def route_prefill(H, E, KU, gating, norm, bias, wty="f32", scale=1.0):
         return _softmax_weight_prefill(route_prefill(H, E, KU, 2, False, bias, wty), KU)
     EPW = E // 8
     TR = ROUTE_TR or max(t for t in (1, 2, 4, 8) if t * (H + E) * 4 <= 48 * 1024)
+    # moe.route.tokens_per_wg past the LDS of x rows + logits (e.g. 8 at H 2048, E 256): lane j of a wave keeps its expert j's logits
+    # in registers during the scoring loop, and they are stored into the x rows' LDS (dead by then) for the top-k. Same sums, same order.
+    REG = TR * (H + E) * 4 > 64 * 1024
+    assert not REG or (TR * H * 4 <= 64 * 1024 and E // 8 <= 32 and H % 128 == 0), f"router TR={TR}: x rows do not fit 64 KiB of LDS"
     prob = "scalar.logisticf<afn> %lgt : f32" if gating == 2 else "scalar.addf %lgt, %zero_f : f32"
     score = "scalar.addf %prob_v, %bias_v : f32" if bias else "scalar.addf %prob_v, %zero_f : f32"
     bias_load = f"""    %b_view = buffer.view %b[%zero] : buffer -> view<{E}xf32>
@@ -312,6 +316,12 @@ def route_prefill(H, E, KU, gating, norm, bias, wty="f32", scale=1.0):
       view.store %logit{r}, %lg_view[{r}, %e] : f32, view<{TR}x{E}xf32>
     }}
 """ for r in range(TR))
+    keep_in = ", ".join(f"%k{r} = %zero_f : f32" for r in range(TR))
+    keep_out = ", ".join(f"%kept{r}" for r in range(TR))
+    if REG:
+        stores = "".join(f"    %logit{r} = kernel.subgroup.reduce<addf> %p{r} : f32\n" for r in range(TR)) + \
+            "    %jl = index.cmp eq, %lane, %j : index\n" + "".join(f"    %kn{r} = scf.select %jl, %logit{r}, %k{r} : f32\n" for r in range(TR)) + \
+            "    scf.yield " + ", ".join(f"%kn{r}" for r in range(TR)) + f" : {acc_ty}\n"
 
     # Phase 2: wave r (< TR) takes token r; lane l holds experts l, l+32, ...: KU rounds of subgroup
     # reductions (max score, then the lowest expert id at that score) instead of workgroup reductions.
@@ -395,7 +405,7 @@ def route_prefill(H, E, KU, gating, norm, bias, wty="f32", scale=1.0):
   }
 """)
     topk = "".join(T2)
-    return f"""
+    text = f"""
 // Router: TR={TR} tokens per workgroup, their h rows staged in LDS; wave w scores experts w*{EPW}.. for
 // all {TR} tokens (one weight load serves {TR} tokens); then per token, thread e holds expert e and {KU}
 // rounds of workgroup reductions pick the top {KU} (ties: lowest index) of {GATE_NAME[gating]}{' + bias' if bias else ''}.
@@ -468,6 +478,28 @@ kernel.def export("g_moe_route_tr") @g_moe_route_tr(%tokens: index) {{
 {topk}  kernel.return
 }}
 """
+    if not REG:
+        return text
+    def rep(a, b):
+        nonlocal text
+        assert text.count(a) == 1, a
+        text = text.replace(a, b)
+    rep(f"""  %lg_bytes = index.constant {TR * E * 4} : offset
+  %lg = buffer.alloca<workgroup> align(16) %lg_bytes : buffer
+  %lg_view = buffer.view %lg[%zero] : buffer -> view<{TR}x{E}xf32>
+""", f"""  %lg_view = buffer.view %xs[%zero] : buffer -> view<{TR}x{E}xf32>
+""")
+    rep("  scf.for %j = [%c0 to %cEPW step %c1] {\n", f"  {keep_out} = scf.for %j = [%c0 to %cEPW step %c1]({keep_in}) -> ({acc_ty}) {{\n")
+    rep("""  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+""" + topk, f"""  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  %lane_e = index.cmp ult, %lane, %cEPW : index
+  scf.if %lane_e {{
+    %el_raw = index.add %e0, %lane : index
+    %el = index.assume %el_raw [range(%el_raw, 0, {E - 1})] : index
+""" + "".join(f"    view.store %kept{r}, %lg_view[{r}, %el] : f32, view<{TR}x{E}xf32>\n" for r in range(TR)) + """  }
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+""" + topk)
+    return text
 
 
 def route_prefill_live(H, E, KU, gating, norm, bias, wty="f32", scale=1.0):
