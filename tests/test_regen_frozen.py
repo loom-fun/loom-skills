@@ -781,3 +781,21 @@ class Explain(unittest.TestCase):
             with contextlib.redirect_stdout(io.StringIO()):
                 regen.main(["explain", p, f])   # unchanged: nothing re-queued
             self.assertEqual(regen.State(p).jobs["a"]["stage"], "published")
+
+
+class OldFrozenGates(unittest.TestCase):
+    def test_the_frozen_sides_gates_do_not_decide_the_kit_build(self):
+        with tempfile.TemporaryDirectory() as t:
+            p = os.path.join(t, "cmp.json")
+            m = {"decode": {"old": 1.0, "new": 1.0, "ratio": 1.0}, "prefill_8k": {"old": 1.0, "new": 1.0, "ratio": 1.0},
+                 "decode_32k": {"old": 1.0, "new": 1.0, "ratio": 1.0}, "streams4": {"old": 1.0, "new": 1.0, "ratio": 1.0}}
+            json.dump({"metrics": m, "gate_failures": ["ktest:fun"], "text": {"status": "MATCH"}}, open(p, "w"))
+            st = SimpleNamespace(d={"mode": "sdk-ab", "opts": {"old_frozen": True, "old_sdk_target": True}}, jobs={})
+            self.assertEqual(regen.sdk_decide(st, "j", {"round": 1}, p)[0], "promote")
+            json.dump({"metrics": m, "gate_failures": ["ktest:fun", "gates:staging:dev"], "text": {"status": "MATCH"}}, open(p, "w"))
+            d, r, *_ = regen.sdk_decide(st, "j", {"round": 1}, p)
+            self.assertEqual((d, r[0]), ("hold", "gate failed: gates:staging:dev"))
+
+    def test_devlab_ktest_reads_its_own_variants_package(self):
+        text = open(os.path.join(ROOT, ".github", "scripts", "devlab_perf.sh")).read()
+        self.assertIn('[ -f "$D/$p1/cfg.json" ] || cp "$D/cfg.json" "$D/$p1/cfg.json"', text)

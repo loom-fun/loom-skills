@@ -931,6 +931,9 @@ print('gufo', k, [x.get(k) for x in r if x.get(k)], 'median', round(st.median(v)
       grep -q '"catalog"' "$card/llm_config.json" && { res[$s]="SKIP (catalog package: no generated kernel tests)"; continue; }
       serve_alone "$p1" >/dev/null 2>&1; for f in "$LOOM_SERVE_STATE"/*.pid; do [ -f "$f" ] && "$SV/stop.sh" "$(basename "$f" .pid)" >/dev/null 2>&1; done
       step "kernel tests $p1"; kt=$D/$p1/ktest; rm -rf "$kt"
+      # make_kernel_tests.py reads the package under test next to its config: a variant without its own cfg.json gets a copy, else the first
+      # D/*/pkg found (another variant's, e.g. a kit build beside a served card) would shape this variant's cases
+      [ -f "$D/$p1/cfg.json" ] || cp "$D/cfg.json" "$D/$p1/cfg.json"
       kenv=$(qv "$p1" "print(' '.join(f'{k}={x}' for k, x in (v.get('build') or {}).items()))")   # the variant's build env (e.g. GEMM_F16O) shapes the test cases too
       # the choices the knowledge base resolved for the rebuilt package (resolved.env of its llm_config.json: a model node's rules, not only the variant's build env) shape the cases too
       renv=$("$T" -c "import json, sys; print(' '.join(f'{k}={x}' for k, x in ((json.load(open(sys.argv[1])).get('resolved') or {}).get('env') or {}).items() if x is not None))" "$D/$p1/pkg/llm_config.json" 2>/dev/null)
