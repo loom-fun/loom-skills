@@ -169,9 +169,9 @@
   }
  },
  "sdk": {
-  "hrx_loom": "0.2.0",
+  "hrx_loom": "0.3.0",
   "source": "pypi",
-  "wheel_sha256": "5148f9e3a264af400ec4bae38bd7b06bf551d28cc33b7a61d67f7bcefa590438",
-  "hrx_system_sha": "0cd370f2baaa0cfef47cc23007f1a109906f8a52"
+  "wheel_sha256": "6252bb0df262351175bdb2c4aaca22ffa63d80d791659aa4d2fa5c92a0af426f",
+  "hrx_system_sha": "e2c41a720363911c04606ce0f4417e2d55630352"
  }
 }
