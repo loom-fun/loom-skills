@@ -2003,10 +2003,12 @@ def cmd_accept_regression(a):
             print(f"{e['slug']} {e['device']}: not a confirmed perf regression, not accepted ({why[:120]})")
             continue
         if st.d["mode"] == "sdk-loom":   # the confirmed rows report the ABBA numbers (same job), as a promoted confirmation does
-            abba = next((j for j in st.jobs.values() if j.get("prev") == name and j.get("perf_abba")), None)
-            if abba:
+            abba = next((j for j in st.jobs.values() if j.get("prev") == name and (j.get("perf_abba") or j.get("rows_pct"))), None)
+            if abba:   # as sdk_loom_settle: metric keys (decode, prefill, ...) and card row names (prefill_2k, ...) of the same-job ABBA
                 rows = e.get("confirm_rows") or []
-                e["confirmed"] = {k: abba["perf_abba"][k] for k in rows if abba["perf_abba"].get(k) is not None}
+                both = {**(abba.get("rows_pct") or {}), **(abba.get("perf_abba") or {})}
+                e["confirmed"] = {k: both[k] for k in rows if both.get(k) is not None}
+                e["confirmed_by"] = abba.get("job_url")
                 e["perf"] = {**(e.get("perf") or {}), **e["confirmed"]}
         e.update(stage="collected", decision="promote", accepted_regression=f"{a.note} (was: {why[:300]})")
         st.log(f"{e['slug']} {e['device']}: confirmed regression accepted for publishing: {a.note}")
