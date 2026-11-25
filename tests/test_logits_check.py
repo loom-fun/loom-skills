@@ -124,6 +124,16 @@ class Comparisons(unittest.TestCase):
         self.assertEqual(lc.check_vs_llama([[("**", -0.1)]], keys, ref, near_tie, views_at=lambda k: views(k, [])), (1, []))
         self.assertEqual(asked, [])
 
+    @unittest.skipIf(near_tie is None, "bench_common needs requests")
+    def test_tail_token_within_a_view(self):
+        # Qwen3-Coder-30B R9700 step 24: Loom 'where' -2.15, llama.cpp's greedy reference -5.75 (a float64 forward: -4.10)
+        loom, keys, ref = [[("of", -0.12), ("where", -2.15)]], ["of"], [{"of": -0.003, "where": -5.75}]
+        self.assertTrue(lc.check_vs_llama(loom, keys, ref, near_tie)[1])
+        self.assertEqual(lc.check_vs_llama(loom, keys, ref, near_tie, views_at=lambda k: [ref[0], {"of": -0.05, "where": -3.2}]), (1, []))
+        # every view outside the tolerance, or none listing the token: still a problem; a confident token gets the tight tier
+        self.assertTrue(lc.check_vs_llama(loom, keys, ref, near_tie, views_at=lambda k: [{"of": -0.01, "where": -5.6}, {"x": -1.0}])[1])
+        self.assertTrue(lc.check_vs_llama([[("of", -1.2)]], keys, [{"of": -0.003}], near_tie, views_at=lambda k: [{"of": -3.0}])[1])
+
     def test_eog_keys(self):
         class Tok:
             def decode(self, ids, skip_special_tokens=False):
