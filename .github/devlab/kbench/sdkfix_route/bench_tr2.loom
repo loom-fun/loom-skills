@@ -1,0 +1,960 @@
+amdgpu.target<gfx12-generic> @rdna4 {subgroup_size = 32}
+
+
+kernel.def export("k_route2048") @k_route2048(%tokens: index) {
+  %c1 = index.constant 1 : index
+  %c256 = index.constant 256 : index
+  %cTRm1 = index.constant 1 : index
+  %cTR = index.constant 2 : index
+  %padded = index.add %tokens, %cTRm1 : index
+  %groups = index.div %padded, %cTR : index
+  kernel.launch.config workgroups(%groups, %c1, %c1) workgroup_size(%c256, %c1, %c1) : index
+} launch(%tokens_arg: index, %x: buffer, %w: buffer, %b: buffer, %ids: buffer, %wts: buffer, %info: buffer) {
+  %tokens = index.assume %tokens_arg [range(%tokens_arg, 1, 8192)] : index
+  %group_id = kernel.workgroup.id<x> : index
+  %wave_id = kernel.subgroup.id : index
+  %wave = index.assume %wave_id [range(%wave_id, 0, 7)] : index
+  %lane_id = kernel.subgroup.lane.id : index
+  %lane = index.assume %lane_id [range(%lane_id, 0, 31)] : index
+  %zero = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c32 = index.constant 32 : index
+  %c256 = index.constant 256 : index
+  %cHG = index.constant 64 : index
+  %cE = index.constant 128 : index
+  %cTR = index.constant 2 : index
+  %zero_f = scalar.constant 0.0 : f32
+  %token0 = index.mul %group_id, %cTR : index
+  %gl_view = buffer.view %info[%zero] : buffer -> view<[%tokens]x4xi32>
+  %gl_dead = scalar.constant 0 : i32
+  %gl_c0 = index.constant 0 : index
+  %gl_t0v = index.add %token0, %gl_c0 : index
+  %gl_in0 = index.cmp ult, %gl_t0v, %tokens : index
+  %gl_t0c = scf.select %gl_in0, %gl_t0v, %c0 : index
+  %gl_t0 = index.assume %gl_t0c [lt(%gl_t0c, %tokens)] : index
+  %gl_w0 = view.load %gl_view[%gl_t0, 2] : view<[%tokens]x4xi32> -> i32
+  %gl_l0 = scalar.cmpi ne, %gl_w0, %gl_dead : i32
+  %gl_a0 = scalar.andi %gl_in0, %gl_l0 : i1
+  %gl_any0 = scalar.andi %gl_a0, %gl_a0 : i1
+  %gl_c1 = index.constant 1 : index
+  %gl_t1v = index.add %token0, %gl_c1 : index
+  %gl_in1 = index.cmp ult, %gl_t1v, %tokens : index
+  %gl_t1c = scf.select %gl_in1, %gl_t1v, %c0 : index
+  %gl_t1 = index.assume %gl_t1c [lt(%gl_t1c, %tokens)] : index
+  %gl_w1 = view.load %gl_view[%gl_t1, 2] : view<[%tokens]x4xi32> -> i32
+  %gl_l1 = scalar.cmpi ne, %gl_w1, %gl_dead : i32
+  %gl_a1 = scalar.andi %gl_in1, %gl_l1 : i1
+  %gl_any1 = scalar.ori %gl_any0, %gl_a1 : i1
+  scf.if %gl_any1 {
+  %x_view = buffer.view %x[%zero] : buffer -> view<[%tokens]x64x32xf32>
+  %xs_bytes = index.constant 16384 : offset
+  %xs = buffer.alloca<workgroup> align(16) %xs_bytes : buffer
+  %xs_view = buffer.view %xs[%zero] : buffer -> view<2x64x32xf32>
+  %xs4_view = buffer.view %xs[%zero] : buffer -> view<2x16x32x4xf32>
+  %w4_view = buffer.view %w[%zero] : buffer -> view<128x16x32x4xf32>
+  %cHB = index.constant 16 : index
+  %lg_bytes = index.constant 1024 : offset
+  %lg = buffer.alloca<workgroup> align(16) %lg_bytes : buffer
+  %lg_view = buffer.view %lg[%zero] : buffer -> view<2x128xf32>
+  %tid0 = kernel.workitem.id<x> : index
+  %tid = index.assume %tid0 [range(%tid0, 0, 255)] : index
+  %cvec = index.constant 128 : index
+  %zero32 = vector.splatf 0.0 : vector<32xf32>
+  scf.for %v = [%tid to %cvec step %c256] {
+    %r_value = index.div %v, %cHG : index
+    %r = index.assume %r_value [range(%r_value, 0, 1)] : index
+    %g_value = index.rem %v, %cHG : index
+    %g = index.assume %g_value [range(%g_value, 0, 63)] : index
+    %tok_value = index.add %token0, %r : index
+    %tok_in = index.cmp ult, %tok_value, %tokens : index
+    %tok_c = scf.select %tok_in, %tok_value, %c0 : index
+    %tok = index.assume %tok_c [lt(%tok_c, %tokens)] : index
+    %xg = vector.load %x_view[%tok, %g, %c0] : view<[%tokens]x64x32xf32> -> vector<32xf32>
+    %xsel = scf.select %tok_in, %xg, %zero32 : vector<32xf32>
+    vector.store %xsel, %xs_view[%r, %g, %c0] : vector<32xf32>, view<2x64x32xf32>
+  }
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  %first = index.cmp eq, %lane, %c0 : index
+  %cEPW = index.constant 16 : index
+  %e0 = index.mul %wave, %cEPW : index
+  scf.for %j = [%c0 to %cEPW step %c1] {
+    %e_raw = index.add %e0, %j : index
+    %e = index.assume %e_raw [range(%e_raw, 0, 127)] : index
+    %p0, %p1 = scf.for %bq = [%c0 to %cHB step %c1](%a0 = %zero_f : f32, %a1 = %zero_f : f32) -> (f32, f32) {
+      %bb = index.assume %bq [range(%bq, 0, 15)] : index
+      %wv = vector.load %w4_view[%e, %bb, %lane, %c0] : view<128x16x32x4xf32> -> vector<4xf32>
+      %xv0 = vector.load %xs4_view[0, %bb, %lane, %c0] : view<2x16x32x4xf32> -> vector<4xf32>
+      %d0 = vector.dotf<reassoc|contract> %wv, %xv0, %zero_f : vector<4xf32>, vector<4xf32>, f32
+      %n0 = scalar.addf %a0, %d0 : f32
+      %xv1 = vector.load %xs4_view[1, %bb, %lane, %c0] : view<2x16x32x4xf32> -> vector<4xf32>
+      %d1 = vector.dotf<reassoc|contract> %wv, %xv1, %zero_f : vector<4xf32>, vector<4xf32>, f32
+      %n1 = scalar.addf %a1, %d1 : f32
+      scf.yield %n0, %n1 : f32, f32
+    }
+    %logit0 = kernel.subgroup.reduce<addf> %p0 : f32
+    scf.if %first {
+      view.store %logit0, %lg_view[0, %e] : f32, view<2x128xf32>
+    }
+    %logit1 = kernel.subgroup.reduce<addf> %p1 : f32
+    scf.if %first {
+      view.store %logit1, %lg_view[1, %e] : f32, view<2x128xf32>
+    }
+  }
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  %c0_i32r = scalar.constant 0 : i32
+  %removed = scalar.constant -3.0e38 : f32
+  %big_id = scalar.constant 1000000 : i32
+  %ids_view = buffer.view %ids[%zero] : buffer -> view<[%tokens]x8xi32>
+  %wts_view = buffer.view %wts[%zero] : buffer -> view<[%tokens]x8xf32>
+  %wave_tok = index.cmp ult, %wave, %cTR : index
+  scf.if %wave_tok {
+    %r = index.assume %wave [range(%wave, 0, 1)] : index
+    %tok_value = index.add %token0, %r : index
+    %tok_live = index.cmp ult, %tok_value, %tokens : index
+    %tok_c = scf.select %tok_live, %tok_value, %c0 : index
+    %token = index.assume %tok_c [lt(%tok_c, %tokens)] : index
+    %store_lane = scalar.andi %first, %tok_live : i1
+    %ce0 = index.constant 0 : index
+    %e0_v = index.add %lane, %ce0 : index
+    %e0_in = index.cmp ult, %e0_v, %cE : index
+    %e0_c = scf.select %e0_in, %e0_v, %c0 : index
+    %be0 = index.assume %e0_c [range(%e0_c, 0, 127)] : index
+    %id0 = index.cast %e0_v : index to i32
+    %lgt0 = view.load %lg_view[%r, %be0] : view<2x128xf32> -> f32
+    %lm0 = scf.select %e0_in, %lgt0, %removed : f32
+    %lmx0 = scalar.addf %lm0, %zero_f : f32
+    %ce1 = index.constant 32 : index
+    %e1_v = index.add %lane, %ce1 : index
+    %e1_in = index.cmp ult, %e1_v, %cE : index
+    %e1_c = scf.select %e1_in, %e1_v, %c0 : index
+    %be1 = index.assume %e1_c [range(%e1_c, 0, 127)] : index
+    %id1 = index.cast %e1_v : index to i32
+    %lgt1 = view.load %lg_view[%r, %be1] : view<2x128xf32> -> f32
+    %lm1 = scf.select %e1_in, %lgt1, %removed : f32
+    %lmx1 = scalar.maxnumf %lmx0, %lm1 : f32
+    %ce2 = index.constant 64 : index
+    %e2_v = index.add %lane, %ce2 : index
+    %e2_in = index.cmp ult, %e2_v, %cE : index
+    %e2_c = scf.select %e2_in, %e2_v, %c0 : index
+    %be2 = index.assume %e2_c [range(%e2_c, 0, 127)] : index
+    %id2 = index.cast %e2_v : index to i32
+    %lgt2 = view.load %lg_view[%r, %be2] : view<2x128xf32> -> f32
+    %lm2 = scf.select %e2_in, %lgt2, %removed : f32
+    %lmx2 = scalar.maxnumf %lmx1, %lm2 : f32
+    %ce3 = index.constant 96 : index
+    %e3_v = index.add %lane, %ce3 : index
+    %e3_in = index.cmp ult, %e3_v, %cE : index
+    %e3_c = scf.select %e3_in, %e3_v, %c0 : index
+    %be3 = index.assume %e3_c [range(%e3_c, 0, 127)] : index
+    %id3 = index.cast %e3_v : index to i32
+    %lgt3 = view.load %lg_view[%r, %be3] : view<2x128xf32> -> f32
+    %lm3 = scf.select %e3_in, %lgt3, %removed : f32
+    %lmx3 = scalar.maxnumf %lmx2, %lm3 : f32
+    %smax = kernel.subgroup.reduce<maxnumf> %lmx3 : f32
+    %lsh0 = scalar.subf %lm0, %smax : f32
+    %lex0 = scalar.expf<afn> %lsh0 : f32
+    %lexm0 = scf.select %e0_in, %lex0, %zero_f : f32
+    %lsum0 = scalar.addf %lexm0, %zero_f : f32
+    %lsh1 = scalar.subf %lm1, %smax : f32
+    %lex1 = scalar.expf<afn> %lsh1 : f32
+    %lexm1 = scf.select %e1_in, %lex1, %zero_f : f32
+    %lsum1 = scalar.addf %lsum0, %lexm1 : f32
+    %lsh2 = scalar.subf %lm2, %smax : f32
+    %lex2 = scalar.expf<afn> %lsh2 : f32
+    %lexm2 = scf.select %e2_in, %lex2, %zero_f : f32
+    %lsum2 = scalar.addf %lsum1, %lexm2 : f32
+    %lsh3 = scalar.subf %lm3, %smax : f32
+    %lex3 = scalar.expf<afn> %lsh3 : f32
+    %lexm3 = scf.select %e3_in, %lex3, %zero_f : f32
+    %lsum3 = scalar.addf %lsum2, %lexm3 : f32
+    %sden = kernel.subgroup.reduce<addf> %lsum3 : f32
+    %pr0 = scalar.divf %lexm0, %sden : f32
+    %s0_0 = scf.select %e0_in, %pr0, %removed : f32
+    %pr1 = scalar.divf %lexm1, %sden : f32
+    %s1_0 = scf.select %e1_in, %pr1, %removed : f32
+    %pr2 = scalar.divf %lexm2, %sden : f32
+    %s2_0 = scf.select %e2_in, %pr2, %removed : f32
+    %pr3 = scalar.divf %lexm3, %sden : f32
+    %s3_0 = scf.select %e3_in, %pr3, %removed : f32
+    %sum_0 = scalar.addf %zero_f, %zero_f : f32
+    %lb0_0 = scalar.addf %s0_0, %zero_f : f32
+    %li0_0 = scalar.addi %id0, %c0_i32r : i32
+    %gt0_1 = scalar.cmpf ogt, %s1_0, %lb0_0 : f32
+    %lb0_1 = scf.select %gt0_1, %s1_0, %lb0_0 : f32
+    %li0_1 = scf.select %gt0_1, %id1, %li0_0 : i32
+    %gt0_2 = scalar.cmpf ogt, %s2_0, %lb0_1 : f32
+    %lb0_2 = scf.select %gt0_2, %s2_0, %lb0_1 : f32
+    %li0_2 = scf.select %gt0_2, %id2, %li0_1 : i32
+    %gt0_3 = scalar.cmpf ogt, %s3_0, %lb0_2 : f32
+    %lb0_3 = scf.select %gt0_3, %s3_0, %lb0_2 : f32
+    %li0_3 = scf.select %gt0_3, %id3, %li0_2 : i32
+    %best0 = kernel.subgroup.reduce<maxnumf> %lb0_3 : f32
+    %isb0 = scalar.cmpf oeq, %lb0_3, %best0 : f32
+    %cand0 = scf.select %isb0, %li0_3, %big_id : i32
+    %win0 = kernel.subgroup.reduce<minsi> %cand0 : i32
+    %m0_0 = scalar.addf %zero_f, %zero_f : f32
+    %w0_0 = scalar.cmpi eq, %id0, %win0 : i32
+    %m0_1 = scf.select %w0_0, %pr0, %m0_0 : f32
+    %s0_1 = scf.select %w0_0, %removed, %s0_0 : f32
+    %w0_1 = scalar.cmpi eq, %id1, %win0 : i32
+    %m0_2 = scf.select %w0_1, %pr1, %m0_1 : f32
+    %s1_1 = scf.select %w0_1, %removed, %s1_0 : f32
+    %w0_2 = scalar.cmpi eq, %id2, %win0 : i32
+    %m0_3 = scf.select %w0_2, %pr2, %m0_2 : f32
+    %s2_1 = scf.select %w0_2, %removed, %s2_0 : f32
+    %w0_3 = scalar.cmpi eq, %id3, %win0 : i32
+    %m0_4 = scf.select %w0_3, %pr3, %m0_3 : f32
+    %s3_1 = scf.select %w0_3, %removed, %s3_0 : f32
+    %wp0 = kernel.subgroup.reduce<addf> %m0_4 : f32
+    %sum_1 = scalar.addf %sum_0, %wp0 : f32
+    scf.if %store_lane {
+      view.store %win0, %ids_view[%token, 0] : i32, view<[%tokens]x8xi32>
+    }
+    %lb1_0 = scalar.addf %s0_1, %zero_f : f32
+    %li1_0 = scalar.addi %id0, %c0_i32r : i32
+    %gt1_1 = scalar.cmpf ogt, %s1_1, %lb1_0 : f32
+    %lb1_1 = scf.select %gt1_1, %s1_1, %lb1_0 : f32
+    %li1_1 = scf.select %gt1_1, %id1, %li1_0 : i32
+    %gt1_2 = scalar.cmpf ogt, %s2_1, %lb1_1 : f32
+    %lb1_2 = scf.select %gt1_2, %s2_1, %lb1_1 : f32
+    %li1_2 = scf.select %gt1_2, %id2, %li1_1 : i32
+    %gt1_3 = scalar.cmpf ogt, %s3_1, %lb1_2 : f32
+    %lb1_3 = scf.select %gt1_3, %s3_1, %lb1_2 : f32
+    %li1_3 = scf.select %gt1_3, %id3, %li1_2 : i32
+    %best1 = kernel.subgroup.reduce<maxnumf> %lb1_3 : f32
+    %isb1 = scalar.cmpf oeq, %lb1_3, %best1 : f32
+    %cand1 = scf.select %isb1, %li1_3, %big_id : i32
+    %win1 = kernel.subgroup.reduce<minsi> %cand1 : i32
+    %m1_0 = scalar.addf %zero_f, %zero_f : f32
+    %w1_0 = scalar.cmpi eq, %id0, %win1 : i32
+    %m1_1 = scf.select %w1_0, %pr0, %m1_0 : f32
+    %s0_2 = scf.select %w1_0, %removed, %s0_1 : f32
+    %w1_1 = scalar.cmpi eq, %id1, %win1 : i32
+    %m1_2 = scf.select %w1_1, %pr1, %m1_1 : f32
+    %s1_2 = scf.select %w1_1, %removed, %s1_1 : f32
+    %w1_2 = scalar.cmpi eq, %id2, %win1 : i32
+    %m1_3 = scf.select %w1_2, %pr2, %m1_2 : f32
+    %s2_2 = scf.select %w1_2, %removed, %s2_1 : f32
+    %w1_3 = scalar.cmpi eq, %id3, %win1 : i32
+    %m1_4 = scf.select %w1_3, %pr3, %m1_3 : f32
+    %s3_2 = scf.select %w1_3, %removed, %s3_1 : f32
+    %wp1 = kernel.subgroup.reduce<addf> %m1_4 : f32
+    %sum_2 = scalar.addf %sum_1, %wp1 : f32
+    scf.if %store_lane {
+      view.store %win1, %ids_view[%token, 1] : i32, view<[%tokens]x8xi32>
+    }
+    %lb2_0 = scalar.addf %s0_2, %zero_f : f32
+    %li2_0 = scalar.addi %id0, %c0_i32r : i32
+    %gt2_1 = scalar.cmpf ogt, %s1_2, %lb2_0 : f32
+    %lb2_1 = scf.select %gt2_1, %s1_2, %lb2_0 : f32
+    %li2_1 = scf.select %gt2_1, %id1, %li2_0 : i32
+    %gt2_2 = scalar.cmpf ogt, %s2_2, %lb2_1 : f32
+    %lb2_2 = scf.select %gt2_2, %s2_2, %lb2_1 : f32
+    %li2_2 = scf.select %gt2_2, %id2, %li2_1 : i32
+    %gt2_3 = scalar.cmpf ogt, %s3_2, %lb2_2 : f32
+    %lb2_3 = scf.select %gt2_3, %s3_2, %lb2_2 : f32
+    %li2_3 = scf.select %gt2_3, %id3, %li2_2 : i32
+    %best2 = kernel.subgroup.reduce<maxnumf> %lb2_3 : f32
+    %isb2 = scalar.cmpf oeq, %lb2_3, %best2 : f32
+    %cand2 = scf.select %isb2, %li2_3, %big_id : i32
+    %win2 = kernel.subgroup.reduce<minsi> %cand2 : i32
+    %m2_0 = scalar.addf %zero_f, %zero_f : f32
+    %w2_0 = scalar.cmpi eq, %id0, %win2 : i32
+    %m2_1 = scf.select %w2_0, %pr0, %m2_0 : f32
+    %s0_3 = scf.select %w2_0, %removed, %s0_2 : f32
+    %w2_1 = scalar.cmpi eq, %id1, %win2 : i32
+    %m2_2 = scf.select %w2_1, %pr1, %m2_1 : f32
+    %s1_3 = scf.select %w2_1, %removed, %s1_2 : f32
+    %w2_2 = scalar.cmpi eq, %id2, %win2 : i32
+    %m2_3 = scf.select %w2_2, %pr2, %m2_2 : f32
+    %s2_3 = scf.select %w2_2, %removed, %s2_2 : f32
+    %w2_3 = scalar.cmpi eq, %id3, %win2 : i32
+    %m2_4 = scf.select %w2_3, %pr3, %m2_3 : f32
+    %s3_3 = scf.select %w2_3, %removed, %s3_2 : f32
+    %wp2 = kernel.subgroup.reduce<addf> %m2_4 : f32
+    %sum_3 = scalar.addf %sum_2, %wp2 : f32
+    scf.if %store_lane {
+      view.store %win2, %ids_view[%token, 2] : i32, view<[%tokens]x8xi32>
+    }
+    %lb3_0 = scalar.addf %s0_3, %zero_f : f32
+    %li3_0 = scalar.addi %id0, %c0_i32r : i32
+    %gt3_1 = scalar.cmpf ogt, %s1_3, %lb3_0 : f32
+    %lb3_1 = scf.select %gt3_1, %s1_3, %lb3_0 : f32
+    %li3_1 = scf.select %gt3_1, %id1, %li3_0 : i32
+    %gt3_2 = scalar.cmpf ogt, %s2_3, %lb3_1 : f32
+    %lb3_2 = scf.select %gt3_2, %s2_3, %lb3_1 : f32
+    %li3_2 = scf.select %gt3_2, %id2, %li3_1 : i32
+    %gt3_3 = scalar.cmpf ogt, %s3_3, %lb3_2 : f32
+    %lb3_3 = scf.select %gt3_3, %s3_3, %lb3_2 : f32
+    %li3_3 = scf.select %gt3_3, %id3, %li3_2 : i32
+    %best3 = kernel.subgroup.reduce<maxnumf> %lb3_3 : f32
+    %isb3 = scalar.cmpf oeq, %lb3_3, %best3 : f32
+    %cand3 = scf.select %isb3, %li3_3, %big_id : i32
+    %win3 = kernel.subgroup.reduce<minsi> %cand3 : i32
+    %m3_0 = scalar.addf %zero_f, %zero_f : f32
+    %w3_0 = scalar.cmpi eq, %id0, %win3 : i32
+    %m3_1 = scf.select %w3_0, %pr0, %m3_0 : f32
+    %s0_4 = scf.select %w3_0, %removed, %s0_3 : f32
+    %w3_1 = scalar.cmpi eq, %id1, %win3 : i32
+    %m3_2 = scf.select %w3_1, %pr1, %m3_1 : f32
+    %s1_4 = scf.select %w3_1, %removed, %s1_3 : f32
+    %w3_2 = scalar.cmpi eq, %id2, %win3 : i32
+    %m3_3 = scf.select %w3_2, %pr2, %m3_2 : f32
+    %s2_4 = scf.select %w3_2, %removed, %s2_3 : f32
+    %w3_3 = scalar.cmpi eq, %id3, %win3 : i32
+    %m3_4 = scf.select %w3_3, %pr3, %m3_3 : f32
+    %s3_4 = scf.select %w3_3, %removed, %s3_3 : f32
+    %wp3 = kernel.subgroup.reduce<addf> %m3_4 : f32
+    %sum_4 = scalar.addf %sum_3, %wp3 : f32
+    scf.if %store_lane {
+      view.store %win3, %ids_view[%token, 3] : i32, view<[%tokens]x8xi32>
+    }
+    %lb4_0 = scalar.addf %s0_4, %zero_f : f32
+    %li4_0 = scalar.addi %id0, %c0_i32r : i32
+    %gt4_1 = scalar.cmpf ogt, %s1_4, %lb4_0 : f32
+    %lb4_1 = scf.select %gt4_1, %s1_4, %lb4_0 : f32
+    %li4_1 = scf.select %gt4_1, %id1, %li4_0 : i32
+    %gt4_2 = scalar.cmpf ogt, %s2_4, %lb4_1 : f32
+    %lb4_2 = scf.select %gt4_2, %s2_4, %lb4_1 : f32
+    %li4_2 = scf.select %gt4_2, %id2, %li4_1 : i32
+    %gt4_3 = scalar.cmpf ogt, %s3_4, %lb4_2 : f32
+    %lb4_3 = scf.select %gt4_3, %s3_4, %lb4_2 : f32
+    %li4_3 = scf.select %gt4_3, %id3, %li4_2 : i32
+    %best4 = kernel.subgroup.reduce<maxnumf> %lb4_3 : f32
+    %isb4 = scalar.cmpf oeq, %lb4_3, %best4 : f32
+    %cand4 = scf.select %isb4, %li4_3, %big_id : i32
+    %win4 = kernel.subgroup.reduce<minsi> %cand4 : i32
+    %m4_0 = scalar.addf %zero_f, %zero_f : f32
+    %w4_0 = scalar.cmpi eq, %id0, %win4 : i32
+    %m4_1 = scf.select %w4_0, %pr0, %m4_0 : f32
+    %s0_5 = scf.select %w4_0, %removed, %s0_4 : f32
+    %w4_1 = scalar.cmpi eq, %id1, %win4 : i32
+    %m4_2 = scf.select %w4_1, %pr1, %m4_1 : f32
+    %s1_5 = scf.select %w4_1, %removed, %s1_4 : f32
+    %w4_2 = scalar.cmpi eq, %id2, %win4 : i32
+    %m4_3 = scf.select %w4_2, %pr2, %m4_2 : f32
+    %s2_5 = scf.select %w4_2, %removed, %s2_4 : f32
+    %w4_3 = scalar.cmpi eq, %id3, %win4 : i32
+    %m4_4 = scf.select %w4_3, %pr3, %m4_3 : f32
+    %s3_5 = scf.select %w4_3, %removed, %s3_4 : f32
+    %wp4 = kernel.subgroup.reduce<addf> %m4_4 : f32
+    %sum_5 = scalar.addf %sum_4, %wp4 : f32
+    scf.if %store_lane {
+      view.store %win4, %ids_view[%token, 4] : i32, view<[%tokens]x8xi32>
+    }
+    %lb5_0 = scalar.addf %s0_5, %zero_f : f32
+    %li5_0 = scalar.addi %id0, %c0_i32r : i32
+    %gt5_1 = scalar.cmpf ogt, %s1_5, %lb5_0 : f32
+    %lb5_1 = scf.select %gt5_1, %s1_5, %lb5_0 : f32
+    %li5_1 = scf.select %gt5_1, %id1, %li5_0 : i32
+    %gt5_2 = scalar.cmpf ogt, %s2_5, %lb5_1 : f32
+    %lb5_2 = scf.select %gt5_2, %s2_5, %lb5_1 : f32
+    %li5_2 = scf.select %gt5_2, %id2, %li5_1 : i32
+    %gt5_3 = scalar.cmpf ogt, %s3_5, %lb5_2 : f32
+    %lb5_3 = scf.select %gt5_3, %s3_5, %lb5_2 : f32
+    %li5_3 = scf.select %gt5_3, %id3, %li5_2 : i32
+    %best5 = kernel.subgroup.reduce<maxnumf> %lb5_3 : f32
+    %isb5 = scalar.cmpf oeq, %lb5_3, %best5 : f32
+    %cand5 = scf.select %isb5, %li5_3, %big_id : i32
+    %win5 = kernel.subgroup.reduce<minsi> %cand5 : i32
+    %m5_0 = scalar.addf %zero_f, %zero_f : f32
+    %w5_0 = scalar.cmpi eq, %id0, %win5 : i32
+    %m5_1 = scf.select %w5_0, %pr0, %m5_0 : f32
+    %s0_6 = scf.select %w5_0, %removed, %s0_5 : f32
+    %w5_1 = scalar.cmpi eq, %id1, %win5 : i32
+    %m5_2 = scf.select %w5_1, %pr1, %m5_1 : f32
+    %s1_6 = scf.select %w5_1, %removed, %s1_5 : f32
+    %w5_2 = scalar.cmpi eq, %id2, %win5 : i32
+    %m5_3 = scf.select %w5_2, %pr2, %m5_2 : f32
+    %s2_6 = scf.select %w5_2, %removed, %s2_5 : f32
+    %w5_3 = scalar.cmpi eq, %id3, %win5 : i32
+    %m5_4 = scf.select %w5_3, %pr3, %m5_3 : f32
+    %s3_6 = scf.select %w5_3, %removed, %s3_5 : f32
+    %wp5 = kernel.subgroup.reduce<addf> %m5_4 : f32
+    %sum_6 = scalar.addf %sum_5, %wp5 : f32
+    scf.if %store_lane {
+      view.store %win5, %ids_view[%token, 5] : i32, view<[%tokens]x8xi32>
+    }
+    %lb6_0 = scalar.addf %s0_6, %zero_f : f32
+    %li6_0 = scalar.addi %id0, %c0_i32r : i32
+    %gt6_1 = scalar.cmpf ogt, %s1_6, %lb6_0 : f32
+    %lb6_1 = scf.select %gt6_1, %s1_6, %lb6_0 : f32
+    %li6_1 = scf.select %gt6_1, %id1, %li6_0 : i32
+    %gt6_2 = scalar.cmpf ogt, %s2_6, %lb6_1 : f32
+    %lb6_2 = scf.select %gt6_2, %s2_6, %lb6_1 : f32
+    %li6_2 = scf.select %gt6_2, %id2, %li6_1 : i32
+    %gt6_3 = scalar.cmpf ogt, %s3_6, %lb6_2 : f32
+    %lb6_3 = scf.select %gt6_3, %s3_6, %lb6_2 : f32
+    %li6_3 = scf.select %gt6_3, %id3, %li6_2 : i32
+    %best6 = kernel.subgroup.reduce<maxnumf> %lb6_3 : f32
+    %isb6 = scalar.cmpf oeq, %lb6_3, %best6 : f32
+    %cand6 = scf.select %isb6, %li6_3, %big_id : i32
+    %win6 = kernel.subgroup.reduce<minsi> %cand6 : i32
+    %m6_0 = scalar.addf %zero_f, %zero_f : f32
+    %w6_0 = scalar.cmpi eq, %id0, %win6 : i32
+    %m6_1 = scf.select %w6_0, %pr0, %m6_0 : f32
+    %s0_7 = scf.select %w6_0, %removed, %s0_6 : f32
+    %w6_1 = scalar.cmpi eq, %id1, %win6 : i32
+    %m6_2 = scf.select %w6_1, %pr1, %m6_1 : f32
+    %s1_7 = scf.select %w6_1, %removed, %s1_6 : f32
+    %w6_2 = scalar.cmpi eq, %id2, %win6 : i32
+    %m6_3 = scf.select %w6_2, %pr2, %m6_2 : f32
+    %s2_7 = scf.select %w6_2, %removed, %s2_6 : f32
+    %w6_3 = scalar.cmpi eq, %id3, %win6 : i32
+    %m6_4 = scf.select %w6_3, %pr3, %m6_3 : f32
+    %s3_7 = scf.select %w6_3, %removed, %s3_6 : f32
+    %wp6 = kernel.subgroup.reduce<addf> %m6_4 : f32
+    %sum_7 = scalar.addf %sum_6, %wp6 : f32
+    scf.if %store_lane {
+      view.store %win6, %ids_view[%token, 6] : i32, view<[%tokens]x8xi32>
+    }
+    %lb7_0 = scalar.addf %s0_7, %zero_f : f32
+    %li7_0 = scalar.addi %id0, %c0_i32r : i32
+    %gt7_1 = scalar.cmpf ogt, %s1_7, %lb7_0 : f32
+    %lb7_1 = scf.select %gt7_1, %s1_7, %lb7_0 : f32
+    %li7_1 = scf.select %gt7_1, %id1, %li7_0 : i32
+    %gt7_2 = scalar.cmpf ogt, %s2_7, %lb7_1 : f32
+    %lb7_2 = scf.select %gt7_2, %s2_7, %lb7_1 : f32
+    %li7_2 = scf.select %gt7_2, %id2, %li7_1 : i32
+    %gt7_3 = scalar.cmpf ogt, %s3_7, %lb7_2 : f32
+    %lb7_3 = scf.select %gt7_3, %s3_7, %lb7_2 : f32
+    %li7_3 = scf.select %gt7_3, %id3, %li7_2 : i32
+    %best7 = kernel.subgroup.reduce<maxnumf> %lb7_3 : f32
+    %isb7 = scalar.cmpf oeq, %lb7_3, %best7 : f32
+    %cand7 = scf.select %isb7, %li7_3, %big_id : i32
+    %win7 = kernel.subgroup.reduce<minsi> %cand7 : i32
+    %m7_0 = scalar.addf %zero_f, %zero_f : f32
+    %w7_0 = scalar.cmpi eq, %id0, %win7 : i32
+    %m7_1 = scf.select %w7_0, %pr0, %m7_0 : f32
+    %s0_8 = scf.select %w7_0, %removed, %s0_7 : f32
+    %w7_1 = scalar.cmpi eq, %id1, %win7 : i32
+    %m7_2 = scf.select %w7_1, %pr1, %m7_1 : f32
+    %s1_8 = scf.select %w7_1, %removed, %s1_7 : f32
+    %w7_2 = scalar.cmpi eq, %id2, %win7 : i32
+    %m7_3 = scf.select %w7_2, %pr2, %m7_2 : f32
+    %s2_8 = scf.select %w7_2, %removed, %s2_7 : f32
+    %w7_3 = scalar.cmpi eq, %id3, %win7 : i32
+    %m7_4 = scf.select %w7_3, %pr3, %m7_3 : f32
+    %s3_8 = scf.select %w7_3, %removed, %s3_7 : f32
+    %wp7 = kernel.subgroup.reduce<addf> %m7_4 : f32
+    %sum_8 = scalar.addf %sum_7, %wp7 : f32
+    scf.if %store_lane {
+      view.store %win7, %ids_view[%token, 7] : i32, view<[%tokens]x8xi32>
+    }
+    %total = scalar.addf %sum_8, %zero_f : f32
+    %min_sum = scalar.constant 6.103515625e-05 : f32
+    %wsum = scalar.maxnumf %total, %min_sum : f32
+    scf.if %store_lane {
+      %wn0 = scalar.divf %wp0, %wsum : f32
+      view.store %wn0, %wts_view[%token, 0] : f32, view<[%tokens]x8xf32>
+      %wn1 = scalar.divf %wp1, %wsum : f32
+      view.store %wn1, %wts_view[%token, 1] : f32, view<[%tokens]x8xf32>
+      %wn2 = scalar.divf %wp2, %wsum : f32
+      view.store %wn2, %wts_view[%token, 2] : f32, view<[%tokens]x8xf32>
+      %wn3 = scalar.divf %wp3, %wsum : f32
+      view.store %wn3, %wts_view[%token, 3] : f32, view<[%tokens]x8xf32>
+      %wn4 = scalar.divf %wp4, %wsum : f32
+      view.store %wn4, %wts_view[%token, 4] : f32, view<[%tokens]x8xf32>
+      %wn5 = scalar.divf %wp5, %wsum : f32
+      view.store %wn5, %wts_view[%token, 5] : f32, view<[%tokens]x8xf32>
+      %wn6 = scalar.divf %wp6, %wsum : f32
+      view.store %wn6, %wts_view[%token, 6] : f32, view<[%tokens]x8xf32>
+      %wn7 = scalar.divf %wp7, %wsum : f32
+      view.store %wn7, %wts_view[%token, 7] : f32, view<[%tokens]x8xf32>
+    }
+  }
+  }
+  kernel.return
+}
+
+check.case public @k_route2048_case {
+  %t = check.literal value(2048) : index
+  %x = check.generate.fill value(0.01) : tensor<2048x2048xf32>
+  %w = check.generate.fill value(0.02) : tensor<262144xf32>
+  %ids = check.generate.fill value(0) : tensor<2048x8xi32>
+  %wts = check.generate.fill value(0.0) : tensor<2048x8xf32>
+  %info = check.file.read.npy path("r2048_info.npy") : tensor<2048x4xi32>
+  kernel.launch @k_route2048[%t](%t, %x, %w, %wts, %ids, %wts, %info) : [index](index, tensor<2048x2048xf32>, tensor<262144xf32>, tensor<2048x8xf32>, tensor<2048x8xi32>, tensor<2048x8xf32>, tensor<2048x4xi32>)
+  check.return
+}
+check.benchmark<@k_route2048_case> @k_route2048_bm
+
+kernel.def export("k_route8192") @k_route8192(%tokens: index) {
+  %c1 = index.constant 1 : index
+  %c256 = index.constant 256 : index
+  %cTRm1 = index.constant 1 : index
+  %cTR = index.constant 2 : index
+  %padded = index.add %tokens, %cTRm1 : index
+  %groups = index.div %padded, %cTR : index
+  kernel.launch.config workgroups(%groups, %c1, %c1) workgroup_size(%c256, %c1, %c1) : index
+} launch(%tokens_arg: index, %x: buffer, %w: buffer, %b: buffer, %ids: buffer, %wts: buffer, %info: buffer) {
+  %tokens = index.assume %tokens_arg [range(%tokens_arg, 1, 8192)] : index
+  %group_id = kernel.workgroup.id<x> : index
+  %wave_id = kernel.subgroup.id : index
+  %wave = index.assume %wave_id [range(%wave_id, 0, 7)] : index
+  %lane_id = kernel.subgroup.lane.id : index
+  %lane = index.assume %lane_id [range(%lane_id, 0, 31)] : index
+  %zero = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c32 = index.constant 32 : index
+  %c256 = index.constant 256 : index
+  %cHG = index.constant 64 : index
+  %cE = index.constant 128 : index
+  %cTR = index.constant 2 : index
+  %zero_f = scalar.constant 0.0 : f32
+  %token0 = index.mul %group_id, %cTR : index
+  %gl_view = buffer.view %info[%zero] : buffer -> view<[%tokens]x4xi32>
+  %gl_dead = scalar.constant 0 : i32
+  %gl_c0 = index.constant 0 : index
+  %gl_t0v = index.add %token0, %gl_c0 : index
+  %gl_in0 = index.cmp ult, %gl_t0v, %tokens : index
+  %gl_t0c = scf.select %gl_in0, %gl_t0v, %c0 : index
+  %gl_t0 = index.assume %gl_t0c [lt(%gl_t0c, %tokens)] : index
+  %gl_w0 = view.load %gl_view[%gl_t0, 2] : view<[%tokens]x4xi32> -> i32
+  %gl_l0 = scalar.cmpi ne, %gl_w0, %gl_dead : i32
+  %gl_a0 = scalar.andi %gl_in0, %gl_l0 : i1
+  %gl_any0 = scalar.andi %gl_a0, %gl_a0 : i1
+  %gl_c1 = index.constant 1 : index
+  %gl_t1v = index.add %token0, %gl_c1 : index
+  %gl_in1 = index.cmp ult, %gl_t1v, %tokens : index
+  %gl_t1c = scf.select %gl_in1, %gl_t1v, %c0 : index
+  %gl_t1 = index.assume %gl_t1c [lt(%gl_t1c, %tokens)] : index
+  %gl_w1 = view.load %gl_view[%gl_t1, 2] : view<[%tokens]x4xi32> -> i32
+  %gl_l1 = scalar.cmpi ne, %gl_w1, %gl_dead : i32
+  %gl_a1 = scalar.andi %gl_in1, %gl_l1 : i1
+  %gl_any1 = scalar.ori %gl_any0, %gl_a1 : i1
+  scf.if %gl_any1 {
+  %x_view = buffer.view %x[%zero] : buffer -> view<[%tokens]x64x32xf32>
+  %xs_bytes = index.constant 16384 : offset
+  %xs = buffer.alloca<workgroup> align(16) %xs_bytes : buffer
+  %xs_view = buffer.view %xs[%zero] : buffer -> view<2x64x32xf32>
+  %xs4_view = buffer.view %xs[%zero] : buffer -> view<2x16x32x4xf32>
+  %w4_view = buffer.view %w[%zero] : buffer -> view<128x16x32x4xf32>
+  %cHB = index.constant 16 : index
+  %lg_bytes = index.constant 1024 : offset
+  %lg = buffer.alloca<workgroup> align(16) %lg_bytes : buffer
+  %lg_view = buffer.view %lg[%zero] : buffer -> view<2x128xf32>
+  %tid0 = kernel.workitem.id<x> : index
+  %tid = index.assume %tid0 [range(%tid0, 0, 255)] : index
+  %cvec = index.constant 128 : index
+  %zero32 = vector.splatf 0.0 : vector<32xf32>
+  scf.for %v = [%tid to %cvec step %c256] {
+    %r_value = index.div %v, %cHG : index
+    %r = index.assume %r_value [range(%r_value, 0, 1)] : index
+    %g_value = index.rem %v, %cHG : index
+    %g = index.assume %g_value [range(%g_value, 0, 63)] : index
+    %tok_value = index.add %token0, %r : index
+    %tok_in = index.cmp ult, %tok_value, %tokens : index
+    %tok_c = scf.select %tok_in, %tok_value, %c0 : index
+    %tok = index.assume %tok_c [lt(%tok_c, %tokens)] : index
+    %xg = vector.load %x_view[%tok, %g, %c0] : view<[%tokens]x64x32xf32> -> vector<32xf32>
+    %xsel = scf.select %tok_in, %xg, %zero32 : vector<32xf32>
+    vector.store %xsel, %xs_view[%r, %g, %c0] : vector<32xf32>, view<2x64x32xf32>
+  }
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  %first = index.cmp eq, %lane, %c0 : index
+  %cEPW = index.constant 16 : index
+  %e0 = index.mul %wave, %cEPW : index
+  scf.for %j = [%c0 to %cEPW step %c1] {
+    %e_raw = index.add %e0, %j : index
+    %e = index.assume %e_raw [range(%e_raw, 0, 127)] : index
+    %p0, %p1 = scf.for %bq = [%c0 to %cHB step %c1](%a0 = %zero_f : f32, %a1 = %zero_f : f32) -> (f32, f32) {
+      %bb = index.assume %bq [range(%bq, 0, 15)] : index
+      %wv = vector.load %w4_view[%e, %bb, %lane, %c0] : view<128x16x32x4xf32> -> vector<4xf32>
+      %xv0 = vector.load %xs4_view[0, %bb, %lane, %c0] : view<2x16x32x4xf32> -> vector<4xf32>
+      %d0 = vector.dotf<reassoc|contract> %wv, %xv0, %zero_f : vector<4xf32>, vector<4xf32>, f32
+      %n0 = scalar.addf %a0, %d0 : f32
+      %xv1 = vector.load %xs4_view[1, %bb, %lane, %c0] : view<2x16x32x4xf32> -> vector<4xf32>
+      %d1 = vector.dotf<reassoc|contract> %wv, %xv1, %zero_f : vector<4xf32>, vector<4xf32>, f32
+      %n1 = scalar.addf %a1, %d1 : f32
+      scf.yield %n0, %n1 : f32, f32
+    }
+    %logit0 = kernel.subgroup.reduce<addf> %p0 : f32
+    scf.if %first {
+      view.store %logit0, %lg_view[0, %e] : f32, view<2x128xf32>
+    }
+    %logit1 = kernel.subgroup.reduce<addf> %p1 : f32
+    scf.if %first {
+      view.store %logit1, %lg_view[1, %e] : f32, view<2x128xf32>
+    }
+  }
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  %c0_i32r = scalar.constant 0 : i32
+  %removed = scalar.constant -3.0e38 : f32
+  %big_id = scalar.constant 1000000 : i32
+  %ids_view = buffer.view %ids[%zero] : buffer -> view<[%tokens]x8xi32>
+  %wts_view = buffer.view %wts[%zero] : buffer -> view<[%tokens]x8xf32>
+  %wave_tok = index.cmp ult, %wave, %cTR : index
+  scf.if %wave_tok {
+    %r = index.assume %wave [range(%wave, 0, 1)] : index
+    %tok_value = index.add %token0, %r : index
+    %tok_live = index.cmp ult, %tok_value, %tokens : index
+    %tok_c = scf.select %tok_live, %tok_value, %c0 : index
+    %token = index.assume %tok_c [lt(%tok_c, %tokens)] : index
+    %store_lane = scalar.andi %first, %tok_live : i1
+    %ce0 = index.constant 0 : index
+    %e0_v = index.add %lane, %ce0 : index
+    %e0_in = index.cmp ult, %e0_v, %cE : index
+    %e0_c = scf.select %e0_in, %e0_v, %c0 : index
+    %be0 = index.assume %e0_c [range(%e0_c, 0, 127)] : index
+    %id0 = index.cast %e0_v : index to i32
+    %lgt0 = view.load %lg_view[%r, %be0] : view<2x128xf32> -> f32
+    %lm0 = scf.select %e0_in, %lgt0, %removed : f32
+    %lmx0 = scalar.addf %lm0, %zero_f : f32
+    %ce1 = index.constant 32 : index
+    %e1_v = index.add %lane, %ce1 : index
+    %e1_in = index.cmp ult, %e1_v, %cE : index
+    %e1_c = scf.select %e1_in, %e1_v, %c0 : index
+    %be1 = index.assume %e1_c [range(%e1_c, 0, 127)] : index
+    %id1 = index.cast %e1_v : index to i32
+    %lgt1 = view.load %lg_view[%r, %be1] : view<2x128xf32> -> f32
+    %lm1 = scf.select %e1_in, %lgt1, %removed : f32
+    %lmx1 = scalar.maxnumf %lmx0, %lm1 : f32
+    %ce2 = index.constant 64 : index
+    %e2_v = index.add %lane, %ce2 : index
+    %e2_in = index.cmp ult, %e2_v, %cE : index
+    %e2_c = scf.select %e2_in, %e2_v, %c0 : index
+    %be2 = index.assume %e2_c [range(%e2_c, 0, 127)] : index
+    %id2 = index.cast %e2_v : index to i32
+    %lgt2 = view.load %lg_view[%r, %be2] : view<2x128xf32> -> f32
+    %lm2 = scf.select %e2_in, %lgt2, %removed : f32
+    %lmx2 = scalar.maxnumf %lmx1, %lm2 : f32
+    %ce3 = index.constant 96 : index
+    %e3_v = index.add %lane, %ce3 : index
+    %e3_in = index.cmp ult, %e3_v, %cE : index
+    %e3_c = scf.select %e3_in, %e3_v, %c0 : index
+    %be3 = index.assume %e3_c [range(%e3_c, 0, 127)] : index
+    %id3 = index.cast %e3_v : index to i32
+    %lgt3 = view.load %lg_view[%r, %be3] : view<2x128xf32> -> f32
+    %lm3 = scf.select %e3_in, %lgt3, %removed : f32
+    %lmx3 = scalar.maxnumf %lmx2, %lm3 : f32
+    %smax = kernel.subgroup.reduce<maxnumf> %lmx3 : f32
+    %lsh0 = scalar.subf %lm0, %smax : f32
+    %lex0 = scalar.expf<afn> %lsh0 : f32
+    %lexm0 = scf.select %e0_in, %lex0, %zero_f : f32
+    %lsum0 = scalar.addf %lexm0, %zero_f : f32
+    %lsh1 = scalar.subf %lm1, %smax : f32
+    %lex1 = scalar.expf<afn> %lsh1 : f32
+    %lexm1 = scf.select %e1_in, %lex1, %zero_f : f32
+    %lsum1 = scalar.addf %lsum0, %lexm1 : f32
+    %lsh2 = scalar.subf %lm2, %smax : f32
+    %lex2 = scalar.expf<afn> %lsh2 : f32
+    %lexm2 = scf.select %e2_in, %lex2, %zero_f : f32
+    %lsum2 = scalar.addf %lsum1, %lexm2 : f32
+    %lsh3 = scalar.subf %lm3, %smax : f32
+    %lex3 = scalar.expf<afn> %lsh3 : f32
+    %lexm3 = scf.select %e3_in, %lex3, %zero_f : f32
+    %lsum3 = scalar.addf %lsum2, %lexm3 : f32
+    %sden = kernel.subgroup.reduce<addf> %lsum3 : f32
+    %pr0 = scalar.divf %lexm0, %sden : f32
+    %s0_0 = scf.select %e0_in, %pr0, %removed : f32
+    %pr1 = scalar.divf %lexm1, %sden : f32
+    %s1_0 = scf.select %e1_in, %pr1, %removed : f32
+    %pr2 = scalar.divf %lexm2, %sden : f32
+    %s2_0 = scf.select %e2_in, %pr2, %removed : f32
+    %pr3 = scalar.divf %lexm3, %sden : f32
+    %s3_0 = scf.select %e3_in, %pr3, %removed : f32
+    %sum_0 = scalar.addf %zero_f, %zero_f : f32
+    %lb0_0 = scalar.addf %s0_0, %zero_f : f32
+    %li0_0 = scalar.addi %id0, %c0_i32r : i32
+    %gt0_1 = scalar.cmpf ogt, %s1_0, %lb0_0 : f32
+    %lb0_1 = scf.select %gt0_1, %s1_0, %lb0_0 : f32
+    %li0_1 = scf.select %gt0_1, %id1, %li0_0 : i32
+    %gt0_2 = scalar.cmpf ogt, %s2_0, %lb0_1 : f32
+    %lb0_2 = scf.select %gt0_2, %s2_0, %lb0_1 : f32
+    %li0_2 = scf.select %gt0_2, %id2, %li0_1 : i32
+    %gt0_3 = scalar.cmpf ogt, %s3_0, %lb0_2 : f32
+    %lb0_3 = scf.select %gt0_3, %s3_0, %lb0_2 : f32
+    %li0_3 = scf.select %gt0_3, %id3, %li0_2 : i32
+    %best0 = kernel.subgroup.reduce<maxnumf> %lb0_3 : f32
+    %isb0 = scalar.cmpf oeq, %lb0_3, %best0 : f32
+    %cand0 = scf.select %isb0, %li0_3, %big_id : i32
+    %win0 = kernel.subgroup.reduce<minsi> %cand0 : i32
+    %m0_0 = scalar.addf %zero_f, %zero_f : f32
+    %w0_0 = scalar.cmpi eq, %id0, %win0 : i32
+    %m0_1 = scf.select %w0_0, %pr0, %m0_0 : f32
+    %s0_1 = scf.select %w0_0, %removed, %s0_0 : f32
+    %w0_1 = scalar.cmpi eq, %id1, %win0 : i32
+    %m0_2 = scf.select %w0_1, %pr1, %m0_1 : f32
+    %s1_1 = scf.select %w0_1, %removed, %s1_0 : f32
+    %w0_2 = scalar.cmpi eq, %id2, %win0 : i32
+    %m0_3 = scf.select %w0_2, %pr2, %m0_2 : f32
+    %s2_1 = scf.select %w0_2, %removed, %s2_0 : f32
+    %w0_3 = scalar.cmpi eq, %id3, %win0 : i32
+    %m0_4 = scf.select %w0_3, %pr3, %m0_3 : f32
+    %s3_1 = scf.select %w0_3, %removed, %s3_0 : f32
+    %wp0 = kernel.subgroup.reduce<addf> %m0_4 : f32
+    %sum_1 = scalar.addf %sum_0, %wp0 : f32
+    scf.if %store_lane {
+      view.store %win0, %ids_view[%token, 0] : i32, view<[%tokens]x8xi32>
+    }
+    %lb1_0 = scalar.addf %s0_1, %zero_f : f32
+    %li1_0 = scalar.addi %id0, %c0_i32r : i32
+    %gt1_1 = scalar.cmpf ogt, %s1_1, %lb1_0 : f32
+    %lb1_1 = scf.select %gt1_1, %s1_1, %lb1_0 : f32
+    %li1_1 = scf.select %gt1_1, %id1, %li1_0 : i32
+    %gt1_2 = scalar.cmpf ogt, %s2_1, %lb1_1 : f32
+    %lb1_2 = scf.select %gt1_2, %s2_1, %lb1_1 : f32
+    %li1_2 = scf.select %gt1_2, %id2, %li1_1 : i32
+    %gt1_3 = scalar.cmpf ogt, %s3_1, %lb1_2 : f32
+    %lb1_3 = scf.select %gt1_3, %s3_1, %lb1_2 : f32
+    %li1_3 = scf.select %gt1_3, %id3, %li1_2 : i32
+    %best1 = kernel.subgroup.reduce<maxnumf> %lb1_3 : f32
+    %isb1 = scalar.cmpf oeq, %lb1_3, %best1 : f32
+    %cand1 = scf.select %isb1, %li1_3, %big_id : i32
+    %win1 = kernel.subgroup.reduce<minsi> %cand1 : i32
+    %m1_0 = scalar.addf %zero_f, %zero_f : f32
+    %w1_0 = scalar.cmpi eq, %id0, %win1 : i32
+    %m1_1 = scf.select %w1_0, %pr0, %m1_0 : f32
+    %s0_2 = scf.select %w1_0, %removed, %s0_1 : f32
+    %w1_1 = scalar.cmpi eq, %id1, %win1 : i32
+    %m1_2 = scf.select %w1_1, %pr1, %m1_1 : f32
+    %s1_2 = scf.select %w1_1, %removed, %s1_1 : f32
+    %w1_2 = scalar.cmpi eq, %id2, %win1 : i32
+    %m1_3 = scf.select %w1_2, %pr2, %m1_2 : f32
+    %s2_2 = scf.select %w1_2, %removed, %s2_1 : f32
+    %w1_3 = scalar.cmpi eq, %id3, %win1 : i32
+    %m1_4 = scf.select %w1_3, %pr3, %m1_3 : f32
+    %s3_2 = scf.select %w1_3, %removed, %s3_1 : f32
+    %wp1 = kernel.subgroup.reduce<addf> %m1_4 : f32
+    %sum_2 = scalar.addf %sum_1, %wp1 : f32
+    scf.if %store_lane {
+      view.store %win1, %ids_view[%token, 1] : i32, view<[%tokens]x8xi32>
+    }
+    %lb2_0 = scalar.addf %s0_2, %zero_f : f32
+    %li2_0 = scalar.addi %id0, %c0_i32r : i32
+    %gt2_1 = scalar.cmpf ogt, %s1_2, %lb2_0 : f32
+    %lb2_1 = scf.select %gt2_1, %s1_2, %lb2_0 : f32
+    %li2_1 = scf.select %gt2_1, %id1, %li2_0 : i32
+    %gt2_2 = scalar.cmpf ogt, %s2_2, %lb2_1 : f32
+    %lb2_2 = scf.select %gt2_2, %s2_2, %lb2_1 : f32
+    %li2_2 = scf.select %gt2_2, %id2, %li2_1 : i32
+    %gt2_3 = scalar.cmpf ogt, %s3_2, %lb2_2 : f32
+    %lb2_3 = scf.select %gt2_3, %s3_2, %lb2_2 : f32
+    %li2_3 = scf.select %gt2_3, %id3, %li2_2 : i32
+    %best2 = kernel.subgroup.reduce<maxnumf> %lb2_3 : f32
+    %isb2 = scalar.cmpf oeq, %lb2_3, %best2 : f32
+    %cand2 = scf.select %isb2, %li2_3, %big_id : i32
+    %win2 = kernel.subgroup.reduce<minsi> %cand2 : i32
+    %m2_0 = scalar.addf %zero_f, %zero_f : f32
+    %w2_0 = scalar.cmpi eq, %id0, %win2 : i32
+    %m2_1 = scf.select %w2_0, %pr0, %m2_0 : f32
+    %s0_3 = scf.select %w2_0, %removed, %s0_2 : f32
+    %w2_1 = scalar.cmpi eq, %id1, %win2 : i32
+    %m2_2 = scf.select %w2_1, %pr1, %m2_1 : f32
+    %s1_3 = scf.select %w2_1, %removed, %s1_2 : f32
+    %w2_2 = scalar.cmpi eq, %id2, %win2 : i32
+    %m2_3 = scf.select %w2_2, %pr2, %m2_2 : f32
+    %s2_3 = scf.select %w2_2, %removed, %s2_2 : f32
+    %w2_3 = scalar.cmpi eq, %id3, %win2 : i32
+    %m2_4 = scf.select %w2_3, %pr3, %m2_3 : f32
+    %s3_3 = scf.select %w2_3, %removed, %s3_2 : f32
+    %wp2 = kernel.subgroup.reduce<addf> %m2_4 : f32
+    %sum_3 = scalar.addf %sum_2, %wp2 : f32
+    scf.if %store_lane {
+      view.store %win2, %ids_view[%token, 2] : i32, view<[%tokens]x8xi32>
+    }
+    %lb3_0 = scalar.addf %s0_3, %zero_f : f32
+    %li3_0 = scalar.addi %id0, %c0_i32r : i32
+    %gt3_1 = scalar.cmpf ogt, %s1_3, %lb3_0 : f32
+    %lb3_1 = scf.select %gt3_1, %s1_3, %lb3_0 : f32
+    %li3_1 = scf.select %gt3_1, %id1, %li3_0 : i32
+    %gt3_2 = scalar.cmpf ogt, %s2_3, %lb3_1 : f32
+    %lb3_2 = scf.select %gt3_2, %s2_3, %lb3_1 : f32
+    %li3_2 = scf.select %gt3_2, %id2, %li3_1 : i32
+    %gt3_3 = scalar.cmpf ogt, %s3_3, %lb3_2 : f32
+    %lb3_3 = scf.select %gt3_3, %s3_3, %lb3_2 : f32
+    %li3_3 = scf.select %gt3_3, %id3, %li3_2 : i32
+    %best3 = kernel.subgroup.reduce<maxnumf> %lb3_3 : f32
+    %isb3 = scalar.cmpf oeq, %lb3_3, %best3 : f32
+    %cand3 = scf.select %isb3, %li3_3, %big_id : i32
+    %win3 = kernel.subgroup.reduce<minsi> %cand3 : i32
+    %m3_0 = scalar.addf %zero_f, %zero_f : f32
+    %w3_0 = scalar.cmpi eq, %id0, %win3 : i32
+    %m3_1 = scf.select %w3_0, %pr0, %m3_0 : f32
+    %s0_4 = scf.select %w3_0, %removed, %s0_3 : f32
+    %w3_1 = scalar.cmpi eq, %id1, %win3 : i32
+    %m3_2 = scf.select %w3_1, %pr1, %m3_1 : f32
+    %s1_4 = scf.select %w3_1, %removed, %s1_3 : f32
+    %w3_2 = scalar.cmpi eq, %id2, %win3 : i32
+    %m3_3 = scf.select %w3_2, %pr2, %m3_2 : f32
+    %s2_4 = scf.select %w3_2, %removed, %s2_3 : f32
+    %w3_3 = scalar.cmpi eq, %id3, %win3 : i32
+    %m3_4 = scf.select %w3_3, %pr3, %m3_3 : f32
+    %s3_4 = scf.select %w3_3, %removed, %s3_3 : f32
+    %wp3 = kernel.subgroup.reduce<addf> %m3_4 : f32
+    %sum_4 = scalar.addf %sum_3, %wp3 : f32
+    scf.if %store_lane {
+      view.store %win3, %ids_view[%token, 3] : i32, view<[%tokens]x8xi32>
+    }
+    %lb4_0 = scalar.addf %s0_4, %zero_f : f32
+    %li4_0 = scalar.addi %id0, %c0_i32r : i32
+    %gt4_1 = scalar.cmpf ogt, %s1_4, %lb4_0 : f32
+    %lb4_1 = scf.select %gt4_1, %s1_4, %lb4_0 : f32
+    %li4_1 = scf.select %gt4_1, %id1, %li4_0 : i32
+    %gt4_2 = scalar.cmpf ogt, %s2_4, %lb4_1 : f32
+    %lb4_2 = scf.select %gt4_2, %s2_4, %lb4_1 : f32
+    %li4_2 = scf.select %gt4_2, %id2, %li4_1 : i32
+    %gt4_3 = scalar.cmpf ogt, %s3_4, %lb4_2 : f32
+    %lb4_3 = scf.select %gt4_3, %s3_4, %lb4_2 : f32
+    %li4_3 = scf.select %gt4_3, %id3, %li4_2 : i32
+    %best4 = kernel.subgroup.reduce<maxnumf> %lb4_3 : f32
+    %isb4 = scalar.cmpf oeq, %lb4_3, %best4 : f32
+    %cand4 = scf.select %isb4, %li4_3, %big_id : i32
+    %win4 = kernel.subgroup.reduce<minsi> %cand4 : i32
+    %m4_0 = scalar.addf %zero_f, %zero_f : f32
+    %w4_0 = scalar.cmpi eq, %id0, %win4 : i32
+    %m4_1 = scf.select %w4_0, %pr0, %m4_0 : f32
+    %s0_5 = scf.select %w4_0, %removed, %s0_4 : f32
+    %w4_1 = scalar.cmpi eq, %id1, %win4 : i32
+    %m4_2 = scf.select %w4_1, %pr1, %m4_1 : f32
+    %s1_5 = scf.select %w4_1, %removed, %s1_4 : f32
+    %w4_2 = scalar.cmpi eq, %id2, %win4 : i32
+    %m4_3 = scf.select %w4_2, %pr2, %m4_2 : f32
+    %s2_5 = scf.select %w4_2, %removed, %s2_4 : f32
+    %w4_3 = scalar.cmpi eq, %id3, %win4 : i32
+    %m4_4 = scf.select %w4_3, %pr3, %m4_3 : f32
+    %s3_5 = scf.select %w4_3, %removed, %s3_4 : f32
+    %wp4 = kernel.subgroup.reduce<addf> %m4_4 : f32
+    %sum_5 = scalar.addf %sum_4, %wp4 : f32
+    scf.if %store_lane {
+      view.store %win4, %ids_view[%token, 4] : i32, view<[%tokens]x8xi32>
+    }
+    %lb5_0 = scalar.addf %s0_5, %zero_f : f32
+    %li5_0 = scalar.addi %id0, %c0_i32r : i32
+    %gt5_1 = scalar.cmpf ogt, %s1_5, %lb5_0 : f32
+    %lb5_1 = scf.select %gt5_1, %s1_5, %lb5_0 : f32
+    %li5_1 = scf.select %gt5_1, %id1, %li5_0 : i32
+    %gt5_2 = scalar.cmpf ogt, %s2_5, %lb5_1 : f32
+    %lb5_2 = scf.select %gt5_2, %s2_5, %lb5_1 : f32
+    %li5_2 = scf.select %gt5_2, %id2, %li5_1 : i32
+    %gt5_3 = scalar.cmpf ogt, %s3_5, %lb5_2 : f32
+    %lb5_3 = scf.select %gt5_3, %s3_5, %lb5_2 : f32
+    %li5_3 = scf.select %gt5_3, %id3, %li5_2 : i32
+    %best5 = kernel.subgroup.reduce<maxnumf> %lb5_3 : f32
+    %isb5 = scalar.cmpf oeq, %lb5_3, %best5 : f32
+    %cand5 = scf.select %isb5, %li5_3, %big_id : i32
+    %win5 = kernel.subgroup.reduce<minsi> %cand5 : i32
+    %m5_0 = scalar.addf %zero_f, %zero_f : f32
+    %w5_0 = scalar.cmpi eq, %id0, %win5 : i32
+    %m5_1 = scf.select %w5_0, %pr0, %m5_0 : f32
+    %s0_6 = scf.select %w5_0, %removed, %s0_5 : f32
+    %w5_1 = scalar.cmpi eq, %id1, %win5 : i32
+    %m5_2 = scf.select %w5_1, %pr1, %m5_1 : f32
+    %s1_6 = scf.select %w5_1, %removed, %s1_5 : f32
+    %w5_2 = scalar.cmpi eq, %id2, %win5 : i32
+    %m5_3 = scf.select %w5_2, %pr2, %m5_2 : f32
+    %s2_6 = scf.select %w5_2, %removed, %s2_5 : f32
+    %w5_3 = scalar.cmpi eq, %id3, %win5 : i32
+    %m5_4 = scf.select %w5_3, %pr3, %m5_3 : f32
+    %s3_6 = scf.select %w5_3, %removed, %s3_5 : f32
+    %wp5 = kernel.subgroup.reduce<addf> %m5_4 : f32
+    %sum_6 = scalar.addf %sum_5, %wp5 : f32
+    scf.if %store_lane {
+      view.store %win5, %ids_view[%token, 5] : i32, view<[%tokens]x8xi32>
+    }
+    %lb6_0 = scalar.addf %s0_6, %zero_f : f32
+    %li6_0 = scalar.addi %id0, %c0_i32r : i32
+    %gt6_1 = scalar.cmpf ogt, %s1_6, %lb6_0 : f32
+    %lb6_1 = scf.select %gt6_1, %s1_6, %lb6_0 : f32
+    %li6_1 = scf.select %gt6_1, %id1, %li6_0 : i32
+    %gt6_2 = scalar.cmpf ogt, %s2_6, %lb6_1 : f32
+    %lb6_2 = scf.select %gt6_2, %s2_6, %lb6_1 : f32
+    %li6_2 = scf.select %gt6_2, %id2, %li6_1 : i32
+    %gt6_3 = scalar.cmpf ogt, %s3_6, %lb6_2 : f32
+    %lb6_3 = scf.select %gt6_3, %s3_6, %lb6_2 : f32
+    %li6_3 = scf.select %gt6_3, %id3, %li6_2 : i32
+    %best6 = kernel.subgroup.reduce<maxnumf> %lb6_3 : f32
+    %isb6 = scalar.cmpf oeq, %lb6_3, %best6 : f32
+    %cand6 = scf.select %isb6, %li6_3, %big_id : i32
+    %win6 = kernel.subgroup.reduce<minsi> %cand6 : i32
+    %m6_0 = scalar.addf %zero_f, %zero_f : f32
+    %w6_0 = scalar.cmpi eq, %id0, %win6 : i32
+    %m6_1 = scf.select %w6_0, %pr0, %m6_0 : f32
+    %s0_7 = scf.select %w6_0, %removed, %s0_6 : f32
+    %w6_1 = scalar.cmpi eq, %id1, %win6 : i32
+    %m6_2 = scf.select %w6_1, %pr1, %m6_1 : f32
+    %s1_7 = scf.select %w6_1, %removed, %s1_6 : f32
+    %w6_2 = scalar.cmpi eq, %id2, %win6 : i32
+    %m6_3 = scf.select %w6_2, %pr2, %m6_2 : f32
+    %s2_7 = scf.select %w6_2, %removed, %s2_6 : f32
+    %w6_3 = scalar.cmpi eq, %id3, %win6 : i32
+    %m6_4 = scf.select %w6_3, %pr3, %m6_3 : f32
+    %s3_7 = scf.select %w6_3, %removed, %s3_6 : f32
+    %wp6 = kernel.subgroup.reduce<addf> %m6_4 : f32
+    %sum_7 = scalar.addf %sum_6, %wp6 : f32
+    scf.if %store_lane {
+      view.store %win6, %ids_view[%token, 6] : i32, view<[%tokens]x8xi32>
+    }
+    %lb7_0 = scalar.addf %s0_7, %zero_f : f32
+    %li7_0 = scalar.addi %id0, %c0_i32r : i32
+    %gt7_1 = scalar.cmpf ogt, %s1_7, %lb7_0 : f32
+    %lb7_1 = scf.select %gt7_1, %s1_7, %lb7_0 : f32
+    %li7_1 = scf.select %gt7_1, %id1, %li7_0 : i32
+    %gt7_2 = scalar.cmpf ogt, %s2_7, %lb7_1 : f32
+    %lb7_2 = scf.select %gt7_2, %s2_7, %lb7_1 : f32
+    %li7_2 = scf.select %gt7_2, %id2, %li7_1 : i32
+    %gt7_3 = scalar.cmpf ogt, %s3_7, %lb7_2 : f32
+    %lb7_3 = scf.select %gt7_3, %s3_7, %lb7_2 : f32
+    %li7_3 = scf.select %gt7_3, %id3, %li7_2 : i32
+    %best7 = kernel.subgroup.reduce<maxnumf> %lb7_3 : f32
+    %isb7 = scalar.cmpf oeq, %lb7_3, %best7 : f32
+    %cand7 = scf.select %isb7, %li7_3, %big_id : i32
+    %win7 = kernel.subgroup.reduce<minsi> %cand7 : i32
+    %m7_0 = scalar.addf %zero_f, %zero_f : f32
+    %w7_0 = scalar.cmpi eq, %id0, %win7 : i32
+    %m7_1 = scf.select %w7_0, %pr0, %m7_0 : f32
+    %s0_8 = scf.select %w7_0, %removed, %s0_7 : f32
+    %w7_1 = scalar.cmpi eq, %id1, %win7 : i32
+    %m7_2 = scf.select %w7_1, %pr1, %m7_1 : f32
+    %s1_8 = scf.select %w7_1, %removed, %s1_7 : f32
+    %w7_2 = scalar.cmpi eq, %id2, %win7 : i32
+    %m7_3 = scf.select %w7_2, %pr2, %m7_2 : f32
+    %s2_8 = scf.select %w7_2, %removed, %s2_7 : f32
+    %w7_3 = scalar.cmpi eq, %id3, %win7 : i32
+    %m7_4 = scf.select %w7_3, %pr3, %m7_3 : f32
+    %s3_8 = scf.select %w7_3, %removed, %s3_7 : f32
+    %wp7 = kernel.subgroup.reduce<addf> %m7_4 : f32
+    %sum_8 = scalar.addf %sum_7, %wp7 : f32
+    scf.if %store_lane {
+      view.store %win7, %ids_view[%token, 7] : i32, view<[%tokens]x8xi32>
+    }
+    %total = scalar.addf %sum_8, %zero_f : f32
+    %min_sum = scalar.constant 6.103515625e-05 : f32
+    %wsum = scalar.maxnumf %total, %min_sum : f32
+    scf.if %store_lane {
+      %wn0 = scalar.divf %wp0, %wsum : f32
+      view.store %wn0, %wts_view[%token, 0] : f32, view<[%tokens]x8xf32>
+      %wn1 = scalar.divf %wp1, %wsum : f32
+      view.store %wn1, %wts_view[%token, 1] : f32, view<[%tokens]x8xf32>
+      %wn2 = scalar.divf %wp2, %wsum : f32
+      view.store %wn2, %wts_view[%token, 2] : f32, view<[%tokens]x8xf32>
+      %wn3 = scalar.divf %wp3, %wsum : f32
+      view.store %wn3, %wts_view[%token, 3] : f32, view<[%tokens]x8xf32>
+      %wn4 = scalar.divf %wp4, %wsum : f32
+      view.store %wn4, %wts_view[%token, 4] : f32, view<[%tokens]x8xf32>
+      %wn5 = scalar.divf %wp5, %wsum : f32
+      view.store %wn5, %wts_view[%token, 5] : f32, view<[%tokens]x8xf32>
+      %wn6 = scalar.divf %wp6, %wsum : f32
+      view.store %wn6, %wts_view[%token, 6] : f32, view<[%tokens]x8xf32>
+      %wn7 = scalar.divf %wp7, %wsum : f32
+      view.store %wn7, %wts_view[%token, 7] : f32, view<[%tokens]x8xf32>
+    }
+  }
+  }
+  kernel.return
+}
+
+check.case public @k_route8192_case {
+  %t = check.literal value(8192) : index
+  %x = check.generate.fill value(0.01) : tensor<8192x2048xf32>
+  %w = check.generate.fill value(0.02) : tensor<262144xf32>
+  %ids = check.generate.fill value(0) : tensor<8192x8xi32>
+  %wts = check.generate.fill value(0.0) : tensor<8192x8xf32>
+  %info = check.file.read.npy path("r8192_info.npy") : tensor<8192x4xi32>
+  kernel.launch @k_route8192[%t](%t, %x, %w, %wts, %ids, %wts, %info) : [index](index, tensor<8192x2048xf32>, tensor<262144xf32>, tensor<8192x8xf32>, tensor<8192x8xi32>, tensor<8192x8xf32>, tensor<8192x4xi32>)
+  check.return
+}
+check.benchmark<@k_route8192_case> @k_route8192_bm

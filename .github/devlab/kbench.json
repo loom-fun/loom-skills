@@ -3,40 +3,14 @@
   "repeats": 5,
   "suites": [
     {
-      "suite": "sdkfix_split",
-      "runner": "strix",
-      "dir": "sdkfix_split",
-      "files": [
-        "bench.loom",
-        "bench_b020.loom",
-        "bench_bf0.loom",
-        "bench_ilp2.loom",
-        "bench_kvo.loom",
-        "bench_kvo16.loom",
-        "bench_kvo4.loom",
-        "bench_u4.loom",
-        "bench_u8.loom"
-      ],
-      "file_sdk": {
-        "bench_b020.loom": "0.2.0"
-      },
-      "config": [],
-      "args": [
-        "--measure=dispatch_complete",
-        "--batch-size=8",
-        "--profile-final-batch=true"
-      ],
-      "device": "amdgpu://?completion_spin_ns=4294967295"
-    },
-    {
-      "suite": "sdkfix_flash",
+      "suite": "sdkfix_route",
       "runner": "r9700",
-      "dir": "sdkfix_flash",
+      "dir": "sdkfix_route",
       "files": [
         "bench.loom",
         "bench_b020.loom",
-        "bench_plain.loom",
-        "bench_ts2.loom"
+        "bench_tr8.loom",
+        "bench_tr2.loom"
       ],
       "file_sdk": {
         "bench_b020.loom": "0.2.0"
