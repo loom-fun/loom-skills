@@ -36,6 +36,8 @@ def main():
     ap.add_argument("--preset", default=os.environ.get("LOOM_PRESET") or None, help="the preset the server serves (default: LOOM_PRESET, else the first)")
     ap.add_argument("--tokens", type=int, default=None, help="prompt tokens (default: the native context minus the answer)")
     ap.add_argument("--wait", type=float, default=120, help="seconds to wait for an admission or a refusal")
+    ap.add_argument("--cancel-wait", type=float, default=float(os.environ.get("LOOM_ADMIT_CANCEL_WAIT") or 60),
+                    help="seconds an admitted request may take to leave the server after the cancel (default 60; LOOM_ADMIT_CANCEL_WAIT): the measured time is cancel_s")
     ap.add_argument("--complete", type=float, nargs="?", const=1800, default=None, help="wait this long (default 1800 s) for the request to finish instead of cancelling it")
     a = ap.parse_args()
     P = Package(a.pkg)
@@ -145,17 +147,18 @@ def main():
             json.dump({"admitted": True, "completed": ok, "tokens": n, "context": context, "detail": msg}, open(a.out, "w"), indent=1)
         sys.exit(0 if ok else 1)
     # Cancel: closing the connection makes the server drop the request; then it must go idle again (no long prefill).
-    idle = True
+    idle, cancel_s = True, None
     cancel()
+    t1 = time.time()
     if reset_local:
         sender.join(timeout=1)
     if admitted:
-        t1 = time.time()
-        while active() and time.time() - t1 < 60:
-            time.sleep(1)
+        while active() and time.time() - t1 < a.cancel_wait:
+            time.sleep(0.5)
         idle = not active()
+        cancel_s = round(time.time() - t1, 1) if idle else None   # the cancel's latency: closed connection -> no active request
     if admitted and not idle:
-        msg = f"ADMITTED {n} tokens of a {context}-token context, but the server did not cancel the request within 60s (WARN: later steps may stall)"
+        msg = f"ADMITTED {n} tokens of a {context}-token context, but the server did not cancel the request within {a.cancel_wait:.0f}s (WARN: later steps may stall)"
     elif admitted:
         msg = f"ADMITTED {n} tokens of a {context}-token context ({time.time() - t0:.1f}s, then cancelled)"
     elif "status" in got or "error" in got:
@@ -164,7 +167,8 @@ def main():
         msg = f"NO ANSWER for {n} tokens of a {context}-token context within {a.wait:.0f}s"
     print(msg, flush=True)
     if a.out:
-        json.dump({"admitted": admitted, "tokens": n, "context": context, "detail": msg}, open(a.out, "w"), indent=1)
+        json.dump({"admitted": admitted, "tokens": n, "context": context, "detail": msg, "cancel_s": cancel_s, "cancel_wait": a.cancel_wait,
+                   "admit_s": round(t1 - t0, 1)}, open(a.out, "w"), indent=1)
     sys.exit(0 if admitted else 1)
 
 

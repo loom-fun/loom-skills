@@ -80,6 +80,22 @@ def build_args(m, cfg_extra=(), slug=None):
     return args + list(cfg_extra)
 
 
+def default_preset_prefill(slug, root):
+    """exec.prefill_capacity that ROOT's scope rules set for SLUG on the device of the package's default preset (the GPU without a preset
+    suffix: Strix Halo), or None. That preset IS the build's execution, so the rule is a build flag there (the per-GPU presets of other devices
+    are written by the card step from their own rules); without it a canonical build disagreed with the measured package (8192 vs 4096)."""
+    card = os.path.join(HERE, "..", "skills", "loom-benchmark", "scripts", "card")
+    if card not in sys.path:
+        sys.path.insert(0, card)
+    import card_lib
+    for gpu, d in card_lib.GPUS.items():
+        if not d.get("preset_suffix"):
+            v = card_lib.scope_execution(slug, gpu, root).get("prefill_capacity")
+            if v is not None:
+                return int(v)
+    return None
+
+
 def real_inputs(slug, m, work, real):
     """--real DIR: the proof build. The GGUFs are the files of the HF cache at the pinned revisions (symlinks) and the
     tokenizer is DIR/<slug>/tokenizer.json: the programs must come out byte-identical to the header-stub build."""
@@ -133,7 +149,11 @@ def build_one(slug, m, skills, out, rdna4, keep, real=None, with_gen=False, inp=
         kb = os.path.join(skills, "..", "loom-kb")   # the choices build.py resolves (a ref without the registry has none)
         if os.path.isdir(kb) and "LOOM_KB_ROOT" not in env:
             env["LOOM_KB_ROOT"] = os.path.abspath(kb)
-        rc, o = sh([sys.executable, os.path.join(kit, "build.py"), "cfg.json", "pkg"] + build_args(m, slug=slug if '"--slug"' in open(os.path.join(kit, "build.py")).read() else None), work, env)
+        args = build_args(m, slug=slug if '"--slug"' in open(os.path.join(kit, "build.py")).read() else None)
+        pf = default_preset_prefill(slug, os.path.abspath(os.path.join(skills, "..", "..")))
+        if pf is not None and "--prefill" in args:   # the ref's scope rule for the default preset's device (Strix Halo serves that preset)
+            args[args.index("--prefill") + 1] = str(pf)
+        rc, o = sh([sys.executable, os.path.join(kit, "build.py"), "cfg.json", "pkg"] + args, work, env)
         log.append(o)
         if rc:
             raise RuntimeError("build.py: " + o.strip().splitlines()[-1][-300:])
