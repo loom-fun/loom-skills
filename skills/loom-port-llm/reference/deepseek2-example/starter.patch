@@ -1,6 +1,6 @@
 --- a/build.py
 +++ b/build.py
-@@ -112,7 +112,9 @@
+@@ -113,7 +113,9 @@
  pos_bytes = 2 * max(cfg["kv_heads"] * (cfg.get("head_dim_swa") or cfg["head_dim"]),
                      (cfg.get("kv_heads_global") or cfg["kv_heads"]) * cfg["head_dim"])
  kv_layers = cfg.get("kv_layers", cfg["layers"])
@@ -11,7 +11,7 @@
  if DRAFT and DRAFT["kind"] == "mtp":   # the MTP block's K/V shares the pool's pages
      kv_per_position += pos_bytes * 2 * len(cfg["mtp"]["layers"])
  if DRAFT and DRAFT["kind"] == "dflash":   # so does the drafter's context K/V
-@@ -453,8 +455,8 @@
+@@ -454,8 +456,8 @@
                 "        %role_suffix = scf.select %user, %suffix, %system_suffix : buffer\n"
                 "        %message = func.call @join4(%prefix, %text, %role_suffix, %empty)")
      # complete_text: the generated assistant turn
@@ -22,16 +22,16 @@
  
  
  def patch_history_think_off(text):
-@@ -759,7 +761,7 @@
- custom_chat = os.path.join(HERE, "chat", chat["call_format"] + ".loom")
- custom_chat = custom_chat if chat["call_format"] not in CALL_FORMATS and os.path.exists(custom_chat) else None
+@@ -767,7 +769,7 @@
+     if not os.path.isfile(custom_chat) or os.path.dirname(os.path.realpath(custom_chat)) != chat_dir:
+         sys.exit(f"chat format {call_format!r} has no local kit controller")
  subs = {
 -    "@@POS_BYTES@@": str(pos_bytes), "@@PLANES@@": str(2 * kv_layers), "@@BLOCK_BYTES@@": str(16 * pos_bytes),
 +    "@@POS_BYTES@@": str(pos_bytes), "@@PLANES@@": str(planes_per_layer * kv_layers), "@@BLOCK_BYTES@@": str(16 * pos_bytes),
      "@@RECURRENT_BYTES@@": str(recurrent_bytes or 4),
      "@@LOGIT_REGION@@": "32768", "@@LOGIT_ROW_BYTES@@": str(((cfg["vocab"] + 127) // 128) * 512),   # gen_llm.LOGITS_OFFSET / CHUNKS * 512
      "@@MAX_CONTEXT@@": str(a.context), "@@TERMINAL@@": chat["terminal"], "@@HEX_TERMINAL@@": hx(chat["terminal"]),
-@@ -781,7 +783,7 @@
+@@ -789,7 +791,7 @@
      "@@HEX_TOOLS_SYSTEM_SEPARATOR@@": hx(chat["tools_system_separator"]),
      "@@HEX_TOOL_TURN_PREFIX@@": hx(chat["tool_turn_prefix"]), "@@HEX_TOOL_ITEM_PREFIX@@": hx(chat["tool_item_prefix"]),
      "@@HEX_TOOL_ITEM_SUFFIX@@": hx(chat["tool_item_suffix"]), "@@HEX_TOOL_TURN_SUFFIX@@": hx(chat["tool_turn_suffix"]),
@@ -1323,7 +1323,7 @@
  GATE_NAME = {1: "softmax(logits)", 2: "sigmoid(logit)", 3: "logit"}   # llama.cpp's expert_gating_func values
  # gating 3 (SOFTMAX_WEIGHT): `bias` is the router's own bias (ffn_gate_inp.bias, added to the logits before the top-k)
  # and the k weights are a softmax over the k picked logits.
-@@ -500,7 +502,390 @@
+@@ -561,7 +563,390 @@
      return "\n" + text
  
  
@@ -1715,7 +1715,7 @@
      """g_row_scale_f16_tiles: the starter's g_row_scale_f16 over the bucketed expert rows (max_tiles x 64), skipping
      the rows of unused tiles (tile_info expert < 0; g_moe_gdn skips those tiles). max_tiles is sized for the worst
      case (t*KU/64 + E tiles), so most of them are unused."""
-@@ -509,11 +894,12 @@
+@@ -570,11 +955,12 @@
          nonlocal text
          assert text.count(a) == 1, a
          text = text.replace(a, b)
@@ -1730,7 +1730,7 @@
    %rt_tiles = index.div %rows, %rt_c64 : index
    %rt_tile_v = index.div %row, %rt_c64 : index
    %rt_tile = index.assume %rt_tile_v [lt(%rt_tile_v, %rt_tiles)] : index
-@@ -528,11 +914,146 @@
+@@ -589,11 +975,146 @@
  
  
  def route(H, E, KU, gating, norm, bias, wty="f32", scale=1.0):
@@ -1880,7 +1880,7 @@
      """mode 'gu': act[a] = silu(Wg[e] x[a/KU]) * Wu[e] x[a/KU]; mode 'dn': ys[a] = Wd[e] x[a].
      fmt "GATE+UP" ('gu'): gate and up weights in different formats, each with its own strides and dequant.
      fused ('gu'): one gate_up tensor passed as both weights, expert e's N gate rows then its N up rows.
-@@ -540,8 +1061,13 @@
+@@ -601,8 +1122,13 @@
      act: the gate/up activation (see act_scalar).
      iq: (iq_decode, iq_dot, iq_load) of gen_llm (ACT_Q8): the activation is read as int8 codes + (scale, code sum) written by
      g_quant_q8 (layout: rows x groups x 32 int8, then rows x groups x (d, sum)) and contracted with the weight codes by
@@ -1895,7 +1895,7 @@
      assert iq is None or (not fmt2 and not bias), "int8 expert matvecs: one weight format, no biases"
      groups = K // 32
      lanes = (groups + 31) // 32 * 32
-@@ -549,24 +1075,40 @@
+@@ -610,24 +1136,40 @@
      rb = row_bytes(fmt, K)
      eb = rb * N
      nw = 2 if mode == "gu" else 1
@@ -1942,7 +1942,7 @@
    %workitem_id = kernel.workitem.id<x> : index
    %workitem = index.assume %workitem_id [range(%workitem_id, 0, {lanes - 1})] : index
    %wave_id = kernel.subgroup.id : index
-@@ -587,25 +1129,38 @@
+@@ -648,25 +1190,38 @@
    %c0_i32 = scalar.constant 0 : i32
    %cE1_i32 = scalar.constant {E - 1} : i32
    %ids_view = buffer.view %ids[%zero] : buffer -> view<[%tokens]xi32>
@@ -1986,7 +1986,7 @@
      L.append(f"""{xview}
    %row_base = index.mul %group_id, %rows_per : index
    %ok = index.cmp ult, %workitem, %groups_c : index""".replace("%groups_c", f"%cgroups"))
-@@ -671,6 +1226,24 @@
+@@ -732,6 +1287,24 @@
      %qm{wi} = scalar.mulf %mn{wi}, %xs : f32
      %qs{wi} = scalar.mulf %qd{wi}, %sc{wi} : f32
      %d{wi} = scalar.subf %qs{wi}, %qm{wi} : f32""")
@@ -2011,7 +2011,7 @@
          elif fold:
              L.append(f"""    %wv{wi} = scf.if %ok -> (vector<32xf32>) {{
        %v = func.call @g_{fw}_values(%{w}, {o}, {within}) : (buffer, offset, index) -> (vector<32xf32>)
-@@ -719,12 +1292,35 @@
+@@ -780,12 +1353,35 @@
      else:
          L.append(f"    %value = scalar.addf {t0}, %zero_f : f32")
      L.append("""    %out_row = index.add %row_base, %rr : index
@@ -2049,7 +2049,7 @@
  
  
  def combine(H, KU, acc=False):
-@@ -762,6 +1358,46 @@
+@@ -823,6 +1419,46 @@
  """
  
  
@@ -2096,7 +2096,7 @@
  def shared_gated(text):
      """A combine kernel (combine / combine_sorted with acc=True) that scales the shared experts' output already in y
      by the token's gate sg[t] (g_moe_shared_gate) before adding the routed experts: y = sg * y + sum_k w_k ys_k."""
-@@ -826,9 +1462,16 @@
+@@ -887,9 +1523,16 @@
  TILE = 64
  
  
@@ -2115,7 +2115,7 @@
      return f"""
  kernel.def export("g_moe_bucket") @g_moe_bucket(%tokens: index) {{
    %c1 = index.constant 1 : index
-@@ -843,12 +1486,12 @@
+@@ -904,12 +1547,12 @@
    %c0 = index.constant 0 : index
    %c1 = index.constant 1 : index
    %cKU = index.constant {KU} : index
@@ -2131,7 +2131,7 @@
    %minus_one = scalar.constant -1 : i32
    %cEm1 = scalar.constant {E - 1} : i32
    %cE = index.constant {E} : index
-@@ -1130,6 +1773,14 @@
+@@ -1191,6 +1834,14 @@
      fused (swiglu): one gate_up tensor as both weights (expert_mv's layout).
      bias / act: as expert_mv (per-expert output biases, the gate/up activation)."""
      import gen_gemm
@@ -2146,7 +2146,7 @@
      fmt, _, fmt2 = fmt.partition("+")
      rb = N and (K // SB[fmt] * FMT[fmt])
      eb = rb * N
-@@ -1228,6 +1879,89 @@
+@@ -1291,6 +1942,78 @@
      return text + "\n" + gen_gemm_rdna4.twin(text) if gen_gemm_rdna4.enabled() else text   # the gfx12 twin K_rdna4 beside K
  
  
@@ -2222,6 +2222,13 @@
 +    return text + "\n" + gen_gemm_rdna4.twin(text) if gen_gemm_rdna4.enabled() else text
 +
 +
+ def store16():
+     """moe.prefill.store16 (MOE_STORE16; numerics-moving): the grouped down GEMM stores its expert rows (ys_sorted) as f16 and
+     g_moe_combine_sorted reads them as f16, in place (same kernel names, same launches): half the DRAM traffic of the
+@@ -1318,6 +2041,17 @@
+     return text
+ 
+ 
 +def combine_sorted16(text, H):
 +    """g_moe_combine_sorted16: g_moe_combine_sorted (text) reading f16 expert rows (MOE_YS16, gen_moe_cw)."""
 +    t = text.replace('export("g_moe_combine_sorted") @g_moe_combine_sorted(', 'export("g_moe_combine_sorted16") @g_moe_combine_sorted16(')
@@ -2236,7 +2243,7 @@
  def combine_sorted(H, KU, acc=False):
      """y[t] (+)= sum_k w[t, k] ys[pos[t, k]], one workgroup per token looping over 256-channel blocks, so a token's
      KU expert rows are read whole and at once (with a workgroup per (token, block) and tokens fastest, each row was
-@@ -1278,3 +2012,200 @@
+@@ -1373,3 +2107,200 @@
    kernel.return
  }}
  """
@@ -2480,7 +2487,7 @@
  # The FFN's pre-norm stored as post_attention_norm (gpt-oss: attn_post_norm normalizes ffn_inp; no ffn_norm and no
  # Gemma-style post_ffw_norm): it is the FFN norm, not a post-attention norm.
  if ("blk.0.ffn_norm.weight" not in tensors and "blk.0.post_attention_norm.weight" in tensors
-@@ -286,7 +309,10 @@
+@@ -286,7 +311,10 @@
  # instead of writing them to the GGUF; MOE_DEFAULTS mirrors src/models/<arch>.cpp (build_moe_ffn's norm_w and gating).
  MOE_DEFAULTS = {"qwen3moe": {"gating": 1, "norm_weights": True}, "qwen35moe": {"gating": 1, "norm_weights": True},
                  "qwen3next": {"gating": 1, "norm_weights": True}, "qwen2moe": {"gating": 1, "norm_weights": False},
@@ -2492,7 +2499,7 @@
                  # gpt-oss: SOFTMAX_WEIGHT (top-k of the biased logits, softmax over the k), LLM_FFN_SWIGLU_OAI_MOE
                  "gpt-oss": {"gating": 3, "norm_weights": False, "act": "swiglu_oai", "swiglu_alpha": 1.702, "swiglu_limit": 7.0}}
  if A("expert_count"):
-@@ -364,7 +390,7 @@
+@@ -364,7 +392,7 @@
  unsupported = [f for f in fmts if f not in formats.DECODES]   # what gen_llm.py decodes (formats.py)
  if unsupported:
      print("WARNING: no kernels for", unsupported, "- add dequant helpers (see the loom-kb `porting` topic)")
@@ -2524,7 +2531,7 @@
  import attn_rules  # noqa: E402
  
  
-@@ -218,7 +225,9 @@
+@@ -220,7 +227,9 @@
  seen = set(); todo = []
  VD = cfg["gdn"]["inner"] if cfg.get("gdn") else 0
  for li in KT_LAYERS:
@@ -2535,7 +2542,7 @@
                     ("attn_qkv", H), ("attn_gate", H), ("ssm_alpha", H), ("ssm_out", VD),
                     ("ffn_gate_shexp", H), ("ffn_down_shexp", (cfg.get("moe") or {}).get("shared_ffn", 0)), ("nextn.eh_proj", 2 * H)]:
          name = f"blk.{li}.{nm_}.weight"
-@@ -504,6 +513,12 @@
+@@ -506,6 +515,12 @@
    check.return
  }}
  """)
@@ -2548,7 +2555,7 @@
  # 3. qk norm + rope on q (live = 0: no KV store)
  t = 4; pos = np.array([0, 1, 7, 300])
  A0 = next(i for i in range(cfg["layers"]) if i not in set(cfg.get("recurrent_layers", [])))
-@@ -531,7 +546,7 @@
+@@ -533,7 +548,7 @@
      c, s = np.cos(ang)[:, None] * msc, np.sin(ang)[:, None] * msc
      if cfg["rope_type"] == "neox":
          a1, a2 = a[..., :RD // 2], a[..., RD // 2:RD]; return np.concatenate([a1 * c - a2 * s, a2 * c + a1 * s, a[..., RD:]], -1)
@@ -2557,7 +2564,7 @@
  # attention projection biases (cfg "attn_bias", qwen2): g_qk_rope_store adds them to q/k/v before the norm and RoPE
  BIAS = cfg.get("attn_bias") or []
  BW = {"q": QH * D, "k": KVH * D, "v": KVH * D}
-@@ -3144,6 +3159,10 @@
+@@ -3146,6 +3161,10 @@
      cases += [invariance_case(s, st) for s in ((0, 1) if WIN else (0,)) for st in (5, 0, 'zero')]
      cases += [order_case(s) for s in ((0, 1) if WIN else (0,))]
  
@@ -2568,7 +2575,7 @@
  # 6. MoE (gen_moe.py) on real tensors, one layer per expert-down format: the decode chain (router -> top-k ->
  # gate/up -> down -> combine, plus the prefill router with padding tokens) and the prefill chain (prefill router ->
  # bucket by expert -> grouped WMMA gate/up GEMM -> tile row scale -> grouped down GEMM -> combine of the sorted rows),
-@@ -3180,7 +3199,9 @@
+@@ -3182,7 +3201,9 @@
              wts = wts / np.maximum(wts.sum(-1, keepdims=True), 6.103515625e-05)
          wts = wts * M.get("scale", 1.0)
          ss = np.sort(sel, -1)[:, ::-1]
@@ -2579,7 +2586,7 @@
          return ids, wts, rel
      def clear_tokens(t):
          """t random rows whose k-th and (k+1)-th scores differ by > 0.2 %: f32 kernels pick the same experts as the
-@@ -3220,7 +3241,7 @@
+@@ -3222,7 +3243,7 @@
          fu = T[b + UN].tensor_type.name.lower(); gun = (fg if fg == fu else f"{fg}_{fu}") + ("_fused" if FUSED else "")   # gate+up formats (gen_moe)
          if (fd, gun) in done: continue
          done.add((fd, gun))
@@ -2588,7 +2595,7 @@
                and H // 32 <= 1024 and FE // 32 <= 1024 and not EB)   # gen_llm.moe_iq
          # gen_llm.moe_iq also needs the router input as the experts' input (gemma4's experts read %h2): the package says which it built
          MQ = MQ and (_pkg_llm_text() is None or f'"g_moe_gu_{gun}_q8_k{H}_' in _pkg_llm_text())
-@@ -3307,10 +3328,24 @@
+@@ -3309,16 +3330,26 @@
          SGA, SGT = ("%sg, ", f"tensor<{t}xf32>, ") if SHG else ("", "")
          GUB, GUBT = (", %bg, %bu", f", tensor<{E_ * FE}xf32>, tensor<{E_ * FE}xf32>") if EB else ("", "")
          DNB, DNBT = (", %bd", f", tensor<{E_ * H}xf32>") if EB else ("", "")
@@ -2609,11 +2616,19 @@
          t = 6; ids, wts = chain(t, "")
          SGT = f"tensor<{t}xf32>, " if SHG else ""
          info_l = np.zeros((t, 4), np.int32); info_l[:, 2] = 1; info_l[2, 2] = 0; info_l[4:, 2] = 0
+-        # g_moe_route_tr_live skips a workgroup whose tokens are all padding and writes every row of the others
+-        from gen_moe import route_tokens_per_wg
+-        _tr = route_tokens_per_wg(H, E_)
+-        _skip = np.array([not info_l[(r // _tr) * _tr:(r // _tr + 1) * _tr, 2].any() for r in range(t)])[:, None]
+-        save(tag + "_info", info_l); save(tag + "_ids_l", np.where(_skip, 0, ids).astype(np.int32))
+-        save(tag + "_wts_l", np.where(_skip, 0, wts).astype(np.float32))
 +        save(tag + "_ids_g", np.where(info_l[:, 2:3] == 0, 0, ids).astype(np.int32)); save(tag + "_wts_g", np.where(info_l[:, 2:3] == 0, 0, wts).astype(np.float32))
-         save(tag + "_info", info_l); save(tag + "_ids_l", np.where(np.arange(t)[:, None] >= 4, 0, ids).astype(np.int32))
-         save(tag + "_wts_l", np.where(np.arange(t)[:, None] >= 4, 0, wts).astype(np.float32))
++        save(tag + "_info", info_l); save(tag + "_ids_l", np.where(np.arange(t)[:, None] >= 4, 0, ids).astype(np.int32))
++        save(tag + "_wts_l", np.where(np.arange(t)[:, None] >= 4, 0, wts).astype(np.float32))
          cases.append(f"""check.case public @moe_chain_{li} {{
-@@ -3328,7 +3363,7 @@
+ {common(t, "")}  %act = check.generate.fill value(0.0) : tensor<{t * KU}x{FE}xf32>
+   %ys = check.generate.fill value(0.0) : tensor<{t * KU}x{H}xf32>
+@@ -3334,7 +3365,7 @@
    kernel.launch @g_moe_route_tr_live[%t](%t, %h, %wr, %b, %ids_l, %wts_l, %info_l) : [index](index, tensor<{t}x{H}xf32>, {wr_t}, tensor<{E_}xf32>, tensor<{t}x{KU}xi32>, tensor<{t}x{KU}xf32>, tensor<{t}x4xi32>)
    check.expect.equal actual(%ids_l) expected(%eids_l) : tensor<{t}x{KU}xi32>
    check.expect.close actual(%wts_l) expected(%ewts_l) atol(1.0e-5) rtol(1.0e-4) nan(different) : tensor<{t}x{KU}xf32>
@@ -2622,51 +2637,52 @@
    kernel.launch @g_moe_combine[%t](%t, %ys, %wts, {SGA}%y) : [index](index, tensor<{t * KU}x{H}xf32>, tensor<{t}x{KU}xf32>, {SGT}tensor<{t}x{H}xf32>)
    check.expect.equal actual(%ids) expected(%eids) : tensor<{t}x{KU}xi32>
    check.expect.equal actual(%ids_tr) expected(%eids) : tensor<{t}x{KU}xi32>
-@@ -3357,12 +3392,12 @@
+@@ -3363,12 +3394,12 @@
    %act16 = check.generate.fill value(0.0) : tensor<{mr}x{FE}xf16>
-   %ys_sorted = check.generate.fill value(0.0) : tensor<{mr}x{H}xf32>
+   %ys_sorted = check.generate.fill value(0.0) : tensor<{mr}x{H}x{YS}>
    kernel.launch @g_row_scale_f16[%t](%t, %nH, %h, %s_h, %h16) : [index](index, index, tensor<{t}x{H}xf32>, tensor<{t}x2xf32>, tensor<{t}x{H}xf16>)
 -  kernel.launch @g_moe_route_tr_live[%t](%t, %h, %wr, %b, %ids, %wts, %info) : [index](index, tensor<{t}x{H}xf32>, {wr_t}, tensor<{E_}xf32>, tensor<{t}x{KU}xi32>, tensor<{t}x{KU}xf32>, tensor<{t}x4xi32>)
 +  kernel.launch @{ROUTE_NAME}[%t](%t, %h, %wr, %b, %ids, %wts, %info) : [index](index, tensor<{t}x{H}xf32>, {wr_t}, tensor<{E_}xf32>, tensor<{t}x{KU}xi32>, tensor<{t}x{KU}xf32>, tensor<{t}x4xi32>)
  {wsc(t)}  kernel.launch @g_moe_bucket[%t](%t, %max_tiles, %info, %ids, %tile_info, %rowmap, %pos) : [index](index, index, tensor<{t}x4xi32>, tensor<{t}x{KU}xi32>, tensor<{mt}x2xi32>, tensor<{mr}xi32>, tensor<{ta}xi32>)
    kernel.launch @g_moe_ggu_{gun}_k{H}[%max_rows, %nFE](%max_rows, %nH, %nFE, %t, %tile_info, %rowmap, %h16, %s_h, %wg, %wu{GUB}, %act_sorted) : [index, index](index, index, index, index, tensor<{mt}x2xi32>, tensor<{mr}xi32>, tensor<{t}x{H}xf16>, tensor<{t}x2xf32>, {gt}, {ut}{GUBT}, tensor<{mr}x{FE}xf32>)
    kernel.launch @g_row_scale_f16_tiles[%max_rows](%max_rows, %nFE, %act_sorted, %s_rows, %act16, %tile_info) : [index](index, index, tensor<{mr}x{FE}xf32>, tensor<{mr}x2xf32>, tensor<{mr}x{FE}xf16>, tensor<{mt}x2xi32>)
-   kernel.launch @g_moe_gdn_{fd}_k{FE}[%max_rows, %nH](%max_rows, %nFE, %nH, %max_rows, %tile_info, %rowmap, %act16, %s_rows, %wd{DNB}, %ys_sorted) : [index, index](index, index, index, index, tensor<{mt}x2xi32>, tensor<{mr}xi32>, tensor<{mr}x{FE}xf16>, tensor<{mr}x2xf32>, {dt_}{DNBT}, tensor<{mr}x{H}xf32>)
--  kernel.launch @g_moe_combine_sorted[%t](%t, %max_rows, %ys_sorted, %pos, %wts, {SGA}%y) : [index](index, index, tensor<{mr}x{H}xf32>, tensor<{ta}xi32>, tensor<{t}x{KU}xf32>, {SGT}tensor<{t}x{H}xf32>)
+-  kernel.launch @g_moe_gdn_{fd}_k{FE}[%max_rows, %nH](%max_rows, %nFE, %nH, %max_rows, %tile_info, %rowmap, %act16, %s_rows, %wd{DNB}, %ys_sorted) : [index, index](index, index, index, index, tensor<{mt}x2xi32>, tensor<{mr}xi32>, tensor<{mr}x{FE}xf16>, tensor<{mr}x2xf32>, {dt_}{DNBT}, tensor<{mr}x{H}x{YS}>)
+-  kernel.launch @g_moe_combine_sorted[%t](%t, %max_rows, %ys_sorted, %pos, %wts, {SGA}%y) : [index](index, index, tensor<{mr}x{H}x{YS}>, tensor<{ta}xi32>, tensor<{t}x{KU}xf32>, {SGT}tensor<{t}x{H}xf32>)
++  kernel.launch @g_moe_gdn_{fd}_k{FE}[%max_rows, %nH](%max_rows, %nFE, %nH, %max_rows, %tile_info, %rowmap, %act16, %s_rows, %wd{DNB}, %ys_sorted) : [index, index](index, index, index, index, tensor<{mt}x2xi32>, tensor<{mr}xi32>, tensor<{mr}x{FE}xf16>, tensor<{mr}x2xf32>, {dt_}{DNBT}, tensor<{mr}x{H}xf32>)
 +  kernel.launch @g_moe_combine_sorted{_YS(fd)}[%t](%t, %max_rows, %ys_sorted, %pos, %wts, {SGA}%y) : [index](index, index, tensor<{mr}x{H}xf32>, tensor<{ta}xi32>, tensor<{t}x{KU}xf32>, {SGT}tensor<{t}x{H}xf32>)
    check.expect.equal actual(%ids) expected(%eids) : tensor<{t}x{KU}xi32>
    check.expect.close actual(%wts) expected({EW}) atol(1.0e-5) rtol(1.0e-4) nan(different) : tensor<{t}x{KU}xf32>
    check.expect.close actual(%y) expected(%ey) atol({0.05 * routed_scale["_p"]:.3g}) rtol(5.0e-2) nan(different) : tensor<{t}x{H}xf32>
-@@ -3466,8 +3501,9 @@
+@@ -3474,8 +3505,9 @@
          for r in np.flatnonzero(live):
              e = tile_exp[tile_of[r]]
              ys_ref[r] = (wds[e] @ a16[r].astype(np.float64)) * sr[r, 1].astype(np.float64)
 +        YS7 = "f" + _YS(fd) if _YS(fd) else "f32"   # MOE_YS16: the column-wave down GEMM stores f16 rows
          for n, a in [("_ti", tile_info), ("_rm", rowmap), ("_x", x16), ("_s", sc), ("_act", act_ref.astype(np.float32)), ("_a16", a16),
--                     ("_sr", sr), ("_ys", ys_ref.astype(np.float32))]:
+-                     ("_sr", sr), ("_ys", ys_ref.astype(np.float16 if YS == "f16" else np.float32))]:
 +                     ("_sr", sr), ("_ys", ys_ref.astype(np.float16 if _YS(fd) else np.float32))]:
              save(tg + n, a)
          for n, a in [("_wg", raw(b + "ffn_gate_exps.weight")), ("_wu", raw(b + "ffn_up_exps.weight")), ("_wd", raw(b + "ffn_down_exps.weight"))]:
              save(tg + n, a)
-@@ -3487,13 +3523,13 @@
+@@ -3495,13 +3527,13 @@
    %eact = check.file.read.npy path("{tg}_act.npy") : tensor<{mr}x{FE7}xf32>
    %a16 = check.file.read.npy path("{tg}_a16.npy") : tensor<{mr}x{FE7}xf16>
    %sr = check.file.read.npy path("{tg}_sr.npy") : tensor<{mr}x2xf32>
--  %eys = check.file.read.npy path("{tg}_ys.npy") : tensor<{mr}x{H}xf32>
+-  %eys = check.file.read.npy path("{tg}_ys.npy") : tensor<{mr}x{H}x{YS}>
 +  %eys = check.file.read.npy path("{tg}_ys.npy") : tensor<{mr}x{H}x{YS7}>
    %act = check.generate.fill value(0.0) : tensor<{mr}x{FE7}xf32>
--  %ys = check.generate.fill value(0.0) : tensor<{mr}x{H}xf32>
+-  %ys = check.generate.fill value(0.0) : tensor<{mr}x{H}x{YS}>
 +  %ys = check.generate.fill value(0.0) : tensor<{mr}x{H}x{YS7}>
    kernel.launch @g_moe_ggu_{gun}_k{H}[%max_rows, %nFE](%max_rows, %nH, %nFE, %t, %ti, %rm, %x, %s, %wg, %wu, %act) : [index, index](index, index, index, index, tensor<{mt}x2xi32>, tensor<{mr}xi32>, tensor<{t7}x{H}xf16>, tensor<{t7}x2xf32>, {gt7}, {ut7}, tensor<{mr}x{FE7}xf32>)
--  kernel.launch @g_moe_gdn_{fd}_k{FE7}[%max_rows, %nH](%max_rows, %nFE, %nH, %max_rows, %ti, %rm, %a16, %sr, %wd, %ys) : [index, index](index, index, index, index, tensor<{mt}x2xi32>, tensor<{mr}xi32>, tensor<{mr}x{FE7}xf16>, tensor<{mr}x2xf32>, {dt7}, tensor<{mr}x{H}xf32>)
+-  kernel.launch @g_moe_gdn_{fd}_k{FE7}[%max_rows, %nH](%max_rows, %nFE, %nH, %max_rows, %ti, %rm, %a16, %sr, %wd, %ys) : [index, index](index, index, index, index, tensor<{mt}x2xi32>, tensor<{mr}xi32>, tensor<{mr}x{FE7}xf16>, tensor<{mr}x2xf32>, {dt7}, tensor<{mr}x{H}x{YS}>)
 +  kernel.launch @g_moe_gdn_{fd}_k{FE7}[%max_rows, %nH](%max_rows, %nFE, %nH, %max_rows, %ti, %rm, %a16, %sr, %wd, %ys) : [index, index](index, index, index, index, tensor<{mt}x2xi32>, tensor<{mr}xi32>, tensor<{mr}x{FE7}xf16>, tensor<{mr}x2xf32>, {dt7}, tensor<{mr}x{H}x{YS7}>)
    check.expect.close actual(%act) expected(%eact) atol({0.15 * float(np.abs(act_ref).mean()):.3g}) rtol(5.0e-2) nan(different) : tensor<{mr}x{FE7}xf32>
--  check.expect.close actual(%ys) expected(%eys) atol({0.05 * float(np.abs(ys_ref).mean()):.3g}) rtol(5.0e-2) nan(different) : tensor<{mr}x{H}xf32>
+-  check.expect.close actual(%ys) expected(%eys) atol({0.05 * float(np.abs(ys_ref).mean()):.3g}) rtol(5.0e-2) nan(different) : tensor<{mr}x{H}x{YS}>
 +  check.expect.close actual(%ys) expected(%eys) atol({0.05 * float(np.abs(ys_ref).mean()):.3g}) rtol(5.0e-2) nan(different) : tensor<{mr}x{H}x{YS7}>
    check.return
  }}
  """)
-@@ -3689,7 +3725,7 @@
+@@ -3697,7 +3729,7 @@
  
      def rule(n):
          return iq_r(n, K, tg, sw) if q8 else pick_r(n, K, tg)

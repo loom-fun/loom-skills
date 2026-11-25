@@ -252,6 +252,12 @@ kernel.def export("g_moe_route") @g_moe_route(%tokens: index) {{
 """
 
 
+def route_tokens_per_wg(H, E):
+    """Tokens per workgroup of the prefill router (moe.route.tokens_per_wg): g_moe_route_tr_live runs a workgroup whose tokens are not
+    all padding whole, so padding rows inside it are written too (g_moe_bucket never reads them)."""
+    return ROUTE_TR or max(t for t in (1, 2, 4, 8) if t * (H + E) * 4 <= 48 * 1024)
+
+
 def route_prefill(H, E, KU, gating, norm, bias, wty="f32", scale=1.0):
     """g_moe_route_tr, for prefill epochs (t >= 64; decode keeps g_moe_route: one token per workgroup, wide loads in
     flight, was 34 % faster per decode step). Router logits (f32 or bf16 weights) into LDS, then the top-k per token.
@@ -267,7 +273,11 @@ def route_prefill(H, E, KU, gating, norm, bias, wty="f32", scale=1.0):
     if gating == 3:
         return _softmax_weight_prefill(route_prefill(H, E, KU, 2, False, bias, wty), KU)
     EPW = E // 8
-    TR = ROUTE_TR or max(t for t in (1, 2, 4, 8) if t * (H + E) * 4 <= 48 * 1024)
+    TR = route_tokens_per_wg(H, E)
+    # moe.route.tokens_per_wg past the LDS of x rows + logits (e.g. 8 at H 2048, E 256): lane j of a wave keeps its expert j's logits
+    # in registers during the scoring loop, and they are stored into the x rows' LDS (dead by then) for the top-k. Same sums, same order.
+    REG = TR * (H + E) * 4 > 64 * 1024
+    assert not REG or (TR * H * 4 <= 64 * 1024 and E // 8 <= 32 and H % 128 == 0), f"router TR={TR}: x rows do not fit 64 KiB of LDS"
     prob = "scalar.logisticf<afn> %lgt : f32" if gating == 2 else "scalar.addf %lgt, %zero_f : f32"
     score = "scalar.addf %prob_v, %bias_v : f32" if bias else "scalar.addf %prob_v, %zero_f : f32"
     bias_load = f"""    %b_view = buffer.view %b[%zero] : buffer -> view<{E}xf32>
@@ -312,6 +322,12 @@ def route_prefill(H, E, KU, gating, norm, bias, wty="f32", scale=1.0):
       view.store %logit{r}, %lg_view[{r}, %e] : f32, view<{TR}x{E}xf32>
     }}
 """ for r in range(TR))
+    keep_in = ", ".join(f"%k{r} = %zero_f : f32" for r in range(TR))
+    keep_out = ", ".join(f"%kept{r}" for r in range(TR))
+    if REG:
+        stores = "".join(f"    %logit{r} = kernel.subgroup.reduce<addf> %p{r} : f32\n" for r in range(TR)) + \
+            "    %jl = index.cmp eq, %lane, %j : index\n" + "".join(f"    %kn{r} = scf.select %jl, %logit{r}, %k{r} : f32\n" for r in range(TR)) + \
+            "    scf.yield " + ", ".join(f"%kn{r}" for r in range(TR)) + f" : {acc_ty}\n"
 
     # Phase 2: wave r (< TR) takes token r; lane l holds experts l, l+32, ...: KU rounds of subgroup
     # reductions (max score, then the lowest expert id at that score) instead of workgroup reductions.
@@ -395,7 +411,7 @@ def route_prefill(H, E, KU, gating, norm, bias, wty="f32", scale=1.0):
   }
 """)
     topk = "".join(T2)
-    return f"""
+    text = f"""
 // Router: TR={TR} tokens per workgroup, their h rows staged in LDS; wave w scores experts w*{EPW}.. for
 // all {TR} tokens (one weight load serves {TR} tokens); then per token, thread e holds expert e and {KU}
 // rounds of workgroup reductions pick the top {KU} (ties: lowest index) of {GATE_NAME[gating]}{' + bias' if bias else ''}.
@@ -468,6 +484,51 @@ kernel.def export("g_moe_route_tr") @g_moe_route_tr(%tokens: index) {{
 {topk}  kernel.return
 }}
 """
+    if not REG:
+        return text
+    def rep(a, b):
+        nonlocal text
+        assert text.count(a) == 1, a
+        text = text.replace(a, b)
+    rep(f"""  %lg_bytes = index.constant {TR * E * 4} : offset
+  %lg = buffer.alloca<workgroup> align(16) %lg_bytes : buffer
+  %lg_view = buffer.view %lg[%zero] : buffer -> view<{TR}x{E}xf32>
+""", f"""  %lg_view = buffer.view %xs[%zero] : buffer -> view<{TR}x{E}xf32>
+""")
+    rep("  scf.for %j = [%c0 to %cEPW step %c1] {\n", f"  {keep_out} = scf.for %j = [%c0 to %cEPW step %c1]({keep_in}) -> ({acc_ty}) {{\n")
+    if HB % 4 == 0:   # the 128-value blocks 4 at a time: 4 weight loads in flight per expert, the sums in the same order
+        loop = f"""    {acc_out} = scf.for %bq = [%c0 to %cHB step %c1]({acc_in}) -> ({acc_ty}) {{
+      %bb = index.assume %bq [range(%bq, 0, {HB - 1})] : index
+{wl}
+{dots}      scf.yield {nxt} : {acc_ty}
+    }}
+"""
+        U = ["    %cu4 = index.constant 4 : index\n",
+             f"    {acc_out} = scf.for %bq = [%c0 to %cHB step %cu4]({acc_in}) -> ({acc_ty}) {{\n"]
+        for u in range(4):
+            U.append(f"      %cu{u}_o = index.constant {u} : index\n      %bq{u} = index.add %bq, %cu{u}_o : index\n"
+                     f"      %bb{u} = index.assume %bq{u} [range(%bq{u}, 0, {HB - 1})] : index\n")
+        for u in range(4):
+            U.append(wl.replace("%bb", f"%bb{u}").replace("%wraw", f"%wraw{u}").replace("%wv", f"%wv{u}") + "\n")
+        for u in range(4):
+            for r in range(TR):
+                prev = f"%a{r}" if u == 0 else f"%n{u - 1}_{r}"
+                U.append(f"""      %xv{u}_{r} = vector.load %xs4_view[{r}, %bb{u}, %lane, %c0] : view<{TR}x{HB}x32x4xf32> -> vector<4xf32>
+      %d{u}_{r} = vector.dotf<reassoc|contract> %wv{u}, %xv{u}_{r}, %zero_f : vector<4xf32>, vector<4xf32>, f32
+      %n{u}_{r} = scalar.addf {prev}, %d{u}_{r} : f32
+""")
+        U.append("      scf.yield " + ", ".join(f"%n3_{r}" for r in range(TR)) + f" : {acc_ty}\n    }}\n")
+        rep(loop, "".join(U))
+    rep("""  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+""" + topk, f"""  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  %lane_e = index.cmp ult, %lane, %cEPW : index
+  scf.if %lane_e {{
+    %el_raw = index.add %e0, %lane : index
+    %el = index.assume %el_raw [range(%el_raw, 0, {E - 1})] : index
+""" + "".join(f"    view.store %kept{r}, %lg_view[{r}, %el] : f32, view<{TR}x{E}xf32>\n" for r in range(TR)) + """  }
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+""" + topk)
+    return text
 
 
 def route_prefill_live(H, E, KU, gating, norm, bias, wty="f32", scale=1.0):
@@ -1224,8 +1285,37 @@ def grouped_gemm(fmt, mode, N, K, E, KU, gemm_fn, fused=False, bias=False, act=N
             "  %row_group_id = kernel.workgroup.id<y> : index\n  %out_group_id = kernel.workgroup.id<x> : index")
     if bias or (act and act != "silu"):
         text = _gemm_bias_act(text, mode, N, E, bias, act)
+    if mode == "store" and store16():
+        text = _store16_rows(text)
     import gen_gemm_rdna4
     return text + "\n" + gen_gemm_rdna4.twin(text) if gen_gemm_rdna4.enabled() else text   # the gfx12 twin K_rdna4 beside K
+
+
+def store16():
+    """moe.prefill.store16 (MOE_STORE16; numerics-moving): the grouped down GEMM stores its expert rows (ys_sorted) as f16 and
+    g_moe_combine_sorted reads them as f16, in place (same kernel names, same launches): half the DRAM traffic of the
+    largest prefill intermediate (prompt rows x used experts x hidden), written by the down GEMM and read back by the combine."""
+    return os.environ.get("MOE_STORE16", "") not in ("", "0", "off", "no", "false")
+
+
+def _store16_rows(text):
+    """The store-mode grouped GEMM text with an f16 output tile (an f32 result fragment stored into an f16 view narrows)."""
+    four = "  %tile_offset = index.scale %tile_first, %four : index, offset -> offset\n"
+    assert text.count(four) == 1 and text.count("view<64x64xf32, %y_layout>") >= 3, "store16: unexpected store-mode GEMM text"
+    text = text.replace(four, "  %two_y16 = index.constant 2 : offset\n  %tile_offset = index.scale %tile_first, %two_y16 : index, offset -> offset\n")
+    return text.replace("view<64x64xf32, %y_layout>", "view<64x64xf16, %y_layout>")
+
+
+def _combine_sorted16(text, H):
+    """g_moe_combine_sorted reading f16 expert rows (store16)."""
+    a = f"%ys_view = buffer.view %ys[%zero] : buffer -> view<[%rows]x{H}xf32>"
+    assert text.count(a) == 1
+    text = text.replace(a, f"%ys_view = buffer.view %ys[%zero] : buffer -> view<[%rows]x{H}xf16>")
+    text, n = re.subn(r"%vv(\d+) = view\.load %ys_view\[%pr\1, %ch\] : view<\[%rows\]x" + str(H) + r"xf32> -> f32",
+                      lambda m: f"%vh{m.group(1)} = view.load %ys_view[%pr{m.group(1)}, %ch] : view<[%rows]x{H}xf16> -> f16\n"
+                                f"    %vv{m.group(1)} = scalar.extf %vh{m.group(1)} : f16 to f32", text)
+    assert n >= 1 and f"view<[%rows]x{H}xf32>" not in text, n
+    return text
 
 
 def combine_sorted(H, KU, acc=False):
@@ -1233,6 +1323,11 @@ def combine_sorted(H, KU, acc=False):
     KU expert rows are read whole and at once (with a workgroup per (token, block) and tokens fastest, each row was
     fetched in H/256 pieces far apart: Qwen3.5-35B-A3B, 1k tokens, 10 % of the prefill). The row loads are
     unconditional (a dead assignment reads row 0 and selects 0) so they are in flight together."""
+    text = _combine_sorted_text(H, KU, acc)
+    return _combine_sorted16(text, H) if store16() else text
+
+
+def _combine_sorted_text(H, KU, acc):
     return f"""
 kernel.def export("g_moe_combine_sorted") @g_moe_combine_sorted(%tokens: index) {{
   %c1 = index.constant 1 : index

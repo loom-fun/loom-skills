@@ -112,7 +112,7 @@ Use unique NAMEs. `stop.sh` refuses to kill a PID that is not a loom-serve.
 Raw form: `loom-serve '--device=amdgpu://?completion_spin_ns=4294967295' --listen=127.0.0.1:PORT
 --model=pkg/model.json --workers=8 --pool_backing=fixed [--preset=NAME]` (the card's serving on Strix Halo and the R9700: the preset's `context_capacity`
 KV and the weights are committed up front). The elastic option, for several models sharing one budget: `--memory_bytes=N [--parameter_idle_ms=60000]` instead of
-`--pool_backing=fixed` (measured on hrx-loom 0.2.0: elastic backing was 5-8 % slower on Strix prefill; not re-measured on 0.3.0, so treat it as the 0.2.0 figure).
+`--pool_backing=fixed` (measured on hrx-loom 0.3.0, elastic vs fixed: Strix Halo prefill at 0.93-0.98x of fixed, so `--pool_backing=fixed` stays there; R9700 shows no gain, 0.97-1.03x on every row, so fixed stays there too).
 
 **Active wait (the default on `amdgpu`).** `serve.sh` turns `amdgpu` into
 `amdgpu://?completion_spin_ns=4294967295`: while GPU work is in flight, Loom's `amd-gpu-retire` thread spins on the

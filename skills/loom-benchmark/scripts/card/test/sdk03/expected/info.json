@@ -415,6 +415,7 @@
        "prefill_32k": 1193.9,
        "prefill_8k": 1424.7,
        "spec_acceptance": 0.68,
+       "spec_acceptance_session": 0.325,
        "streams4": 134.2
       }
      }

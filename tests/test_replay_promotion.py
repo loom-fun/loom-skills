@@ -283,6 +283,25 @@ class ReleaseWriterTests(unittest.TestCase):
             self.release.prepare(only=[IMAGE])
         self.release.rows[IMAGE]["programs_sha256"] = promotion.programs_sha256(self.release.hub.dirs[staged][0])
         self.release.write_inputs()
+        # retro review: programs_sha256 alone used to promote an image package; its pixel qualification is required (fail closed)
+        with self.assertRaisesRegex(ValueError, "needs its qualification"):
+            self.release.prepare(only=[IMAGE])
+        verdict = {"preset": "image", "request_sha256": "r" * 64, "pixels_match": True, "programs_match": True, "max_abs_channel_diff": 0,
+                   "deterministic": {"old": True, "new": True}}
+        for bad, why in (({"run": 45, "job": 138}, "no pixel verdict"), ({"run": 45, "image": verdict}, "run and job"),
+                         ({"run": 45, "job": 138, "image": {**verdict, "pixels_match": False}}, "pixels differ"),
+                         ({"run": 45, "job": 138, "image": {**verdict, "max_abs_channel_diff": 2}}, "pixels differ"),
+                         ({"run": 45, "job": 138, "image": {**verdict, "programs_match": False}}, "other programs"),
+                         ({"run": 45, "job": 138, "image": {**verdict, "deterministic": {"old": True}}}, "not deterministic"),
+                         ({"run": 45, "job": 138, "image": {**verdict, "preset": "upscale"}}, "presets")):
+            self.release.rows[IMAGE]["qualification"] = {"strix-halo": bad}
+            self.release.write_inputs()
+            shutil.rmtree(self.release.bundle, ignore_errors=True)
+            with self.assertRaisesRegex(ValueError, why):
+                self.release.prepare(only=[IMAGE])
+        self.release.rows[IMAGE]["qualification"] = {"strix-halo": {"run": 45, "job": 138, "url": "u", "image": verdict}}
+        self.release.write_inputs()
+        shutil.rmtree(self.release.bundle, ignore_errors=True)
         sha = self.release.prepare(only=[IMAGE])
         document, _ = promotion.inspect_bundle(self.release.bundle, sha)
         self.assertEqual(document["tags"][IMAGE]["pin_path"], "README.md")  # image pin from the card, not llm_config

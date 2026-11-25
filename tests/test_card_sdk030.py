@@ -17,6 +17,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "skills/loom-benchmark/scripts"
@@ -162,6 +163,28 @@ class Lint(unittest.TestCase):
             self.assertEqual(res["admission"], [])
             self.assertEqual(res["delta"], ["card: strix-halo prefill_2k -4.0 % unexplained (beyond -3 %)"])
 
+    def test_foreign_tree_caught_in_both_forms(self):
+        # retro review: --form staging composed symlinks and os.walk did not follow them, so dev/ (and program/, gen/) went unchecked
+        with tempfile.TemporaryDirectory() as t:
+            d = self.card(t)
+            (d / "dev").mkdir()
+            (d / "dev" / "notes.txt").write_text("porting notes\n", encoding="utf-8")
+            for form in ("production", "staging"):
+                res = lint_card.lint(str(d), form=form, runs=lint_card.Runs(offline=True))
+                self.assertIn("dev/ (1 files): not part of the card format", res["files"], form)
+            (d / "dev" / "notes.txt").unlink()
+            (d / "program" / "stray.txt").write_text("x\n", encoding="utf-8")   # inside a card tree: allowed in both forms alike
+            self.assertEqual(lint_card.lint(str(d), form="staging", runs=lint_card.Runs(offline=True))["files"],
+                             lint_card.lint(str(d), form="production", runs=lint_card.Runs(offline=True))["files"])
+
+    def test_docstring_says_what_publish_runs(self):
+        # retro review: the docstring said publish_package.py runs the lint; it runs only the files check (card_files.check_package)
+        pub = (CARD / "publish_package.py").read_text(encoding="utf-8")
+        self.assertIn("from card_files import check_package", pub)
+        self.assertNotRegex(pub, r"import lint_card|from lint_card|lint_card\.lint\(|lint_card\.py\"")   # it never runs the lint
+        self.assertNotIn("publish_package.py runs it before", lint_card.__doc__)
+        self.assertIn("publish_package.py runs only the\nfiles check", lint_card.__doc__)
+
     def test_hand_edit_failed_run_and_staging_text(self):
         with tempfile.TemporaryDirectory() as t:
             d = self.card(t)
@@ -191,5 +214,129 @@ class Lint(unittest.TestCase):
             self.assertTrue(res["admission"], res)
 
 
+class AcceptanceDelta(unittest.TestCase):
+    """The acceptance delta compares one quantity from one workload (perf-session acceptance) on both sides."""
+    def info(self):
+        return json.loads((CARD / "test/sdk03/expected/info.json").read_text(encoding="utf-8"))
+
+    def row(self, info, depth=3):
+        pin = {"hrx_loom": "0.3.0"}
+        rows = card_lib.delta_rows(info, pin, info["sdk_delta"]["comparisons"][0], depth)["strix-halo"]
+        return next(r for r in rows if r["metric"] == "spec_acceptance")
+
+    def test_perf_session_old_side(self):
+        info = self.info()
+        self.assertEqual(info["sdk_delta"]["comparisons"][0]["devices"]["strix-halo"]["metrics"]["spec_acceptance_session"], 0.325)
+        r = self.row(info)
+        self.assertEqual(r["per_pass"], {"old": 0.975, "new": 1.249})   # not the spec gate's 68 % x 3 = 2.04
+        self.assertFalse(r["different_workloads"])
+        self.assertEqual(r["change"], round(1.249 / 0.975 - 1, 4))
+
+    def session_acceptance(self, info, **kw):
+        for sess in info["devices"]["strix-halo"]["performance"]["sessions"]:
+            if "spec_acceptance" in sess["metrics"]:
+                sess["metrics"]["spec_acceptance"].update(kw)
+        return info
+
+    def test_acceptance_drop_is_a_regression(self):
+        # retro review: a spec_acceptance drop beyond 3 % was never marked, so it needed no explanation
+        info = self.session_acceptance(self.info(), accepted_per_pass=0.9)   # 0.975 -> 0.9 per pass: -7.7 %
+        r = self.row(info)
+        self.assertEqual(r["relative"], round(0.9 / 0.975 - 1, 4))
+        self.assertTrue(r["regression"])
+        import render_card
+        text = "\n".join(render_card.delta_lines(info, {"hrx_loom": "0.3.0"}, True, 3))
+        self.assertIn("drafted tokens accepted -7.7 % (0.97 → 0.90 per verification pass): unexplained.", text)
+        self.assertIn("counted them) ³", text)
+        d = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, d, True)
+        d = Lint.card(self, d)   # the lint sees it too (it now compares with the package's draft depth, as the render does)
+        (d / "info.json").write_text(json.dumps(info, indent=1), encoding="utf-8")
+        res = lint_card.lint(str(d), runs=lint_card.Runs(offline=True))
+        self.assertIn("card: strix-halo spec_acceptance -7.7 % unexplained (beyond -3 %)", res["delta"])
+        r = self.row(self.session_acceptance(self.info(), accepted_per_pass=0.96))   # -1.5 %: within the band
+        self.assertFalse(r["regression"])
+
+    def test_acceptance_drop_in_points_is_relative(self):
+        info = self.info()
+        info["sdk_delta"]["comparisons"][0]["devices"]["strix-halo"]["metrics"]["spec_acceptance"] = 0.68
+        info = self.session_acceptance(info, loom=0.64)   # 68 % -> 64 %: -4 points, -5.9 % relative
+        r = self.row(info)
+        self.assertEqual((r["change"], r["relative"]), (round(0.64 - 0.68, 4), round(0.64 / 0.68 - 1, 4)))
+        self.assertTrue(r["regression"])
+        info["sdk_delta"]["comparisons"][0]["explanations"] = {"strix-halo": {"spec_acceptance": {"text": "the drafter changed"}}}
+        self.assertEqual(self.row(info)["explanation"], {"text": "the drafter changed"})
+
+    def test_spec_gate_only_old_card_has_no_delta(self):
+        info = self.info()
+        del info["sdk_delta"]["comparisons"][0]["devices"]["strix-halo"]["metrics"]["spec_acceptance_session"]
+        r = self.row(info)
+        self.assertTrue(r["different_workloads"])
+        self.assertIsNone(r["change"])
+        self.assertIsNone(r["per_pass"])
+        self.assertEqual((r["old"], r["accepted_per_pass"]), (0.68, 1.249))
+        import render_card
+        text = "\n".join(render_card.delta_lines(info, {"hrx_loom": "0.3.0"}, True, 3))
+        self.assertIn("68 % of proposals in its speculative-decoding gate, this card 1.25 per verification pass in the performance "
+                      "session (different workloads, no delta)", text)
+        self.assertNotIn("-38.8", text)
+
+
 if __name__ == "__main__":
     unittest.main()
+
+
+class NoGenerator(unittest.TestCase):
+    """A hand-written package (llm_config "generator" says unknown, no commit recoverable) states it has no generator."""
+    GEN = {"skills_commit": "unknown", "dirty": None, "kit": {"example": None, "modified": True}, "hrx_loom": "unknown"}
+    BASIS = "hand-written package, no generator"
+
+    def versions(self):
+        return {"card_generator": "a" * 40, "package": {"skills_commit": {"commit": None, "basis": self.BASIS}}}
+
+    def test_generator_commit(self):
+        self.assertFalse(card_lib.stamped(self.GEN))
+        self.assertEqual(card_lib.generator_commit(self.GEN, self.versions()), (None, "none"))
+        self.assertEqual(card_lib.generator_commit(self.GEN, {"card_generator": "x"}), (None, None))
+        rec = {"package": {"skills_commit": {"commit": "b" * 40, "recovered": True, "basis": "production card"}}}
+        self.assertEqual(card_lib.generator_commit(self.GEN, rec), ("b" * 40, "recovered"))
+        self.assertEqual(card_lib.generator_commit({"skills_commit": "c" * 40}, rec), ("c" * 40, "stamp"))
+
+    def test_rendered_without_unknown(self):
+        import render_card
+        text = render_card.skills_text(self.GEN, self.versions())
+        self.assertEqual(text, f"none ({self.BASIS})")
+        self.assertNotIn("unknown", render_card.versions_sdk(self.GEN, self.versions(), {"hrx_loom": "0.3.0", "hrx_system_sha": "e" * 40}))
+
+    def test_schema(self):
+        schema = card_lib.load_json(card_lib.SCHEMA_PATH)
+        sub = schema["properties"]["versions"]
+        self.assertEqual(card_lib._check(self.versions(), sub, schema, "versions", []), [])
+        bad = {"card_generator": "x", "package": {"skills_commit": {"commit": "nothex", "basis": "y"}}}
+        self.assertNotEqual(card_lib._check(bad, sub, schema, "versions", []), [])
+
+
+class KitKept(unittest.TestCase):
+    """Migration-only programs whose kit build lost its A/B: the card says why in one generated line (sdk_delta.kit)."""
+    REASON = "Strix Halo decode -4.2 % (confirmed in the same-job ABBA)"
+    URL = "https://github.com/loom-fun/loom-skills/actions/runs/1/job/2"
+
+    def test_lint_and_render(self):
+        with tempfile.TemporaryDirectory() as t:
+            d = Lint().card(t)
+            info = json.loads((d / "info.json").read_text(encoding="utf-8"))
+            info["sdk_delta"]["kit"] = {"reason": self.REASON, "url": self.URL}
+            self.assertFalse([e for e in card_lib.validate(info, "") if "sdk_delta" in e])
+            import render_card
+            text = "\n".join(render_card.delta_lines(info, {"hrx_loom": "0.3.0"}, True, 3))
+            self.assertIn(f"is not shipped: {self.REASON} ([evidence]({self.URL})).", text)
+            bad = dict(info, sdk_delta=dict(info["sdk_delta"], kit={"why": "x"}))
+            self.assertTrue([e for e in card_lib.validate(bad, "") if "sdk_delta" in e])
+
+    def test_make_info_keeps_and_checks(self):
+        ns = SimpleNamespace(previous_card=[], delta_explanations=None, kit_kept=None)
+        old = {"kit": {"reason": self.REASON, "url": None}, "comparisons": []}
+        self.assertEqual(make_info.sdk_delta(ns, old)["kit"], {"reason": self.REASON, "url": None})
+        ns.kit_kept = {"url": self.URL}
+        with self.assertRaises(SystemExit):
+            make_info.sdk_delta(ns, None)

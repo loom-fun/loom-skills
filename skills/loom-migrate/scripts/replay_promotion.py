@@ -41,7 +41,7 @@ CARD_SCRIPTS = Path(__file__).resolve().parents[2] / "loom-benchmark" / "scripts
 FETCH = re.compile(r"(?m)^([ \t]*loom-fetch[ \t]+)(?:([\x22\x27])([^\r\n]*?)\2|([^\s]+))")
 SCHEMA = 2
 PIN_FIELDS = ("staging_revision", "target_revision", "retain_target_files", "delete_target_files", "rollback_tag",
-              "image_readme_refresh", "programs_sha256")
+              "image_readme_refresh", "programs_sha256", "qualification")
 TAG_ACTIONS = ("create", "already-at-parent", "already-on-target-sdk")
 MARKER = "Reviewed promotion manifest SHA256: "
 
@@ -112,6 +112,12 @@ def records(pins, allow_empty=False):
                     f"{slug}: deleted files require a pinned outgoing rollback tag (rollback_tag is {row.get('rollback_tag')!r})")
         require("programs_sha256" not in row or re.fullmatch(SHA256, row["programs_sha256"] or ""),
                 f"{slug}: programs_sha256 must be a sha256")
+        if "qualification" in row:
+            qual = row["qualification"]
+            require(isinstance(qual, dict) and qual and all(
+                isinstance(device, str) and isinstance(q, dict) and isinstance(q.get("run"), int) and isinstance(q.get("job"), int)
+                and q["run"] > 0 and q["job"] > 0 for device, q in qual.items()),
+                f"{slug}: qualification must map each device to its run and job ids")
         if "image_readme_refresh" in row:
             refresh = row["image_readme_refresh"]
             hashes = {"reference_readme_sha256", "target_readme_sha256", "staging_readme_sha256"}
@@ -331,6 +337,28 @@ def programs_sha256(directory):
     return h.hexdigest() if files else None
 
 
+def check_image_qualification(slug, row, presets=None):
+    """An image package (no info.json to carry its evidence) is promoted only on the qualification regen eligible writes for it: per device the
+    run and job of the passing comparison and its pixel verdict (identical pixels, max channel diff 0, the qualified programs, deterministic on
+    both SDKs) for the preset the card fetches. Fail closed: a row without them is refused."""
+    qual = row.get("qualification")
+    require(isinstance(qual, dict) and qual, f"{slug}: an image package needs its qualification (run, job, pixel verdict) in the release input")
+    seen = set()
+    for device, q in sorted(qual.items()):
+        image = q.get("image") if isinstance(q, dict) else None
+        require(isinstance(q, dict) and isinstance(q.get("run"), int) and isinstance(q.get("job"), int) and q["run"] > 0 and q["job"] > 0,
+                f"{slug}: {device} image qualification has no run and job")
+        require(isinstance(image, dict), f"{slug}: {device} image qualification has no pixel verdict")
+        require(image.get("pixels_match") is True and image.get("max_abs_channel_diff") == 0,
+                f"{slug}: {device} image qualification: pixels differ")
+        require(image.get("programs_match") is True, f"{slug}: {device} image qualification served other programs")
+        require(all((image.get("deterministic") or {}).get(side) is True for side in ("old", "new")),
+                f"{slug}: {device} image qualification is not deterministic on both SDKs")
+        require(isinstance(image.get("preset"), str) and image["preset"], f"{slug}: {device} image qualification names no preset")
+        seen.add(image["preset"])
+    require(presets is None or seen == set(presets), f"{slug}: image qualification presets {sorted(seen)} are not the card's {sorted(set(presets or []))}")
+
+
 def check_image_readme_refresh(slug, refresh, source, target, reference):
     require(reference is not None and {n: sha for n, sha in target.items() if n != "README.md"}
             == {n: sha for n, sha in reference.items() if n != "README.md"},
@@ -369,6 +397,7 @@ def compose(slug, row, source, source_hashes, target, target_hashes, out, meta, 
         require(all(service.get("kind") == "image" for service in model["services"].values()),
                 f"{slug}: missing generated card metadata on non-image package")
         require(row.get("programs_sha256"), f"{slug}: an image package needs its qualified programs_sha256 in the release input")
+        check_image_qualification(slug, row, presets)
         if refresh is not None:
             check_image_readme_refresh(slug, refresh, source_hashes, target_hashes, reference_hashes)
             row = {**row, "image_reference_hashes": reference_hashes}
@@ -551,6 +580,8 @@ def inspect_bundle(bundle, manifest_sha):
                 and tag["action"] in TAG_ACTIONS, f"{slug}: invalid tag plan entry")
     require({p.name for p in (bundle / "packages").iterdir()} == {s for s, _ in rows}, "bundle slug coverage differs")
     for slug, row in rows:
+        if "info.json" not in row["source"]:   # an image package: the reviewed manifest carries its qualification
+            check_image_qualification(slug, row, row.get("presets"))
         if (refresh := row.get("image_readme_refresh")) is not None:
             check_image_readme_refresh(slug, refresh, row["source"], row["target"], row.get("image_reference_hashes"))
         if row.get("rollback_tag"):

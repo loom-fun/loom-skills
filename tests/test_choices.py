@@ -329,9 +329,10 @@ class Resolution(unittest.TestCase):
         slug = "ggml-org-Qwen3.6-35B-A3B-loom"
         r = resolve.resolve_full(moe35(), ("rdna3", "rdna4"), KB, draft="dflash", slug=slug)
         self.assertEqual({k: v for k, v in r["env"].items() if "GQA_D256" in k}, {"ATTN_GQA_D256": "0"})
-        self.assertEqual(resolve.resolve(moe35(), ("rdna3",), KB, draft="dflash", slug=slug)["env"], {"ATTN_GQA_D256": "0"})
-        self.assertEqual(resolve.resolve(moe35(), ("rdna4",), KB, draft="dflash", slug=slug)["env"], {"ATTN_GQA_D256": "0"})
-        self.assertEqual(resolve.resolve(moe35(), ("rdna3", "rdna4"), KB, draft="dflash", slug="unsloth-Qwen3.5-35B-A3B-loom")["env"], {"ATTN_GQA_D256": "0"})
+        d256 = lambda devs, s: {k: v for k, v in resolve.resolve(moe35(), devs, KB, draft="dflash", slug=s)["env"].items() if "GQA_D256" in k}
+        self.assertEqual(d256(("rdna3",), slug), {"ATTN_GQA_D256": "0"})
+        self.assertEqual(d256(("rdna4",), slug), {"ATTN_GQA_D256": "0"})
+        self.assertEqual(d256(("rdna3", "rdna4"), "unsloth-Qwen3.5-35B-A3B-loom"), {"ATTN_GQA_D256": "0"})
 
     def test_attn_rules_twin_reads_its_own_variable(self):
         """attn_rules.gqa(..., twin=True) follows ATTN_GQA_D256__RDNA4; unset it follows ATTN_GQA_D256 (no twin text then)."""

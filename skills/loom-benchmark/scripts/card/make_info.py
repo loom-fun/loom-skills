@@ -128,7 +128,7 @@ from card_lib import (DEFAULT_GPU, DRAFTED_ROWS, EVIDENCE_ID, GPUS, METRIC_KEYS,
                       programs_sha256, require_valid, fixed_pool_capacity, gpu_preset_execution, gpu_preset_name, with_gpu_preset, served_context, fit_served_context, upstream_facts, with_gate_features, write_json,
                       SERVE_HEADROOM, registry, fit_rows, non_targets, load_device_results, validate_device_results, with_device_preset, DEVICE_RESULTS_ID, card_serve_args, quick_start, serves,
                       historical_xsj_gate, sdk_serve_args, xsj_enabled, xsj_evidence_errors, xsj_measurement_errors, xsj_vulkan_comparison_errors,
-                      CAVEAT_MAX, DEVICE_RESULTS_DIR, QUICK_START_QUALIFICATION, qualified_bare_quick_start, text_errors, previous_values)
+                      CAVEAT_MAX, DEVICE_RESULTS_DIR, QUICK_START_QUALIFICATION, qualified_bare_quick_start, text_errors, previous_values, stamped)
 
 
 # ---------------------------------------------------------------- sources
@@ -649,7 +649,7 @@ def cmd_build(a):
         card.pop("memory_bytes", None)
     if "license" in card and card["license"] is None:
         card.pop("license")
-    if facts["generator"]:
+    if stamped(facts["generator"]):
         versions.pop("package", None)   # the build stamp in llm_config.json wins
 
     # per-GPU serving settings: the command line, then the fit table
@@ -863,7 +863,17 @@ def sdk_delta(a, old_delta):
                     sys.exit("\n".join(errs))
                 ex.setdefault(gpu, {})[k] = {"text": e["text"], "url": e.get("url")}
     order = {"card": 0, "migration": 1}
-    return {"comparisons": sorted(comps.values(), key=lambda c: order[c["label"]])} if comps else None
+    kit = getattr(a, "kit_kept", None) or (old_delta or {}).get("kit")
+    if kit:
+        if not kit.get("reason"):
+            sys.exit("--kit-kept: needs a reason")
+        errs = text_errors("--kit-kept reason", kit["reason"], CAVEAT_MAX)
+        if errs:
+            sys.exit("\n".join(errs))
+        kit = {"reason": kit["reason"], "url": kit.get("url")}
+    if not comps and not kit:
+        return None
+    return {**({"kit": kit} if kit else {}), "comparisons": sorted(comps.values(), key=lambda c: order[c["label"]])}
 
 
 # ---------------------------------------------------------------- perf logs -> evidence
@@ -1623,6 +1633,9 @@ def main(argv=None):
                    help="an earlier card of this package whose stored Loom values the delta line compares with (repeat): card = the published "
                    "card this one replaces (its repo and revision), migration = this package's migration-only card on the new SDK (frozen "
                    "programs; no link, it is never published as the production card). Replaces --from-info's comparison of the same label")
+    b.add_argument("--kit-kept", type=load_json, metavar="KIT.json",
+                   help='{"reason": ..., "url": ...}: these migration-only programs stay; the release kit build was A/B\'d against them on the new SDK '
+                        "and not shipped (fleet/regen.py, phase 2): the card says why, one generated line")
     b.add_argument("--sdk-evidence", type=load_json, metavar="EVIDENCE.json",
                    help="an sdk-evidence/1 file (fleet/regen.py evidence): this card's regression explanations (as --delta-explanations "
                    "card) and the conclusion of every job it cites (recorded on the sources; render_card.py refuses a failed one)")

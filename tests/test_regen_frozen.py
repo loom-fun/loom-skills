@@ -1,6 +1,7 @@
 """fleet/regen.py --programs production (the frozen SDK migration), the version-generic SDK constants, the evidence / eligible generator,
 ab_jobs.py --programs production and the image comparison's request (no network, no GPU)."""
 import contextlib
+import glob
 import io
 import json
 import os
@@ -256,6 +257,8 @@ class CollectFrozen(unittest.TestCase):
         self.assertEqual(regen.admission(self.d)["warnings"], ["WARN: the server did not cancel the request within 60s"])
         self.assertIsNone(regen.frozen_guard(self.st, e))
         self.assertIn("concluded failure", regen.frozen_guard(self.st, dict(e, conclusion="failure")))
+        no_conclusion = {k: v for k, v in e.items() if k != "conclusion"}   # retro review: a missing conclusion used to pass the guard
+        self.assertIn("without a recorded conclusion", regen.frozen_guard(self.st, no_conclusion))
         self.assertIn("not the production programs", regen.frozen_guard(self.st, dict(e, programs_sha256="b" * 64)))
         json.dump({"hrx_loom": "0.3.0", "wheel_sha256": "x"}, open(os.path.join(self.d, "sdk_stagingnd.json"), "w"))
         self.assertIn("not the verified", regen.frozen_guard(self.st, e))
@@ -284,9 +287,11 @@ class Eligibility(unittest.TestCase):
                                   "claimed_devices": sorted(devices), "devices": devices}},
                 "held": {HELD: {"reason": "owner", "tag_revision": "t" * 40}}}
 
+    HEAD = staticmethod(lambda repo: "s" * 40)
+
     def test_every_runner_device_qualified(self):
         el, held, pend = regen.eligibility(self.doc({"strix-halo": self.dev(), "radeon-r9700": self.dev(run="46", job="139"),
-                                                     "gfx1150": {"status": "no_runner"}}))
+                                                     "gfx1150": {"status": "no_runner"}}), self.HEAD)
         row = el[TEXT]
         self.assertEqual(row["device_keys"], ["radeon-r9700", "strix-halo"])
         self.assertEqual(row["qualification"]["radeon-r9700"]["run"], 46)
@@ -294,14 +299,56 @@ class Eligibility(unittest.TestCase):
         self.assertEqual((row["programs_sha256"], row["target_revision"], row["staging_revision"]), (H, REV[TEXT], "s" * 40))
         self.assertEqual(held[HELD]["tag_revision"], "t" * 40)
         self.assertEqual(pend, {})
+        self.assertEqual(row["gates_not_rerun"], {})
+
+    def test_staging_revision_is_the_latest_publish_and_the_live_head(self):
+        # retro review: sorted(revisions)[-1] picked the alphabetically largest sha ("f..."), not the latest publish ("a...")
+        devs = {"strix-halo": self.dev(published_revision="a" * 40, published="2026-11-25T03:00:00Z"),
+                "radeon-r9700": self.dev(run="46", job="139", published_revision="f" * 40, published="2026-11-25T01:00:00Z")}
+        el, _, pend = regen.eligibility(self.doc(devs), lambda repo: "a" * 40)
+        self.assertEqual(el[TEXT]["staging_revision"], "a" * 40)
+        el, _, pend = regen.eligibility(self.doc(devs), lambda repo: "b" * 40)   # published since by something else
+        self.assertEqual(el, {})
+        self.assertIn("is not the latest published revision", pend[TEXT]["reasons"]["staging"])
+        el, _, pend = regen.eligibility(self.doc(devs))   # never eligible without the live head
+        self.assertEqual(el, {})
+        self.assertIn("not checked", pend[TEXT]["reasons"]["staging"])
+
+        def down(repo):
+            raise OSError("503")
+        self.assertIn("cannot read the live staging head", regen.eligibility(self.doc(devs), down)[2][TEXT]["reasons"]["staging"])
+
+    def test_gates_not_rerun_listed(self):
+        el, _, _ = regen.eligibility(self.doc({"strix-halo": self.dev(gates_not_run="no stock reference")}), self.HEAD)
+        self.assertEqual(el[TEXT]["gates_not_rerun"], {"strix-halo": "no stock reference"})
+
+    def image_doc(self, image):
+        dev = {**self.dev(), "image": image}
+        dev.pop("programs_match")
+        return {"models": {IMAGE: {"production": f"loom-fun/{IMAGE}", "production_revision": "a" * 40, "programs_sha256": "i" * 64, "kind": "image",
+                                   "claimed_devices": [], "devices": {"strix-halo": dev}}}, "held": {}}
+
+    def test_image_rows_carry_their_pixel_verdict(self):
+        good = {"preset": "image", "request_sha256": "r" * 64, "pixels_match": True, "programs_match": True, "max_abs_channel_diff": 0,
+                "old": {"deterministic": True}, "new": {"deterministic": True}, "time_ratio": 1.0}
+        el, _, _ = regen.eligibility(self.image_doc(good), self.HEAD)
+        q = el[IMAGE]["qualification"]["strix-halo"]
+        self.assertEqual((q["run"], q["job"]), (45, 138))
+        self.assertEqual(q["image"], {"preset": "image", "request_sha256": "r" * 64, "pixels_match": True, "programs_match": True,
+                                      "max_abs_channel_diff": 0, "deterministic": {"old": True, "new": True}})
+        for bad in ({**good, "pixels_match": False}, {**good, "max_abs_channel_diff": 3}, {**good, "programs_match": False},
+                    {**good, "new": {"deterministic": False}}, None):
+            el, _, pend = regen.eligibility(self.image_doc(bad), self.HEAD)
+            self.assertEqual(el, {}, bad)
+            self.assertIn(IMAGE, pend)
 
     def test_fail_closed(self):
         for bad in (self.dev("failed"), self.dev(conclusion="failure"), self.dev(run=None), self.dev(programs_match=False),
                     self.dev("pending"), self.dev(published_revision=None)):
-            el, _, pend = regen.eligibility(self.doc({"strix-halo": self.dev(), "radeon-r9700": bad}))
+            el, _, pend = regen.eligibility(self.doc({"strix-halo": self.dev(), "radeon-r9700": bad}), self.HEAD)
             self.assertEqual(el, {}, bad)
             self.assertIn(TEXT, pend)
-        el, _, pend = regen.eligibility(self.doc({"gfx1150": {"status": "no_runner"}}))
+        el, _, pend = regen.eligibility(self.doc({"gfx1150": {"status": "no_runner"}}), self.HEAD)
         self.assertEqual(el, {})
 
 
@@ -415,14 +462,45 @@ class ProductionFacts(unittest.TestCase):
                 os.makedirs(os.path.join(local_dir, "program"))
                 open(os.path.join(local_dir, "program", "llm.loom"), "w").write("x")
                 json.dump({"services": {"chat": {"kind": "text"}}, "presets": {}}, open(os.path.join(local_dir, "model.json"), "w"))
-                json.dump({"card": {"memory_bytes": 5, "features": ["draft"]}, "devices": {"strix-halo": {}, "gfx1150": {}},
+                json.dump({"card": {"memory_bytes": 5, "features": ["draft"]}, "devices": {"strix-halo": {}, "gfx1150": {}, "radeon-r9700": {"state": "not_a_target", "reason": "x"}},
                            "versions": {"card_generator": "38b84928d947d45615439ffe54dc3d66899f7b0b"}}, open(os.path.join(local_dir, "info.json"), "w"))
                 json.dump({"sdk": {"hrx_loom": "0.2.0"}, "generator": {"skills_commit": "unknown"}}, open(os.path.join(local_dir, "llm_config.json"), "w"))
             with mock.patch.dict(sys.modules, {"huggingface_hub": SimpleNamespace(snapshot_download=snapshot_download)}):
                 f = regen.production_facts(f"loom-fun/{STRIX_ONLY}", "b" * 40, cache)
             self.assertEqual((f["kind"], f["claimed"], f["memory_bytes"]), ("text", ["gfx1150", "strix-halo"], 5))
-            self.assertEqual(f["generator"], "38b84928d947d45615439ffe54dc3d66899f7b0b")   # an "unknown" stamp falls back to the card's generator
+            # retro review: an "unknown" stamp fell back to the card generator's commit, which made the card, not the programs
+            self.assertIsNone(f["generator"])
             self.assertTrue(f["programs_sha256"])
+            facts_path = glob.glob(os.path.join(cache, "*", "facts.json"))[0]
+            legacy = dict(json.load(open(facts_path)), generator="38b84928d947d45615439ffe54dc3d66899f7b0b")
+            legacy.pop("generator_source")
+            json.dump(legacy, open(facts_path, "w"))   # a cache written before the rule: re-read from the cached llm_config.json
+            self.assertIsNone(regen.production_facts(f"loom-fun/{STRIX_ONLY}", "b" * 40, cache)["generator"])
+            json.dump({"generator": {"skills_commit": "c" * 40}}, open(os.path.join(os.path.dirname(facts_path), "llm_config.json"), "w"))
+            legacy["generator_source"] = None
+            json.dump(legacy, open(facts_path, "w"))
+            self.assertEqual(regen.production_facts(f"loom-fun/{STRIX_ONLY}", "b" * 40, cache)["generator"], "c" * 40)
+
+
+class PackageGenerator(unittest.TestCase):
+    def test_recovered_or_hand_written(self):
+        self.assertEqual(regen.package_generator("a" * 40, True), {"commit": "a" * 40, "recovered": True, "basis": "production package llm_config.json"})
+        self.assertEqual(regen.package_generator(None, False), {"commit": None, "basis": "hand-written package, no generator"})
+        self.assertEqual(regen.package_generator(None, True), {"commit": None, "basis": regen.NO_STAMP})
+
+    def test_legacy_ref_with_a_card_generator_commit(self):
+        with tempfile.TemporaryDirectory() as work:
+            ref = {"old": f"loom-fun/{TEXT}@{REV[TEXT]}", "generator": "38b84928d947d45615439ffe54dc3d66899f7b0b"}   # planned before the rule
+            st = SimpleNamespace(d={"work": work, "opts": {"refs_all": {TEXT: ref}}})
+            self.assertIsNone(regen.ref_generator(st, TEXT))   # no cached llm_config.json: no commit
+            d = os.path.join(work, "production", f"{TEXT}@{REV[TEXT][:12]}")
+            os.makedirs(d)
+            json.dump({"generator": {"skills_commit": "unknown"}}, open(os.path.join(d, "llm_config.json"), "w"))
+            self.assertIsNone(regen.ref_generator(st, TEXT))
+            json.dump({"generator": {"skills_commit": "d" * 40}}, open(os.path.join(d, "llm_config.json"), "w"))
+            self.assertEqual(regen.ref_generator(st, TEXT), "d" * 40)
+            st.d["opts"]["refs_all"][TEXT] = {"generator": None, "generator_source": "llm_config"}
+            self.assertIsNone(regen.ref_generator(st, TEXT))
 
 
 class FrozenAssembleAndLint(unittest.TestCase):
@@ -454,7 +532,227 @@ class KernelTestsNotApplicable(unittest.TestCase):
                 e = {"slug": STRIX_ONLY, "device": dev, "cmp": cmp}
                 regen.kernel_tests_not_applicable(st, e, d)
                 self.assertEqual(json.load(open(cmp))["gate_failures"], want, dev)
+            st.d["opts"]["refs_all"][TEXT] = {"gates": {"strix-halo": ["agent", "golden"]}}   # a fleet (kit-generated) package: the kit makes its tests
+            json.dump({"gate_failures": ["ktest:staging"]}, open(cmp, "w"))
+            regen.kernel_tests_not_applicable(st, {"slug": TEXT, "device": "strix-halo", "cmp": cmp}, d)
+            self.assertEqual(json.load(open(cmp))["gate_failures"], ["ktest:staging"])
             json.dump({"results": {"ktest:staging": "FAIL (3/5 passed)"}}, open(os.path.join(d, "summary.json"), "w"))   # ran and failed: still a failure
             json.dump({"gate_failures": ["ktest:staging"]}, open(cmp, "w"))
             regen.kernel_tests_not_applicable(st, {"slug": STRIX_ONLY, "device": "strix-halo", "cmp": cmp}, d)
             self.assertEqual(json.load(open(cmp))["gate_failures"], ["ktest:staging"])
+
+
+class AcceptNoReference(unittest.TestCase):
+    def test_only_gates_whose_reference_could_not_start(self):
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, True)
+        d = os.path.join(tmp, "job")
+        os.makedirs(d)
+        cmp = os.path.join(tmp, "cmp.json")
+        json.dump({"gate_failures": ["gates:staging:dev"], "metrics": {k: {"new": 100.0, "card": 100.0, "new_vs_card": 1.0} for k in regen.SDK_METRICS.values()}},
+                  open(cmp, "w"))
+        state = os.path.join(tmp, "s.json")
+        job = {"slug": STRIX_ONLY, "device": "strix-halo", "stage": "needs_decision", "round": 1, "cmp": cmp, "dir": d}
+        json.dump({"work": tmp, "mode": "sdk-loom", "opts": {"programs": "production", "new_sdk": "0.3.0"}, "jobs": {"j": job}, "batches": []}, open(state, "w"))
+        os.makedirs(os.path.join(d, "gates_staging"))
+
+        def gates(**passed):
+            json.dump({"verdict": "FAIL", "gates": {n: {"pass": p} for n, p in passed.items()}}, open(os.path.join(d, "gates_staging", "gates.json"), "w"))
+        gates(golden=False, agent=True)
+        open(os.path.join(d, "gates_staging.out"), "w").write("== golden: 3 llama.cpp references pending\n")
+        with contextlib.redirect_stdout(io.StringIO()):
+            regen.main(["accept-no-reference", state, STRIX_ONLY, "--note", "n"])
+        self.assertEqual(regen.State(state).jobs["j"]["stage"], "needs_decision")   # a reference that ran: never accepted
+        pending = "could not start llama-server: x\n== golden: references still pending after 5 rounds (FAIL)\n"
+        open(os.path.join(d, "gates_staging.out"), "w").write(pending)
+        gates(golden=False, agent=False)   # retro review: agent failed against a recorded reference; the log's pending line used to accept it all
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            regen.main(["accept-no-reference", state, STRIX_ONLY, "--note", "n"])
+        self.assertEqual(regen.State(state).jobs["j"]["stage"], "needs_decision")
+        self.assertIn("agent failed with a reference recorded", out.getvalue())
+        os.remove(os.path.join(d, "gates_staging", "gates.json"))   # which gates failed is not recorded: not accepted
+        with contextlib.redirect_stdout(io.StringIO()):
+            regen.main(["accept-no-reference", state, STRIX_ONLY, "--note", "n"])
+        self.assertEqual(regen.State(state).jobs["j"]["stage"], "needs_decision")
+        gates(golden=False, agent=True)
+        with contextlib.redirect_stdout(io.StringIO()):
+            regen.main(["accept-no-reference", state, STRIX_ONLY, "--note", "no stock reference for inkling2"])
+        e = regen.State(state).jobs["j"]
+        self.assertEqual((e["stage"], e["decision"], e["no_reference"]), ("collected", "promote", "no stock reference for inkling2"))
+
+
+class KitVerdict(unittest.TestCase):
+    """Phase 2: ship the kit programs of a model only when every device's A/B passes; else keep the frozen ones and re-queue its cards."""
+    def write(self, t, name, doc):
+        p = os.path.join(t, name)
+        json.dump({"work": t, **doc}, open(p, "w"))
+        return p
+
+    def p2(self, t, name, jobs):
+        for n, e in jobs.items():
+            cmp = self.write(t, f"{n}.cmp.json", e.pop("cmpdoc", {"text": {"status": "MATCH", "prompts": 3, "identical": 3}, "gate_failures": []}))
+            e.update(cmp=cmp, job_url=f"https://github.com/loom-fun/loom-skills/actions/runs/1/job/{n}")
+        return self.write(t, name, {"mode": "sdk-ab", "opts": {"old_sdk_target": True, "base": "sdk030"}, "batches": [], "jobs": jobs})
+
+    def test_ship_keep_and_wait(self):
+        with tempfile.TemporaryDirectory() as t:
+            pub = {"stage": "published", "decision": "promote", "verified": {"ok": True}}
+            sweep = self.write(t, "sweep.json", {"mode": "sdk-loom", "opts": {"programs": "production"}, "batches": [], "jobs": {
+                "a-r": {"slug": "a", "device": "radeon-r9700", **pub}, "a-s": {"slug": "a", "device": "strix-halo", **pub},
+                "b-s": {"slug": "b", "device": "strix-halo", **pub}, "c-s": {"slug": "c", "device": "strix-halo", "stage": "running"}}})
+            ok = {"stage": "collected", "decision": "promote", "round": 1, "rows_pct": {"decode": -1.0, "prefill_8k": 2.0}}
+            r = self.p2(t, "p2r.json", {"ra": {"slug": "a", "device": "radeon-r9700", **ok}})
+            s = self.p2(t, "p2s.json", {
+                "sa": {"slug": "a", "device": "strix-halo", **ok},
+                "sb": {"slug": "b", "device": "strix-halo", **ok, "rows_pct": {"decode": 1.0, "decode_32k": -4.4},
+                       "cmpdoc": {"text": {"status": "DIFF", "prompts": 3, "identical": 2}, "gate_failures": []}},
+                "sc": {"slug": "c", "device": "strix-halo", **ok}})
+            out = os.path.join(t, "kv.json")
+            with contextlib.redirect_stdout(io.StringIO()):
+                regen.main(["kit-verdict", sweep, r, s, "--out", out])
+            kv = json.load(open(out))
+            self.assertEqual(kv["a"], {"ship": True})
+            self.assertFalse(kv["b"]["ship"])
+            self.assertEqual(kv["b"]["reason"], "Strix greedy text differs on 1/3 prompts; Strix decode_32k -4.4 %".replace("Strix", regen.card_lib.GPUS["strix-halo"]["short"]))
+            self.assertNotIn("c", kv)   # its migration-only card is not published yet
+            sw = regen.State(sweep)
+            self.assertEqual(sw.d["opts"]["kit_kept"]["b"]["url"], "https://github.com/loom-fun/loom-skills/actions/runs/1/job/sb")
+            self.assertEqual((sw.jobs["b-s"]["stage"], "verified" in sw.jobs["b-s"]), ("collected", False))
+            self.assertEqual(sw.jobs["a-s"]["stage"], "published")
+            self.assertEqual(regen.State(r).d["opts"]["ship"], ["a"])
+            self.assertEqual(regen.State(s).d["opts"]["ship"], ["a"])
+
+
+class Share(unittest.TestCase):
+    """One job per model and device: the --old-frozen phase-2 job is also the frozen package's migration job."""
+    def test_old_frozen_job(self):
+        ref = f"loom-fun/{TEXT}@{REV[TEXT]}"
+        doc = AbJobsFrozen().doc()
+        doc["jobs"][0]["steps"] = ["perf:fun:1", "perf:staging:1", "func:staging", "ktest:staging", "gates:staging:dev"]
+        ab_jobs.old_frozen(doc, {TEXT: {"old": ref, "new": ref, "programs_sha256": H}}, "dev")
+        j = doc["jobs"][0]
+        by = {v["name"]: v for v in j["variants"]}
+        self.assertEqual((by["fun"]["programs_sha256"], by["funnd"]["programs_sha256"]), (H, H))
+        self.assertNotIn("programs_sha256", by["staging"])
+        for step in ("func:fun", "ktest:fun", "gates:fun:dev", "admit:fun", "admit:staging"):
+            self.assertIn(step, j["steps"])
+        with self.assertRaises(SystemExit):
+            ab_jobs.old_frozen(AbJobsFrozen().doc(), {}, "dev")
+        with self.assertRaises(SystemExit):
+            ab_jobs.main(["--device", "strix-halo", "--sdk-ab", "--old-sdk", "0.2.0", "--new-sdk", "0.3.0", "--old-frozen", TEXT])
+
+    def test_view_is_the_frozen_side_as_a_migration_job(self):
+        with tempfile.TemporaryDirectory() as t:
+            src, dst = os.path.join(t, "job"), os.path.join(t, "view")
+            os.makedirs(os.path.join(src, "gates_fun"))
+            os.makedirs(os.path.join(src, "gates_staging"))
+            for f in ("perf_fun.jsonl", "perf_staging.jsonl", "c4_funnd.txt", "c4_stagingnd.txt", "programs_sha256_fun.txt", "programs_sha256_staging.txt",
+                      "sdk_fun.json", "sdk_funnd.json", "admit_fun.json", "admit_staging.json", "metrics_fun_000.txt", "perf-fun.log", "runner.txt",
+                      "gates_fun/gates.json", "gates_staging/gates.json", "build_staging.log", "text_fun.json"):
+                open(os.path.join(src, f), "w").write(f)
+            json.dump({"job": "sab-x", "results": {"perf:fun:1": "fun decode_tps [1] median 1", "perf:staging:1": "staging decode_tps [2] median 2",
+                                                   "c4:funnd": "funnd c4 median 3", "textmatch:fun": "x", "func:fun": "pass", "func:staging": "fail",
+                                                   "gates:fun:dev": "GATES PASS", "admit:fun": "ADMITTED"}}, open(os.path.join(src, "summary.json"), "w"))
+            open(os.path.join(src, "results.tsv"), "w").write("perf:fun:1\tfun decode\nperf:staging:1\tstaging decode\n")
+            regen.phase1_view(src, dst)
+            got = sorted(os.path.relpath(os.path.join(r, f), dst).replace(os.sep, "/") for r, _, fs in os.walk(dst) for f in fs)
+            self.assertEqual(got, sorted(["admit_staging.json", "c4_stagingnd.txt", "gates_staging/gates.json", "metrics_staging_000.txt", "perf-staging.log",
+                                          "perf_staging.jsonl", "programs_sha256_staging.txt", "results.tsv", "runner.txt", "sdk_staging.json",
+                                          "sdk_stagingnd.json", "summary.json", "text_staging.json"]))
+            self.assertEqual(open(os.path.join(dst, "perf_staging.jsonl")).read(), "perf_fun.jsonl")   # the frozen side's file
+            self.assertEqual(open(os.path.join(dst, "gates_staging/gates.json")).read(), "gates_fun/gates.json")
+            self.assertEqual(json.load(open(os.path.join(dst, "summary.json")))["results"],
+                             {"perf:staging:1": "staging decode_tps [1] median 1", "c4:stagingnd": "stagingnd c4 median 3", "func:staging": "pass",
+                              "gates:staging:dev": "GATES PASS", "admit:staging": "ADMITTED"})
+            self.assertEqual(open(os.path.join(dst, "results.tsv")).read(), "perf:staging:1\tfun decode\n")
+
+    def test_share_and_feed(self):
+        with tempfile.TemporaryDirectory() as t:
+            def write(name, doc):
+                p = os.path.join(t, name)
+                json.dump({"work": t, **doc}, open(p, "w"))
+                return p
+            sweep = write("sweep.json", {"mode": "sdk-loom", "opts": {"programs": "production"}, "log": [], "batches": [
+                {"id": 0, "device": "strix-halo", "jobs": ["sab-a", "sab-b"], "stage": "submitted", "run": "11"},
+                {"id": 1, "device": "strix-halo", "jobs": ["sab-c"], "stage": "planned"}], "jobs": {
+                "sab-a": {"slug": "a", "device": "strix-halo", "stage": "queued", "batch": 0, "round": 1},
+                "sab-b": {"slug": "b", "device": "strix-halo", "stage": "queued", "batch": 0, "round": 1},
+                "sab-c": {"slug": "c", "device": "strix-halo", "stage": "planned", "batch": 1, "round": 1}}})
+            p2 = write("p2.json", {"mode": "sdk-ab", "opts": {"old_sdk_target": True, "old_frozen": True}, "log": [], "batches": [], "jobs": {
+                "sab-a": {"slug": "a", "device": "strix-halo", "stage": "planned", "round": 1},
+                "sab-b": {"slug": "b", "device": "strix-halo", "stage": "planned", "round": 1},
+                "sab-c": {"slug": "c", "device": "strix-halo", "stage": "planned", "round": 1}}})
+            calls = []
+            with mock.patch.object(regen, "sh", lambda cmd, check=True: calls.append(cmd)), contextlib.redirect_stdout(io.StringIO()):
+                regen.main(["share", sweep, p2, "--cancel"])
+            sw, q = regen.State(sweep), regen.State(p2)
+            self.assertEqual({n: e["stage"] for n, e in sw.jobs.items()}, {"sab-a": "shared", "sab-b": "shared", "sab-c": "shared"})
+            self.assertEqual([b["jobs"] for b in sw.d["batches"]], [[], []])
+            self.assertEqual(sw.d["batches"][1]["stage"], "dropped")
+            with mock.patch.object(regen, "gh_json", lambda args: {"jobs": []}), contextlib.redirect_stdout(io.StringIO()):
+                try:
+                    regen.main(["poll", sweep])   # a dropped batch (no branch, no run) is not looked up
+                except SystemExit:
+                    pass
+            self.assertEqual(calls, [["gh", "api", "-X", "POST", f"repos/{regen.REPO}/actions/runs/11/force-cancel"]])
+            self.assertEqual(q.jobs["sab-a"]["phase1"], {"state": sw.path, "job": "sab-a"})
+            # the phase-2 job of a is collected: its frozen side is the migration job's result; b's job failed: it stops for a decision
+            d = os.path.join(t, "jobdir")
+            os.makedirs(d)
+            json.dump({"job": "sab-a", "results": {}}, open(os.path.join(d, "summary.json"), "w"))
+            with contextlib.redirect_stdout(io.StringIO()):
+                regen.feed_phase1({**q.jobs["sab-a"], "dir": d, "conclusion": "success", "run": "22", "job_url": "u"})
+                regen.feed_phase1({**q.jobs["sab-b"], "dir": d, "conclusion": "failure", "job_url": "v"})
+            sw = regen.State(sweep)
+            self.assertEqual((sw.jobs["sab-a"]["stage"], sw.jobs["sab-a"]["run"], sw.jobs["sab-a"]["job_url"]), ("done", "22", "u"))
+            self.assertEqual(regen.download(sw, "sab-a", sw.jobs["sab-a"]), sw.jobs["sab-a"]["shared_dir"])
+            self.assertEqual(sw.jobs["sab-b"]["stage"], "needs_decision")
+
+
+class RooflineStub(unittest.TestCase):
+    def test_stub_only_when_the_checkpoint_is_not_cached(self):
+        dump = sorted(glob.glob(os.path.join(ROOT, "fleet", "unsloth-Qwen3-0.6B-loom", "gguf", "*.json.gz")))[0]
+        name = os.path.basename(dump)[:-len(".json.gz")]
+        ck = {"repo": "unsloth/Qwen3-0.6B-GGUF", "revision": "r" * 40, "file": name}
+        with tempfile.TemporaryDirectory() as t, mock.patch.dict(os.environ, {"HF_HOME": os.path.join(t, "hf")}), \
+                mock.patch.object(regen.card_lib, "load_package", lambda p: {}), \
+                mock.patch.object(regen.card_lib, "package_facts", lambda f: {"checkpoint": ck}):
+            p = regen.roofline_stub("unsloth-Qwen3-0.6B-loom", t, t)
+            self.assertEqual(os.path.basename(p), name)   # the card names the checkpoint file, not a stub path
+            with open(p, "rb") as f:
+                self.assertEqual(f.read(4), b"GGUF")
+            snap = os.path.join(t, "hf", "hub", "models--unsloth--Qwen3-0.6B-GGUF", "snapshots", "r" * 40)
+            os.makedirs(snap)
+            open(os.path.join(snap, name), "w").close()
+            self.assertIsNone(regen.roofline_stub("unsloth-Qwen3-0.6B-loom", t, t))   # cached: make_info reads the real file
+            self.assertIsNone(regen.roofline_stub("no-such-model", t, t))
+
+
+class ConfirmationRows(unittest.TestCase):
+    def test_a_row_the_sweep_job_never_had_is_not_missing(self):
+        with tempfile.TemporaryDirectory() as t:
+            p = os.path.join(t, "cmp.json")
+            json.dump({"metrics": {"decode": {"old": 63.3, "new": 62.5, "ratio": 0.987}, "prefill_2k": {"old": 1416.5, "new": 1371.7, "ratio": 0.968},
+                                   "streams4": {"old": 109.5, "new": 108.4, "ratio": 0.99}}, "gate_failures": [], "text": {"status": "MATCH"}}, open(p, "w"))
+            first = {"rows_pct": {"decode": -2.0, "prefill_2k": -3.9, "streams4": -1.1}, "round": 1}
+            st = SimpleNamespace(d={"mode": "sdk-loom", "opts": {}}, jobs={"a": first})
+            d, r, *_ = regen.sdk_decide(st, "a-r2", {"prev": "a", "round": 2}, p, use_prev=False)
+            self.assertFalse(any("missing" in x for x in r), r)   # no 8k prefill on this card: not measured, not missing
+            first["rows_pct"]["prefill_8k"] = -1.0
+            d, r, *_ = regen.sdk_decide(st, "a-r2", {"prev": "a", "round": 2}, p, use_prev=False)
+            self.assertTrue(any("missing" in x for x in r), r)   # the sweep job measured it: the confirmation must too
+
+
+class AcceptRegressionRows(unittest.TestCase):
+    def test_confirmed_card_rows_and_the_abba_job(self):
+        with tempfile.TemporaryDirectory() as t:
+            p = os.path.join(t, "s.json")
+            json.dump({"work": t, "mode": "sdk-loom", "opts": {"programs": "production"}, "batches": [], "log": [], "jobs": {
+                "a": {"slug": "m", "device": "radeon-r9700", "stage": "needs_decision", "round": 1, "confirm_rows": ["prefill_1k", "prefill_2k"],
+                      "perf": {"prefill": -1.0}, "reason": "ABBA confirmation (job 9): slower than -3% in the same-job ABBA: prefill_2k -3.2 %"},
+                "a-r2": {"slug": "m", "device": "radeon-r9700", "stage": "collected", "round": 2, "prev": "a", "job_url": "https://x/job/2",
+                         "perf_abba": {"decode": -1.3, "prefill": None}, "rows_pct": {"prefill_1k": -2.1, "prefill_2k": -3.2}}}}, open(p, "w"))
+            with contextlib.redirect_stdout(io.StringIO()):
+                regen.main(["accept-regression", p, "m", "--note", "confirmed; root cause open"])
+            e = regen.State(p).jobs["a"]
+            self.assertEqual((e["stage"], e["confirmed"], e["confirmed_by"]), ("collected", {"prefill_1k": -2.1, "prefill_2k": -3.2}, "https://x/job/2"))

@@ -25,7 +25,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from card_lib import (DEFAULT_GPU, FEATURES, GATE_NAMES, GATES, GPUS, HF, LOOM_URL, METHOD, METRIC_KEYS, METRICS, SCHEMA_ID, SKILLS_URL,  # noqa: E402
-                      TIMED, PRELOAD_FLAG, preload_mode, card_gpus, card_metrics, derived_tags, beyond_context, gate_applies, generator_commit, gpu_context, gpu_memory, recorded_quick_start, serves,
+                      TIMED, PRELOAD_FLAG, preload_mode, card_gpus, card_metrics, derived_tags, beyond_context, gate_applies, generator_commit, stamped, gpu_context, gpu_memory, recorded_quick_start, serves,
                       gpu_view, has_results, has_runner, load_info, load_json, load_package, metric_applies, native_context, over_context,
                       package_facts, programs_sha256, require_valid, stale_metrics, with_gate_features, historical_xsj_gate, sdk_uses_file_parameters, xsj_enabled,
                       DELTA_BAND, DELTA_NAMES, GOOD_CONCLUSIONS, UNRECORDED_SDK, carried_sdk, delta_rows, drop_carried, previous_gate, sdk_at_least, sdk_version)
@@ -116,12 +116,14 @@ def skills_text(gen, versions):
         if (gen.get("kit") or {}).get("modified"):
             out += " (kit edited after copying)"
         return out
+    if how == "none":
+        return f"none ({versions['package']['skills_commit']['basis']})"
     return f"{short(commit)} (recovered)" if how == "recovered" else "unknown"
 
 
 def package_sdk(gen, versions):
-    if gen:
-        return sdk_text(gen.get("hrx_loom"))
+    if gen and isinstance(gen.get("hrx_loom"), dict):
+        return sdk_text(gen["hrx_loom"])
     return sdk_text((versions.get("package") or {}).get("hrx_loom"))
 
 
@@ -129,7 +131,7 @@ def versions_sdk(gen, versions, pin):
     """The Versions line's hrx-loom: the SDK the Quick start installs and the card's sessions ran (the pin), with the SDK
     that generated the programs when that is another version (frozen programs migrated to a new SDK). The same version:
     the generator's identity, or the pin's when only the pin records its hrx-system commit."""
-    stamp = (gen or {}).get("hrx_loom") if gen else (versions.get("package") or {}).get("hrx_loom")
+    stamp = gen["hrx_loom"] if gen and isinstance(gen.get("hrx_loom"), dict) else (versions.get("package") or {}).get("hrx_loom")
     gv, pv = sdk_version(stamp), sdk_version(pin)
     if not pv:
         return package_sdk(gen, versions)
@@ -862,6 +864,11 @@ def delta_lines(info, pin, solo, depth=None):
     re-measured on its own SDK, against that card's stored value. A regression beyond DELTA_BAND is numbered and followed
     by its explanation from evidence, or "unexplained" (lint_card.py refuses to publish that)."""
     L = []
+    kit = (info.get("sdk_delta") or {}).get("kit")
+    if kit:
+        L += [f"**Programs:** the previous card's programs with only the SDK migration; this release's loom-skills kit build was A/B'd "
+              f"against them on hrx-loom {sdk_version(pin)} and is not shipped: {kit['reason'].rstrip('.')}"
+              + (f" ([evidence]({kit['url']}))" if kit.get("url") else "") + ".", ""]
     for c in (info.get("sdk_delta") or {}).get("comparisons") or []:
         rows = delta_rows(info, pin, c, depth)
         if not rows:
@@ -879,12 +886,22 @@ def delta_lines(info, pin, solo, depth=None):
                 name = DELTA_NAMES[r["metric"]]
                 if r["metric"] == "spec_acceptance" and r.get("per_pass"):   # SDK 0.2's share x depth = its accepted per pass
                     pp = r["per_pass"]
-                    parts.append(f"{name} per verification pass {pp['old']:.2f} → {pp['new']:.2f} ({r['change'] * 100:+.1f} %; the previous "
-                                 f"card's {pct_of(r['old'])} of depth-{depth} proposals as SDK {olds[0] if olds else 'its'} counted them)")
+                    parts.append(f"{name} per verification pass {pp['old']:.2f} → {pp['new']:.2f} ({r['change'] * 100:+.1f} %; both in the "
+                                 f"performance session's decode requests, the previous card's share of depth-{depth} proposals as SDK "
+                                 f"{olds[0] if olds else 'its'} counted them)")
+                    if r["regression"]:
+                        notes.append((g, r))
+                        parts[-1] += f" {mark(len(notes))}"
+                elif r["metric"] == "spec_acceptance" and r.get("different_workloads"):
+                    parts.append(f"{name}: previous card {pct_of(r['old'])} of proposals in its speculative-decoding gate, this card "
+                                 f"{r['accepted_per_pass']:.2f} per verification pass in the performance session (different workloads, no delta)")
                 elif r["metric"] == "spec_acceptance":
                     new = ("not reported" if r["unreported"] else "not re-measured" if r["missing"]
                            else pct_of(r["new"]) if r["new"] is not None else "not measured")
                     parts.append(f"{name} {pct_of(r['old']) if r['old'] is not None else MISSING} → {new}")
+                    if r["regression"]:
+                        notes.append((g, r))
+                        parts[-1] += f" {mark(len(notes))}"
                 elif r["change"] is None:
                     parts.append(f"{name} " + ("not re-measured" if r["missing"] else "new" if r["old"] is None else "not measured"))
                 else:
@@ -897,8 +914,13 @@ def delta_lines(info, pin, solo, depth=None):
         for i, (g, r) in enumerate(notes, 1):
             e = r["explanation"]
             why = (e["text"].rstrip(".") + (f" ([evidence]({e['url']}))" if e.get("url") else "")) if e else "unexplained"
-            L.append(f"- {mark(i)} {GPUS[g]['short']} {DELTA_NAMES[r['metric']]} {r['change'] * 100:+.1f} % "
-                     f"({num(r['metric'], r['old'])} → {num(r['metric'], r['new'])} tok/s): {why}.")
+            if r["metric"] == "spec_acceptance":   # a drafted-token acceptance drop: its own quantity, not tok/s
+                pp = r.get("per_pass")
+                vals = f"{pp['old']:.2f} → {pp['new']:.2f} per verification pass" if pp else f"{pct_of(r['old'])} → {pct_of(r['new'])}"
+                L.append(f"- {mark(i)} {GPUS[g]['short']} {DELTA_NAMES[r['metric']]} {r['relative'] * 100:+.1f} % ({vals}): {why}.")
+            else:
+                L.append(f"- {mark(i)} {GPUS[g]['short']} {DELTA_NAMES[r['metric']]} {r['change'] * 100:+.1f} % "
+                         f"({num(r['metric'], r['old'])} → {num(r['metric'], r['new'])} tok/s): {why}.")
         L.append(f"- Change: (this card / previous card - 1) × 100 % of the Loom value; beyond -{DELTA_BAND * 100:g} % a regression needs a "
                  "confirmed explanation.")
         L.append("")
@@ -1376,8 +1398,9 @@ def render_report(d):
          f"`{SCHEMA_ID}`) by the loom-skills card generator; the card's README.md is rendered from the same data.", "",
          *delta_lines(info, required_sdk(facts, versions, info["sources"]), solo, (facts["spec"] or (None, None))[1]),
          "## Setup", "",
-         f"- Package: this repository. Programs generated by loom-skills {skills_text(facts['generator'], versions)} with "
-         f"hrx-loom {package_sdk(facts['generator'], versions)}.",
+         (f"- Package: this repository. Programs generated by loom-skills {skills_text(facts['generator'], versions)} with "
+          f"hrx-loom {package_sdk(facts['generator'], versions)}." if generator_commit(facts['generator'], versions)[1] != "none" else
+          f"- Package: this repository. Programs: {versions['package']['skills_commit']['basis']}."),
          f"- Checkpoint: {hf(c['repo'])}" + (f" @ `{c['revision']}`" if c["revision"] else "") + f", `{c['file']}`"
          + (f", sha256 `{c['sha256']}`" if c["sha256"] else "") + "."]
     if facts["drafter"]:
