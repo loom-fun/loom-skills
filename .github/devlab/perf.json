@@ -46,6 +46,51 @@
     "perf:fun:1"
    ],
    "sdk": "0.3.0"
+  },
+  {
+   "llama_kv_rocm": 36864,
+   "name": "rg-gemma4-31b-r9700",
+   "runner": "r9700",
+   "card": "loom-fun/unsloth-gemma-4-31B-it-loom@568071f2fbee4b39c45d10ed9ea2453d5eec7137",
+   "memory_bytes_r9700": 34000000000,
+   "served_context": 8192,
+   "kit": "gemma4",
+   "llamacpp": "b1375",
+   "llamacpp_vulkan": "b12211",
+   "variants": [
+    {
+     "context": 8192,
+     "execution": {
+      "context_capacity": 8192,
+      "pool_capacity": 8192
+     },
+     "sdk": "card",
+     "programs_sha256": "a94d2a3e23c431b279124494629062db61f93917fd23e80deb2cc2037aef0f73",
+     "name": "fun",
+     "card": "loom-fun/unsloth-gemma-4-31B-it-loom@568071f2fbee4b39c45d10ed9ea2453d5eec7137"
+    },
+    {
+     "name": "staging",
+     "context": 8192,
+     "execution": {
+      "context_capacity": 8192,
+      "pool_capacity": 8192
+     },
+     "sdk": "0.3.0",
+     "programs_sha256": "a94d2a3e23c431b279124494629062db61f93917fd23e80deb2cc2037aef0f73"
+    }
+   ],
+   "steps": [
+    "profile:fun:pf2k,pf8k,dec",
+    "profile:staging:pf2k,pf8k,dec",
+    "profile:staging:pf2k",
+    "profile:fun:pf2k",
+    "perf:fun:1",
+    "perf:staging:1",
+    "perf:staging:1",
+    "perf:fun:1"
+   ],
+   "sdk": "0.3.0"
   }
  ]
 }
