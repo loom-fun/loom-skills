@@ -17,6 +17,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "skills/loom-benchmark/scripts"
@@ -256,3 +257,29 @@ class NoGenerator(unittest.TestCase):
         self.assertEqual(card_lib._check(self.versions(), sub, schema, "versions", []), [])
         bad = {"card_generator": "x", "package": {"skills_commit": {"commit": "nothex", "basis": "y"}}}
         self.assertNotEqual(card_lib._check(bad, sub, schema, "versions", []), [])
+
+
+class KitKept(unittest.TestCase):
+    """Migration-only programs whose kit build lost its A/B: the card says why in one generated line (sdk_delta.kit)."""
+    REASON = "Strix Halo decode -4.2 % (confirmed in the same-job ABBA)"
+    URL = "https://github.com/loom-fun/loom-skills/actions/runs/1/job/2"
+
+    def test_lint_and_render(self):
+        with tempfile.TemporaryDirectory() as t:
+            d = Lint().card(t)
+            info = json.loads((d / "info.json").read_text(encoding="utf-8"))
+            info["sdk_delta"]["kit"] = {"reason": self.REASON, "url": self.URL}
+            self.assertFalse([e for e in card_lib.validate(info, "") if "sdk_delta" in e])
+            import render_card
+            text = "\n".join(render_card.delta_lines(info, {"hrx_loom": "0.3.0"}, True, 3))
+            self.assertIn(f"is not shipped: {self.REASON} ([evidence]({self.URL})).", text)
+            bad = dict(info, sdk_delta=dict(info["sdk_delta"], kit={"why": "x"}))
+            self.assertTrue([e for e in card_lib.validate(bad, "") if "sdk_delta" in e])
+
+    def test_make_info_keeps_and_checks(self):
+        ns = SimpleNamespace(previous_card=[], delta_explanations=None, kit_kept=None)
+        old = {"kit": {"reason": self.REASON, "url": None}, "comparisons": []}
+        self.assertEqual(make_info.sdk_delta(ns, old)["kit"], {"reason": self.REASON, "url": None})
+        ns.kit_kept = {"url": self.URL}
+        with self.assertRaises(SystemExit):
+            make_info.sdk_delta(ns, None)

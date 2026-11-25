@@ -864,6 +864,11 @@ def delta_lines(info, pin, solo, depth=None):
     re-measured on its own SDK, against that card's stored value. A regression beyond DELTA_BAND is numbered and followed
     by its explanation from evidence, or "unexplained" (lint_card.py refuses to publish that)."""
     L = []
+    kit = (info.get("sdk_delta") or {}).get("kit")
+    if kit:
+        L += [f"**Programs:** the previous card's programs with only the SDK migration; this release's loom-skills kit build was A/B'd "
+              f"against them on hrx-loom {sdk_version(pin)} and is not shipped: {kit['reason'].rstrip('.')}"
+              + (f" ([evidence]({kit['url']}))" if kit.get("url") else "") + ".", ""]
     for c in (info.get("sdk_delta") or {}).get("comparisons") or []:
         rows = delta_rows(info, pin, c, depth)
         if not rows:
