@@ -30,20 +30,21 @@
     "func:card",
     "ktest:card",
     "gates:card:dev",
-    "perf:card:3",
-    "perf:card:3:long",
+    "perf:card:6",
+    "perf:card:6:long",
     "c4:nodraft",
-    "llama@rocm.np1:3",
-    "llama@rocm.np1:3:long",
+    "llama@rocm.np1:6",
+    "llama@rocm.np1:6:long",
     "llamac4@rocm.nodraft",
-    "llama@vulkan.np1:3",
-    "llama@vulkan.np1:3:long",
+    "llama@vulkan.np1:2",
+    "llama@vulkan.np1:2:long",
     "llamac4@vulkan.perslot.nodraft",
     "profile:card"
    ],
    "runner": "r9700",
    "llama_spec": "--spec-type draft-mtp --spec-draft-n-max 3",
-   "_comment": "llama_spec: the arguments of the Strix Halo card's llama.cpp rows (run 45545014427; the package's MTP depth 3); the model is not in data/drafting_classification.json (not a nightly card yet)"
+   "_comment": "llama_spec: the arguments of the Strix Halo card's llama.cpp rows (run 45545014427; the package's MTP depth 3); the model is not in data/drafting_classification.json (not a nightly card yet)",
+   "repeat_rows": 3
   },
   {
    "name": "bonsai-r3-r9700",
