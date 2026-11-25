@@ -915,3 +915,22 @@ class OldFrozenGates(unittest.TestCase):
     def test_devlab_ktest_reads_its_own_variants_package(self):
         text = open(os.path.join(ROOT, ".github", "scripts", "devlab_perf.sh")).read()
         self.assertIn('[ -f "$D/$p1/cfg.json" ] || cp "$D/cfg.json" "$D/$p1/cfg.json"', text)
+
+
+class ConstrainedEvidence(unittest.TestCase):
+    def test_replay_is_scoped_and_uses_candidate(self):
+        opts = {"constrained_gates": {TEXT: {"artifact": "artifact", "job": "job.json", "variant": "sample"}}}
+        with mock.patch.object(regen, "run_tool") as run:
+            for slug, gpu in [(IMAGE, "radeon-r9700"), (TEXT, "strix-halo")]:
+                self.assertEqual(regen.constrained_evidence(opts, slug, gpu, "candidate", "work", None), [])
+            with self.assertRaisesRegex(RuntimeError, "pinned production"):
+                regen.constrained_evidence(opts, TEXT, "radeon-r9700", "candidate", "work", None)
+            run.assert_not_called()
+            args = (opts, TEXT, "radeon-r9700", "candidate", "work", "production/info.json")
+            self.assertEqual(regen.constrained_evidence(*args), ["ev_constrained.json"])
+            run.assert_called_once_with([f"{regen.CARD}/make_info.py", "emulated-gates", os.path.abspath("artifact"),
+                                         "--job", os.path.abspath("job.json"), "--variant", "sample", "--package",
+                                         "candidate", "-o", "ev_constrained.json"], "work")
+            run.side_effect = RuntimeError("package programs differ")
+            with self.assertRaisesRegex(RuntimeError, "programs differ"):
+                regen.constrained_evidence(*args)

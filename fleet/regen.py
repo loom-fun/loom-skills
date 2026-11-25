@@ -1325,6 +1325,21 @@ def card_message(e, dev, run, loom_only, sdk, version=SDK_NEW):
     return msg
 
 
+def constrained_evidence(opts, slug, dev, package, work, pinned_info):
+    """Replay opts.constrained_gates[slug] (artifact and job paths, variant) against this staging package."""
+    spec = opts.get("constrained_gates", {}).get(slug)
+    if not spec or dev != "radeon-r9700":
+        return []
+    if not pinned_info:
+        raise RuntimeError("constrained gate ingest requires a pinned production info.json for the performance rows")
+    if not all(isinstance(spec, dict) and isinstance(spec.get(k), str) and spec[k] for k in ("artifact", "job", "variant")):
+        raise RuntimeError("constrained gate ingest requires artifact, job and variant")
+    evidence = "ev_constrained.json"
+    run_tool([f"{CARD}/make_info.py", "emulated-gates", os.path.abspath(spec["artifact"]),
+              "--job", os.path.abspath(spec["job"]), "--variant", spec["variant"], "--package", package, "-o", evidence], work)
+    return [evidence]
+
+
 def ingest_full(st, name, e, W):
     """The card's performance, gates and roofline of this device from the job (REGEN_RECIPE: ingest the NEW package)."""
     d, dev, slug = e["dir"], e["device"], e["slug"]
@@ -1457,6 +1472,12 @@ def ingest_full(st, name, e, W):
     # --from-info keeps only DevLab-measured sessions: another GPU's published table (Strix Halo's loom-fun numbers) would be dropped, so every
     # other device's performance is taken from the head card as published
     keep = [f"{g}=info_prev.json" for g, x in (prev.get("devices") or {}).items() if g != dev and (x or {}).get("performance")]
+    extra = constrained_evidence(st.d["opts"], slug, dev, out, W,
+                                 baseline_info if verified and e.get("source_card") else None)
+    if extra:
+        ev.extend(extra)
+        keep = [s for s in keep if not s.startswith("gfx1201-16gb=")]
+        keep.append(f"gfx1201-16gb={baseline_info}")
     for spec in keep:
         build += ["--perf-from", spec]
     # sdk-loom: the previous card's Loom sessions are the v0.1 rows this table replaces (its llama.cpp rows were copied into the new session above;
