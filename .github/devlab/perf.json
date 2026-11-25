@@ -32,36 +32,6 @@
           },
           "sdk": "0.3.0",
           "programs_sha256": "500c2d0ef4e65fa5abccb584958b4047f7c94325b11d2625ddf365e3328751b3"
-        },
-        {
-          "name": "kitold",
-          "cap_pool": 31744,
-          "execution": {
-            "context_capacity": 26624
-          },
-          "build": {},
-          "build_args": [
-            "--memory-gib",
-            "4096"
-          ],
-          "sdk": "0.2.0",
-          "require_preset_r9700": false,
-          "programs_sha256": "3448f734c080d779e6ba22a0a9ba1aaeb4d53195ec34ba03d5031e366aae75ec"
-        },
-        {
-          "name": "kitnew",
-          "cap_pool": 31744,
-          "execution": {
-            "context_capacity": 26624
-          },
-          "build": {},
-          "build_args": [
-            "--memory-gib",
-            "4096"
-          ],
-          "sdk": "0.3.0",
-          "require_preset_r9700": false,
-          "programs_sha256": "3448f734c080d779e6ba22a0a9ba1aaeb4d53195ec34ba03d5031e366aae75ec"
         }
       ],
       "steps": [
@@ -72,15 +42,7 @@
         "accept:frozenold:3",
         "accept:frozennew:3",
         "accept:frozennew:4",
-        "accept:frozenold:4",
-        "accept:kitold:1",
-        "accept:kitnew:1",
-        "accept:kitnew:2",
-        "accept:kitold:2",
-        "accept:kitold:3",
-        "accept:kitnew:3",
-        "accept:kitnew:4",
-        "accept:kitold:4"
+        "accept:frozenold:4"
       ],
       "sdk": "0.3.0",
       "env": {
