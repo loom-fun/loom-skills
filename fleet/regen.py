@@ -421,7 +421,7 @@ def production_facts(repo, rev, cache):
            "features": (info.get("card") or {}).get("features") or [], "sdk": (cfg or {}).get("sdk"),
            # the commit that generated the package (its llm_config stamp), else the commit that generated its card
            "generator": next((c for c in (((cfg or {}).get("generator") or {}).get("skills_commit"), (info.get("versions") or {}).get("card_generator"))
-                              if c and re.fullmatch(r"[0-9a-f]{7,40}", str(c))), None)}
+                              if c and re.fullmatch(r"[0-9a-f]{40}", str(c))), None)}
     if not out["programs_sha256"]:
         raise RuntimeError(f"{repo}@{rev[:10]}: no program/ files")
     json.dump(out, open(facts, "w"), indent=1)
@@ -1237,7 +1237,8 @@ def ingest_full(st, name, e, W):
     if production:   # the frozen package carries no generator stamp of this branch: the production card's, named as such
         gen = ((st.d["opts"].get("refs_all") or {}).get(slug) or {}).get("generator")
         if gen:
-            json.dump({"evidence": "loom-card-evidence/2", "gpu": dev, "versions": {"package": {"skills_commit": {"commit": gen, "basis": "production card"}}}},
+            json.dump({"evidence": "loom-card-evidence/2", "gpu": dev, "versions": {"package": {"skills_commit": {"commit": gen, "recovered": True,
+                                                                                                        "basis": "production card"}}}},
                       open(os.path.join(W, "ev_versions.json"), "w"), indent=1)
             ev.append("ev_versions.json")
     gpus = [x for x in card_lib.registry.devices() if x in (prev.get("devices") or {}) or x == dev]
@@ -2028,7 +2029,8 @@ def build_evidence(st):
         src = (r.get("old") or e.get("source_card") or "@").split("@")
         mod = doc["models"].setdefault(e["slug"], {"production": src[0], "production_revision": src[1], "programs_sha256": r.get("programs_sha256"),
                                                    "kind": r.get("kind", e.get("kind", "text")), "claimed_devices": r.get("claimed", []), "devices": {},
-                                                   **({"versions": {"package": {"skills_commit": {"commit": r["generator"], "basis": "production card"}}}}
+                                                   **({"versions": {"package": {"skills_commit": {"commit": r["generator"], "recovered": True,
+                                                                                                  "basis": "production card"}}}}
                                                       if r.get("generator") else {})})
         status = device_status(e)
         dv = {"status": status, "reason": e.get("reason")}
