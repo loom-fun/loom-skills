@@ -1,5 +1,5 @@
 {
- "_comment": "pf-gemma reproduction (prefail, do not merge): logits gate of the staging package (fun: frozen programs; lmstudio 26B: already a kit build) vs the sdk030 kit build (staging) vs the build at the #1304 commit (fix = the frozen programs + the final softcap in g_logits_export); R9700: dev gates of the staging card served with the gfx1201-16gb Quick start (g16). logits campaign (logits_jobs.py): new side built from d632f23125c8ab1ba8732e17d2638b5970570ee3; Strix Halo A/B of the staging cards (strix_ab_jobs.py): per model one job on one Strix runner, loom-fun-staging package (fun) vs loom-fun-staging package (staging), same prompts and settings; compare with strix_ab_compare.py SDK A/B (--sdk-ab): fun = the published card on hrx-loom 0.3.0, staging = the package built in the job on 0.3.0.",
+ "_comment": "pf-gemma reproduction r2 (pinned Gufo bundle: the 0.3.0 extension bundle crashed loading every package) (prefail, do not merge): logits gate of the staging package (fun: frozen programs; lmstudio 26B: already a kit build) vs the sdk030 kit build (staging) vs the build at the #1304 commit (fix = the frozen programs + the final softcap in g_logits_export); R9700: dev gates of the staging card served with the gfx1201-16gb Quick start (g16). logits campaign (logits_jobs.py): new side built from d632f23125c8ab1ba8732e17d2638b5970570ee3; Strix Halo A/B of the staging cards (strix_ab_jobs.py): per model one job on one Strix runner, loom-fun-staging package (fun) vs loom-fun-staging package (staging), same prompts and settings; compare with strix_ab_compare.py SDK A/B (--sdk-ab): fun = the published card on hrx-loom 0.3.0, staging = the package built in the job on 0.3.0.",
  "runner": "strix",
  "memory_bytes": 81000000000,
  "llama_spec": "matched",
@@ -49,8 +49,8 @@
    "sdk": "0.3.0",
    "bundle": {
     "build": {
-     "extension": "loom-fun/loom-gufo-extension@cd2a18327bdafd36d091d0a779c4d1efa770ae04",
-     "gufo": "loom-fun/gufo@ec6d3d0724381585307d98ac760d75d2f8f325b8"
+     "extension": "loom-fun/loom-gufo-extension@45b2bc0062e73d9fcce8d3d71be9a85a2bfe448f",
+     "gufo": "loom-fun/gufo@2255d6f3754f530af1d178097abe48c436104908"
     }
    }
   },
@@ -100,8 +100,8 @@
    "sdk": "0.3.0",
    "bundle": {
     "build": {
-     "extension": "loom-fun/loom-gufo-extension@cd2a18327bdafd36d091d0a779c4d1efa770ae04",
-     "gufo": "loom-fun/gufo@ec6d3d0724381585307d98ac760d75d2f8f325b8"
+     "extension": "loom-fun/loom-gufo-extension@45b2bc0062e73d9fcce8d3d71be9a85a2bfe448f",
+     "gufo": "loom-fun/gufo@2255d6f3754f530af1d178097abe48c436104908"
     }
    }
   },
@@ -150,8 +150,8 @@
    "sdk": "0.3.0",
    "bundle": {
     "build": {
-     "extension": "loom-fun/loom-gufo-extension@cd2a18327bdafd36d091d0a779c4d1efa770ae04",
-     "gufo": "loom-fun/gufo@ec6d3d0724381585307d98ac760d75d2f8f325b8"
+     "extension": "loom-fun/loom-gufo-extension@45b2bc0062e73d9fcce8d3d71be9a85a2bfe448f",
+     "gufo": "loom-fun/gufo@2255d6f3754f530af1d178097abe48c436104908"
     }
    }
   },
@@ -200,8 +200,8 @@
    "sdk": "0.3.0",
    "bundle": {
     "build": {
-     "extension": "loom-fun/loom-gufo-extension@cd2a18327bdafd36d091d0a779c4d1efa770ae04",
-     "gufo": "loom-fun/gufo@ec6d3d0724381585307d98ac760d75d2f8f325b8"
+     "extension": "loom-fun/loom-gufo-extension@45b2bc0062e73d9fcce8d3d71be9a85a2bfe448f",
+     "gufo": "loom-fun/gufo@2255d6f3754f530af1d178097abe48c436104908"
     }
    }
   },
@@ -226,8 +226,8 @@
    "sdk": "0.3.0",
    "bundle": {
     "build": {
-     "extension": "loom-fun/loom-gufo-extension@cd2a18327bdafd36d091d0a779c4d1efa770ae04",
-     "gufo": "loom-fun/gufo@ec6d3d0724381585307d98ac760d75d2f8f325b8"
+     "extension": "loom-fun/loom-gufo-extension@45b2bc0062e73d9fcce8d3d71be9a85a2bfe448f",
+     "gufo": "loom-fun/gufo@2255d6f3754f530af1d178097abe48c436104908"
     }
    }
   },
@@ -283,17 +283,6 @@
      ],
      "sdk": "0.3.0",
      "ref": "9221dc522e5e0ab216ea79ba4a249e2668337e14"
-    },
-    {
-     "name": "g16",
-     "card": "loom-fun-staging/unsloth-gemma-4-12B-it-loom",
-     "sdk": "0.3.0",
-     "memory_bytes": 15000000000,
-     "serve_args": [
-      "--preset=chat-16gb",
-      "--state_slab_bytes=4mib",
-      "--weight_slab_bytes=64mib"
-     ]
     }
    ],
    "steps": [
@@ -301,14 +290,13 @@
     "logits:staging",
     "ktest:staging",
     "logits:fix",
-    "ktest:fix",
-    "gates:g16:dev"
+    "ktest:fix"
    ],
    "sdk": "0.3.0",
    "bundle": {
     "build": {
-     "extension": "loom-fun/loom-gufo-extension@cd2a18327bdafd36d091d0a779c4d1efa770ae04",
-     "gufo": "loom-fun/gufo@ec6d3d0724381585307d98ac760d75d2f8f325b8"
+     "extension": "loom-fun/loom-gufo-extension@45b2bc0062e73d9fcce8d3d71be9a85a2bfe448f",
+     "gufo": "loom-fun/gufo@2255d6f3754f530af1d178097abe48c436104908"
     }
    }
   },
@@ -385,8 +373,8 @@
    "sdk": "0.3.0",
    "bundle": {
     "build": {
-     "extension": "loom-fun/loom-gufo-extension@cd2a18327bdafd36d091d0a779c4d1efa770ae04",
-     "gufo": "loom-fun/gufo@ec6d3d0724381585307d98ac760d75d2f8f325b8"
+     "extension": "loom-fun/loom-gufo-extension@45b2bc0062e73d9fcce8d3d71be9a85a2bfe448f",
+     "gufo": "loom-fun/gufo@2255d6f3754f530af1d178097abe48c436104908"
     }
    }
   },
@@ -440,8 +428,8 @@
    "sdk": "0.3.0",
    "bundle": {
     "build": {
-     "extension": "loom-fun/loom-gufo-extension@cd2a18327bdafd36d091d0a779c4d1efa770ae04",
-     "gufo": "loom-fun/gufo@ec6d3d0724381585307d98ac760d75d2f8f325b8"
+     "extension": "loom-fun/loom-gufo-extension@45b2bc0062e73d9fcce8d3d71be9a85a2bfe448f",
+     "gufo": "loom-fun/gufo@2255d6f3754f530af1d178097abe48c436104908"
     }
    }
   },
@@ -508,8 +496,8 @@
    "sdk": "0.3.0",
    "bundle": {
     "build": {
-     "extension": "loom-fun/loom-gufo-extension@cd2a18327bdafd36d091d0a779c4d1efa770ae04",
-     "gufo": "loom-fun/gufo@ec6d3d0724381585307d98ac760d75d2f8f325b8"
+     "extension": "loom-fun/loom-gufo-extension@45b2bc0062e73d9fcce8d3d71be9a85a2bfe448f",
+     "gufo": "loom-fun/gufo@2255d6f3754f530af1d178097abe48c436104908"
     }
    }
   },
@@ -534,8 +522,8 @@
    ],
    "bundle": {
     "build": {
-     "extension": "loom-fun/loom-gufo-extension@cd2a18327bdafd36d091d0a779c4d1efa770ae04",
-     "gufo": "loom-fun/gufo@ec6d3d0724381585307d98ac760d75d2f8f325b8"
+     "extension": "loom-fun/loom-gufo-extension@45b2bc0062e73d9fcce8d3d71be9a85a2bfe448f",
+     "gufo": "loom-fun/gufo@2255d6f3754f530af1d178097abe48c436104908"
     }
    }
   }
