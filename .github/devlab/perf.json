@@ -1,5 +1,5 @@
 {
- "_comment": "Ternary Bonsai 27B (#1416): R9700 card measurement (llama.cpp rows on the matched MTP spec) + iterate round 3: reduced-vocabulary MTP proposal head (Q2_0 row copy, 32k/80k rows), native Q2_0 GEMM staging (128/256-row kernels), the same-architecture prefill stack of Qwen3.8-27B (gfx11 / gfx12 sets)",
+ "_comment": "Ternary Bonsai 27B (#1416): the round-3 winner (model node skills/loom-kb/model/prism-ml-Ternary-Bonsai-2.5-27B-loom: native Q2_0 GEMM staging, 81920-row Q2_0 proposal head, the per-family prefill settings) built from this branch with the card's slug; gates full once + the card measurement on both GPUs (llama.cpp ROCm rows reused: same build and model, rule 17; Strix Halo adds its missing Vulkan baseline)",
  "card": "loom-fun-staging/prism-ml-Ternary-Bonsai-2.5-27B-loom",
  "kit": null,
  "memory_bytes": 39000000000,
@@ -7,186 +7,84 @@
  "llamacpp_vulkan": "b12211",
  "jobs": [
   {
-   "name": "bonsai-r9700-card2",
+   "name": "bonsai-win-r9700",
+   "runner": "r9700",
    "card": "loom-fun-staging/prism-ml-Ternary-Bonsai-2.5-27B-loom",
    "kit": null,
    "llamacpp": "b1387",
-   "llamacpp_vulkan": "b12211",
    "memory_bytes_r9700": 30000000000,
    "variants": [
     {
-     "name": "card",
-     "context": 196608
+     "name": "win",
+     "build": {}
     },
     {
-     "name": "nodraft",
-     "context": 196608,
+     "name": "windnd",
+     "build": {},
      "execution": {
       "draft_depth": 0
      }
     }
    ],
    "steps": [
-    "func:card",
-    "ktest:card",
-    "gates:card:full",
-    "perf:card:1",
-    "perf:card:1",
-    "perf:card:1",
-    "perf:card:1",
-    "perf:card:1",
-    "perf:card:1",
-    "perf:card:1:long",
-    "perf:card:1:long",
-    "perf:card:1:long",
-    "perf:card:1:long",
-    "perf:card:1:long",
-    "perf:card:1:long",
-    "c4:nodraft",
-    "llama@rocm.np1:6",
-    "llama@rocm.np1:6:long",
-    "llamac4@rocm.nodraft",
-    "llama@vulkan.np1:2",
-    "llama@vulkan.np1:2:long",
-    "llamac4@vulkan.perslot.nodraft",
-    "profile:card"
+    "func:win",
+    "ktest:win",
+    "gates:win:full",
+    "perf:win:1",
+    "perf:win:1",
+    "perf:win:1",
+    "perf:win:1",
+    "perf:win:1",
+    "perf:win:1",
+    "perf:win:1:long",
+    "perf:win:1:long",
+    "perf:win:1:long",
+    "perf:win:1:long",
+    "perf:win:1:long",
+    "perf:win:1:long",
+    "c4:windnd",
+    "profile:win"
    ],
-   "runner": "r9700",
    "llama_spec": "--spec-type draft-mtp --spec-draft-n-max 3",
-   "_comment": "llama_spec: the arguments of the Strix Halo card's llama.cpp rows (run 45545014427; the package's MTP depth 3); the model is not in data/drafting_classification.json (not a nightly card yet)",
    "repeat_rows": 3
   },
   {
-   "name": "bonsai-r3-r9700",
-   "runner": "r9700",
+   "name": "bonsai-win-strix",
    "card": "loom-fun-staging/prism-ml-Ternary-Bonsai-2.5-27B-loom",
    "kit": null,
-   "memory_bytes": 30000000000,
-   "variants": [
-    {
-     "name": "card",
-     "context": 65536
-    },
-    {
-     "name": "ph32",
-     "build": {
-      "PROPOSE_HEAD_ROWS": "32768"
-     },
-     "context": 65536
-    },
-    {
-     "name": "ph80",
-     "build": {
-      "PROPOSE_HEAD_ROWS": "81920"
-     },
-     "context": 65536
-    },
-    {
-     "name": "nat",
-     "build": {
-      "GEMM_Q2_0_NATIVE": "1"
-     },
-     "context": 65536
-    },
-    {
-     "name": "nst",
-     "build": {
-      "GEMM_Q2_0_NATIVE": "1",
-      "GDN_CHUNK": "1",
-      "GDN_COPY_SPLIT": "8",
-      "FLASH2_TRIM": "1"
-     },
-     "context": 65536
-    }
-   ],
-   "steps": [
-    "smoke:card",
-    "ktest:ph32",
-    "ktest:nst",
-    "perf:card:1",
-    "perf:ph32:1",
-    "perf:ph80:1",
-    "perf:nat:1",
-    "perf:nst:1",
-    "perf:nst:1",
-    "perf:nat:1",
-    "perf:ph80:1",
-    "perf:ph32:1",
-    "perf:card:1",
-    "perf:card:1:long",
-    "perf:ph32:1:long",
-    "perf:ph80:1:long",
-    "perf:nat:1:long",
-    "perf:nst:1:long",
-    "profile:nst"
-   ]
-  },
-  {
-   "name": "bonsai-r3-strix",
-   "card": "loom-fun-staging/prism-ml-Ternary-Bonsai-2.5-27B-loom",
-   "kit": null,
+   "llamacpp": "b1387",
    "memory_bytes": 39000000000,
    "variants": [
     {
-     "name": "card"
+     "name": "win",
+     "build": {}
     },
     {
-     "name": "ph32",
-     "build": {
-      "PROPOSE_HEAD_ROWS": "32768"
-     }
-    },
-    {
-     "name": "ph80",
-     "build": {
-      "PROPOSE_HEAD_ROWS": "81920"
-     }
-    },
-    {
-     "name": "nat",
-     "build": {
-      "GEMM_Q2_0_NATIVE": "1"
-     }
-    },
-    {
-     "name": "nst",
-     "build": {
-      "GEMM_Q2_0_NATIVE": "1",
-      "FLASH2_KT256": "16",
-      "GDN_CHUNK11": "1",
-      "GDN_CHUNK11_FUSE": "1",
-      "GDN_CHUNK11_GATE": "1",
-      "GDN_CHUNK11_CN": "16",
-      "GDN_CHUNK11_OPT": "kbo",
-      "GDN_SKIP_LONG": "1",
-      "GDN_AB_WMMA": "1",
-      "RESID_EPI": "1",
-      "FLASH2_TRIM": "1",
-      "QG_SPLIT": "1"
+     "name": "windnd",
+     "build": {},
+     "execution": {
+      "draft_depth": 0
      }
     }
    ],
    "steps": [
-    "smoke:card",
-    "ktest:ph32",
-    "ktest:nst",
-    "perf:card:1",
-    "perf:ph32:1",
-    "perf:ph80:1",
-    "perf:nat:1",
-    "perf:nst:1",
-    "perf:nst:1",
-    "perf:nat:1",
-    "perf:ph80:1",
-    "perf:ph32:1",
-    "perf:card:1",
-    "perf:card:1:long",
-    "perf:ph32:1:long",
-    "perf:ph80:1:long",
-    "perf:nat:1:long",
-    "perf:nst:1:long",
-    "profile:nst"
-   ]
+    "func:win",
+    "ktest:win",
+    "gates:win:full",
+    "perf:win:1",
+    "perf:win:1",
+    "perf:win:1",
+    "perf:win:1:long",
+    "perf:win:1:long",
+    "perf:win:1:long",
+    "c4:windnd",
+    "llama@vulkan.np1:2",
+    "llama@vulkan.np1:2:long",
+    "llamac4@vulkan.perslot.nodraft",
+    "profile:win"
+   ],
+   "llama_spec": "--spec-type draft-mtp --spec-draft-n-max 3",
+   "llamacpp_vulkan": "b12211"
   }
  ]
 }
