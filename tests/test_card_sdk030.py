@@ -152,6 +152,29 @@ class Lint(unittest.TestCase):
             shutil.copy(CARD / "test/sdk03/expected" / f, d / f)
         return d
 
+    def test_sdk_evidence_and_explicit_explanations_merge_per_metric(self):
+        with tempfile.TemporaryDirectory() as t:
+            d = self.card(t)
+            info = d / "info.json"
+            slug = json.loads(info.read_text(encoding="utf-8"))["repo"].split("/")[-1]
+            gpu = "strix-halo"
+            generated = {"text": "Same-job confirmation within the band.", "url": None}
+            explicit = {"text": "A second measurement confirmed this row.", "url": None}
+            rows = [{"row": k, "explanation": generated} for k in ("decode", "prefill_2k")]
+            evidence = Path(t, "evidence.json")
+            evidence.write_text(json.dumps({"schema": "sdk-evidence/1",
+                                            "models": {slug: {"devices": {gpu: {"regressions": rows}}}}}), encoding="utf-8")
+            explanations = Path(t, "explicit.json")
+            explanations.write_text(json.dumps({"card": {gpu: {"decode": explicit}}}), encoding="utf-8")
+            out = Path(t, "rebuilt.json")
+            subprocess.run([sys.executable, str(CARD / "make_info.py"), "build", str(d), "--upstream", "none",
+                            "--device-results", "none", "--from-info", str(info), "--sdk-evidence", str(evidence),
+                            "--delta-explanations", str(explanations), "-o", str(out)], check=True)
+            comparisons = json.loads(out.read_text(encoding="utf-8"))["sdk_delta"]["comparisons"]
+            merged = next(c for c in comparisons if c["label"] == "card")["explanations"][gpu]
+            self.assertEqual(merged["decode"], explicit)
+            self.assertEqual(merged["prefill_2k"], generated)
+
     def test_sdk03_golden(self):
         with tempfile.TemporaryDirectory() as t:
             d = self.card(t)

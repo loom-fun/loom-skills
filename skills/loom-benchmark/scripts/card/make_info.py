@@ -800,8 +800,10 @@ def cmd_build(a):
                 if e:
                     ex.setdefault(gpu, {})[r["row"]] = e if isinstance(e, dict) else {"text": e, "url": dev.get("job_url")}
         if ex:
-            a.delta_explanations = {"card": {**ex, **((a.delta_explanations or {}).get("card") or {})},
-                                    **{k: v for k, v in (a.delta_explanations or {}).items() if k != "card"}}
+            explicit = a.delta_explanations or {}
+            for gpu, rows in (explicit.get("card") or {}).items():
+                ex.setdefault(gpu, {}).update(rows)
+            a.delta_explanations = {**explicit, "card": ex}
     for src in info["sources"].values():
         if src.get("url") in jobs:
             src["conclusion"] = jobs[src["url"]]
