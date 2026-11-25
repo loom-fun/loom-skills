@@ -524,6 +524,14 @@ CHOICE("moe.prefill.prefetch", "bool", True, "MOE_PREFETCH", doc="Stage prefetch
 CHOICE("moe.prefill.store16", "bool", False, "MOE_STORE16", kernels=["g_moe_gdn_*", "g_moe_combine_sorted*"], rows=ROWS_PREFILL, from_pr="qwen35 lane",
        doc="Numerics-moving: the grouped down GEMM stores its expert rows (ys_sorted) as f16 and g_moe_combine_sorted reads them as f16, in place "
            "(gen_moe.store16): half the DRAM traffic of prefill's largest intermediate (prompt rows x used experts x hidden).")
+CHOICE("moe.prefill.cw_q4k", "str", "0", "MOE_CW_Q4K", kernels=["g_moe_ggu_q4_k_*", "g_moe_gdn_q4_k_*"], rows=ROWS_PREFILL, from_pr="qwen35 lane (#1418)",
+       doc="Column-wave grouped MoE GEMMs for Q4_K experts in the starter (gen_moe_cw_q4k.py, gfx11 + gfx12 twin; '1' both, or a list of "
+           "swiglu,store): each wave owns output columns and dequantizes them straight into WMMA B fragments (no weight LDS stage), the "
+           "activation rows are staged once per 128 K, the chunk's 6-bit scales/mins are decoded word-wide once, and only the tile's live "
+           "16-row fragments get MMAs. Bit-identical to the 64-row tile kernels on live rows (same values, same K order). Loop VALU per 128 K "
+           "(32 weight columns per wave): gfx11 ~610 (each half-wave decodes its column's 16 values per K16) vs the 64-row kernel's "
+           "~1490 per 128 columns, gfx12 ~366 (8 values per lane, no duplicate). Token 'xch' (e.g. '1,xch'): gfx11 half-waves decode "
+           "one group each and swap through xor-16 shuffles (523 VALU + 64 ds_bpermute, 240 VGPRs; experiment). DevLab kbench pending.")
 _DS2 = dict(kits=["deepseek2"], rows=ROWS_PREFILL, from_pr="joyai-pfgemm")   # deepseek2 example kit (JoyAI-LLM-Flash campaign, PR #1361)
 CHOICE("prefill.gemm.t64_g32", "bool", False, "GEMM_T64_G32", kernels=["g_gemm_iq4_*", "g_moe_g*_iq4_*"], **_DS2,
        doc="The 64-row WMMA tile stages IQ4_XS / IQ4_NL a whole 32-group per thread (_g32_iq4, the iq4_f16lut values): grouped MoE "

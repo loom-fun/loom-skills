@@ -3447,8 +3447,12 @@ if cfg.get("moe") and os.environ.get("MOE_TESTS", "1") == "1" and os.environ.get
         if (fd, gun) in seen7: continue
         seen7.add((fd, gun))
         tg = f"mg{li}"
-        ex = [0, E7 // 2, E7 - 1]; mt = 4; mr = mt * 64; t7 = 40; ta7 = t7 * KU7
+        ex = [0, E7 // 2, E7 - 1]; t7 = 40; ta7 = t7 * KU7
         counts = [64, 37, 0, 5]; tile_exp = [ex[0], ex[1], -1, ex[2]]
+        import gen_moe_cw_q4k   # moe.prefill.cw_q4k specializes its K loop per live 16-row fragment count: cover nf = 2 too
+        if gen_moe_cw_q4k.modes():
+            counts.append(20); tile_exp.append(ex[1])
+        mt = len(counts); mr = mt * 64
         tile_info = np.array([[e, c] for e, c in zip(tile_exp, counts)], np.int32)
         rowmap = np.full(mr, -1, np.int32)
         for ti, c in enumerate(counts):
