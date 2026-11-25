@@ -1123,9 +1123,15 @@ def ingest_full(st, name, e, W):
                                                and bool(st.d["opts"].get("no_baselines")))
     # sdk-ab: the job measured a package BUILT from the branch; the card is made on the staging head, which must hold exactly those programs (the
     # v0.2 package published before this card-only step): make_info.py refuses a different programs hash
-    rev = hf_head(f"{st.d['opts']['new_org']}/{slug}") if sdk else e["card_revision"].split("@")[-1]
     out = os.path.join(W, "out")
-    hf_snapshot(f"{st.d['opts']['new_org']}/{slug}", rev, out)
+    dry = INGEST_DRY   # ingest --dry-run (--programs production): the card is made on the locally assembled frozen package
+    if dry:
+        rev = None
+        frozen_assemble(e["source_card"], target_sdk(st.d), out)
+        e = dict(e, package={"programs_sha256": card_lib.programs_sha256(out)})
+    else:
+        rev = hf_head(f"{st.d['opts']['new_org']}/{slug}") if sdk else e["card_revision"].split("@")[-1]
+        hf_snapshot(f"{st.d['opts']['new_org']}/{slug}", rev, out)
     if sdk:   # the package step's programs, whatever the head's revision is now (another device's card may have been published since)
         got = card_lib.programs_sha256(out)
         if got != e["package"]["programs_sha256"]:
@@ -1135,9 +1141,9 @@ def ingest_full(st, name, e, W):
         try:
             published_pin = sdk_package.load(os.path.join(out, "llm_config.json")).get("sdk") or {}
         except (OSError, ValueError, AttributeError) as ex:
-            raise RuntimeError(f"cannot read the SDK pin from staging head {rev[:10]}") from ex
+            raise RuntimeError(f"cannot read the SDK pin from staging head {str(rev)[:10]}") from ex
         if any(published_pin.get(key) != value for key, value in pin.items()):
-            raise RuntimeError(f"the staging head {rev[:10]} no longer has the verified SDK {target_sdk(st.d)} pin")
+            raise RuntimeError(f"the staging head {str(rev)[:10]} no longer has the verified SDK {target_sdk(st.d)} pin")
     shutil.copy(os.path.join(out, "info.json"), os.path.join(W, "info_prev.json"))
     prev = json.load(open(os.path.join(W, "info_prev.json")))
     baseline_info = "info_prev.json"
@@ -1196,6 +1202,15 @@ def ingest_full(st, name, e, W):
                   *src, "--device", "none", "--hrx-loom", "none", "-o", "ev_vulkan.json"], W)
         ev.append("ev_vulkan.json")
     gfiles = [f for f in (f"{d}/gates_{V}/gates.json", f"{d}/ktest_{V}.log") if os.path.exists(f)]
+    adm = os.path.join(d, f"admit_{V}.json")
+    if gfiles and gfiles[0].endswith("gates.json") and os.path.isfile(adm):
+        # the frozen job's admission probe (admit:V, the served preset's native context; the gates ran at the dev level, which has none): the card
+        # reads it from the gates file's context_admit, so the job's gates.json is passed with it (nothing else changes)
+        gj = json.load(open(gfiles[0]))
+        if not gj.get("context_admit"):
+            gj["context_admit"] = {k: v for k, v in json.load(open(adm)).items() if k in ("admitted", "tokens", "context", "detail")}
+            gfiles[0] = os.path.join(W, "gates_with_admission.json")
+            json.dump(gj, open(gfiles[0], "w"), indent=1)
     if gfiles:
         run_tool([f"{S}/make_info.py", "gates", "--gpu", dev, "--time", end, *gfiles, "--package", out, *src, "--device", "dev.json", "--hrx-loom", hrx,
                   "-o", "ev_gates.json"], W)
@@ -1230,11 +1245,12 @@ def ingest_full(st, name, e, W):
                       "-o", "info_new.json"], W)
     shutil.copy(os.path.join(W, "info_new.json"), os.path.join(out, "info.json"))
     msg = card_message(e, dev, run, loom_only, sdk, target_sdk(st.d))
-    parent = rev if verified else hf_head(f"{st.d['opts']['new_org']}/{slug}")
+    parent = rev if verified or dry else hf_head(f"{st.d['opts']['new_org']}/{slug}")
     return out, parent, msg
 
 
 _MAKE_INFO_HELP = {}
+INGEST_DRY = False   # ingest --dry-run: ingest_full assembles the frozen package locally instead of reading the staging head
 
 
 def make_info_supports(sub, flag):
@@ -1298,8 +1314,13 @@ def cmd_ingest(a):
         todo = [(n, e) for n, e in todo if not e.get("rerun_of_me")]
     if a.slug:
         todo = [(n, e) for n, e in todo if e["slug"] in a.slug]
-    if st.d["mode"] in SDK_MODES:
+    dry = getattr(a, "dry_run", False)
+    if dry and st.d["opts"].get("programs") != "production":
+        die("ingest --dry-run builds a --programs production card on the local frozen package (other modes need the staging package)")
+    if st.d["mode"] in SDK_MODES and not dry:
         todo = [(n, e) for n, e in todo if sdk_ingest_ready(st, n, e)]
+    global INGEST_DRY
+    INGEST_DRY = dry
     for name, e in todo:
         W = os.path.join(st.work, "cards", f"{e['slug']}.{e['device']}")
         shutil.rmtree(W, ignore_errors=True)
@@ -1313,9 +1334,15 @@ def cmd_ingest(a):
                     os.remove(os.path.join(out, f))
             run_tool([f"{CARD}/render_card.py", "--check", out, os.path.join(out, "README.md")], W)
         except (RuntimeError, SystemExit) as ex:
+            if dry:
+                print(f"{e['slug']} {e['device']}: dry-run ingest failed: {str(ex)[-600:]}")
+                continue
             e.update(stage="needs_decision", reason=f"ingest failed: {str(ex)[-400:]}")
             st.log(f"{e['slug']} {e['device']}: ingest failed")
             st.save()
+            continue
+        if dry:   # nothing recorded: the card is only built (and checked) for review
+            print(f"{e['slug']} {e['device']}: dry-run card at {out}")
             continue
         e.update(stage="ingested", card_dir=out, parent=parent, message=msg)
         if str(e.get("reason", "")).startswith("ingest failed"):
@@ -1404,6 +1431,30 @@ def package_one(st, slug, canon, sha, dry, env, prefill_changes=None, source_car
 WEIGHT_PATTERNS = re.compile(r"(^|/)parameter/|\.(gguf|safetensors|bin|mmproj)$")
 
 
+def staging_to_main(value):
+    """llm_config.json's knowledge-base evidence strings name the branch a fact was verified on; a frozen package was verified on what is now
+    main, so "staging main" reads "main" (DECISIONS D6 b: the only text change of a frozen llm_config.json besides the pin)"""
+    if isinstance(value, dict):
+        return {k: staging_to_main(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [staging_to_main(v) for v in value]
+    return value.replace("staging main", "main") if isinstance(value, str) else value
+
+
+def frozen_assemble(source, version, out):
+    """The frozen package of SOURCE (org/repo@rev) in OUT: its files at that revision (no weights), llm_config.json with only the "sdk" pin of
+    VERSION and the staging-main evidence wording changed (staging_to_main). -> its programs hash"""
+    source_repo, _, source_rev = source.partition("@")
+    hf_snapshot_small(source_repo, source_rev, out)
+    cfg = os.path.join(out, "llm_config.json")
+    config = staging_to_main(sdk_package.load(cfg))
+    config["sdk"] = release_pin(version)
+    with open(cfg, "w", encoding="utf-8") as f:
+        json.dump(config, f, indent=1)
+        f.write("\n")
+    return card_lib.programs_sha256(out)
+
+
 def package_frozen(st, slug, jobs, dry):
     """--programs production: the staging package IS the production package at its inventory revision, byte for byte (programs, model files,
     tokenizer, card files until `ingest` replaces the card), with only llm_config.json's "sdk" pin stamped to the target release. Every selected job of
@@ -1431,14 +1482,7 @@ def package_frozen(st, slug, jobs, dry):
         raise RuntimeError(f"the production package holds weight files in its repo ({', '.join(weights[:3])}): not a frozen-path package")
     W = os.path.join(st.work, "package", slug)
     out = os.path.join(W, "pkg")
-    hf_snapshot_small(source_repo, source_rev, out)
-    cfg = os.path.join(out, "llm_config.json")
-    config = sdk_package.load(cfg)
-    config["sdk"] = release_pin(version)
-    with open(cfg, "w", encoding="utf-8") as f:
-        json.dump(config, f, indent=1)
-        f.write("\n")
-    got = card_lib.programs_sha256(out)
+    got = frozen_assemble(source, version, out)
     if got != want:
         raise RuntimeError(f"the production snapshot's programs {str(got)[:12]} are not the measured {want[:12]}")
     repo = f"{org}/{slug}"
@@ -2106,6 +2150,8 @@ def main(argv=None):
             q.add_argument("--run", required=True)
         if name == "ingest":
             q.add_argument("--slug", action="append")
+            q.add_argument("--dry-run", action="store_true", help="--programs production: build each card on the locally assembled frozen package "
+                                                                  "(no staging package needed), record nothing; for review and lint_card.py")
         if name == "package":
             q.add_argument("--slugs", nargs="+", help="only these models, whatever their stage (default: the collected jobs that were promoted)")
             q.add_argument("--ref", help="the git ref the canonical build is made at (default: origin/<the state's base>)")
