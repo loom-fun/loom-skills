@@ -1,10 +1,10 @@
 {
- "_comment": "sdkcap kit A/B on SDK 0.3.0: kit build (sdk030) vs kit build with chat.input_measure (the 0.3.0 complete-conversation count contract in prepare_input); count probe + ABBA perf (iterate shape), no gates.",
+ "_comment": "sdkcap confirm (ratchet): Strix Qwen3-0.6B streams4 0.910 in run 45527529704 (one c4 session per variant); ABBA c4 x3 + perf ABBA.",
  "memory_bytes": 100000000000,
  "llamacpp": "b1375",
  "jobs": [
   {
-   "name": "meas-strix-qwen3-0-6b",
+   "name": "meas-strix-qwen3-0-6b-r2",
    "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
    "kit": null,
    "runner": "strix",
@@ -22,233 +22,16 @@
     }
    ],
    "steps": [
-    "smoke:kit",
-    "smoke:meas",
-    "count:kit",
-    "count:meas",
-    "perf:kit:1",
-    "perf:meas:1",
-    "perf:meas:1",
-    "perf:kit:1",
     "c4:kit",
-    "c4:meas"
-   ]
-  },
-  {
-   "name": "meas-strix-qwen3-30b-a3b-2507",
-   "card": "loom-fun/unsloth-Qwen3-30B-A3B-Instruct-2507-loom",
-   "kit": null,
-   "runner": "strix",
-   "sdk": "0.3.0",
-   "variants": [
-    {
-     "name": "kit",
-     "build": {}
-    },
-    {
-     "name": "meas",
-     "build": {
-      "LLM_INPUT_MEASURE": "1"
-     }
-    }
-   ],
-   "steps": [
-    "smoke:kit",
-    "smoke:meas",
-    "count:kit",
-    "count:meas",
-    "perf:kit:1",
-    "perf:meas:1",
-    "perf:meas:1",
-    "perf:kit:1",
+    "c4:meas",
+    "c4:meas",
     "c4:kit",
-    "c4:meas"
-   ]
-  },
-  {
-   "name": "meas-strix-qwen3-5-4b",
-   "card": "loom-fun/unsloth-Qwen3.5-4B-loom",
-   "kit": null,
-   "runner": "strix",
-   "sdk": "0.3.0",
-   "variants": [
-    {
-     "name": "kit",
-     "build": {}
-    },
-    {
-     "name": "meas",
-     "build": {
-      "LLM_INPUT_MEASURE": "1"
-     }
-    }
-   ],
-   "steps": [
-    "smoke:kit",
-    "smoke:meas",
-    "count:kit",
-    "count:meas",
-    "perf:kit:1",
-    "perf:meas:1",
-    "perf:meas:1",
-    "perf:kit:1",
     "c4:kit",
-    "c4:meas"
-   ]
-  },
-  {
-   "name": "meas-strix-gemma-4-e2b",
-   "card": "loom-fun/unsloth-gemma-4-E2B-it-loom",
-   "kit": "gemma4",
-   "runner": "strix",
-   "sdk": "0.3.0",
-   "variants": [
-    {
-     "name": "kit",
-     "build": {}
-    },
-    {
-     "name": "meas",
-     "build": {
-      "LLM_INPUT_MEASURE": "1"
-     }
-    }
-   ],
-   "steps": [
-    "smoke:kit",
-    "smoke:meas",
-    "count:kit",
-    "count:meas",
+    "c4:meas",
     "perf:kit:1",
     "perf:meas:1",
     "perf:meas:1",
-    "perf:kit:1",
-    "c4:kit",
-    "c4:meas"
-   ]
-  },
-  {
-   "name": "meas-r9700-qwen3-0-6b",
-   "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
-   "kit": null,
-   "runner": "r9700",
-   "sdk": "0.3.0",
-   "variants": [
-    {
-     "name": "kit",
-     "build": {}
-    },
-    {
-     "name": "meas",
-     "build": {
-      "LLM_INPUT_MEASURE": "1"
-     }
-    }
-   ],
-   "steps": [
-    "smoke:kit",
-    "smoke:meas",
-    "count:kit",
-    "count:meas",
-    "perf:kit:1",
-    "perf:meas:1",
-    "perf:meas:1",
-    "perf:kit:1",
-    "c4:kit",
-    "c4:meas"
-   ]
-  },
-  {
-   "name": "meas-r9700-qwen3-30b-a3b-2507",
-   "card": "loom-fun/unsloth-Qwen3-30B-A3B-Instruct-2507-loom",
-   "kit": null,
-   "runner": "r9700",
-   "sdk": "0.3.0",
-   "variants": [
-    {
-     "name": "kit",
-     "build": {}
-    },
-    {
-     "name": "meas",
-     "build": {
-      "LLM_INPUT_MEASURE": "1"
-     }
-    }
-   ],
-   "steps": [
-    "smoke:kit",
-    "smoke:meas",
-    "count:kit",
-    "count:meas",
-    "perf:kit:1",
-    "perf:meas:1",
-    "perf:meas:1",
-    "perf:kit:1",
-    "c4:kit",
-    "c4:meas"
-   ]
-  },
-  {
-   "name": "meas-r9700-qwen3-5-4b",
-   "card": "loom-fun/unsloth-Qwen3.5-4B-loom",
-   "kit": null,
-   "runner": "r9700",
-   "sdk": "0.3.0",
-   "variants": [
-    {
-     "name": "kit",
-     "build": {}
-    },
-    {
-     "name": "meas",
-     "build": {
-      "LLM_INPUT_MEASURE": "1"
-     }
-    }
-   ],
-   "steps": [
-    "smoke:kit",
-    "smoke:meas",
-    "count:kit",
-    "count:meas",
-    "perf:kit:1",
-    "perf:meas:1",
-    "perf:meas:1",
-    "perf:kit:1",
-    "c4:kit",
-    "c4:meas"
-   ]
-  },
-  {
-   "name": "meas-r9700-gemma-4-e2b",
-   "card": "loom-fun/unsloth-gemma-4-E2B-it-loom",
-   "kit": "gemma4",
-   "runner": "r9700",
-   "sdk": "0.3.0",
-   "variants": [
-    {
-     "name": "kit",
-     "build": {}
-    },
-    {
-     "name": "meas",
-     "build": {
-      "LLM_INPUT_MEASURE": "1"
-     }
-    }
-   ],
-   "steps": [
-    "smoke:kit",
-    "smoke:meas",
-    "count:kit",
-    "count:meas",
-    "perf:kit:1",
-    "perf:meas:1",
-    "perf:meas:1",
-    "perf:kit:1",
-    "c4:kit",
-    "c4:meas"
+    "perf:kit:1"
    ]
   }
  ]
