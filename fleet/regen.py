@@ -418,6 +418,7 @@ def production_facts(repo, rev, cache):
     kinds = {(sv or {}).get("kind") for sv in (model.get("services") or {}).values()}
     out = {"programs_sha256": card_lib.programs_sha256(d), "kind": "image" if cfg is None and kinds == {"image"} else "text",
            "claimed": sorted((info.get("devices") or {}).keys()), "memory_bytes": (info.get("card") or {}).get("memory_bytes"),
+           "gates": {d: sorted((v or {}).get("gates") or {}) for d, v in (info.get("devices") or {}).items()},   # the gates the card claims per device
            "features": (info.get("card") or {}).get("features") or [], "sdk": (cfg or {}).get("sdk"),
            # the commit that generated the package (its llm_config stamp), else the commit that generated its card
            "generator": next((c for c in (((cfg or {}).get("generator") or {}).get("skills_commit"), (info.get("versions") or {}).get("card_generator"))
@@ -526,7 +527,8 @@ def cmd_plan(a):
                         f = production_facts(published, revision, os.path.join(work, "production"))
                     except Exception as x:
                         die(f"{published}@{revision[:10]}: cannot read the production package ({x}); rerun plan")
-                    refs[s].update(programs_sha256=f["programs_sha256"], kind=f["kind"], claimed=f["claimed"], generator=f.get("generator"))
+                    refs[s].update(programs_sha256=f["programs_sha256"], kind=f["kind"], claimed=f["claimed"], generator=f.get("generator"),
+                                   gates=f.get("gates") or {})
                     if s not in nightly and f["kind"] == "text":   # a hand-written package the nightly list does not hold: its card's facts
                         refs[s]["model"] = {"repo": published, "slug": s.lower(), "memory_bytes": f["memory_bytes"], "kit": None, "features": f["features"]}
                 continue
@@ -941,6 +943,24 @@ def image_verdict(d, e):
     return "hold", [f"{k}: {str(v)[:160]}" for k, v in s.items() if not str(v).startswith("PASS")] or ["the image comparison did not pass"]
 
 
+def kernel_tests_not_applicable(st, e, d):
+    """--programs production: kernel tests the kit cannot GENERATE for this package (make_kernel_tests.py ended before a result: ktest ERROR, a
+    hand-written port's tensors) are not applicable when the production card claims no kernel-test gate on this device: the 0.2.0 card had none,
+    so the frozen card has none either. Recorded on the job (not_applicable) and removed from the compare's gate failures; a kernel test that
+    RAN and failed, or one the card claims, still holds."""
+    claimed = (((st.d["opts"].get("refs_all") or {}).get(e["slug"]) or {}).get("gates") or {}).get(e["device"])
+    if claimed is None or "kernel_tests" in claimed:
+        return
+    summ = json.load(open(os.path.join(d, "summary.json"))).get("results", {})
+    cmp = json.load(open(e["cmp"]))
+    na = [k for k in cmp.get("gate_failures") or [] if k.startswith("ktest:") and str(summ.get(k, "")).startswith("ERROR")]
+    if na:
+        cmp["gate_failures"] = [k for k in cmp["gate_failures"] if k not in na]
+        cmp["not_applicable"] = {k: "the kit's kernel-test generator does not cover this package and its production card claims no kernel tests" for k in na}
+        json.dump(cmp, open(e["cmp"], "w"), indent=1)
+        e["not_applicable"] = sorted(na)
+
+
 def frozen_guard(st, e):
     """--programs production, fail closed: why this job cannot qualify the frozen package (None when it can): it must have concluded success, served
     exactly the production programs and run the verified target SDK."""
@@ -977,6 +997,8 @@ def collect_one(st, name, e):
         decision, reasons, e["perf"], e["rows_pct"] = sdk_decide(st, name, e, e["cmp"])
     elif mode == "sdk-loom" and not e.get("prev"):   # the sweep job: cross-job deltas against the old card's Loom rows
         e["cmp"] = compare(st, name, e, d)
+        if production:
+            kernel_tests_not_applicable(st, e, d)
         decision, reasons, e["perf"], e["rows_pct"] = sdk_loom_decide(st, name, e, e["cmp"])
         e["perf_cross"] = dict(e["perf"])
     elif mode == "sdk-loom":   # the targeted ABBA job: old card on its pin vs the new package, same job; its verdict decides
