@@ -832,3 +832,150 @@ def use_block_mv(text):
         n[0] += 1
         return k.lstrip("\n")
     return pat.sub(sub, text), n[0]
+
+
+# ---- table decode (choice decode.ptq1_0.mv = "lut") ----
+# A 256-entry workgroup table maps a byte to its trits 0..3 (one byte each, codes 0..2) plus a 256-byte table of trit 4: a 16-byte
+# run takes two gathers, a 4x4 byte transpose per dword (vector.shuffle) puts the 4 bytes' trit n into one dword, about 1 VALU op
+# per weight instead of the 16-bit lane arithmetic's 3 (mv_block).
+LUT_INIT = """  %lut_bytes = index.constant 1024 : offset
+  %lut = buffer.alloca<workgroup> align(16) %lut_bytes : buffer
+  %lut4_bytes = index.constant 256 : offset
+  %lut4 = buffer.alloca<workgroup> align(16) %lut4_bytes : buffer
+  %lut_v = buffer.view %lut[%zero] : buffer -> view<256xi32>
+  %lut4_v = buffer.view %lut4[%zero] : buffer -> view<256xi8>
+  %lc256 = index.constant 256 : index
+  %lc1 = index.constant 1 : index
+  scf.for %le0 = [%ltid to %lc256 step %lstep] {
+    %le = index.assume %le0 [range(%le0, 0, 255)] : index
+    %lq = index.cast %le : index to i32
+    %l255 = scalar.constant 255 : i32
+    %l3 = scalar.constant 3 : i32
+    %l8 = scalar.constant 8 : i32
+    %lm1 = scalar.constant 3 : i32
+    %lm2 = scalar.constant 9 : i32
+    %lm3 = scalar.constant 27 : i32
+    %lm4 = scalar.constant 81 : i32
+    %lq1 = scalar.muli %lq, %lm1 : i32
+    %lq2 = scalar.muli %lq, %lm2 : i32
+    %lq3 = scalar.muli %lq, %lm3 : i32
+    %lq4 = scalar.muli %lq, %lm4 : i32
+    %lr0a = scalar.andi %lq, %l255 : i32
+    %lr1a = scalar.andi %lq1, %l255 : i32
+    %lr2a = scalar.andi %lq2, %l255 : i32
+    %lr3a = scalar.andi %lq3, %l255 : i32
+    %lr4a = scalar.andi %lq4, %l255 : i32
+    %lr0b = scalar.muli %lr0a, %l3 : i32
+    %lr1b = scalar.muli %lr1a, %l3 : i32
+    %lr2b = scalar.muli %lr2a, %l3 : i32
+    %lr3b = scalar.muli %lr3a, %l3 : i32
+    %lr4b = scalar.muli %lr4a, %l3 : i32
+    %lt0 = scalar.shrui %lr0b, %l8 : i32
+    %lt1 = scalar.shrui %lr1b, %l8 : i32
+    %lt2 = scalar.shrui %lr2b, %l8 : i32
+    %lt3 = scalar.shrui %lr3b, %l8 : i32
+    %lt4 = scalar.shrui %lr4b, %l8 : i32
+    %l16 = scalar.constant 16 : i32
+    %l24 = scalar.constant 24 : i32
+    %lt1s = scalar.shli %lt1, %l8 : i32
+    %lt2s = scalar.shli %lt2, %l16 : i32
+    %lt3s = scalar.shli %lt3, %l24 : i32
+    %lp01 = scalar.ori %lt0, %lt1s : i32
+    %lp23 = scalar.ori %lt2s, %lt3s : i32
+    %lp = scalar.ori %lp01, %lp23 : i32
+    view.store %lp, %lut_v[%le] : i32, view<256xi32>
+    %lt4b = scalar.trunci %lt4 : i32 to i8
+    view.store %lt4b, %lut4_v[%le] : i8, view<256xi8>
+  }
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+"""
+
+_T44 = "[0, 4, 8, 12, 1, 5, 9, 13, 2, 6, 10, 14, 3, 7, 11, 15]"
+
+
+def _lut_codes(pfx):
+    """IR: the 4 groups' codes (0..2) %{pfx}c0..3 and scale %{pfx}d of the block vector<7xi32> %{pfx}blk via the tables."""
+    return f"""      %{pfx}by = vector.bitcast %{pfx}blk : vector<7xi32> to vector<28xi8>
+      %{pfx}a = vector.slice %{pfx}by[0] : vector<28xi8> -> vector<16xi8>
+      %{pfx}b8 = vector.slice %{pfx}by[16] : vector<28xi8> -> vector<8xi8>
+      %{pfx}h2 = vector.slice %{pfx}by[24] : vector<28xi8> -> vector<2xi8>
+      %{pfx}dw = vector.extract %{pfx}blk[6] : vector<7xi32> -> i32
+      %{pfx}c16 = scalar.constant 16 : i32
+      %{pfx}dsh = scalar.shrui %{pfx}dw, %{pfx}c16 : i32
+      %{pfx}d16 = scalar.trunci %{pfx}dsh : i32 to i16
+      %{pfx}dh = scalar.bitcast %{pfx}d16 : i16 to f16
+      %{pfx}d = scalar.extf %{pfx}dh : f16 to f32
+      %{pfx}ai = vector.extui %{pfx}a : vector<16xi8> to vector<16xi32>
+      %{pfx}bi = vector.extui %{pfx}b8 : vector<8xi8> to vector<8xi32>
+      %{pfx}hi = vector.extui %{pfx}h2 : vector<2xi8> to vector<2xi32>
+      %{pfx}al = vector.gather %lut_v[0][%{pfx}ai] : view<256xi32>, vector<16xi32> -> vector<16xi32>
+      %{pfx}a4 = vector.gather %lut4_v[0][%{pfx}ai] : view<256xi8>, vector<16xi32> -> vector<16xi8>
+      %{pfx}bl = vector.gather %lut_v[0][%{pfx}bi] : view<256xi32>, vector<8xi32> -> vector<8xi32>
+      %{pfx}b4 = vector.gather %lut4_v[0][%{pfx}bi] : view<256xi8>, vector<8xi32> -> vector<8xi8>
+      %{pfx}hl = vector.gather %lut_v[0][%{pfx}hi] : view<256xi32>, vector<2xi32> -> vector<2xi32>
+      %{pfx}ab = vector.bitcast %{pfx}al : vector<16xi32> to vector<64xi8>
+      %{pfx}bbb = vector.bitcast %{pfx}bl : vector<8xi32> to vector<32xi8>
+      %{pfx}hb = vector.bitcast %{pfx}hl : vector<2xi32> to vector<8xi8>
+""" + "".join(f"""      %{pfx}ak{k} = vector.slice %{pfx}ab[{16 * k}] : vector<64xi8> -> vector<16xi8>
+      %{pfx}at{k} = vector.shuffle<{_T44}> %{pfx}ak{k} : vector<16xi8>
+""" for k in range(4)) + "".join(f"""      %{pfx}bk{k} = vector.slice %{pfx}bbb[{16 * k}] : vector<32xi8> -> vector<16xi8>
+      %{pfx}bt{k} = vector.shuffle<{_T44}> %{pfx}bk{k} : vector<16xi8>
+""" for k in range(2)) + f"""      %{pfx}ht = vector.shuffle<[0, 4, 1, 5, 2, 6, 3, 7]> %{pfx}hb : vector<8xi8>
+""" + "".join(f"""      %{pfx}aw{k} = vector.bitcast %{pfx}at{k} : vector<16xi8> to vector<4xi32>
+""" for k in range(4)) + "".join(f"""      %{pfx}bw{k} = vector.bitcast %{pfx}bt{k} : vector<16xi8> to vector<4xi32>
+""" for k in range(2)) + f"""      %{pfx}hw = vector.bitcast %{pfx}ht : vector<8xi8> to vector<2xi32>
+      %{pfx}a4w = vector.bitcast %{pfx}a4 : vector<16xi8> to vector<4xi32>
+      %{pfx}b4w = vector.bitcast %{pfx}b4 : vector<8xi8> to vector<2xi32>
+""" + _lut_groups(pfx)
+
+
+def _lut_groups(pfx):
+    """Assemble the 4 groups (8 dwords each) from the transposed dwords: at{k}[n] = trit n of A bytes 4k..4k+3, bt{k}[n] = trit n of
+    B bytes 4k..4k+3, a4w / b4w = trit 4, hw = the qh values (120..127)."""
+    def d(src, i):
+        return f"%{pfx}{src}_e{i}"
+    lines, names = [], {}
+    for k in range(4):
+        for n in range(4):
+            nm = f"%{pfx}A{n}_{k}"
+            lines.append(f"      {nm} = vector.extract %{pfx}aw{k}[{n}] : vector<4xi32> -> i32")
+            names[("A", n, k)] = nm
+        nm = f"%{pfx}A4_{k}"
+        lines.append(f"      {nm} = vector.extract %{pfx}a4w[{k}] : vector<4xi32> -> i32")
+        names[("A", 4, k)] = nm
+    for k in range(2):
+        for n in range(4):
+            nm = f"%{pfx}B{n}_{k}"
+            lines.append(f"      {nm} = vector.extract %{pfx}bw{k}[{n}] : vector<4xi32> -> i32")
+            names[("B", n, k)] = nm
+        nm = f"%{pfx}B4_{k}"
+        lines.append(f"      {nm} = vector.extract %{pfx}b4w[{k}] : vector<2xi32> -> i32")
+        names[("B", 4, k)] = nm
+    for k in range(2):
+        nm = f"%{pfx}Q_{k}"
+        lines.append(f"      {nm} = vector.extract %{pfx}hw[{k}] : vector<2xi32> -> i32")
+        names[("Q", 0, k)] = nm
+    order = [[("A", 0, k) for k in range(4)] + [("A", 1, k) for k in range(4)],
+             [("A", 2, k) for k in range(4)] + [("A", 3, k) for k in range(4)],
+             [("A", 4, k) for k in range(4)] + [("B", 0, k) for k in range(2)] + [("B", 1, k) for k in range(2)],
+             [("B", 2, k) for k in range(2)] + [("B", 3, k) for k in range(2)] + [("B", 4, k) for k in range(2)] + [("Q", 0, k) for k in range(2)]]
+    for g, ks in enumerate(order):
+        lines.append(f"      %{pfx}cw{g} = vector.from_elements {', '.join(names[x] for x in ks)} : vector<8xi32>")
+        lines.append(f"      %{pfx}c{g} = vector.bitcast %{pfx}cw{g} : vector<8xi32> to vector<32xi8>")
+    return "\n".join(lines) + "\n"
+
+
+def use_lut_mv(text):
+    """mv_block kernels with the table decode: same names (see use_block_mv), the tables filled once per workgroup."""
+    text, n = use_block_mv(text)
+    pat = re.compile(r'(kernel\.def (?:target\(@\w+\) )?export\("g_mv_ptq1_0_k\d+[^"]*"\).*?\n  kernel\.return\n\}\n)', re.S)
+
+    def sub(m):
+        k = m.group(1)
+        k = re.sub(r"(      %b(\d)by = vector\.bitcast %b\2blk.*?%b\2c3 = vector\.concat<0>[^\n]*\n)",
+                   lambda mm: _lut_codes(f"b{mm.group(2)}"), k, flags=re.S)
+        k = k.replace("  %first = index.cmp eq, %lane, %c0 : index\n",
+                      "  %first = index.cmp eq, %lane, %c0 : index\n  %lw32 = index.mul %wave, %c32 : index\n  %ltid = index.add %lw32, %lane : index\n"
+                      f"  %lstep = index.mul %cW, %c32 : index\n{LUT_INIT}", 1)
+        return k
+    return pat.sub(sub, text), n

@@ -6600,9 +6600,9 @@ if __name__ == "__main__":
         print("rope_qg launches:", _nqg)
     if HADAMARD:   # prism.hadamard: the token embedding stores rotated rows
         text = ternary.embed_patch(text, H)
-    if os.environ.get("PTQ1_0_MV", "") == "block":   # choice decode.ptq1_0.mv: whole-block PTQ1_0 matvecs (ternary.mv_block)
-        text, _nmvb = ternary.use_block_mv(text)
-        print("ptq1_0 block matvecs:", _nmvb)
+    if os.environ.get("PTQ1_0_MV", "") in ("block", "lut"):   # choice decode.ptq1_0.mv: whole-block PTQ1_0 matvecs (ternary.mv_block)
+        text, _nmvb = (ternary.use_lut_mv if os.environ["PTQ1_0_MV"] == "lut" else ternary.use_block_mv)(text)
+        print("ptq1_0", os.environ["PTQ1_0_MV"], "matvecs:", _nmvb)
     if os.environ.get("LIVE_ROW_SKIP", "1") != "0":   # =0 A/B it off
         text = live_row_skip(text)
     if GDN and os.environ.get("GDN_AB_WMMA", "0").strip().lower() not in ("", "0", "false", "no", "off"):   # choice prefill.gdn.ab_wmma (gen_gdn_ab.py)
