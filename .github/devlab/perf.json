@@ -1,47 +1,67 @@
 {
- "_comment": "R9700 per-model measurement (r9700_jobs.py): one job per model on one R9700 runner; loom-fun-staging card, llama.cpp ROCm b1375 + Vulkan b12211 with the matched drafting, reduced-context models served at served_context. Does not fit: none",
- "runner": "r9700",
- "memory_bytes": 34000000000,
+ "_comment": "sdk030 #1400/#1413 (eng regress): admission cancel latency with the PRE-53622d66 ctx_admit.py (requests client: no socket to close before response headers) on hrx-loom 0.2.0 vs 0.3.0, frozen programs. Diagnostic only.",
+ "runner": "strix",
+ "memory_bytes": 41000000000,
  "llama_spec": "matched",
+ "card": "loom-fun/InternScience-Sage-A1.5-loom@bfa32772063c03a549b3452520d3110e0d978f2f",
+ "kit": null,
+ "llamacpp": "b1374",
  "jobs": [
   {
-   "name": "unsloth-qwen3-0-6b-loom",
-   "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
-   "kit": null,
-   "llamacpp": "b1375",
-   "llamacpp_vulkan": "b12211",
-   "memory_bytes_r9700": 17000000000,
+   "name": "rg-oldcancel-joyai-strix",
+   "runner": "strix",
+   "card": "loom-fun/jdopensource-JoyAI-LLM-Flash-loom@b4787e7927e3863b612b50c13c69207efaa7806e",
+   "memory_bytes": 47000000000,
+   "kit": "deepseek2",
+   "llamacpp": "b1386",
+   "sdk": "0.3.0",
    "variants": [
     {
-     "name": "card",
-     "build": {}
+     "name": "fun",
+     "sdk": "card",
+     "programs_sha256": "bf2c516bdedc09998b86e9a48e240b4a7cde001881c77fcb0c3c4b5d530c28c6",
+     "card": "loom-fun/jdopensource-JoyAI-LLM-Flash-loom@b4787e7927e3863b612b50c13c69207efaa7806e"
     },
     {
-     "name": "nodraft",
-     "build": {},
-     "execution": {
-      "draft_depth": 0
-     }
+     "name": "staging",
+     "sdk": "0.3.0",
+     "programs_sha256": "bf2c516bdedc09998b86e9a48e240b4a7cde001881c77fcb0c3c4b5d530c28c6"
     }
    ],
    "steps": [
-    "func:card",
-    "ktest:card",
-    "gates:card:dev",
-    "perf:card:3",
-    "perf:card:3:long",
-    "c4:nodraft",
-    "llama@rocm.np1:3",
-    "llama@rocm.np1:3:long",
-    "llamac4@rocm.nodraft",
-    "llama@vulkan.np1:3",
-    "llama@vulkan.np1:3:long",
-    "llamac4@vulkan.perslot.nodraft"
+    "admit:fun",
+    "admit:staging",
+    "admit:staging",
+    "admit:fun"
+   ]
+  },
+  {
+   "name": "rg-oldcancel-ornith9b-strix",
+   "runner": "strix",
+   "card": "loom-fun/bartowski-Ornith-1.5-9B-loom@fd3c6efebabc4ea9502c296326402a079bb84827",
+   "memory_bytes": 32000000000,
+   "kit": null,
+   "llamacpp": "b1374",
+   "sdk": "0.3.0",
+   "variants": [
+    {
+     "name": "fun",
+     "sdk": "card",
+     "programs_sha256": "8966d3a22644212b1c594e39d9d2b2194ac4b821e0c9e5d8149685dba3241ee8",
+     "card": "loom-fun/bartowski-Ornith-1.5-9B-loom@fd3c6efebabc4ea9502c296326402a079bb84827"
+    },
+    {
+     "name": "staging",
+     "sdk": "0.3.0",
+     "programs_sha256": "8966d3a22644212b1c594e39d9d2b2194ac4b821e0c9e5d8149685dba3241ee8"
+    }
+   ],
+   "steps": [
+    "admit:fun",
+    "admit:staging",
+    "admit:staging",
+    "admit:fun"
    ]
   }
- ],
- "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
- "kit": null,
- "llamacpp": "b1375",
- "llamacpp_vulkan": "b12211"
+ ]
 }
