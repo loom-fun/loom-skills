@@ -235,7 +235,7 @@ class CollectTest(Base):
         r2 = [n for n in st.jobs if n.endswith("-r2")]
         self.assertEqual(len(r2), 1)
         self.assertEqual((st.jobs[r2[0]]["prev"], st.jobs[r2[0]]["round"], st.jobs[r2[0]]["aa"]), (JOB, 2, True))
-        self.assertEqual(st.d["batches"][-1]["round"], 2)
+        self.assertEqual((st.d["batches"][-1]["round"], st.d["batches"][-1]["priority"]), (2, True))   # targeted: not behind the waves
         # a second call does not queue another
         with mock.patch.object(regen, "sh", self.gen), contextlib.redirect_stdout(io.StringIO()):
             regen.main(["rerun", self.state])
