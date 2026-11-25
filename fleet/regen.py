@@ -937,6 +937,11 @@ def frozen_guard(st, e):
         return f"the job served programs {str(built)[:12]}, not the production programs {str(e.get('programs_sha256'))[:12]}"
     if not measured_sdk(e, target_sdk(st.d)):
         return f"the job's SDK is not the verified hrx-loom {target_sdk(st.d)} wheel (sdk_staging.json / sdk_stagingnd.json)"
+    adm = admission(e.get("dir")) if not e.get("prev") else {"result": "n/a"}   # an ABBA confirmation measures rows only
+    if adm is None:
+        return "the job recorded no native-context admission probe (admit:staging)"
+    if adm["result"] == "REFUSED":
+        return f"the native-context admission probe was refused: {adm.get('detail') or adm.get('tokens')}"
     return None
 
 
@@ -1802,16 +1807,22 @@ def admission(d):
     """the native-context admission probe of a job (gates.sh context_admit in gates_staging/gates.json, its log): {result, tokens, served_context,
     warnings, log} or None when the job ran no gates"""
     g = os.path.join(d or "", "gates_staging", "gates.json")
+    ca, logf = None, os.path.join("gates_staging", "gates_context_admit.log")
     try:
         ca = json.load(open(g)).get("context_admit")
     except (OSError, ValueError):
-        return None
+        pass
+    if not ca:   # the job's own admit:staging step (devlab_perf.sh, ctx_admit.py --out): the frozen jobs' probe at the gates' dev level
+        try:
+            ca, logf = json.load(open(os.path.join(d or "", "admit_staging.json"))), "admit_staging.txt"
+        except (OSError, ValueError):
+            return None
     if not ca:
         return None
-    log = read(os.path.join(d, "gates_staging", "gates_context_admit.log"), "") or ""
+    log = read(os.path.join(d, logf), "") or ""
     warn = sorted({ln.strip()[:200] for ln in log.splitlines() if "WARN" in ln or "did not cancel" in ln})
     return {"result": "ADMITTED" if ca.get("admitted") else "REFUSED", "tokens": ca.get("tokens"), "served_context": ca.get("context"),
-            "detail": ca.get("detail"), "warnings": warn, "log": "gates_staging/gates_context_admit.log"}
+            "detail": ca.get("detail"), "warnings": warn, "log": logf}
 
 
 def device_evidence(st, e, info_cache):

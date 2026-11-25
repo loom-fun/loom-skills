@@ -367,6 +367,8 @@ def frozen(doc, old_sdk, new_sdk, refs):
         if not want:
             sys.exit(f"{slug}: --programs production needs the production programs hash in its refs entry (\"programs_sha256\")")
         j["sdk"] = new_sdk
+        if any(x.startswith("gates:") for x in j["steps"]) and "admit:staging" not in j["steps"]:
+            j["steps"].append("admit:staging")   # the native-context admission probe of the shipped preset (gates.sh runs it only at quick/full)
         by = {v["name"]: v for v in j["variants"]}
         for old, new in (("fun", "staging"), ("funnd", "stagingnd")):
             n = by[new]
