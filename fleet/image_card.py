@@ -4,8 +4,9 @@ inventory revision with only the migration's mechanical changes and the SDK-only
 image_result.json: identical pixels and seconds per image, the same programs on both SDKs in one job).
 
 Changes, and nothing else: the pin of the `pipx install` line; the `loom-fetch` line fetches from ORG without `--materialize=copy` (gone in 0.3.0,
-skills/loom-migrate/versions/v0.2.0-to-v0.3.0.md 2.5) and the sentence that explained it; "supported by hrx-loom OLD" -> NEW; one "Change from the
-previous card" block before "## Files"; the Versions line names the SDK, the SDK the values were measured on and this script's commit.
+skills/loom-migrate/versions/v0.2.0-to-v0.3.0.md 2.5) and the sentence that explained it; "supported by hrx-loom OLD" -> NEW; the Loom row of every timing
+table marked as measured on OLD in the cross-engine session; one "Change from the previous card" block before "## Files"; the Versions
+line names the SDK, the SDK the values were measured on and this script's commit.
 
 usage: image_card.py SLUG JOB_DIR JOB_URL OUT_DIR [--org loom-fun-staging] [--publish]
   JOB_DIR: the downloaded image job (image_result.json); OUT_DIR: written fresh (the production card's small files + the migrated README.md).
@@ -36,6 +37,25 @@ def skills_commit():
     return r.stdout.strip() if r.returncode == 0 else "unknown"
 
 
+LOOM_ROW = "| Loom (this package) |"
+
+
+def mark_loom_rows(text, old, new):
+    """The Loom row of every timing table (a table whose header has s/image): marked as measured on the old SDK in the cross-engine session, so no
+    old-SDK value renders unmarked under the new pin (the new SDK's re-measurement is the delta block's)."""
+    out, header = [], None
+    for line in text.split("\n"):
+        if line.startswith("|"):
+            header = header or line
+            if "s/image" in header and line.startswith(LOOM_ROW):
+                line = (f"| Loom (this package; hrx-loom {old}, Windows cross-engine session; SDK {new} re-measured on Linux below) |"
+                        + line[len(LOOM_ROW):])
+        else:
+            header = None
+        out.append(line)
+    return "\n".join(out)
+
+
 def migrate(text, slug, result, url, org, commit):
     """The migrated README text of one image card (refuses a job that did not show identical pixels on the same programs)."""
     old, new = result["sdk"]["old"], result["sdk"]["new"]
@@ -46,6 +66,7 @@ def migrate(text, slug, result, url, org, commit):
     t = re.sub(r"loom-fetch huggingface:loom-fun/(\S+) --materialize=copy", rf"loom-fetch huggingface:{org}/\1", t)
     t = t.replace("- `--materialize=copy` puts copies of the fetched package files in the output directory. ", "- ")
     t = t.replace(f"supported by hrx-loom {old} can fetch", f"supported by hrx-loom {new} can fetch")
+    t = mark_loom_rows(t, old, new)
     o, n = result["runs"]["old"], result["runs"]["new"]
     images = sum(len(s["seconds"]) for s in n["sessions"])
     block = (f"**Change from the previous card** ([revision `{rev[:7]}`](https://huggingface.co/loom-fun/{slug}/tree/{rev}), hrx-loom {old}; "

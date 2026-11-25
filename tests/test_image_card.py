@@ -17,6 +17,15 @@ loom-fetch huggingface:loom-fun/acme-Img-loom:image --materialize=copy --output=
 
 Other AMD GPUs supported by hrx-loom 0.2.0 can fetch and serve the same package.
 
+| backend | s/image ↓ | Loom speedup |
+|---|---|---|
+| Loom (this package) | **7.1** | — |
+| other | 9.0 | 1.3× |
+
+| backend | PSNR ↑ |
+|---|---|
+| Loom (this package) | 25.69 |
+
 ## Files
 
 Versions: card schema `model-card.v1`; hrx-loom `0.2.0`; programs from somewhere.
@@ -34,6 +43,8 @@ class Migrate(unittest.TestCase):
         self.assertNotIn("materialize", t)
         self.assertIn("- The weights come from acme at the pinned revision.", t)
         self.assertIn("supported by hrx-loom 0.3.0 can fetch", t)
+        self.assertIn("| Loom (this package; hrx-loom 0.2.0, Windows cross-engine session; SDK 0.3.0 re-measured on Linux below) | **7.1** | — |", t)
+        self.assertIn("| Loom (this package) | 25.69 |", t)   # not a timing table: unchanged
         self.assertIn("- Strix Halo: identical pixels (RGB sha256 `bbbbbbb` on both, 4 images each), s/image 10 → 9.9 (-1.0 %; lower is faster): "
                       "the same programs on both SDKs in one [job](https://x/job/1).\n\n## Files", t)
         self.assertIn("hrx-loom `0.3.0` (values above measured on `0.2.0` unless marked; card migrated by loom-skills `fleet/image_card.py` `ccccccc`);", t)
