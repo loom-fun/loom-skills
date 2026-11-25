@@ -1,47 +1,115 @@
 {
- "_comment": "R9700 per-model measurement (r9700_jobs.py): one job per model on one R9700 runner; loom-fun-staging card, llama.cpp ROCm b1375 + Vulkan b12211 with the matched drafting, reduced-context models served at served_context. Does not fit: none",
- "runner": "r9700",
- "memory_bytes": 34000000000,
- "llama_spec": "matched",
+ "_comment": "Ternary Bonsai 27B (#1416) iterate round 1: Q2_0 package (card, no drafting) vs the load-time PTQ1_0 repack with the generic, whole-block and table-decode matvecs; perf + c4 + ktest, profiles of decode. No gates (iterate preset).",
+ "card": "loom-fun-staging/prism-ml-Ternary-Bonsai-2.5-27B-loom",
+ "kit": null,
+ "memory_bytes": 35000000000,
  "jobs": [
   {
-   "name": "unsloth-qwen3-0-6b-loom",
-   "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
+   "name": "bonsai-r1-strix",
+   "card": "loom-fun-staging/prism-ml-Ternary-Bonsai-2.5-27B-loom",
    "kit": null,
-   "llamacpp": "b1375",
-   "llamacpp_vulkan": "b12211",
-   "memory_bytes_r9700": 17000000000,
+   "memory_bytes": 35000000000,
    "variants": [
     {
-     "name": "card",
-     "build": {}
+     "name": "card"
     },
     {
-     "name": "nodraft",
-     "build": {},
-     "execution": {
-      "draft_depth": 0
+     "name": "rp",
+     "build": {
+      "TERNARY_REPACK": "1"
+     }
+    },
+    {
+     "name": "rpblk",
+     "build": {
+      "TERNARY_REPACK": "1",
+      "PTQ1_0_MV": "block"
+     }
+    },
+    {
+     "name": "rplut",
+     "build": {
+      "TERNARY_REPACK": "1",
+      "PTQ1_0_MV": "lut"
      }
     }
    ],
    "steps": [
-    "func:card",
-    "ktest:card",
-    "gates:card:dev",
-    "perf:card:3",
-    "perf:card:3:long",
-    "c4:nodraft",
-    "llama@rocm.np1:3",
-    "llama@rocm.np1:3:long",
-    "llamac4@rocm.nodraft",
-    "llama@vulkan.np1:3",
-    "llama@vulkan.np1:3:long",
-    "llamac4@vulkan.perslot.nodraft"
+    "smoke:card",
+    "ktest:rp",
+    "ktest:rpblk",
+    "ktest:rplut",
+    "perf:card:2",
+    "perf:card:1:long",
+    "c4:card",
+    "perf:rp:2",
+    "perf:rp:1:long",
+    "c4:rp",
+    "perf:rpblk:2",
+    "perf:rpblk:1:long",
+    "c4:rpblk",
+    "perf:rplut:2",
+    "perf:rplut:1:long",
+    "c4:rplut",
+    "profile:card:dec",
+    "profile:rpblk:dec"
    ]
+  },
+  {
+   "name": "bonsai-r1-r9700",
+   "card": "loom-fun-staging/prism-ml-Ternary-Bonsai-2.5-27B-loom",
+   "kit": null,
+   "memory_bytes": 30000000000,
+   "variants": [
+    {
+     "name": "card",
+     "context": 65536
+    },
+    {
+     "name": "rp",
+     "build": {
+      "TERNARY_REPACK": "1"
+     },
+     "context": 65536
+    },
+    {
+     "name": "rpblk",
+     "build": {
+      "TERNARY_REPACK": "1",
+      "PTQ1_0_MV": "block"
+     },
+     "context": 65536
+    },
+    {
+     "name": "rplut",
+     "build": {
+      "TERNARY_REPACK": "1",
+      "PTQ1_0_MV": "lut"
+     },
+     "context": 65536
+    }
+   ],
+   "steps": [
+    "smoke:card",
+    "ktest:rp",
+    "ktest:rpblk",
+    "ktest:rplut",
+    "perf:card:2",
+    "perf:card:1:long",
+    "c4:card",
+    "perf:rp:2",
+    "perf:rp:1:long",
+    "c4:rp",
+    "perf:rpblk:2",
+    "perf:rpblk:1:long",
+    "c4:rpblk",
+    "perf:rplut:2",
+    "perf:rplut:1:long",
+    "c4:rplut",
+    "profile:card:dec",
+    "profile:rpblk:dec"
+   ],
+   "runner": "r9700"
   }
- ],
- "card": "loom-fun/unsloth-Qwen3-0.6B-loom",
- "kit": null,
- "llamacpp": "b1375",
- "llamacpp_vulkan": "b12211"
+ ]
 }
