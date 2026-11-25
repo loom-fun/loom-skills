@@ -193,3 +193,33 @@ class Lint(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class NoGenerator(unittest.TestCase):
+    """A hand-written package (llm_config "generator" says unknown, no commit recoverable) states it has no generator."""
+    GEN = {"skills_commit": "unknown", "dirty": None, "kit": {"example": None, "modified": True}, "hrx_loom": "unknown"}
+    BASIS = "hand-written package, no generator"
+
+    def versions(self):
+        return {"card_generator": "a" * 40, "package": {"skills_commit": {"commit": None, "basis": self.BASIS}}}
+
+    def test_generator_commit(self):
+        self.assertFalse(card_lib.stamped(self.GEN))
+        self.assertEqual(card_lib.generator_commit(self.GEN, self.versions()), (None, "none"))
+        self.assertEqual(card_lib.generator_commit(self.GEN, {"card_generator": "x"}), (None, None))
+        rec = {"package": {"skills_commit": {"commit": "b" * 40, "recovered": True, "basis": "production card"}}}
+        self.assertEqual(card_lib.generator_commit(self.GEN, rec), ("b" * 40, "recovered"))
+        self.assertEqual(card_lib.generator_commit({"skills_commit": "c" * 40}, rec), ("c" * 40, "stamp"))
+
+    def test_rendered_without_unknown(self):
+        import render_card
+        text = render_card.skills_text(self.GEN, self.versions())
+        self.assertEqual(text, f"none ({self.BASIS})")
+        self.assertNotIn("unknown", render_card.versions_sdk(self.GEN, self.versions(), {"hrx_loom": "0.3.0", "hrx_system_sha": "e" * 40}))
+
+    def test_schema(self):
+        schema = card_lib.load_json(card_lib.SCHEMA_PATH)
+        sub = schema["properties"]["versions"]
+        self.assertEqual(card_lib._check(self.versions(), sub, schema, "versions", []), [])
+        bad = {"card_generator": "x", "package": {"skills_commit": {"commit": "nothex", "basis": "y"}}}
+        self.assertNotEqual(card_lib._check(bad, sub, schema, "versions", []), [])
