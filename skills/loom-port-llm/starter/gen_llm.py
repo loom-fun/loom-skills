@@ -30,6 +30,8 @@ FF_UNIFORM = len(set(FFL)) == 1
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "draft"))
 import gen_draft  # noqa: E402  speculative decoding (LLM_DRAFT, set by build.py): verify + drafter programs
 MTP_LAYER = None
+import ternary  # noqa: E402  PrismML ternary checkpoints: PTQ1_0 helpers, prism.hadamard rotation
+HADAMARD = ternary.setup(CFG)
 from gen_gdn import single_form  # noqa: E402
 single_form(gen_draft.DRAFT["kind"] if gen_draft.enabled() else None)
 if gen_draft.enabled() and gen_draft.DRAFT["kind"] == "mtp":
@@ -149,6 +151,16 @@ SWA_ROPE = bool(CFG.get("sliding_layers")) and (CFG.get("head_dim_swa") or D) ==
 assert not SWA_ROPE or (RD_SWA % 64 == 0 and RD_SWA <= D), "rope_dims_swa must be a multiple of 64"
 FREQ_FACTORS = CFG.get("rope_freq_factors")  # per rotary pair: frequency / factor (llama3 rope_freqs; global layers only)
 TENS = CFG["tensors"]                     # tensor name -> {"type": fmt, "shape": [...]}
+# TERNARY_REPACK=1 (choice decode.ternary.repack): a Q2_0 ternary checkpoint's matrices (Ternary Bonsai: the file hrx-loom can read) are
+# repacked at load into PTQ1_0 blocks (28 B per 128 values instead of 36) by the weight policy (ternary.prep_kernel): the programs read
+# the PTQ1_0 copy. Entries {tensor: ("q2_0x", "ptq1_0", 128-value blocks)}.
+REPACK = {}
+if os.environ.get("TERNARY_REPACK", "0") == "1":
+    assert CFG.get("hadamard"), "TERNARY_REPACK: a ternary (prism.hadamard) checkpoint"
+    for _n, _t in TENS.items():
+        if _t["type"] == "q2_0" and len(_t["shape"]) == 2 and _t["shape"][0] % 128 == 0:
+            REPACK[_n] = ("q2_0x", "ptq1_0", _t["shape"][0] * _t["shape"][1] // 128)
+            _t["type"] = "ptq1_0"
 # Gate activation (cfg attn_gate_act): sigmoid (default), or softplus (laguna) on a per-head gate, which g_gate_heads
 # applies to the head's logit so the attention kernels multiply by the stored value.
 GATE_ACT = CFG.get("attn_gate_act", "sigmoid")
@@ -6776,9 +6788,11 @@ if __name__ == "__main__":
             import prep_weights
             PSRC = "bf16r" if src_fmt(head_name) == "bf16" else src_fmt(head_name)   # bf16r: BF16 rows re-encoded (safetensors head)
             assert PSRC in prep_weights.SRC_SUPER and ACT_Q8 and H % 32 == 0, \
-                f"PROPOSE_HEAD_ROWS needs a Q6_K or BF16 head with int8 activations (head {src_fmt(head_name)}, ACT_Q8={ACT_Q8})"
+                f"PROPOSE_HEAD_ROWS needs a Q6_K, Q2_0 or BF16 head with int8 activations (head {src_fmt(head_name)}, ACT_Q8={ACT_Q8})"
             PBASE = base_vocab() or V
             PDST = "q6_k" if os.environ.get("PROPOSE_HEAD", "q4_0") == "q6_k" and PSRC == "q6_k" else "q4_0"   # q6_k: the rows kept as they are (no re-rounding)
+            if PSRC == "q2_0":   # a Q2_0 head (Ternary Bonsai, 2.25 bits per weight): the subset's rows are copied as they are (Q4_0 would be larger)
+                PDST = "q2_0"
             HPREP = {TENS[head_name].get("hf", head_name): prep_weights.subset_entry(PSRC, PDST, PROWS, PBASE, V, H)}
             HKEY = TENS[head_name].get("hf", head_name)
             PHEAD_ROWS = prep_weights.subset_rows(PROWS, PBASE, V)
@@ -6875,6 +6889,10 @@ if __name__ == "__main__":
             spec_kernels += gen_draft.mtp_kernels(gfacts) + gen_assist.kernels(gfacts)
     if any(t["type"] == "q5_0" for t in TENS.values()):
         COMMON += Q5_0
+    if any(t["type"] == "ptq1_0" for t in TENS.values()):   # PrismML ternary weights (ternary.py)
+        COMMON += ternary.PTQ1_0_HELPERS
+    if any(t["type"] == "q2_0" for t in TENS.values()):   # upstream Q2_0 (Ternary Bonsai's stock packing; ternary.py)
+        COMMON += ternary.Q2_0_HELPERS
     if any(t["type"] == "mxfp4" for t in TENS.values()):
         COMMON += MXFP4
     if any(t["type"] in SPLIT for t in TENS.values()):
@@ -6900,7 +6918,7 @@ if __name__ == "__main__":
             _rows = PHEAD_ROWS[2] if PHEAD_ROWS else V   # a reduced draft vocabulary has fewer rows
             _V, _CH = V, CHUNKS
             V, CHUNKS = _rows, (_rows + 127) // 128
-            _pf, _ps = ("q6_k", "_pq6") if PHEAD_ROWS and HPREP[HKEY][1] == "q6_k" else ("q4_0", "_p40")
+            _pf, _ps = {"q6_k": ("q6_k", "_pq6"), "q2_0": ("q2_0", "_pq2")}.get(HPREP[HKEY][1] if PHEAD_ROWS else "", ("q4_0", "_p40"))
             COMMON += "".join(head_mv(tg, _pf, iq=True, suffix=_ps) for tg in (1, 4, 8, 16))
             V, CHUNKS = _V, _CH
             _pm = _re.search(r"command\.def public @llm_" + gen_draft.DRAFT["kind"] + r"_propose\(\).*?\n\}\n", program, _re.S)
@@ -6909,6 +6927,11 @@ if __name__ == "__main__":
             if PHEAD_ROWS and PHEAD_ROWS[2] < V:
                 _pt = _pt.replace("@g_head_select[", "@g_head_select_p[")
             program = program[:_pm.start()] + _pt + program[_pm.end():]
+    if HADAMARD:   # prism.hadamard: the quantizers feeding folded weights rotate (after quant/head wiring, before the row-scale fusions)
+        program, _had_used = ternary.wiring(program, CFG)
+        COMMON += ternary.kernels(CFG, _had_used)
+        if os.environ.get("HAD_FAST", "0") == "1":   # choice decode.hadamard.fast: register / subgroup FWHT in the rotating int8 quantizers
+            COMMON = ternary.use_fast_q8(COMMON, CFG, _had_used)
     if os.environ.get("ROW_SCALE_LIVE", "1") != "0":   # after quant_wiring (it matches g_row_scale_f16); =0 A/B it off
         program = live_row_scale(program)
         COMMON += ROW_SCALE_LIVE
@@ -7022,6 +7045,11 @@ if __name__ == "__main__":
         from rope_qg import fuse as _rope_qg
         text, _nqg = _rope_qg(text)
         print("rope_qg launches:", _nqg)
+    if HADAMARD:   # prism.hadamard: the token embedding stores rotated rows
+        text = ternary.embed_patch(text, H)
+    if os.environ.get("PTQ1_0_MV", "") in ("block", "lut"):   # choice decode.ptq1_0.mv: whole-block PTQ1_0 matvecs (ternary.mv_block)
+        text, _nmvb = (ternary.use_lut_mv if os.environ["PTQ1_0_MV"] == "lut" else ternary.use_block_mv)(text)
+        print("ptq1_0", os.environ["PTQ1_0_MV"], "matvecs:", _nmvb)
     if os.environ.get("LIVE_ROW_SKIP", "1") != "0":   # =0 A/B it off
         text = live_row_skip(text)
     if GDN and os.environ.get("GDN_AB_WMMA", "0").strip().lower() not in ("", "0", "false", "no", "off"):   # choice prefill.gdn.ab_wmma (gen_gdn_ab.py)
@@ -7072,11 +7100,12 @@ if __name__ == "__main__":
         text = seg_attention(text)
     SRC_PREP = {n: t for n, t in TENS.items() if t.get("prep") and f'"{n}"' in text}   # safetensors: the small tensors the programs read, converted at load (hf_names/*.json "prep")
     MB_USED = {n: e for n, e in MBLK_PREP.items() if f'"{n}"' in text}   # MTP_BLOCK_PREP: the NextN block's matrices the programs read
+    MB_USED.update({n: e for n, e in REPACK.items() if f'"{n}"' in text})   # TERNARY_REPACK: the repacked matrices
     if SRC_PREP or MB_USED or VHEAD_PREP or PHEAD_MAIN:
         import prep_weights
         entries = {t["hf"]: ("bf16e", "f32_" + t["prep"]["op"], int(math.prod(t["shape"]))) for t in SRC_PREP.values()}
         assert all(t["prep"]["src"] == "bf16" for t in SRC_PREP.values()), "prepared tensors are bf16 in the checkpoint"
-        entries.update({TENS[n]["hf"]: e for n, e in MB_USED.items()})
+        entries.update({TENS[n].get("hf", n): e for n, e in MB_USED.items()})
         entries.update(PHEAD_MAIN)
         if VHEAD_PREP:   # the verified head: a Q8_0 copy of every row, HEAD_PIECE_ROWS rows per prepared tensor
             _hk = TENS["output.weight"]["hf"]

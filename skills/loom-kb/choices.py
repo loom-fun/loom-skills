@@ -318,6 +318,10 @@ CHOICE("prefill.gemm.m256_xg_db", "bool", False, "GEMM_M256_XG_DB", from_pr="q38
        doc="double-buffered weight stage of prefill.gemm.m256_xg (one barrier per step).", **_PG)
 CHOICE("prefill.gemm.m256_db", "bool", False, "GEMM_M256_DB", from_pr="q38pf-gemm", doc="m256 GEMM with double-buffered 32-K LDS stages (loses).", **_PG)
 CHOICE("prefill.gemm.m256_db_fence", "bool", True, "GEMM_M256_DB_FENCE", from_pr="q38pf-gemm", doc="fence after the barrier of prefill.gemm.m256_db.", **_PG)
+CHOICE("prefill.gemm.q2_0_native", "bool", False, "GEMM_Q2_0_NATIVE", kernels=["g_gemm_q2_0_*"], rows=ROWS_PREFILL,
+       doc="Q2_0 (Ternary Bonsai) GEMMs stage their 16-value quarter-block straight to F16 (ternary.q2_0_dequant16: one 4-byte code load, "
+           "word-wide shift-and-mask; the values of @g_q2_0_values + fptrunc) and get the 128/256-row kernels; off: the shared value helper "
+           "(a 32-value decode per 16 weights) and the 64-row tile at every size (quant/q2_0 node).")
 CHOICE("prefill.gemm.q4_0_native", "bool", False, "GEMM_Q4_0_NATIVE", kernels=["g_gemm_q4_0_*", "g_moe_*q4_0*"], rows=ROWS_PREFILL,
        from_pr="gemma-qat-perf",
        doc="Dense Q4_0 GEMMs stage their 16-value half-block straight to F16 (moe_q4_0.dequant16: the values of @g_q4_0_values + "
@@ -371,6 +375,17 @@ CHOICE("decode.q4_0.act_q8", "bool", False, "Q4_0_Q8", kernels=["g_mv_q4_0_*", "
        doc="Q4_0 dense matvecs, head and expert matvecs take int8 activations (ACT_Q8's dot4 path with @g_q4_0_icodes, as llama.cpp's "
            "vec_dot_q4_0_q8_1) instead of f32 values and a per-row subgroup reduction per token, which is ALU-bound at 4 tokens "
            "(quant/q4_0 node).")
+CHOICE("decode.ternary.repack", "bool", False, "TERNARY_REPACK", kernels=["g_mv_ptq1_0_*", "g_gemm_ptq1_0_*", "g_head_mv*", "g_embed", "g_prep_q2_0x_ptq1_0"],
+       rows=ROWS_DECODE + ROWS_STREAMS, from_pr="bonsai-1416",
+       doc="A Q2_0 ternary checkpoint (Ternary Bonsai; hrx-loom 0.3.0 cannot read its PTQ1_0 file) is repacked at load into PTQ1_0 blocks by the "
+           "weight policy (starter ternary.prep_kernel; 28 instead of 36 bytes per 128 weights) and every matrix kernel reads the copy "
+           "(quant/ptq1_0, quant/q2_0 nodes).")
+CHOICE("decode.ptq1_0.mv", "str", None, "PTQ1_0_MV", kernels=["g_mv_ptq1_0_*"], rows=ROWS_DECODE + ROWS_STREAMS, from_pr="bonsai-1416",
+       doc="PTQ1_0 int8 matvecs: generic (None: one lane per 32-value group, the shared kernel), block (one lane per 128-value block, "
+           "16-bit-lane trit decode) or lut (block, workgroup byte tables) (starter ternary.mv_block / use_lut_mv).")
+CHOICE("decode.hadamard.fast", "bool", False, "HAD_FAST", kernels=["g_had_q8_*"], rows=ROWS_DECODE + ROWS_STREAMS, from_pr="bonsai-1416",
+       doc="prism.hadamard rotating int8 quantizers: the 1024-point transform in registers and subgroup shuffles (3 workgroup rounds) "
+           "instead of 10 barrier-separated workgroup-memory stages (starter ternary.fwht_fast).")
 CHOICE("decode.iq4.act_q8", "bool", False, "IQ4_Q8", kernels=["g_mv_iq4_*", "g_quant_q8"],
        rows=ROWS_DECODE + ROWS_STREAMS, from_pr="q38xl-dec",
        doc="IQ4_XS / IQ4_NL dense matvecs take int8 activations (ACT_Q8's dot4 path with @g_iq4_<fmt>_icodes: kvalues codes x one "
@@ -758,9 +773,10 @@ CHOICE("draft.verify.exact", "bool", False, "SPEC_EXACT", enc=("1", "0"),
 CHOICE("draft.warm.mm_from", "int", 5, "DRAFT_MM_FROM", doc="The drafter's catch-up program takes the GEMM from this many tokens.", **_SP)
 CHOICE("draft.propose.head", "str", "q4_0", "PROPOSE_HEAD", doc="q4_0: the proposals' head pass reads a load-time Q4_0 copy of the "
        "target's head (off: the head itself; q6_k: with PROPOSE_HEAD_ROWS the subset's rows stay Q6_K).", **_SP)
-CHOICE("draft.propose.head_rows", "int", 0, "PROPOSE_HEAD_ROWS", kernels=["g_prep_*", "g_head_mv*_p40", "g_head_select_p"], rows=ROWS_DECODE + ROWS_STREAMS,
+CHOICE("draft.propose.head_rows", "int", 0, "PROPOSE_HEAD_ROWS", kernels=["g_prep_*", "g_head_mv*_p40", "g_head_mv*_pq2", "g_head_select_p"], rows=ROWS_DECODE + ROWS_STREAMS,
        doc="MTP proposals over a reduced draft vocabulary (0: off, the target's own head): the proposals' head pass reads a load-time Q4_0 "
-       "copy of a Q6_K or BF16 head's rows [0, N) plus every added-token row (draft/prep_weights.py); verification keeps the head, so only acceptance moves.", **{})
+       "copy of a Q6_K or BF16 head's rows [0, N) plus every added-token row (draft/prep_weights.py); a Q2_0 head's rows are copied as they "
+       "are (_pq2); verification keeps the head, so only acceptance moves.", **{})
 CHOICE("draft.propose.block", "str", None, "MTP_BLOCK_PREP", kernels=["g_prep_*", "g_mv_*_q8*"], rows=ROWS_DECODE + ROWS_STREAMS,
        doc="MTP proposals of a safetensors checkpoint whose NextN block is BF16: the block's matrices (eh_proj, attention, FFN) are read from a "
        "load-time Q8_0 or Q4_0 copy (q8_0 | q4_0; empty: as stored). The block feeds proposals only (verification never reads it), so only "

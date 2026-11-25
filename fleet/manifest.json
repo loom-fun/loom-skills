@@ -1098,6 +1098,33 @@
     }
    }
   },
+  "prism-ml-Ternary-Bonsai-2.5-27B-loom": {
+   "staging": {
+    "repo": "loom-fun-staging/prism-ml-Ternary-Bonsai-2.5-27B-loom",
+    "revision": "1115da0f6b5edf3a77fde0c1652ea21ac15c4914"
+   },
+   "model_id": "prism-ml/Ternary-Bonsai-2.5-27B",
+   "kit": null,
+   "arch": "qwen35",
+   "build": {
+    "preset": "chat",
+    "context": 262144,
+    "prefill": 1024,
+    "rows": 4,
+    "max_tokens": 4096,
+    "draft_depth": 3
+   },
+   "files": {
+    "Ternary-Bonsai-2.5-27B-Q2_0-mtp.gguf": {
+     "origin": "checkpoint",
+     "repo": "prism-ml/Ternary-Bonsai-2.5-27B-GGUF",
+     "revision": "28a7093cc25bc151cc2b284c5570f12ce343fdcf",
+     "path": "Ternary-Bonsai-2.5-27B-Q2_0-mtp.gguf",
+     "size": 7912178944,
+     "dump": "prism-ml-Ternary-Bonsai-2.5-27B-loom/gguf/Ternary-Bonsai-2.5-27B-Q2_0-mtp.gguf.json.gz"
+    }
+   }
+  },
   "rippertnt-HyperCLOVAX-SEED-Text-Instruct-1.5B-loom": {
    "staging": {
     "repo": "loom-fun-staging/rippertnt-HyperCLOVAX-SEED-Text-Instruct-1.5B-loom",

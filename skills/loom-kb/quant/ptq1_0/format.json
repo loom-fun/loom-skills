@@ -1,0 +1,22 @@
+{
+  "schema": "loom-kb/format/1",
+  "format": "ptq1_0",
+  "ggml_type": "PTQ1_0",
+  "block_size": 128,
+  "bytes_per_block": 28,
+  "bits_per_weight": 1.75,
+  "low_bit": false,
+  "int8_path": true,
+  "moe": false,
+  "dequant_helper": "ternary.py (@g_ptq1_0_values, @g_ptq1_0_icodes; emitted when used); gen_gemm.py dequant16 (HELPER)",
+  "ktest": {
+    "matvec_int8": true,
+    "gemm_default": true,
+    "gemm_all": true
+  },
+  "devices_verified": {
+    "rdna3": false,
+    "rdna4": false
+  },
+  "evidence": "PrismML ternary (GGML type 143, PrismML-Eng/llama.cpp ggml-quants.c dequantize_row_ptq1_0); Ternary-Bonsai-2.5-27B port #1416 (PR #1435): kernels compile for gfx1151 and gfx1201; GPU qualification pending"
+}

@@ -1,0 +1,55 @@
+{
+ "scope": "model/prism-ml-Ternary-Bonsai-2.5-27B-loom",
+ "match": {
+  "slug": [
+   "prism-ml-Ternary-Bonsai-2.5-27B-loom"
+  ]
+ },
+ "owner": "kb",
+ "choices": [
+  {
+   "when": {},
+   "set": {
+    "prefill.gemm.q2_0_native": true
+   },
+   "evidence": "bonsai round 3 (https://github.com/loom-fun/loom-skills/actions/runs/45582278639, iterate preset, same-job interleaved sessions vs the card build): Q2_0 decodes its 16-value quarter-block straight to F16 in the GEMM staging. R9700 prefill 1k/2k/8k/16k/32k 977.6/987.3/987.6/964.4/921.9 -> 1541.7/1559.8/1614.8/1550.9/1440.6 tok/s (+58/+58/+64/+61/+56 %); Strix Halo 351.4/353.1/351.0/339.4/318.2 -> 473.8/467.8/469.8/449.6/412.5 (+35/+32/+34/+32/+30 %); decode ties; ktest 116/116 (R9700) 119/119 (Strix)."
+  },
+  {
+   "when": {},
+   "set": {
+    "draft.propose.head_rows": 81920
+   },
+   "evidence": "bonsai round 3 (https://github.com/loom-fun/loom-skills/actions/runs/45582278639): MTP proposals read a same-format Q2_0 row copy of head rows [0, 81920) plus the added-token rows (118 MB per proposal instead of the 357 MB head; verification keeps the head). Strix Halo decode/2k/32k 44.8/38.7/29.6 -> 47.1/40.7/31.6 tok/s (+5.1/+5.2/+6.8 %), R9700 103.9/94.0/68.3 -> 106.6/95.9/70.4 (+2.6/+2.0/+3.1 %); acceptance .474 -> .449; 32768 rows lost on both GPUs (43.9 / 101.3, acceptance .397)."
+  },
+  {
+   "when": {
+    "devices": [
+     "rdna4"
+    ]
+   },
+   "set": {
+    "hybrid.gdn.chunk": true,
+    "decode.spec.gdn_copy_split": 8,
+    "prefill.attn.flash2_trim": true
+   },
+   "evidence": "bonsai round 3 (https://github.com/loom-fun/loom-skills/actions/runs/45582278639, job bonsai-r3-r9700): the R9700 settings of the same-architecture Qwen3.8-27B node on top of the native Q2_0 GEMM: prefill 1k/2k/8k/16k/32k 1541.7/1559.8/1614.8/1550.9/1440.6 -> 1603.4/1622.5/1687.8/1622.8/1511.8 tok/s (+4.0/+4.0/+4.5/+4.6/+4.9 %), decode 103.4 -> 107.1, decode_32k 67.8 -> 70.2; ktest 116/116."
+  },
+  {
+   "when": {
+    "devices": [
+     "rdna3"
+    ]
+   },
+   "set": {
+    "prefill.attn.flash2_kt256": 16,
+    "hybrid.gdn.chunk11": true,
+    "hybrid.gdn.chunk11_fuse": true,
+    "hybrid.gdn.chunk11_gate": true,
+    "hybrid.gdn.chunk11_cn": 16,
+    "hybrid.gdn.chunk11_opt": "kbo",
+    "hybrid.gdn.skip_long": true
+   },
+   "evidence": "bonsai round 3 (https://github.com/loom-fun/loom-skills/actions/runs/45582278639, job bonsai-r3-strix): the gfx11 GDN and flash prefill settings of the same-architecture Qwen3.8-27B node on top of the native Q2_0 GEMM: Strix Halo prefill 1k/2k/8k/16k/32k 473.8/467.8/469.8/449.6/412.5 -> 489.5/485.3/491.7/474.1/438.6 tok/s (+3.3/+3.7/+4.7/+5.4/+6.3 %, measured together with the fused epilogues below), decode ties; ktest 119/119. Not set: that node's fused epilogues (prefill.fuse.resid_epi, prefill.fuse.qg_split, prefill.gdn.ab_wmma): with them the R9700 runs their gfx12 twins and the compare and consistency gates fail (1/14 prompts match llama.cpp, max gap 2.61), without them both pass (12/14, max gap 0.033; diagnostic run https://github.com/loom-fun/loom-skills/actions/runs/45649607839, variants d2 vs d1)."
+  }
+ ]
+}

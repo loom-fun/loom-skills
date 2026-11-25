@@ -323,6 +323,7 @@ import gguf
 card, dst, starter = sys.argv[1:]
 sys.path.insert(0, starter)
 from formats import split_parts
+import gguf_ext  # noqa: F401  GGML types newer than the pinned gguf package (Q2_0, PTQ1_0)
 c = json.load(open(os.path.join(card, "llm_config.json")))
 par = lambda f: os.path.join(card, "parameter", os.path.basename(f))
 if (c.get("source") or {}).get("kind") == "safetensors":   # an HF safetensors checkpoint: the tensor table from its header (HTTP range reads), the weights as fetched

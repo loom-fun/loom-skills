@@ -15,6 +15,8 @@ import json, sys, os, numpy as np
 from gguf import GGUFReader
 from gguf.quants import dequantize
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import gguf_ext  # noqa: E402,F401  GGML types newer than the pinned gguf package (PTQ1_0, Q2_0): GGUFReader + dequantize
+import ternary  # noqa: E402  prism.hadamard numpy references
 import kb_choices  # noqa: E402  the choices the model's kernels were generated with (resolved.env of the package, else resolved here)
 kb_choices.apply_for_tests(json.load(open(sys.argv[1])))
 from mv_rows import pick_r, iq_r, flash2_deep_from  # noqa: E402
@@ -52,6 +54,13 @@ if (cfg.get("source") or {}).get("kind") == "safetensors":   # an HF checkpoint 
         return v.reshape(int(t.shape[1]), int(t.shape[0])) if len(t.shape) == 2 else np.asarray(v, dtype=np.float32)
 else:
     T = {t.name: t for p in split_parts(cfg["gguf"]) for t in GGUFReader(p).tensors}
+    if os.environ.get("TERNARY_REPACK", "0") == "1":   # decode.ternary.repack: the kernels read the load-time PTQ1_0 copy of the Q2_0 matrices
+        class _Repacked:
+            def __init__(self, t):
+                self.name, self.shape, self.tensor_type = t.name, t.shape, gguf_ext.PTQ1_0
+                self.src = np.asarray(t.data).view(np.uint8).reshape(-1)
+                self.data = gguf_ext.q2_0_to_ptq1_0(self.src.reshape(-1, 36)).reshape(-1)
+        T = {n: (_Repacked(t) if t.tensor_type.name == "Q2_0" and len(t.shape) == 2 and int(t.shape[0]) % 128 == 0 else t) for n, t in T.items()}
     def raw(name): return np.asarray(T[name].data).view(np.int8).reshape(-1)
     def deq(name):
         t = T[name]; return dequantize(np.asarray(t.data), t.tensor_type).reshape(int(t.shape[1]), int(t.shape[0])) if len(t.shape) == 2 else np.asarray(t.data, dtype=np.float32)
@@ -140,6 +149,7 @@ VARGS = ", %meta, %tinfo" if VIS else ""
 VTYPES = f", tensor<4xi32>, tensor<{t}x4xi32>" if VIS else ""
 E = deq("token_embd.weight"); w = deq("blk.0.attn_norm.weight")
 x = E[ids]
+if cfg.get("hadamard"): x = ternary.np_unrotate_embed(x, cfg)   # a latent (rotated) table: the lookup returns D (H z)
 if cfg.get("embed_norm"): x = x / np.sqrt((x * x).mean(-1, keepdims=True) + 1e-5)  # weightless embedding RMSNorm
 if cfg.get("embed_scale"): x = x * cfg["embed_scale"]
 h = x / np.sqrt((x * x).mean(-1, keepdims=True) + eps) * w
@@ -157,6 +167,78 @@ cases.append(f"""check.case public @embed {{
   kernel.launch @g_embed[%t](%t, %ids{VARGS}, %tab, %w, %x, %h) : [index](index, {ty(ids)}{VTYPES}, {ty(tab)}, tensor<{H}xf32>, tensor<{t}x{H}xf32>, tensor<{t}x{H}xf32>)
   check.expect.close actual(%x) expected(%ex) atol(1.0e-4) rtol(1.0e-3) nan(different) : tensor<{t}x{H}xf32>
   check.expect.close actual(%h) expected(%eh) atol(1.0e-3) rtol(1.0e-3) nan(different) : tensor<{t}x{H}xf32>
+  check.return
+}}
+""")
+if os.environ.get("TERNARY_REPACK", "0") == "1":   # the load-time repack kernel vs gguf_ext.q2_0_to_ptq1_0 (byte-exact)
+    _rn = "blk.0.ffn_down.weight"; _src = T[_rn].src[: 36 * 4096]; _dst = gguf_ext.q2_0_to_ptq1_0(_src.reshape(-1, 36)).reshape(-1)
+    save("rp_in", _src.view(np.int8)); save("rp_out", _dst.view(np.int8))
+    cases.append(f"""check.case public @ternary_repack {{
+  %b = check.literal value(4096) : index
+  %in0 = check.literal value(0) : i64
+  %src = check.file.read.npy path("rp_in.npy") : tensor<{_src.size}xi8>
+  %e = check.file.read.npy path("rp_out.npy") : tensor<{_dst.size}xi8>
+  %o = check.generate.fill value(0) : tensor<{_dst.size}xi8>
+  kernel.launch @g_prep_q2_0x_ptq1_0[%b](%b, %in0, %o, %src) : [index](index, i64, tensor<{_dst.size}xi8>, tensor<{_src.size}xi8>)
+  check.expect.equal actual(%o) expected(%e) : tensor<{_dst.size}xi8>
+  check.return
+}}
+""")
+if cfg.get("hadamard"):   # the rotating quantizers (ternary.wiring), each followed by a folded projection of its width
+    _hrng = np.random.default_rng(11)
+    _gdn = [li for li in cfg.get("recurrent_layers", [])]
+    _attn = [li for li in range(cfg["layers"]) if li not in set(_gdn)]
+    _probe = [(H, False, "blk.0.attn_qkv.weight" if "blk.0.attn_qkv.weight" in T else "blk.0.attn_q.weight"), (cfg["ffn"] if isinstance(cfg["ffn"], int) else cfg["ffn"][0], False, "blk.0.ffn_down.weight")]
+    if _attn: _probe.append((int(T[f"blk.{_attn[0]}.attn_output.weight"].shape[0]), False, f"blk.{_attn[0]}.attn_output.weight"))
+    if _gdn: _probe.append((int(T[f"blk.{_gdn[0]}.ssm_out.weight"].shape[0]), bool(cfg["hadamard"].get("gdn_v_grouped")), f"blk.{_gdn[0]}.ssm_out.weight"))
+    for _W, _p, _nm in _probe:
+        _fmt = T[_nm].tensor_type.name.lower(); _n = int(T[_nm].shape[1]); _Wd = deq(_nm)
+        _sfx = f"w{_W}{'p' if _p else ''}"
+        for tg in (1, 4):
+            xs = _hrng.standard_normal((tg, _W)).astype(np.float32)
+            xr = ternary.np_rotate(xs, cfg, _W, _p).astype(np.float32)
+            y = q8_ref(xr).astype(np.float64) @ _Wd.T.astype(np.float64)
+            tag = f"had_q8_{_sfx}_t{tg}"
+            save(tag + "_w", raw(_nm)); save(tag + "_x", xs); save(tag + "_y", y.astype(np.float32))
+            _R = iq_r(_n, _W, tg)
+            kern = f"g_mv_{_fmt}_k{_W}" + (f"_t{tg}" if tg > 1 else "") + "_q8" + (f"_r{_R}" if _R != 16 else "")
+            cases.append(f"""check.case public @{tag} {{{{
+  %n = check.literal value({_n}) : index
+  %t = check.literal value({tg}) : index
+  %k = check.literal value({_W}) : index
+  %acc = check.literal value(0) : i32
+  %w = check.file.read.npy path("{tag}_w.npy") : {ty(raw(_nm))}
+  %x = check.file.read.npy path("{tag}_x.npy") : tensor<{tg}x{_W}xf32>
+  %e = check.file.read.npy path("{tag}_y.npy") : tensor<{tg}x{_n}xf32>
+  %xq = check.generate.fill value(0) : tensor<{tg}x{2 * _W}xi8>
+  %y = check.generate.fill value(0.0) : tensor<{tg}x{_n}xf32>
+  kernel.launch @g_had_q8_{_sfx}[%t, %k](%t, %k, %x, %xq) : [index, index](index, index, tensor<{tg}x{_W}xf32>, tensor<{tg}x{2 * _W}xi8>)
+  kernel.launch @{kern}[%n, %t](%n, %t, %acc, %xq, %w, %y) : [index, index](index, index, i32, tensor<{tg}x{2 * _W}xi8>, {ty(raw(_nm))}, tensor<{tg}x{_n}xf32>)
+  check.expect.close actual(%y) expected(%e) atol(2.0e-3) rtol(2.0e-3) nan(different) : tensor<{tg}x{_n}xf32>
+  check.return
+}}}}
+""".replace("{{", "{").replace("}}", "}"))
+        # the F16 row-scaled copy (prefill GEMM operand): rotated values x the row's power-of-two scale (g_row_scale_f16's rule)
+        tr = 3
+        xs = (_hrng.standard_normal((tr, _W)) * np.array([[1.0], [40.0], [1e-3]])).astype(np.float32)
+        xr = ternary.np_rotate(xs, cfg, _W, _p)
+        mx = np.abs(xr).max(-1).astype(np.float32)
+        e_ = np.clip(((mx.view(np.int32) >> 23) & 255) - 127 - 13, 0, 100)
+        sc = (2.0 ** -e_).astype(np.float32); inv = (2.0 ** e_).astype(np.float32)
+        x16 = (xr * sc[:, None]).astype(np.float16)
+        tag = f"had_rs16_{_sfx}"
+        save(tag + "_x", xs); save(tag + "_h", x16); save(tag + "_s", np.stack([sc, inv], -1).astype(np.float32))
+        cases.append(f"""check.case public @{tag} {{
+  %t = check.literal value({tr}) : index
+  %k = check.literal value({_W}) : index
+  %x = check.file.read.npy path("{tag}_x.npy") : tensor<{tr}x{_W}xf32>
+  %eh = check.file.read.npy path("{tag}_h.npy") : tensor<{tr}x{_W}xf16>
+  %es = check.file.read.npy path("{tag}_s.npy") : tensor<{tr}x2xf32>
+  %s = check.generate.fill value(0.0) : tensor<{tr}x2xf32>
+  %h = check.generate.fill value(0.0) : tensor<{tr}x{_W}xf16>
+  kernel.launch @g_had_rs16_{_sfx}[%t](%t, %k, %x, %s, %h) : [index](index, index, tensor<{tr}x{_W}xf32>, tensor<{tr}x2xf32>, tensor<{tr}x{_W}xf16>)
+  check.expect.close actual(%s) expected(%es) atol(0.0) rtol(0.0) nan(different) : tensor<{tr}x2xf32>
+  check.expect.close actual(%h) expected(%eh) atol(1.0e-3) rtol(2.0e-3) nan(different) : tensor<{tr}x{_W}xf16>
   check.return
 }}
 """)
@@ -2402,16 +2484,16 @@ def _phead_params():
     t = _pkg_llm_text()
     i = t.find("@g_head_select_p(") if t else -1
     m = re.search(r"%split = scalar\.constant (\d+) : i32\n\s*%shift = scalar\.constant (\d+) : i32", t[i:]) if i >= 0 else None
-    return (int(m.group(1)), int(m.group(2)), "@g_prep_q6_k_q6_k(" in t) if m else None
+    return (int(m.group(1)), int(m.group(2)), "@g_prep_q6_k_q6_k(" in t or "@g_prep_q2_0_q2_0(" in t) if m else None
 
 
-# a Q6_K head (GGUF) or a BF16 head (safetensors, prep_weights "bf16r"); the package's llm.loom says whether the copy exists
-_PH = _phead_params() if ((HEAD_Q8 and HEAD_FMT == "q6_k" and H % 256 == 0 or ACT_Q8 and HEAD_FMT == "bf16" and H % 32 == 0)
+# a Q6_K or Q2_0 head (GGUF) or a BF16 head (safetensors, prep_weights "bf16r"); the package's llm.loom says whether the copy exists
+_PH = _phead_params() if ((HEAD_Q8 and HEAD_FMT in ("q6_k", "q2_0") and H % 256 == 0 or ACT_Q8 and HEAD_FMT == "bf16" and H % 32 == 0)
                           and (cfg.get("mtp") or cfg.get("drafter"))) else None
-PSRC = "bf16r" if HEAD_FMT == "bf16" else "q6_k"
+PSRC = "bf16r" if HEAD_FMT == "bf16" else HEAD_FMT
 if _PH:
-    split_rows, shift, SAME = _PH                        # SAME: the copy keeps the Q6_K rows (PROPOSE_HEAD=q6_k), else Q4_0
-    PSUF = "_pq6" if SAME else "_p40"
+    split_rows, shift, SAME = _PH                        # SAME: the copy keeps the head's rows (Q6_K with PROPOSE_HEAD=q6_k; Q2_0 always), else Q4_0
+    PSUF = {"q6_k": "_pq6", "q2_0": "_pq2"}[PSRC] if SAME else "_p40"
     base_tok = split_rows + shift                     # first added-token id; the copy holds rows [0, split_rows) + [base_tok, V)
     V_ = cfg["vocab"]; rows_p = split_rows + V_ - base_tok; CHp = (rows_p + 127) // 128
     sel = np.concatenate([np.arange(split_rows), np.arange(base_tok, V_)])
@@ -2438,7 +2520,7 @@ if _PH:
     lpad = np.full((S, CHP), -3.0e38, np.float32); lpad[:, :rows_p] = lp
     save("pr_meta", hm); save("pr_h", hp); save("pr_l", lpad.reshape(-1))
     unit = 256 if SAME else 32
-    mt, ht, w4t = f"tensor<{hm.size}xi32>", f"tensor<{S}x{H}xf32>", f"tensor<{nb * (210 if SAME else 18)}xi8>"
+    mt, ht, w4t = f"tensor<{hm.size}xi32>", f"tensor<{S}x{H}xf32>", f"tensor<{nb * ({'q6_k': 210, 'q2_0': 72}[PSRC] if SAME else 18)}xi8>"
     tol = (2.0e-3 if SAME else 3.0e-2) * float(np.abs(lp).max())
     skip_blocks = base_tok * H * 2 if PSRC == "bf16r" else (base_tok - split_rows) * H // unit   # bf16r: the tail range's byte origin in the one buffer
     def prl(k, tag):
@@ -2457,7 +2539,7 @@ if _PH:
   %w = check.file.read.npy path("hd_w.npy") : {hwt}
   %le = check.file.read.npy path("pr_l.npy") : tensor<{S * CHP}xf32>
   %w4 = check.generate.fill value(0) : {w4t}
-  kernel.launch @g_prep_{PSRC}_{"q6_k" if SAME else "q4_0"}[%b](%b, %o, %sp, %sk, %w4, %w) : [index](index, i64, i64, i64, {w4t}, {hwt})
+  kernel.launch @g_prep_{PSRC}_{PSRC if SAME else "q4_0"}[%b](%b, %o, %sp, %sk, %w4, %w) : [index](index, i64, i64, i64, {w4t}, {hwt})
   %hk = check.literal value({H}) : index
   %hq = check.generate.fill value(0) : tensor<{S}x{2 * H}xi8>
   kernel.launch @g_quant_q8[%t, %hk](%t, %hk, %h, %hq) : [index, index](index, index, {ht}, tensor<{S}x{2 * H}xi8>)

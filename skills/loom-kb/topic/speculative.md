@@ -103,7 +103,8 @@ Q6_K (llama.cpp dequantize_row_q6_K, then quantize_row_q4_0) with a `split` / `s
 `g_head_select_p` maps the winning row back to its token id (row < N: itself; else + base - N; DFlash2's `g_dfl_topk`
 does the same on its stored ids). Applies to `@llm_mtp_propose` and `@llm_dflash_propose`; verification keeps the
 target's head, so the output never changes, only which drafts are accepted. N = every row is a precision-only copy. `PROPOSE_HEAD=q6_k` keeps the
-rows as Q6_K (a byte copy of the subset, no re-rounding: more bytes, higher acceptance).
+rows as Q6_K (a byte copy of the subset, no re-rounding: more bytes, higher acceptance). A Q2_0 head (Ternary Bonsai, 2.25 bits per
+weight) is always copied as it is (`g_prep_q2_0_q2_0`, `g_head_mv*_q8_pq2`): Q4_0 would be twice its bytes.
 Kernel tests `propose_head_rows`, `propose_head_select`.
 
 Files: `gen_draft.py` (verify, acceptance, GDN capture/replay, the generic replay hook, MTP), `gen_dflash.py`
