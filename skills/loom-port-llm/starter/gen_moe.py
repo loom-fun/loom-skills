@@ -252,6 +252,12 @@ kernel.def export("g_moe_route") @g_moe_route(%tokens: index) {{
 """
 
 
+def route_tokens_per_wg(H, E):
+    """Tokens per workgroup of the prefill router (moe.route.tokens_per_wg): g_moe_route_tr_live runs a workgroup whose tokens are not
+    all padding whole, so padding rows inside it are written too (g_moe_bucket never reads them)."""
+    return ROUTE_TR or max(t for t in (1, 2, 4, 8) if t * (H + E) * 4 <= 48 * 1024)
+
+
 def route_prefill(H, E, KU, gating, norm, bias, wty="f32", scale=1.0):
     """g_moe_route_tr, for prefill epochs (t >= 64; decode keeps g_moe_route: one token per workgroup, wide loads in
     flight, was 34 % faster per decode step). Router logits (f32 or bf16 weights) into LDS, then the top-k per token.
@@ -267,7 +273,7 @@ def route_prefill(H, E, KU, gating, norm, bias, wty="f32", scale=1.0):
     if gating == 3:
         return _softmax_weight_prefill(route_prefill(H, E, KU, 2, False, bias, wty), KU)
     EPW = E // 8
-    TR = ROUTE_TR or max(t for t in (1, 2, 4, 8) if t * (H + E) * 4 <= 48 * 1024)
+    TR = route_tokens_per_wg(H, E)
     # moe.route.tokens_per_wg past the LDS of x rows + logits (e.g. 8 at H 2048, E 256): lane j of a wave keeps its expert j's logits
     # in registers during the scoring loop, and they are stored into the x rows' LDS (dead by then) for the top-k. Same sums, same order.
     REG = TR * (H + E) * 4 > 64 * 1024
@@ -552,10 +558,6 @@ def route_prefill_live(H, E, KU, gating, norm, bias, wty="f32", scale=1.0):
     live.append(f"  scf.if %gl_any{TR - 1} {{\n")
     rep("  %token0 = index.mul %group_id, %cTR : index\n", "  %token0 = index.mul %group_id, %cTR : index\n" + "".join(live))
     rep("  kernel.return\n}\n", "  }\n  kernel.return\n}\n")
-    if "%kept0" in text:   # register-held logits (TR past the LDS of 4): one workgroup spans live and padding tokens; padding rows stay unwritten
-        rep("    %store_lane = scalar.andi %first, %tok_live : i1\n",
-            "    %gl_wt = view.load %gl_view[%token, 2] : view<[%tokens]x4xi32> -> i32\n    %gl_lt = scalar.cmpi ne, %gl_wt, %gl_dead : i32\n"
-            "    %store_lt = scalar.andi %first, %tok_live : i1\n    %store_lane = scalar.andi %store_lt, %gl_lt : i1\n")
     return "\n" + text
 
 
