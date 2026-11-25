@@ -2540,10 +2540,108 @@ def eligibility(doc, head=None):
     return eligible, held, pending
 
 
+def published_kit_device(st, name, first, model):
+    """Qualification of the kit job whose measured sessions went on the card, possibly a confirming job."""
+    final_name = first.get("rerun_of_me") or name
+    e = st.jobs[final_name]
+    done, problems = kit_job_verdict(st, name, first)
+    if not done or problems:
+        return {"status": "pending", "reason": "; ".join(problems) or "kit confirmation pending"}
+    if e["stage"] != "published" or not (e.get("verified") or {}).get("ok") or not e.get("published_revision"):
+        return {"status": "pending", "reason": "kit card has not been published and verified"}
+    if e.get("source_card") != f"{model['production']}@{model['production_revision']}":
+        return {"status": "pending", "reason": "the kit job used a different production inventory revision"}
+    digest = (e.get("package") or {}).get("programs_sha256")
+    if not digest or job_programs(e) != digest or not measured_sdk(e, target_sdk(st.d)):
+        return {"status": "pending", "reason": "the kit job does not match the shipped programs and verified SDK"}
+    try:
+        cmp = sdk_package.load(e["cmp"])
+        gates = sdk_package.load(os.path.join(e["dir"], "gates_staging", "gates.json"))
+        admit = admission(e["dir"])
+    except (OSError, ValueError, KeyError) as err:
+        return {"status": "pending", "reason": f"kit qualification artifact missing or unreadable: {err}"}
+    if (cmp.get("text") or {}).get("status") not in ("MATCH", "DIFF") or not e.get("rows_pct") or \
+            gates.get("verdict") != "PASS" or not gates.get("gates") or \
+            not all(g.get("pass") for g in gates["gates"].values()) or (admit or {}).get("result") != "ADMITTED":
+        return {"status": "pending", "reason": "kit text, gates or native admission evidence is incomplete or failed"}
+    return {"status": "qualified", "run": e.get("run"), "job": job_id(e), "job_url": e.get("job_url"),
+            "conclusion": e.get("conclusion"), "programs_match": True, "programs_sha256": digest,
+            "published": e.get("published"), "published_revision": e["published_revision"]}
+
+
+def final_kit_qualifications(doc, sweep, states):
+    """Select final kit or frozen jobs for eligibility, leaving the SDK-only evidence command independent."""
+    jobs, shipped = {}, set()
+    lanes = lane_owned(sweep)
+    for st in states:
+        if not phase2_state(st.d) or target_sdk(st.d) != doc["sdk"]["new"] or st.d["opts"].get("new_org") != STAGING_ORG:
+            die(f"{st.path}: expected a phase-2 staging state on SDK {doc['sdk']['new']}")
+        lanes.update(lane_owned(st))
+        shipped.update(st.d["opts"].get("ship") or ())
+        for name, e in st.jobs.items():
+            if e.get("prev") or e["stage"] == "skipped":
+                continue
+            by_gpu = jobs.setdefault(e["slug"], {})
+            if e["device"] in by_gpu:
+                die(f"{e['slug']} {e['device']}: more than one phase-2 job for this device")
+            by_gpu[e["device"]] = st, name, e
+    kept = sweep.d["opts"].get("kit_kept") or {}
+    frozen = {(e["slug"], e["device"]): e for e in sweep.jobs.values() if not e.get("prev")}
+    for slug, model in doc["models"].items():
+        digests = set()
+        for gpu, row in model["devices"].items():
+            if row["status"] in ("no_runner", "not_claimed", "does_not_fit"):
+                continue
+            if slug in lanes:
+                row.update(status="pending", reason="qualification supplied by the owning lane")
+            elif slug in shipped:
+                job = jobs.get(slug, {}).get(gpu)
+                if not job or slug not in (job[0].d["opts"].get("ship") or ()) or slug in kept:
+                    row.update(status="pending", reason="no consistent ship decision for this device")
+                    continue
+                kit = published_kit_device(*job, model)
+                model["devices"][gpu] = kit
+                if kit["status"] == "qualified":
+                    digests.add(kit["programs_sha256"])
+            elif slug in jobs and slug not in kept:
+                row.update(status="pending", reason="phase-2 ship or keep decision pending")
+            elif row["status"] == "qualified" and not (frozen[slug, gpu].get("verified") or {}).get("ok"):
+                row.update(status="pending", reason="frozen card has not passed staging verification")
+        if len(digests) == 1:
+            model["programs_sha256"] = digests.pop()
+        elif len(digests) > 1:
+            for row in model["devices"].values():
+                if row["status"] == "qualified":
+                    row.update(status="pending", reason="qualified devices measured different kit programs")
+    return shipped
+
+
+def check_kit_sessions(row):
+    """Verify the published revision has every device's cited job and program digest in its own performance table."""
+    try:
+        info = card_lib.load_info(hf_file(row["staging"], "info.json", row["staging_revision"]))
+        for gpu, qual in row["qualification"].items():
+            sessions = (card_lib.gpu_view(info, gpu).get("performance") or {}).get("sessions", [])
+            if not any(s.get("programs_sha256") == row["programs_sha256"] and
+                       (info["sources"].get(s.get("source")) or {}).get("url") == qual["url"] for s in sessions):
+                return f"{gpu}: final staging card lacks the measured kit session"
+    except Exception as err:   # an unreadable Hub revision cannot qualify
+        return f"cannot validate kit sessions on the published revision: {err}"
+    return None
+
+
 def cmd_eligible(a):
     st = State(a.state)
     doc = build_evidence(st)
+    shipped = set()
+    if getattr(a, "kit_state", None):
+        shipped = final_kit_qualifications(doc, st, [State(path) for path in a.kit_state])
     eligible, held, pending = eligibility(doc, hf_head)
+    for slug in sorted(shipped.intersection(eligible)):
+        problem = check_kit_sessions(eligible[slug])
+        if problem:
+            pending[slug] = {"production": eligible[slug]["production"], "reasons": {"staging": problem}}
+            del eligible[slug]
     os.makedirs(a.out_dir, exist_ok=True)
     for name, d in (("eligible.json", eligible), ("held.json", held), ("pending.json", pending)):
         json.dump(d, open(os.path.join(a.out_dir, name), "w"), indent=1, sort_keys=True)
@@ -2600,7 +2698,7 @@ def kit_job_verdict(st, name, e):
     """(done, problems) of one phase-2 A/B job: the kit programs ship on this device only when the ratchet promoted, every gate passed,
     every card row is within -SDK_REGRESSION (equal or better) and the greedy text is identical. problems: short generated phrases."""
     if e["stage"] in ("planned", "submitted", "queued", "running", "done") or e.get("rerun_of_me") and \
-            st.jobs[e["rerun_of_me"]]["stage"] not in ("collected", "needs_decision", "failed"):
+            st.jobs[e["rerun_of_me"]]["stage"] not in ("collected", "ingested", "published", "needs_decision", "failed"):
         return False, []
     last = st.jobs[e["rerun_of_me"]] if e.get("rerun_of_me") else e
     if last["stage"] == "collected" and last.get("decision") in ("rerun", "confirm", "improved-pending") and not last.get("rerun_of_me"):
@@ -2622,7 +2720,7 @@ def kit_job_verdict(st, name, e):
     slow = sorted(((v, k) for k, v in rows.items() if v is not None and v < -SDK_REGRESSION * 100))
     if slow:
         probs.append(f"{gpu} " + ", ".join(f"{k} {v:+.1f} %" for v, k in slow[:3]))
-    if not probs and (last["stage"] != "collected" or last.get("decision") != "promote"):
+    if not probs and (last["stage"] not in ("collected", "ingested", "published") or last.get("decision") != "promote"):
         probs.append(f"{gpu} not promoted by the ratchet ({last.get('decision') or last['stage']})")
     return True, probs
 
@@ -2904,6 +3002,7 @@ def main(argv=None):
             q.add_argument("-o", "--out", required=True)
         else:
             q.add_argument("--out-dir", required=True)
+            q.add_argument("--kit-state", action="append", help="phase-2 state (repeat for every device): qualify the final published programs")
         q.set_defaults(fn=fn)
     q = sub.add_parser("rerender")
     q.add_argument("--slugs", nargs="+")
