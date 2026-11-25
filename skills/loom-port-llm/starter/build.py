@@ -878,6 +878,9 @@ for name in ("prepare", "control", "storage", "service"):
     if DRAFT:   # speculative decoding glue (draft/build_draft.py)
         text = {"prepare": lambda t: build_draft.patch_prepare(t, DRAFT, cfg), "storage": lambda t: build_draft.patch_storage(t, cfg, DRAFT),
                 "control": lambda t: build_draft.patch_control(t, cfg, DRAFT)}.get(name, lambda t: t)(text)
+    if name == "control" and os.environ.get("LLM_INPUT_MEASURE", "0") == "1":   # choice chat.input_measure: the SDK 0.3.0 count contract
+        import input_measure
+        text = input_measure.patch_control(text)
     if name in ("storage", "control", "prepare") and os.environ.get("LLM_LOGITS", "1") == "0":   # choice feature.logits_export off: no logits readback in the package
         text = re.sub(r"(?s)\n?[ ]*// logits:begin\n.*?// logits:end\n", "\n", text)
     for k, v in subs.items():
