@@ -203,7 +203,7 @@ class AcceptanceDelta(unittest.TestCase):
 
     def test_perf_session_old_side(self):
         info = self.info()
-        self.assertEqual(info["sdk_delta"]["comparisons"][0]["devices"]["strix-halo"]["session_acceptance"], 0.325)
+        self.assertEqual(info["sdk_delta"]["comparisons"][0]["devices"]["strix-halo"]["metrics"]["spec_acceptance_session"], 0.325)
         r = self.row(info)
         self.assertEqual(r["per_pass"], {"old": 0.975, "new": 1.249})   # not the spec gate's 68 % x 3 = 2.04
         self.assertFalse(r["different_workloads"])
@@ -211,7 +211,7 @@ class AcceptanceDelta(unittest.TestCase):
 
     def test_spec_gate_only_old_card_has_no_delta(self):
         info = self.info()
-        del info["sdk_delta"]["comparisons"][0]["devices"]["strix-halo"]["session_acceptance"]
+        del info["sdk_delta"]["comparisons"][0]["devices"]["strix-halo"]["metrics"]["spec_acceptance_session"]
         r = self.row(info)
         self.assertTrue(r["different_workloads"])
         self.assertIsNone(r["change"])

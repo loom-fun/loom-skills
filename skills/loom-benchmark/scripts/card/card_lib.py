@@ -1413,6 +1413,7 @@ def drop_carried(info, pin):
     return out
 
 
+SESSION_ACCEPTANCE_KEY = "spec_acceptance_session"   # in the stored metrics, beside the spec gate's spec_acceptance
 SESSION_ACCEPTANCE_ROWS = ("decode", "decode_2k", "decode_32k")
 
 
@@ -1440,7 +1441,7 @@ def previous_values(old):
             # (the spec gate's value, in metrics, decodes another prompt set)
             sess = [m["acceptance"] for k, (m, _) in card_metrics(view).items() if k in SESSION_ACCEPTANCE_ROWS and m.get("acceptance") is not None]
             if sess:
-                out[gpu]["session_acceptance"] = round(statistics.median(sess), 3)
+                out[gpu]["metrics"][SESSION_ACCEPTANCE_KEY] = round(statistics.median(sess), 3)
             if gates:
                 out[gpu]["gates"] = gates
     return out
@@ -1461,7 +1462,7 @@ def delta_rows(info, pin, comparison, depth=None):
     spec_acceptance measured as accepted tokens per verification pass (unreported proposals) is compared with the
     earlier card's share of proposals x the draft depth (depth): SDK 0.2 counted every verification as depth proposals,
     so that product is exactly its accepted tokens per pass (row per_pass: {old, new}). The old side is the earlier card's
-    perf-session acceptance of its decode rows (session_acceptance), the same workload as the new value; an earlier card that
+    perf-session acceptance of its decode rows (metrics.spec_acceptance_session), the same workload as the new value; an earlier card that
     has only the spec gate's value decoded another prompt set: the row carries different_workloads and no change."""
     out = {}
     expl = comparison.get("explanations") or {}
@@ -1486,9 +1487,9 @@ def delta_rows(info, pin, comparison, depth=None):
             if old is not None and new is not None:
                 change = round(new - old, 4) if k == "spec_acceptance" else round(new / old - 1, 4) if old else None
             elif k == "spec_acceptance" and old is not None and m.get("accepted_per_pass") is not None:
-                if prev.get("session_acceptance") is not None:
+                if prev["metrics"].get(SESSION_ACCEPTANCE_KEY) is not None:
                     if depth:
-                        per_pass = {"old": round(prev["session_acceptance"] * depth, 3), "new": m["accepted_per_pass"]}
+                        per_pass = {"old": round(prev["metrics"][SESSION_ACCEPTANCE_KEY] * depth, 3), "new": m["accepted_per_pass"]}
                         change = round(per_pass["new"] / per_pass["old"] - 1, 4) if per_pass["old"] else None
                 else:
                     different = True
