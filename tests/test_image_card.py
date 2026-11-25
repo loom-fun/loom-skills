@@ -45,5 +45,17 @@ class Migrate(unittest.TestCase):
             image_card.migrate(README.replace("## Files", "## Other"), "s", RESULT, "u", "loom-fun-staging", "c")
 
 
+class Publish(unittest.TestCase):
+    def test_only_files_outside_the_card_format_are_deleted(self):
+        self.assertEqual(image_card.not_card_format(["README.md", "model.json", "tokenizer.json", "program/a.loom", "library/motif/x.loom",
+                                                     ".gitattributes", "sdk-qualification.json", "dev/x.json"]),
+                         ["dev/x.json", "sdk-qualification.json"])
+
+    def test_staging_org_only(self):
+        for org in ("loom-fun", "someone-else"):
+            with self.assertRaises(SystemExit):
+                image_card.main(["s", "d", "u", "o", "--org", org])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -9,7 +9,8 @@ previous card" block before "## Files"; the Versions line names the SDK, the SDK
 
 usage: image_card.py SLUG JOB_DIR JOB_URL OUT_DIR [--org loom-fun-staging] [--publish]
   JOB_DIR: the downloaded image job (image_result.json); OUT_DIR: written fresh (the production card's small files + the migrated README.md).
-  --publish: one commit to ORG/SLUG on top of its head: these files, and every other non-program file there deleted (e.g. a qualification record)."""
+  --publish: one commit to ORG/SLUG on top of its head: these files, and the files there the card format does not define deleted
+  (card_files.card_file, e.g. a qualification record)."""
 import argparse
 import json
 import os
@@ -19,7 +20,15 @@ import subprocess
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(HERE, "..", "skills", "loom-benchmark", "scripts", "card"))
+import card_files  # noqa: E402
+
 STAGING_ORG = "loom-fun-staging"
+
+
+def not_card_format(paths):
+    """The repository paths the card format does not define (card_files.card_file): the only files --publish deletes."""
+    return sorted(p for p in paths if not card_files.card_file(p))
 
 
 def skills_commit():
@@ -60,11 +69,9 @@ def main(argv=None):
     ap.add_argument("job_dir")
     ap.add_argument("job_url")
     ap.add_argument("out")
-    ap.add_argument("--org", default=STAGING_ORG)
+    ap.add_argument("--org", default=STAGING_ORG, choices=(STAGING_ORG,), help="the staging org (the only one this script writes)")
     ap.add_argument("--publish", action="store_true")
     a = ap.parse_args(argv)
-    if a.org == "loom-fun":
-        sys.exit("image_card.py writes the staging org only")
     from huggingface_hub import HfApi, snapshot_download, CommitOperationAdd, CommitOperationDelete
     result = json.load(open(os.path.join(a.job_dir, "image_result.json")))
     shutil.rmtree(a.out, ignore_errors=True)
@@ -79,8 +86,7 @@ def main(argv=None):
         api, repo = HfApi(), f"{a.org}/{a.slug}"
         info = api.model_info(repo, files_metadata=True)
         local = sorted(f for f in os.listdir(a.out) if os.path.isfile(os.path.join(a.out, f)) and not f.startswith("."))
-        gone = sorted(s.rfilename for s in info.siblings if s.rfilename not in local and s.rfilename != ".gitattributes"
-                      and not s.rfilename.startswith(("program/", "library/", "parameter/")) and not s.rfilename.endswith(".loom"))
+        gone = not_card_format(s.rfilename for s in info.siblings if s.rfilename not in local)
         ops = [CommitOperationAdd(path_in_repo=f, path_or_fileobj=os.path.join(a.out, f)) for f in local] + [CommitOperationDelete(path_in_repo=f) for f in gone]
         c = api.create_commit(repo, ops, parent_commit=info.sha,
                               commit_message=f"Card on hrx-loom {result['sdk']['new']}: production card + migration, SDK-only delta from the image job")
