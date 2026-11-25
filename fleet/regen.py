@@ -2258,7 +2258,7 @@ def acceptance_evidence(directory, device, view):
            if k in card_lib.SESSION_ACCEPTANCE_ROWS and m.get("acceptance") is not None}
     rows = []
     if directory and os.path.isfile(os.path.join(directory, "perf_staging.jsonl")):
-        rows = make_info.perf_rows(os.path.join(directory, "perf_staging.jsonl"), "loom", "staging")
+        rows = make_info.perf_rows(os.path.join(directory, "perf_staging.jsonl"), "loom")
     pp, _ = make_info.session_values(rows, make_info.per_pass_samples)
     shares, _ = make_info.session_values(rows, make_info.acceptance_samples)
     depth = None

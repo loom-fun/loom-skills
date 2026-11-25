@@ -51,7 +51,7 @@ class AcceptanceEvidence(unittest.TestCase):
                     json.dump(doc, f)
             write("model_staging.json", {"presets": {"chat": {"execution": {}}, "chat-r9700": {"execution": {"draft_depth": 2}}}})
             write("llm_config.json", {"draft": {"depth": 3}})
-            write("perf_staging.jsonl", {"accepted_per_pass": {"decode_tps": 0.9}})
+            write("perf_staging.jsonl", {"label": "fun", "accepted_per_pass": {"decode_tps": 0.9}})
             result = regen.acceptance_evidence(d, "radeon-r9700", view)
             self.assertEqual((result["old"], result["new"], result["unit"]), (1, 0.9, "accepted_per_pass"))
             del view["performance"]["sessions"][0]["metrics"]["decode"]
