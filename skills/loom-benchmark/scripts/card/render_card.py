@@ -1112,7 +1112,7 @@ def render(d):
     L += ["## Correctness", "", head, "|---|---|" + "---|" * len(cols)]
     ev = []
 
-    def gate_cell(g, name, desc):
+    def gate_result(g, name, desc):
         dev = info["devices"][g]
         if not has_results(dev):
             return MISSING + ((" not yet re-measured" if has_runner(g) else " not measured") if dev.get("state") == "not_measured" else " does not fit")
@@ -1148,6 +1148,18 @@ def render(d):
         pre = (", pre-existing: the previous card failed it too" + (f" ({prev['detail']})" if prev.get("detail") else "")
                if prev and prev["status"] == "fail" else "")
         return res + (f" ({gt['detail']})" if gt["detail"] else "") + pre + f" {mark(ev.index(key) + 1)}"
+
+    def gate_cell(g, name, desc):
+        result = gate_result(g, name, desc)
+        row = (info["devices"][g].get("gates") or {}).get(name) or {}
+        emulated = row.get("emulated_on")
+        if emulated:
+            source = info["sources"][row["source"]]
+            label = GPUS[emulated["device"]]["short"]
+            sdk = sdk_version(source["hrx_loom"])
+            result += f" ([measured on {label} limited to 16 GB (SDK {sdk})]({source['url']}))"
+        return result
+
     vision_details = [(gpu_view(info, g)["gates"].get("vision", {}).get("detail") or "") for g in cols]
     for name, desc in GATES:
         if name == "vision" and (c["file"].endswith(".safetensors") or any(d.startswith("vLLM ") for d in vision_details)):
@@ -1166,6 +1178,8 @@ def render(d):
         src = sources[x["source"]]
         old = carried_sdk(info, x["source"], pin)
         where = "" if solo else f" on the {GPUS[g]['short']}"
+        if x.get("emulated_on"):
+            where = f" measured on {GPUS[x['emulated_on']['device']]['short']} limited to 16 GB (SDK {sdk_version(src['hrx_loom'])})"
         verdict = (f"admitted a {x['tokens']:,}-token request" if x["admitted"] and x.get("tokens") else "admitted" if x["admitted"]
                    else "refused the request")
         L.append(f"- Context admission{where}: one request filling the {x['context']:,}-token context "

@@ -1389,13 +1389,29 @@ def carried_sdk(info, sid, pin):
     return have or UNRECORDED_SDK
 
 
+def emulated_gate_errors(gpu, gate, src):
+    """A DevLab gate on the 16 GB class must identify the physical runner and its budget."""
+    emulated = gate.get("emulated_on")
+    if gpu != "gfx1201-16gb" or src.get("kind") != "devlab":
+        return ["unexpected emulated_on for this device or source"] if emulated is not None else []
+    if emulated != {"device": "radeon-r9700", "memory_bytes": GPUS[gpu]["memory_bytes"]}:
+        return ["emulated_on must record the R9700 and the 16 GB Quick start budget"]
+    run = src.get("run") or ""
+    if not re.fullmatch(r"[1-9][0-9]*", run) or not re.fullmatch(
+            rf"{re.escape(SKILLS_URL)}/actions/runs/{run}/job/[1-9][0-9]*", src.get("url") or ""):
+        return ["emulated gate requires its DevLab job URL"]
+    if gpu_from_device(src.get("device")) != "radeon-r9700" or not sdk_version(src.get("hrx_loom")):
+        return ["emulated gate requires the R9700 source and its SDK version"]
+    return []
+
+
 def requalified(info, gpu, pin):
     """Whether a GPU of the card has any Loom value or gate measured on the pin's SDK (re-qualified on it)."""
     dev = (info.get("devices") or {}).get(gpu) or {}
     if not has_results(dev):
         return False
     sids = [s["source"] for s in (dev.get("performance") or {}).get("sessions", [])]
-    sids += [g["source"] for g in (dev.get("gates") or {}).values()]
+    sids += [g["source"] for g in (dev.get("gates") or {}).values() if not g.get("emulated_on")]
     return any(sids) and any(not carried_sdk(info, sid, pin) for sid in sids)
 
 
@@ -1573,8 +1589,12 @@ def validate(info, programs=None):
                 elif sources.get(sid, {}).get("kind") == "xsj":
                     errs.append(f"{at}.remeasure.{k}: cannot use XSJ evidence for re-measurement")
             rm = rm.get("previous")
+        admission = dev.get("admission") or {}
+        if admission:
+            errs += [f"{at}.admission: {msg}" for msg in emulated_gate_errors(gpu, admission, sources.get(admission["source"], {}))]
         for n, g in (dev.get("gates") or {}).items():
             errs += measurement(g, gpu, f"{at}.gates.{n}", expected=None)
+            errs += [f"{at}.gates.{n}: {msg}" for msg in emulated_gate_errors(gpu, g, sources.get(g["source"], {}))]
     return errs + free_text_errors(info)
 
 
