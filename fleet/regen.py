@@ -1372,6 +1372,14 @@ def cmd_ingest(a):
         todo = [(n, e) for n, e in todo if sdk_ingest_ready(st, n, e)]
     global INGEST_DRY
     INGEST_DRY = dry
+    if not dry and st.d["mode"] in SDK_MODES:   # one card per model at a time: each device's card is built on the staging head the previous one published
+        busy = {e["slug"] for e in st.jobs.values() if e["stage"] == "ingested"}
+        one = []
+        for n, e in todo:
+            if e["slug"] not in busy:
+                busy.add(e["slug"])
+                one.append((n, e))
+        todo = one
     for name, e in todo:
         W = os.path.join(st.work, "cards", f"{e['slug']}.{e['device']}")
         shutil.rmtree(W, ignore_errors=True)
@@ -2143,6 +2151,39 @@ def cmd_eligible(a):
         print(f"  pending {s}: " + "; ".join(f"{k}: {v}" for k, v in p["reasons"].items())[:300])
 
 
+def cmd_verify(a):
+    """--programs production: check each published card on the staging head (small files): the frozen programs, the target pin, this device's
+    session from the job, and lint_card.py --form staging. Records e["verified"] = {revision, ok, problems}; prints the problems."""
+    st = State(a.state)
+    pin = pinned_target(st.d)
+    for name, e in st.jobs.items():
+        if e["stage"] != "published" or (e.get("verified") or {}).get("ok"):
+            continue
+        repo = f"{st.d['opts']['new_org']}/{e['slug']}"
+        d = os.path.join(st.work, "verify", e["slug"])
+        problems = []
+        try:
+            head = hf_head(repo)
+            hf_snapshot_small(repo, head, d)
+            if card_lib.programs_sha256(d) != e.get("programs_sha256"):
+                problems.append("staging programs are not the production programs")
+            got = (sdk_package.load(os.path.join(d, "llm_config.json")).get("sdk") or {})
+            if pin and any(got.get(k) != v for k, v in pin.items()):
+                problems.append(f"llm_config pin {got.get('hrx_loom')} is not the verified {target_sdk(st.d)}")
+            info = card_lib.load_info(os.path.join(d, "info.json"))
+            srcs = {s_.get("url") for s_ in (info.get("sources") or {}).values()}
+            if e.get("job_url") not in srcs:
+                problems.append(f"the card does not cite this device's job {e.get('job_url')}")
+            r = sh([PY, os.path.join(CARD, "lint_card.py"), d, "--form", "staging"], check=False)
+            problems += [ln.split(": ", 1)[-1] for ln in r.stdout.splitlines() if "[carried]" not in ln and ": [" in ln]
+        except Exception as x:
+            problems.append(f"verify failed: {x}")
+        e["verified"] = {"revision": locals().get("head"), "ok": not problems, "problems": problems, "at": now()}
+        print(f"{e['slug']} {e['device']}: " + ("ok" if not problems else "; ".join(problems)[:600]))
+        shutil.rmtree(d, ignore_errors=True)
+        st.save()
+
+
 def cmd_accept_no_reference(a):
     """--programs production: a model whose gates could not run because the reference engine cannot serve its checkpoint (gates.sh: llama-server
     would not start, "references still pending after 5 rounds"; e.g. an architecture only a hand-made reference serves) is decided on its other
@@ -2258,6 +2299,9 @@ def main(argv=None):
             q.add_argument("--ref", help="the git ref the canonical build is made at (default: origin/<the state's base>)")
             q.add_argument("--prefill-transition", action="append", default=[], metavar="SLUG:PRESET:OLD:NEW",
                            help="explicit measured prefill change; every selected job must provide matching programs and preset execution")
+    q = sub.add_parser("verify", help="--programs production: check the published staging cards (programs, pin, cited job, lint_card.py)")
+    q.add_argument("state")
+    q.set_defaults(fn=cmd_verify)
     q = sub.add_parser("accept-no-reference", help="--programs production: gates that could not run (no reference engine for the checkpoint)")
     q.add_argument("state")
     q.add_argument("slug", nargs="+")
