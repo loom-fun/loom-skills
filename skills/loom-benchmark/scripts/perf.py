@@ -173,16 +173,20 @@ def median(v):
 def repeats(key, metric, make, f):
     """f(make(i)) for i in range(--repeat-rows) (repeat 0 is the plain run); the successful values' median, with all of
     them in out["samples"][metric] when there are several. The drafted-token acceptance of the repeats is averaged."""
-    vals, accs = [], []
+    vals = []
+    telemetry = {"acceptance": [], "accepted_per_pass": []}
     for i in range(max(1, a.repeat_rows)):
-        out.get("acceptance", {}).pop(key, None)
+        for field in telemetry:
+            out.get(field, {}).pop(key, None)
         v = f(make(i))
         if v is not None:
             vals.append(v)
-            if key in out.get("acceptance", {}):
-                accs.append(out["acceptance"][key])
-    if accs:
-        out["acceptance"][key] = round(sum(accs) / len(accs), 4)
+            for field, values in telemetry.items():
+                if key in out.get(field, {}):
+                    values.append(out[field][key])
+    for field, values in telemetry.items():
+        if values:
+            out[field][key] = round(sum(values) / len(values), 4)
     if a.repeat_rows > 1 and vals:
         out.setdefault("samples", {})[metric] = vals
     return median(vals) if vals else None

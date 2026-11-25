@@ -2,6 +2,9 @@
 spec_check.py and the card scripts (make_info.py) read. bench_common re-exports them."""
 
 
+# This SDK defined proposed_tokens as verification_passes × configured draft depth.
+DEPTH_COUNTED_PROPOSAL_SDKS = {"0.2.0"}
+
 DRAFT_COUNTERS = ("draft_proposed_tokens", "draft_accepted_inputs", "decode_tokens")
 
 

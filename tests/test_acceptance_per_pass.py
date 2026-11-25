@@ -24,6 +24,29 @@ class AcceptancePerPass(unittest.TestCase):
         dumps = sorted(str(p) for p in DATA.glob('metrics_staging_*.txt'))
         self.assertLess(make_info.draft_metrics_acceptance(dumps)['accepted_per_pass'], 0.8)
 
+    def test_repeat_rows_average_all_successful_per_pass_samples(self):
+        # The short essay and three context repeats have separate request counters.
+        import contextlib
+        import io
+        import json
+        import runpy
+        import tempfile
+        from unittest.mock import patch
+        import bench_common
+        stream_result = {"status": 200, "prompt_tokens": 50, "ttft": 1, "decode_tps": 4, "tokens": 256}
+        before = {"decode_tokens": 10, "draft_accepted_inputs": 0}
+        snapshots = [value for accepted in (2, 1, 2, 3) for value in
+                     (before, {"decode_tokens": 12 + accepted, "draft_accepted_inputs": accepted})]
+        with tempfile.TemporaryDirectory() as tmp:
+            script = ROOT / "skills/loom-benchmark/scripts/perf.py"
+            log = Path(tmp) / "perf.jsonl"
+            args = [str(script), "unused", "test", "--no-campaign", "--log", str(log), "--repeat-rows", "3"]
+            with patch.object(sys, "argv", args), patch.object(bench_common, "stream", return_value=stream_result), \
+                    patch.object(bench_common, "server_draft_counters", side_effect=snapshots), contextlib.redirect_stdout(io.StringIO()):
+                runpy.run_path(str(script), run_name="__main__")
+            row = json.loads(log.read_text())
+            self.assertEqual(row["accepted_per_pass"]["decode_tps_2k"], 1.0)
+
     def test_no_rows_no_value(self):
         self.assertIsNone(make_info.session_per_pass([{"label": "x", "decode_tps": 10.0}]))
 
