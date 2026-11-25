@@ -813,6 +813,11 @@ class KitVerdict(unittest.TestCase):
             for kit in (False, True):
                 self.assertIn("failed gates: logits", regen.check_staged_qualification(row, kit=kit))
             info["devices"]["strix-halo"]["gates"]["logits"]["status"] = "pass"
+            info["devices"]["strix-halo"]["gates"]["logits"]["source"] = "a"
+            info["sources"]["a"]["hrx_loom"] = {"hrx_loom": "0.2.0"}
+            self.assertIn("earlier or unknown SDK: logits", regen.check_staged_qualification(row, kit=True, sdk="0.3.0"))
+            info["sources"]["a"]["hrx_loom"] = {"hrx_loom": "0.3.0"}
+            self.assertIsNone(regen.check_staged_qualification(row, kit=True, sdk="0.3.0"))
             session = info["devices"]["radeon-r9700"]["performance"]["sessions"][0]
             session["source"] = "a"
             self.assertIn("radeon-r9700", regen.check_staged_qualification(row, kit=True))
@@ -1071,3 +1076,39 @@ class ConstrainedEvidence(unittest.TestCase):
             run.side_effect = RuntimeError("package programs differ")
             with self.assertRaisesRegex(RuntimeError, "programs differ"):
                 regen.constrained_evidence(*args)
+
+
+class StandaloneLogits(unittest.TestCase):
+    def test_exact_device_sdk_and_digest_preserve_a_measured_failure(self):
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as t:
+            root = Path(t)
+            job = {"name": "measurement", "conclusion": "success", "labels": ["radeon-r9700"], "runner_name": "runner",
+                   "id": 102, "run_id": 101, "html_url": "https://github.com/loom-fun/loom-skills/actions/runs/101/job/102",
+                   "completed_at": "2026-01-12T10:00:00Z"}
+            def write(name, value):
+                (root / name).write_text(json.dumps(value))
+            write("job.json", job)
+            write("summary.json", {"job": "measurement", "runner": "runner", "results": {"logits:staging": "FAIL: translation"}})
+            pin = regen.release_pin("0.3.0")
+            write("llm_config.json", {"sdk": pin})
+            write("sdk_staging.json", pin)
+            write("logits_staging.json", {"gates": {"logits": {"pass": False}}})
+            (root / "card_revision.txt").write_text(f"loom-fun-staging/{TEXT}@" + "b" * 40)
+            (root / "programs_sha256_staging.txt").write_text(H)
+            spec = {"artifact": t, "job": str(root / "job.json"), "variant": "staging"}
+            with mock.patch.object(regen.card_lib, "programs_sha256", return_value=H), mock.patch.object(regen, "run_tool") as run:
+                self.assertEqual(regen.standalone_logits(spec, TEXT, "radeon-r9700", t, t), "ev_logits.json")
+                args = run.call_args.args[0]
+                self.assertIn(str(root / "logits_staging.json"), args)
+                self.assertIn(job["html_url"], args)
+                with self.assertRaisesRegex(RuntimeError, "completed device"):
+                    regen.standalone_logits(spec, TEXT, "strix-halo", t, t)
+                with self.assertRaisesRegex(RuntimeError, "pinned revision"):
+                    regen.standalone_logits(spec, "wrong-model", "radeon-r9700", t, t)
+                write("sdk_staging.json", dict(pin, wheel_sha256="different"))
+                with self.assertRaisesRegex(RuntimeError, "wheel"):
+                    regen.standalone_logits(spec, TEXT, "radeon-r9700", t, t)
+                (root / "programs_sha256_staging.txt").write_text("bad")
+                with self.assertRaisesRegex(RuntimeError, "different programs"):
+                    regen.standalone_logits(spec, TEXT, "radeon-r9700", t, t)

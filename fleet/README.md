@@ -88,6 +88,8 @@ The separate `evidence` command continues to report the SDK comparison on frozen
 For models awaiting a final program revision, list one slug per line in `STATE.program_hold` on each affected state.
 Submission defers any batch containing a held slug. Split mixed planned batches to run the unaffected models first.
 Remove a slug after its final recipe is ready. Eligibility also checks each runner device for failed gates on the pinned text card.
+To replace a carried logits gate, attach `standalone_logits` to the device job being ingested, with `artifact` (downloaded directory),
+`job` (saved Actions job JSON), and `variant` (the measured variant). The card cites the functional job; performance retains its own job.
 
 `regen.py package S.json [--dry-run] [--slugs S...] [--ref REF]` is the step between `collect` and `ingest` (`make_info.py` refuses programs other than the
 ones the job built, so the v0.2 package must be on staging before the card is made). It builds the base once, CPU only (`build_fleet.py --ref origin/<base>

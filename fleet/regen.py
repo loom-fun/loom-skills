@@ -1355,6 +1355,43 @@ def constrained_evidence(opts, slug, dev, package, work, pinned_info):
     return [evidence]
 
 
+def standalone_logits(spec, slug, gpu, package, work):
+    """Build one gate from a successful final-program job; its measured pass or failure goes on the card."""
+    if not isinstance(spec, dict) or not all(isinstance(spec.get(k), str) and spec[k] for k in ("artifact", "job", "variant")):
+        raise RuntimeError("standalone logits ingest requires artifact, job and variant")
+    artifact, variant = Path(spec["artifact"]).resolve(), spec["variant"]
+    job = sdk_package.load(spec["job"])
+    summary = sdk_package.load(artifact / "summary.json")
+    if (job.get("conclusion") != "success" or gpu not in job.get("labels", []) or job["name"] != summary["job"]
+            or job["runner_name"] != summary["runner"] or f"logits:{variant}" not in summary["results"]):
+        raise RuntimeError("standalone logits artifact does not match the completed device job")
+    url = f"https://github.com/{REPO}/actions/runs/{job['run_id']}/job/{job['id']}"
+    if job["html_url"] != url:
+        raise RuntimeError("standalone logits job URL differs from the run and job IDs")
+    reference = (artifact / "card_revision.txt").read_text().strip()
+    if not re.fullmatch(r"(?:loom-fun|loom-fun-staging)/" + re.escape(slug) + r"@[0-9a-f]{40}", reference):
+        raise RuntimeError("standalone logits job did not measure a pinned revision of this model")
+    digest = (artifact / f"programs_sha256_{variant}.txt").read_text().strip()
+    if not digest or digest != card_lib.programs_sha256(package):
+        raise RuntimeError("standalone logits job measured different programs")
+    sdk = sdk_package.load(artifact / f"sdk_{variant}.json")
+    expected = sdk_package.load(Path(package) / "llm_config.json").get("sdk") or {}
+    if not expected.get("wheel_sha256") or any(sdk.get(k) != expected.get(k) for k in ("hrx_loom", "wheel_sha256")):
+        raise RuntimeError("standalone logits job did not use the staging package's verified SDK wheel")
+    result = artifact / f"logits_{variant}.json"
+    gate = (sdk_package.load(result).get("gates") or {}).get("logits") or {}
+    if not isinstance(gate.get("pass"), bool):
+        raise RuntimeError("standalone logits job has no measured logits gate")
+    run_tool([f"{CARD}/pull_devlab.py", "--identity", str(artifact), "--gpu", gpu,
+              "--device-out", "logits_device.json", "--hrx-out", "logits_install.json"], work)
+    out = "ev_logits.json"
+    run_tool([f"{CARD}/make_info.py", "gates", "--gpu", gpu, "--package", package, "--fetched-programs", digest,
+              "--device", "logits_device.json", "--hrx-loom", str(artifact / f"sdk_{variant}.json"),
+              "--time", job["completed_at"][:19], "--url", url, "--run", str(job["run_id"]), "--source-kind", "devlab",
+              str(result), "-o", out], work)
+    return out
+
+
 def ingest_full(st, name, e, W):
     """The card's performance, gates and roofline of this device from the job (REGEN_RECIPE: ingest the NEW package)."""
     d, dev, slug = e["dir"], e["device"], e["slug"]
@@ -1470,6 +1507,11 @@ def ingest_full(st, name, e, W):
         run_tool([f"{S}/make_info.py", "gates", "--gpu", dev, "--time", end, *gfiles, "--package", out, *src, "--device", "dev.json", "--hrx-loom", hrx,
                   "-o", "ev_gates.json"], W)
         ev.append("ev_gates.json")
+    if e.get("standalone_logits"):
+        try:
+            ev.append(standalone_logits(e["standalone_logits"], slug, dev, out, W))
+        except (OSError, ValueError, TypeError, KeyError) as err:
+            raise RuntimeError(f"invalid standalone logits evidence: {err}") from err
     stub = roofline_stub(slug, out, W)
     run_tool([f"{S}/make_info.py", "roofline", "--gpu", dev, "--device", card_lib.registry.device(dev)["roofline"]["default"], "--package", out,
               "--evidence", "ev_perf.json", *(["--gguf", stub] if stub else []), "-o", "ev_roof.json"], W)
@@ -2617,7 +2659,7 @@ def final_kit_qualifications(doc, sweep, states):
     return shipped
 
 
-def check_staged_qualification(row, *, kit):
+def check_staged_qualification(row, *, kit, sdk=None):
     """Check the pinned text card for failing gates and, for shipped kits, the exact measured sessions."""
     try:
         info = card_lib.load_info(hf_file(row["staging"], "info.json", row["staging_revision"]))
@@ -2626,6 +2668,11 @@ def check_staged_qualification(row, *, kit):
             failed = sorted(name for name, gate in (view.get("gates") or {}).items() if gate["status"] == "fail")
             if failed:
                 return f"{gpu}: final staging card shows failed gates: {', '.join(failed)}"
+            if sdk and gpu not in (row.get("gates_not_rerun") or {}):
+                carried = sorted(name for name, gate in (view.get("gates") or {}).items()
+                                 if card_lib.carried_sdk(info, gate.get("source"), sdk))
+                if carried:
+                    return f"{gpu}: runner gates still measured on an earlier or unknown SDK: {', '.join(carried)}"
             if not kit:
                 continue
             sessions = (view.get("performance") or {}).get("sessions", [])
@@ -2651,7 +2698,7 @@ def cmd_eligible(a):
     for slug, row in list(eligible.items()):
         if row["kind"] != "text":
             continue
-        problem = check_staged_qualification(row, kit=slug in shipped)
+        problem = check_staged_qualification(row, kit=slug in shipped, sdk=doc["sdk"]["new"])
         if problem:
             pending[slug] = {"production": eligible[slug]["production"], "reasons": {"staging": problem}}
             del eligible[slug]
