@@ -4,7 +4,7 @@ so its per-kernel statistics cover exactly this script's requests (plus one tiny
 
 usage: profile_requests.py URL MODEL SCENARIO [--reps K] [--depth D] [--tokens N]
   probe   one tiny request (is the statistics output there at all?)
-  pf1k / pf2k / pf8k   K fresh-nonce prompts of ~1000 / ~2000 / ~8000 tokens, max_tokens 2 (prefill only)
+  pf2k / pf8k   K fresh-nonce prompts of ~2000 / ~8000 tokens, max_tokens 2 (prefill only)
   dec     one essay request (short prompt), N (default 400) tokens: a drafted decode, the counters give its verify steps
   dec2k / dec32k   perf.py's decode_2k / decode_32k request (its ~2000 / ~32000-token document, 256 / 128 tokens) WITHOUT a nonce: the same
           text on every server, so two SDKs (or two builds) decode identical prompts and their drafted-token acceptance compares exactly
@@ -20,7 +20,7 @@ from bench_common import doc, long_prompt, server_draft_counters, stream, thinki
 ap = argparse.ArgumentParser()
 ap.add_argument("url")
 ap.add_argument("model")
-ap.add_argument("scenario", choices=["probe", "pf1k", "pf2k", "pf8k", "dec", "dec2k", "dec32k"])
+ap.add_argument("scenario", choices=["probe", "pf2k", "pf8k", "dec", "dec2k", "dec32k"])
 ap.add_argument("--reps", type=int, default=3)
 ap.add_argument("--tokens", type=int, default=int(os.environ["LOOM_PROFILE_TOKENS"]) if os.environ.get("LOOM_PROFILE_TOKENS") else None,
                 help="decode tokens (default: dec 400, dec2k 256, dec32k 128 as perf.py)")
@@ -97,8 +97,8 @@ if a.scenario != "probe":
     if a.perf_warmup:
         out["warmup_draft"] = {k: before.get(k, 0) - before_warmup.get(k, 0) for k in before}
     reqs = []
-    if a.scenario in ("pf1k", "pf2k", "pf8k"):
-        n = {"pf1k": 1000, "pf2k": 2000, "pf8k": 8000}[a.scenario]
+    if a.scenario in ("pf2k", "pf8k"):
+        n = 2000 if a.scenario == "pf2k" else 8000
         for i in range(a.reps):
             reqs.append(go(f"[{nonce} {i}] Summarize this documentation in one sentence.\n\n" + doc(n), 2))
     elif a.scenario in ("dec2k", "dec32k"):   # perf.py's decode-with-context prompts, fixed text (no nonce)
