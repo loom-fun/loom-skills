@@ -694,7 +694,7 @@ class Share(unittest.TestCase):
                     regen.main(["poll", sweep])   # a dropped batch (no branch, no run) is not looked up
                 except SystemExit:
                     pass
-            self.assertEqual(calls, [["gh", "run", "cancel", "11", "-R", regen.REPO]])
+            self.assertEqual(calls, [["gh", "api", "-X", "POST", f"repos/{regen.REPO}/actions/runs/11/force-cancel"]])
             self.assertEqual(q.jobs["sab-a"]["phase1"], {"state": sw.path, "job": "sab-a"})
             # the phase-2 job of a is collected: its frozen side is the migration job's result; b's job failed: it stops for a decision
             d = os.path.join(t, "jobdir")
