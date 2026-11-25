@@ -1,5 +1,5 @@
 {
- "_comment": "Flash-Next prefill lane (#1417) round 1: prefill chunk 8192/12288; A = 64-row expert records for short packets; B = int8 hyperconnection projections up to 8192-token packets",
+ "_comment": "Flash-Next prefill lane (#1417) round 1b (elastic backing: fixed backing + chunk 8192 does not fit): prefill chunk 8192/12288; A = 64-row expert records for short packets; B = int8 hyperconnection projections up to 8192-token packets",
  "card": "loom-fun/unsloth-Qwen3.8-Flash-Next-loom@d847c21bc93c0c6bc45752a9edaf91d80ac74490",
  "sdk": "0.3.0",
  "kit": "qwen4exp",
@@ -11,12 +11,14 @@
  },
  "jobs": [
   {
-   "name": "flash-r1",
+   "name": "flash-r1b",
    "variants": [
     {
      "name": "base",
      "build": {},
-     "sdk": "0.3.0"
+     "sdk": "0.3.0",
+     "elastic": true,
+     "memory_bytes": "none"
     },
     {
      "name": "p8k",
@@ -24,34 +26,42 @@
      "sdk": "0.3.0",
      "execution": {
       "prefill_capacity": 8192
-     }
+     },
+     "elastic": true,
+     "memory_bytes": "none"
     },
     {
      "name": "a8k",
      "build": {},
-     "ref": "ff05e5e6b41ea8f8904713afa1b97bb563e549ae",
+     "ref": "3b9a2c9e1af3def3cee7d2d8090b7b742c450886",
      "sdk": "0.3.0",
      "execution": {
       "prefill_capacity": 8192
-     }
+     },
+     "elastic": true,
+     "memory_bytes": "none"
     },
     {
      "name": "b8k",
      "build": {},
-     "ref": "55934c674c95800546ae917d96db7a6e09ed0cf4",
+     "ref": "8235dd4ef83b1eb1e4069560876a2d6d611309a0",
      "sdk": "0.3.0",
      "execution": {
       "prefill_capacity": 8192
-     }
+     },
+     "elastic": true,
+     "memory_bytes": "none"
     },
     {
      "name": "ab8k",
      "build": {},
-     "ref": "14d1fd6fd62acc39e530149714683193d6d20f91",
+     "ref": "ac9c028b115670d0b63f38fe16bf377486f5baf4",
      "sdk": "0.3.0",
      "execution": {
       "prefill_capacity": 8192
-     }
+     },
+     "elastic": true,
+     "memory_bytes": "none"
     },
     {
      "name": "p12k",
@@ -59,7 +69,9 @@
      "sdk": "0.3.0",
      "execution": {
       "prefill_capacity": 12288
-     }
+     },
+     "elastic": true,
+     "memory_bytes": "none"
     }
    ],
    "steps": [
