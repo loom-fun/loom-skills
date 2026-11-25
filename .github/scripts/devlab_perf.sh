@@ -393,11 +393,11 @@ kit_for() {   # kit_for VARIANT REF -> builds D/<variant>/kit from REF's starter
   if [ -n "$ref" ]; then
     git -C "$here" fetch -q origin "${ref#origin/}" 2>/dev/null
     rm -rf "$D/$v/src"; mkdir -p "$D/$v/src"
-    git -C "$here" archive "$ref" skills/loom-port-llm skills/loom-kb | tar -x -C "$D/$v/src" || { echo "FAIL: no $ref"; return 1; }
+    git -C "$here" archive "$ref" skills/loom-port-llm skills/loom-kb skills/loom-setup | tar -x -C "$D/$v/src" || { echo "FAIL: no $ref"; return 1; }
     PL=$D/$v/src/skills/loom-port-llm; KBV[$v]=$D/$v/src/skills/loom-kb; echo "starter from $ref ($(git -C "$here" log -1 --format=%h:%s "$ref" | cut -c1-80))"
   fi
   if [ "$kit" != - ]; then "$PL/reference/apply_example.sh" "$kit" "$D/$v/kit" | tail -1 >/dev/null || return 1
-  else cp -r "$PL/starter" "$D/$v/kit"; fi
+  else cp -r "$PL/starter" "$D/$v/kit" && "$T" "$D/$v/kit/kit_source.py" write "$D/$v/kit" --skills-dir "$PL" > /dev/null || return 1; fi   # the copy's SDK pin (KIT_SOURCE)
   KIT[$v]=$D/$v/kit
 }
 for v in $variants; do
