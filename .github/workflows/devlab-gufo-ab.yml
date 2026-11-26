@@ -1,0 +1,55 @@
+name: devlab-gufo-ab
+# A/B of Gufo source revisions (gufo-org/gufo or a fork) on ONE AMD DevLab Dispatch Strix Halo runner: each revision is built
+# on the runner, then `gufo bench` runs in the experiment's order and, optionally, greedy logprobs are compared byte for
+# byte (.github/scripts/devlab_gufo_ab.sh, experiment .github/devlab/gufo-ab.json). Runs on a pull request labeled
+# `devlab-gufo-ab` (every push re-runs it), or by hand once this file is on the default branch.
+on:
+  pull_request:
+    types: [labeled, synchronize]
+  workflow_dispatch:
+    inputs:
+      experiment:
+        description: "Experiment file"
+        required: false
+        default: .github/devlab/gufo-ab.json
+
+permissions:
+  contents: read
+
+concurrency:
+  group: devlab-gufo-ab-${{ github.ref }}-${{ github.event.label.name }}
+  cancel-in-progress: true
+
+jobs:
+  ab:
+    if: >-
+      github.event_name != 'pull_request' ||
+      (contains(github.event.pull_request.labels.*.name, 'devlab-gufo-ab') &&
+       (github.event.action != 'labeled' || github.event.label.name == 'devlab-gufo-ab'))
+    runs-on: [strix-halo, devlab-dispatch, Linux, self-hosted]
+    timeout-minutes: 480
+    env:
+      HF_TOKEN: ${{ secrets.HF_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: work dir
+        run: mkdir -p "$GITHUB_WORKSPACE/../gufo-ab" && echo "WORK=$(cd "$GITHUB_WORKSPACE/../gufo-ab" && pwd)" >> "$GITHUB_ENV"
+      - name: build and A/B
+        run: bash .github/scripts/devlab_gufo_ab.sh "${{ inputs.experiment || '.github/devlab/gufo-ab.json' }}"
+      - name: summary
+        if: always()
+        run: cat "$WORK/out/summary.md" >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
+      - name: upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gufo-ab
+          path: ${{ env.WORK }}/out
+          retention-days: 14
+      - name: clean up
+        if: always()
+        run: |   # build trees are written by root in the build container; remove them there. The model download (hf/) and the Nix volume stay for the next run.
+          docker kill gufo-ab-serve gufo-ab-bench 2>/dev/null || true
+          docker run --rm -v "$WORK":"$WORK" nixos/nix:latest rm -rf "$WORK/out" "$WORK/src" || true
