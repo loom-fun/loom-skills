@@ -513,8 +513,8 @@ kernel.def export("g_mla_xdeq") @g_mla_xdeq(%unused: index) {{
 def xexp(QH, layer_max, kv_lora, nope, v, kvo="g_kv_offset"):
     """[k_nope | v] of 64 keys x one head per workgroup: 2*QDN waves = (32-key half kg, 16*NT-column group qd of the head's
     nope+v W rows, the first nope/(16*NT) groups being k and the rest v); per 16-value latent step a wave loads 2 key
-    fragments (one 16-position page each) and NT W fragments: 2*NT MMAs.  Upstream: 32 heads, 128/128 -> QDN 4, 8 waves.
-    GLM: 20 heads, 192/256 -> QDN 7, 14 waves; threads == W rows, so staging stays one row per thread."""
+    fragments (one 16-position page each) and NT W fragments: 2*NT MMAs. E.g. nope/v 128/128 -> QDN 4, 8 waves;
+    192/256 -> QDN 7, 14 waves. Threads == W rows, so staging stays one row per thread."""
     D = kv_lora + 64
     NPV = nope + v
     NT = int(os.environ.get("MLA_XE_NT", "4"))   # 16-column W tiles per wave (4: 2*QDN waves of 32 keys x 64 cols)
@@ -793,7 +793,7 @@ def xflash(QH, scale, QB=192, QD=576, VD=128, lds=None, VS=1):
     waves stage each 32-key block's K [32 x QB] and V^T [VD x 32] in workgroup memory once (VD threads, 5 16-value loads
     each) and read their fragments from there; the loop runs to the quad's last key block, a wave past its own causal
     range keeps its state.  QB = nope + rope (the key width), VD = v_dims.  A wave accumulates all VD v dims, so
-    VD/16 chunks: 8 upstream (v 128), 16 for GLM (v 256) -- see the VD_CHUNKS assertion."""
+    VD/16 chunks: 8 at v 128; v 256 needs VS = 2 (see the VCH assertion)."""
     if lds is None:
         lds = os.environ.get("MLA_XF", "lds") == "lds"
     NOPE = QB - 64                    # k_nope width (QB = nope + rope)
@@ -1215,16 +1215,9 @@ kernel.def export("g_mla_xflash") @g_mla_xflash(%count_buffer: buffer) {{
     %four = index.constant 4 : offset
     %vo_o = index.scale %vo_e, %four : index, offset -> offset
     %vo_view = buffer.view %vo[%vo_o] : buffer -> view<{VD}x16xf32, %vo_layout>""")
-    DBG = os.environ.get("MLA_XF_DBG", "")     # 2 = write the running max (f32) instead of the output: -3e38 means the
-    if DBG == "2":                             # lane's mask never opened, a finite value means it did
-        a("""    %dbg_m = vector.splat %m_final : vector<8xf32>""")
-    if DBG in ("3", "4", "5", "6", "7"):                     # 3 = l_final, 4 = the divisor 1/l actually used
-        sel = {"3": "%l_final", "4": "%inv", "5": "%ls0", "6": "%ls1", "7": "%osum"}[DBG]
-        a("    %dbg_l = vector.splat " + sel + " : vector<8xf32>")
     for d in range(8):
-        src = {"2": "%dbg_m", "3": "%dbg_l", "4": "%dbg_l"}.get(DBG, "%on" + str(d))
         a(f"""    %on{d} = vector.mulf %o{d}, %inv_v : vector<8xf32>
-    vector.fragment.store<result> {src}, %vo_view[%vd{d}, %c0] shape [%c16, %c16] : vector<8xf32>, view<{VD}x16xf32, %vo_layout>""")
+    vector.fragment.store<result> %on{d}, %vo_view[%vd{d}, %c0] shape [%c16, %c16] : vector<8xf32>, view<{VD}x16xf32, %vo_layout>""")
     if lds:
         a("    }")
     a("""  }

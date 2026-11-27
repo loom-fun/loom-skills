@@ -27,8 +27,8 @@ def flash_on():
 
 def geometry(cfg):
     m = cfg.get("mla") or {}
-    # GLM-4.7-Flash port: heads / nope_dims / v_dims are model-specific (20 / 192 / 256); the cache row
-    # (kv_lora 512) and the RoPE width (64) are what the paged layout fixes.
+    # heads, nope_dims and v_dims are per model (e.g. 32 / 128 / 128, 20 / 192 / 256); the paged layout fixes only the
+    # cache row (kv_lora 512) and the RoPE width (64).
     required = {"kv_lora": 512, "rope_dims": 64}
     got = {name: m.get(name) for name in required}
     q_lora = m.get("q_lora", 0)
@@ -220,7 +220,7 @@ def bmv(name, fmt, K, N, H, XH, YH, FMT, SB, row_bytes, TGC=8):
     """Per-head batched matrix-vector: y[t, h, r] = sum_k W[h, r, k] x[t, h, k] for r < N, k < K (W rows of K values in
     `fmt`, head h's N rows after h * N rows); x rows of XH values per head (first K used), y rows of YH per head (first
     N written). Lane = (row, 32-value group): KP/32 lanes per row reduce by xor shuffles, KP = 32 * 2^n >= K being the
-    contraction padded so the reduction tree is a power of two (GLM: K = nope 192 -> KP 256; groups past K contribute a
+    contraction padded so the reduction tree is a power of two (e.g. K = nope 192 -> KP 256; groups past K contribute a
     zero weight and skip the read, so nothing is read past the row and the weights stay K wide). A 256-lane workgroup
     takes 256 / (KP/32) rows of one head and TGC tokens (weights decoded once per workgroup, kept in registers)."""
     assert K % 32 == 0 and XH % 32 == 0
