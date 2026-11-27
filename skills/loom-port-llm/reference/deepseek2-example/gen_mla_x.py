@@ -975,9 +975,7 @@ kernel.def export("g_mla_xflash") @g_mla_xflash(%count_buffer: buffer) {{
     assert not (u2 and (diag or not lds))
     ABL = set(t for t in os.environ.get("MLA_XF_ABL", "").split(",") if t)   # kbench ablations (wrong results): nores, nox, nosm
     assert ABL <= {"nores", "nox", "nosm", "nobar", "nofrag"}, ABL
-    # vg is the DEFAULT because the LDS V staging is wrong for v_dims > 128: the staged tile and the fragment reads
-    # disagree at one v column (measured: run-to-run scatter at v=5 of 256). K from LDS is fine.
-    SRC = set(t for t in os.environ.get("MLA_XF_SRC", "vg").split(",") if t) if lds else set()
+    SRC = set(t for t in os.environ.get("MLA_XF_SRC", "").split(",") if t) if lds else set()   # fragments read from global, not LDS
     assert SRC <= {"kg", "pg", "vg"}, SRC   # kg: K nope chunks, pg: K rope (k_pe) chunks, vg: V^T
     bar = "" if "nobar" in ABL else "      kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)"
     TY = ", ".join(["vector<8xf32>"] * 8)
