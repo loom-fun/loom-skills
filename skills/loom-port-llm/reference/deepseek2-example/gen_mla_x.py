@@ -951,8 +951,8 @@ kernel.def export("g_mla_xflash") @g_mla_xflash(%count_buffer: buffer) {{
     %st_kc0_v = index.rem %wi, %cnk : index
     %st_kc0 = index.mul %st_kc0_v, %c16 : index
     %st_kk1 = index.add %st_kk0, %c16 : index
-    %cpk = index.constant 128 : index
-    %wr = index.min %wi_all, %cpk : index   // 32 keys x 4 rope chunks = 128 cells
+    %cpk = index.constant 127 : index
+    %wr = index.min %wi_all, %cpk : index   // 32 keys x 4 rope chunks = cells 0..127
     %st_pk = index.div %wr, %c4 : index
     %st_pk_a = index.assume %st_pk [range(%st_pk, 0, 31)] : index
     %st_pc_v = index.rem %wr, %c4 : index
