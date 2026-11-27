@@ -27,14 +27,19 @@ def flash_on():
 
 def geometry(cfg):
     m = cfg.get("mla") or {}
-    required = {"kv_lora": 512, "rope_dims": 64, "nope_dims": 128, "v_dims": 128}
+    # heads, nope_dims and v_dims are per model (e.g. 32 / 128 / 128, 20 / 192 / 256); the paged layout fixes only the
+    # cache row (kv_lora 512) and the RoPE width (64).
+    required = {"kv_lora": 512, "rope_dims": 64}
     got = {name: m.get(name) for name in required}
     q_lora = m.get("q_lora", 0)
-    if (cfg.get("heads") != 32 or got != required or not isinstance(q_lora, int) or q_lora <= 0
-            or q_lora % 256 or cfg.get("sliding_layers")):
-        raise ValueError("unsupported deepseek2 MLA geometry: expected 32 query heads, "
-                         f"{required}, a positive q_lora divisible by 256, and no sliding layers; "
-                         f"received heads={cfg.get('heads')}, {got}, q_lora={q_lora}, "
+    bad_dims = [k for k in ("nope_dims", "v_dims")
+                if not isinstance(m.get(k), int) or m[k] <= 0 or m[k] % 16]
+    if (got != required or not isinstance(q_lora, int) or q_lora <= 0
+            or q_lora % 256 or cfg.get("sliding_layers") or bad_dims):
+        raise ValueError("unsupported deepseek2 MLA geometry: expected "
+                         f"{required}, nope_dims and v_dims multiples of 16, a positive q_lora divisible by 256, "
+                         f"and no sliding layers; received heads={cfg.get('heads')}, {m}, q_lora={q_lora}, "
+                         f"bad dims={bad_dims}, "
                          f"sliding_layers={cfg.get('sliding_layers')}")
     return dict(QH=cfg["heads"], QL=m["q_lora"], KL=m["kv_lora"], RD=m["rope_dims"], NOPE=m["nope_dims"],
                 VD=m["v_dims"], D=m["kv_lora"] + m["rope_dims"], QB=m["nope_dims"] + m["rope_dims"])
@@ -214,13 +219,30 @@ kernel.def export("g_mla_rope_store") @g_mla_rope_store(%tokens: index) {{
 def bmv(name, fmt, K, N, H, XH, YH, FMT, SB, row_bytes, TGC=8):
     """Per-head batched matrix-vector: y[t, h, r] = sum_k W[h, r, k] x[t, h, k] for r < N, k < K (W rows of K values in
     `fmt`, head h's N rows after h * N rows); x rows of XH values per head (first K used), y rows of YH per head (first
-    N written). Lane = (row, 32-value group): K/32 lanes per row reduce by xor shuffles. A 256-lane workgroup takes
-    256 / (K/32) rows of one head and TGC tokens (weights decoded once per workgroup, kept in registers)."""
-    LPR = K // 32
-    assert K % 32 == 0 and 32 % LPR == 0 and XH % 32 == 0
+    N written). Lane = (row, 32-value group): KP/32 lanes per row reduce by xor shuffles, KP = 32 * 2^n >= K being the
+    contraction padded so the reduction tree is a power of two (e.g. K = nope 192 -> KP 256; groups past K contribute a
+    zero weight and skip the read, so nothing is read past the row and the weights stay K wide). A 256-lane workgroup
+    takes 256 / (KP/32) rows of one head and TGC tokens (weights decoded once per workgroup, kept in registers)."""
+    assert K % 32 == 0 and XH % 32 == 0
+    KP = 32 << ((K + 31) // 32 - 1).bit_length()
+    LPR = KP // 32
+    assert KP <= XH, f"bmv {name}: padded contraction {KP} exceeds the x row stride {XH}"
     RPW = 32 // LPR
     RW = 8 * RPW
     assert N % RW == 0
+    if KP > K:
+        wv = f"""  %cgk = index.constant {K // 32} : index
+  %zero32 = vector.splatf 0.0 : vector<32xf32>
+  %ink = index.cmp ult, %g, %cgk : index
+  %wv = scf.if %ink -> (vector<32xf32>) {{
+    %wv_r = func.call @g_{fmt}_values(%w, %origin, %within) : (buffer, offset, index) -> (vector<32xf32>)
+    scf.yield %wv_r : vector<32xf32>
+  }} else {{
+    scf.yield %zero32 : vector<32xf32>
+  }}
+"""
+    else:
+        wv = f"  %wv = func.call @g_{fmt}_values(%w, %origin, %within) : (buffer, offset, index) -> (vector<32xf32>)\n"
     gpb = SB // 32
     rb = row_bytes
     sh = []
@@ -281,8 +303,7 @@ kernel.def export("{name}") @{name}(%tokens: index) {{
   %within = index.rem %g, %cgpb : index
   %ba = index.scale %blk, %block_bytes : index, offset -> offset
   %origin = index.add %ro, %ba : offset
-  %wv = func.call @g_{fmt}_values(%w, %origin, %within) : (buffer, offset, index) -> (vector<32xf32>)
-  %x_view = buffer.view %x[%zero] : buffer -> view<[%tokens]x{H}x{XH // 32}x32xf32>
+{wv}  %x_view = buffer.view %x[%zero] : buffer -> view<[%tokens]x{H}x{XH // 32}x32xf32>
   %y_view = buffer.view %y[%zero] : buffer -> view<[%tokens]x{H}x{YH}xf32>
   %first = index.cmp eq, %g, %c0 : index
   %t0 = index.mul %tg_id, %ctg : index

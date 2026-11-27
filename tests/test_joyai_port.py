@@ -59,7 +59,10 @@ class Port(unittest.TestCase):
         spec.loader.exec_module(gen)
         cfg = json.loads((EXAMPLE / "cfg.json").read_text(encoding="utf-8"))
         self.assertEqual(gen.geometry(cfg)["D"], 576)
-        for changed in ({**cfg, "heads": 64}, {**cfg, "mla": {**cfg["mla"], "q_lora": 0}},
+        # heads, nope_dims and v_dims are per model: a 20-head, 192/256 MLA is accepted
+        glm = {**cfg, "heads": 20, "mla": {**cfg["mla"], "nope_dims": 192, "v_dims": 256}}
+        self.assertEqual((gen.geometry(glm)["QH"], gen.geometry(glm)["QB"], gen.geometry(glm)["VD"]), (20, 256, 256))
+        for changed in ({**cfg, "mla": {**cfg["mla"], "nope_dims": 100}}, {**cfg, "mla": {**cfg["mla"], "q_lora": 0}},
                         {**cfg, "mla": {**cfg["mla"], "kv_lora": 256}}, {**cfg, "sliding_layers": [3]}):
             with self.subTest(changed=changed), self.assertRaisesRegex(ValueError, "unsupported deepseek2 MLA geometry"):
                 gen.geometry(changed)
